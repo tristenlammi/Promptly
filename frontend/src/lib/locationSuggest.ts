@@ -115,6 +115,29 @@ export function mergeSuggestions(saved: LocationSuggestion[], contacts: Location
   return out.slice(0, limit);
 }
 
+/** Which of your own things a field may suggest (``LocationInput``'s
+ *  ``sources``): a form's Location question never offers your contacts'
+ *  addresses ("Where do you live?" shouldn't offer Grandma's), and offers
+ *  your saved places only when you're signed in. */
+export interface SuggestionSources {
+  saved: boolean;
+  contacts: boolean;
+}
+
+/** One list from the three kinds, leaving out the ones ``sources`` turns
+ *  off — also when the map search itself handed some back. */
+export function suggestionsFrom(
+  sources: SuggestionSources,
+  saved: LocationSuggestion[],
+  contacts: LocationSuggestion[],
+  search: LocationSuggestion[],
+  limit = 8
+): LocationSuggestion[] {
+  const own = new Set<SuggestionKind>(["home", "work", "favourite", "list", "recent"]);
+  const fromMap = search.filter((s) => (sources.contacts || s.kind !== "contact") && (sources.saved || !own.has(s.kind)));
+  return mergeSuggestions(sources.saved ? saved : [], sources.contacts ? contacts : [], fromMap, limit);
+}
+
 /** What goes in the field: "Name, short address", or just the address when
  *  the name is the address (or the start of it). */
 export function locationText(s: Pick<LocationSuggestion, "name" | "address">): string {

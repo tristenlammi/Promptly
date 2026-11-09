@@ -22,6 +22,10 @@ need it.
 * ``POST /{token}/uploads`` (multipart: ``file``, ``question_id``,
   ``draft_key``) — stage a file for a file question (WP-F1.6);
   ``DELETE /{token}/uploads/{id}?draft_key=`` takes it back.
+* ``GET  /{token}/places?q=&question=&lat=&lon=`` — place suggestions for
+  a Location question (WP-F2.2, :mod:`app.forms.places`): Photon only,
+  never anyone's saved places; the same 404 unless the form is open to you
+  and has a Location question.
 
 Answering never gives access to the form's file: the link is a
 ``resource_type="form"`` row that nothing serving files reads.
@@ -51,6 +55,7 @@ router = APIRouter()
 _submit_limit = rate_limit(parse("10/minute"), bucket="form_submit")
 _report_limit = rate_limit(parse("5/hour"), bucket="form_report")
 _upload_limit = rate_limit(parse("30/hour"), bucket="form_upload")
+_places_limit = rate_limit(parse("60/minute"), bucket="form_places")
 
 MAX_BODY_BYTES = 128 * 1024
 
@@ -242,6 +247,30 @@ async def remove_upload(
     user = await _who(request, db)
     try:
         await responses.remove_file(db, token, user, upload_id, draft_key)
+    except Refusal as exc:
+        raise _raise(exc) from None
+
+
+@router.get("/{token}/places")
+async def place_suggestions(
+    token: str,
+    request: Request,
+    q: str = Query(..., min_length=2, max_length=120),
+    question: str | None = Query(default=None, max_length=40),
+    lat: float | None = Query(default=None, ge=-90, le=90),
+    lon: float | None = Query(default=None, ge=-180, le=180),
+    db: AsyncSession = Depends(get_db),
+    _limit: None = Depends(_places_limit),
+) -> dict:
+    """Suggestions for a Location question while you type: addresses and
+    places from this server's own map search, nothing anyone saved."""
+    from app.forms import places
+
+    user = await _who(request, db)
+    ip, _ua = request_meta(request)
+    near = (round(lat, 2), round(lon, 2)) if lat is not None and lon is not None else None
+    try:
+        return await places.search(db, token, user, q=q, question=question, near=near, ip=ip)
     except Refusal as exc:
         raise _raise(exc) from None
 

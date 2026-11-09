@@ -576,6 +576,23 @@ async def export_responses(
     )
 
 
+@router.get("/{file_id:uuid}/places")
+async def answer_places(
+    file_id: uuid.UUID,
+    question: str | None = Query(None, min_length=1, max_length=40),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Every answer to a Location question that has a spot (a picked
+    place), for "Show on a map": ``{number, question_id, text, lat, lon}``,
+    newest first, at most 2,000. People who can see the answers only."""
+    from app.forms import results
+
+    _shell, form, _access = await load_form(db, file_id, user)
+    rows = await results.places(db, form, question)
+    return {"places": rows, "capped": len(rows) >= results.MAX_PLACES}
+
+
 class _Summarise(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

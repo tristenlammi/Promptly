@@ -1,3 +1,5 @@
+import type { SearchRowLike } from "@/lib/locationSuggest";
+
 import { apiClient } from "./client";
 import type { FormDefinition } from "./forms";
 
@@ -166,6 +168,24 @@ export const formAnswerApi = {
         if (onProgress && e.total) onProgress(e.loaded / e.total);
       },
     });
+    return data;
+  },
+  /** Place suggestions for a Location question: this server's own map
+   *  search only (never anyone's saved places). ``maps: false`` when Maps
+   *  isn't set up — the question is then a plain text box. */
+  async places(
+    token: string,
+    q: string,
+    opts: { question?: string; near?: { lat: number; lon: number } | null; signal?: AbortSignal } = {}
+  ): Promise<{ results: SearchRowLike[]; maps: boolean }> {
+    const params: Record<string, string | number> = { q };
+    if (opts.question) params.question = opts.question;
+    // Roughly where (a kilometre or so) is enough to rank nearby places first.
+    if (opts.near) {
+      params.lat = Math.round(opts.near.lat * 100) / 100;
+      params.lon = Math.round(opts.near.lon * 100) / 100;
+    }
+    const { data } = await apiClient.get(`${base(token)}/places`, { params, signal: opts.signal });
     return data;
   },
   /** The linked event as a one-event .ics (title, time and place). */

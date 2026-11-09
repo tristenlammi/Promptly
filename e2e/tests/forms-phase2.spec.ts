@@ -169,3 +169,75 @@ test("a 5×4 grid is built, previewed and answered on a phone with no sideways s
   await alice.goto(`/files/form/${fileId}?tab=responses`);
   await expect(alice.getByRole("table", { name: /answers per row and column/ })).toBeAttached({ timeout: 20_000 });
 });
+
+// ---------------------------------------------------------------- WP-F2.2
+
+test("a Location question: typed on a phone without an account, and a signed-in person's own Home", async ({ alice, bob, browser }) => {
+  test.setTimeout(180_000);
+  const auth = await bearer(alice);
+  const title = `Pick-up spots ${stamp}`;
+  const { fileId, token } = await makeForm(alice, auth, title, [
+    q("where", "location", "Where should we pick you up?", { ask: "address" }, true),
+    q("suburb", "location", "Which suburb?", { ask: "town" }),
+  ], { audience: "link" });
+
+  // This e2e stack has no map data (no Photon): the place search says so
+  // quietly and the question is a plain text box. Picking a suggestion
+  // from Photon is covered by backend/tests/test_forms_location.py.
+  const probe = await alice.request.get(`/api/f/${token}/places`, { params: { q: "Smith" } });
+  expect(probe.ok()).toBe(true);
+  expect(await probe.json()).toEqual({ results: [], maps: false });
+
+  const { context, page } = await stranger(browser);
+  const asked: string[] = [];
+  page.on("request", (r) => asked.push(new URL(r.url()).pathname));
+  await page.goto(`/f/${token}`);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 20_000 });
+  const found = await scanBoth(page, "answer page with a Location question (phone)");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByText("This question needs an answer.")).toBeVisible();
+  const box = page.getByRole("combobox", { name: "Where should we pick you up?" });
+  await box.fill("12 Smith St, Hobart");
+  await page.getByRole("combobox", { name: "Which suburb?" }).fill("Sandy Bay");
+  await page.waitForTimeout(600);
+  await noSidewaysScroll(page);
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByText("Your answer has been sent.")).toBeVisible({ timeout: 20_000 });
+  // Someone without an account only ever uses the form's own place search.
+  expect(asked.filter((p) => p.startsWith("/api/maps") || p.startsWith("/api/people"))).toEqual([]);
+  expect(asked.some((p) => p === `/api/f/${token}/places`)).toBe(true);
+  await context.close();
+  expect(found).toEqual([]);
+
+  // The owner sees the words (no spot: it was typed).
+  const s = await (await alice.request.get(`/api/forms/${fileId}/summary`, { headers: { Authorization: auth } })).json();
+  expect(s.questions[0].places).toEqual([{ number: 1, text: "12 Smith St, Hobart" }]);
+  expect(s.questions[0].with_spot).toBe(0);
+  await alice.goto(`/files/form/${fileId}?tab=responses`);
+  await expect(alice.getByRole("button", { name: "12 Smith St, Hobart" })).toBeVisible({ timeout: 20_000 });
+
+  // Signed in, your own saved Home is offered — your contacts never are.
+  const bobAuth = await bearer(bob);
+  const home = await bob.request.post("/api/maps/places", {
+    headers: { Authorization: bobAuth },
+    data: { kind: "home", name: "Home", address: "7 Wattle Rd, Lindisfarne", lat: -42.85, lon: 147.36 },
+  });
+  expect(home.ok(), await home.text()).toBe(true);
+  const bobAsked: string[] = [];
+  bob.on("request", (r) => bobAsked.push(new URL(r.url()).pathname));
+  await bob.goto(`/f/${token}`);
+  const bobBox = bob.getByRole("combobox", { name: "Where should we pick you up?" });
+  await bobBox.click();
+  await bobBox.pressSequentially("hom", { delay: 40 });
+  const option = bob.getByRole("option", { name: /Home/ });
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.click();
+  await expect(bob.getByText("(a place on the map)")).toBeAttached();
+  await expect(bobBox).toHaveValue("7 Wattle Rd, Lindisfarne");
+  expect(bobAsked.filter((p) => p.startsWith("/api/people"))).toEqual([]);
+  expect(bobAsked.filter((p) => p === "/api/maps/search")).toEqual([]);
+  await bob.getByRole("button", { name: "Submit" }).click();
+  await expect(bob.getByText("Your answer has been sent.")).toBeVisible({ timeout: 20_000 });
+  const pl = await (await alice.request.get(`/api/forms/${fileId}/places`, { headers: { Authorization: auth } })).json();
+  expect(pl.places).toEqual([{ number: 2, text: "7 Wattle Rd, Lindisfarne", lat: -42.85, lon: 147.36, question_id: "where" }]);
+});

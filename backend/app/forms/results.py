@@ -44,6 +44,10 @@ SUMMARY_TEXTS = 5
 PAGE = 50
 #: Days / times listed per question in the summary.
 MAX_GROUPS = 100
+#: Newest places listed per Location question in the summary.
+SUMMARY_PLACES = 10
+#: Places sent to the map at most.
+MAX_PLACES = 2000
 
 _LIVE = "r.form_id = :f AND r.deleted_at IS NULL"
 
@@ -190,6 +194,32 @@ async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dic
         ):
             row_answers.setdefault(k, {})[row] = int(n)
 
+    # Location questions (WP-F2.2): the newest places, and how many have a
+    # spot on the map.
+    place_ids = [q["id"] for q in qs if q.get("kind") == "location"]
+    places: dict[str, list[dict[str, Any]]] = {}
+    spots: dict[str, int] = {}
+    if place_ids:
+        for k, v, number in await grouped(
+            f"SELECT key, value, number FROM ("
+            f"SELECT e.key, e.value, r.number, "
+            f"row_number() OVER (PARTITION BY e.key ORDER BY r.number DESC) AS rn "
+            f"FROM form_responses r CROSS JOIN LATERAL jsonb_each(r.answers) e "
+            f"WHERE {_LIVE} AND e.key = ANY(:keys)) s WHERE rn <= :n ORDER BY key, number DESC",
+            keys=place_ids,
+            n=SUMMARY_PLACES,
+        ):
+            places.setdefault(k, []).append(_place(number, v))
+        spots = {
+            k: int(n)
+            for k, n in await grouped(
+                f"SELECT e.key, count(*) FROM form_responses r CROSS JOIN LATERAL jsonb_each(r.answers) e "
+                f"WHERE {_LIVE} AND e.key = ANY(:keys) AND jsonb_typeof(e.value) = 'object' "
+                f"AND e.value->'picked' = 'true'::jsonb GROUP BY 1",
+                keys=place_ids,
+            )
+        }
+
     latest_ids = [q["id"] for q in qs if q.get("kind") in TEXT_KINDS]
     latest: dict[str, list[dict[str, Any]]] = {}
     if latest_ids:
@@ -275,6 +305,9 @@ async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dic
                 }
                 for rid, label in grid_rows(q)
             ]
+        elif kind == "location":
+            block["places"] = places.get(qid, [])
+            block["with_spot"] = spots.get(qid, 0)
         elif kind in TEXT_KINDS:
             block["latest"] = latest.get(qid, [])
         elif kind == "file_upload":
@@ -291,6 +324,46 @@ async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dic
         "latest_number": first_last[1],
         "questions": live + gone,
     }
+
+
+def _place(number: int, value: Any) -> dict[str, Any]:
+    """One Location answer for the Responses page: its words, and its spot
+    when a suggestion was picked."""
+    out: dict[str, Any] = {"number": number, "text": ""}
+    if isinstance(value, dict):
+        out["text"] = str(value.get("text") or "")
+        if value.get("picked") and isinstance(value.get("lat"), (int, float)) and isinstance(value.get("lon"), (int, float)):
+            out["lat"], out["lon"] = float(value["lat"]), float(value["lon"])
+    elif isinstance(value, str):
+        out["text"] = value
+    return out
+
+
+async def places(db: AsyncSession, form: Form, question_id: str | None = None) -> list[dict[str, Any]]:
+    """Every located answer (a picked place) for the map: ``{number,
+    question_id, text, lat, lon}``, newest first, at most
+    :data:`MAX_PLACES`. Only for people who can see the answers."""
+    ids = [q["id"] for q in questions(form.definition or {}, include_deleted=True) if q.get("kind") == "location"]
+    if question_id is not None:
+        ids = [i for i in ids if i == question_id]
+    if not ids:
+        return []
+    rows = (
+        await db.execute(
+            text(
+                "SELECT r.number, e.key, e.value FROM form_responses r CROSS JOIN LATERAL jsonb_each(r.answers) e "
+                f"WHERE {_LIVE} AND e.key = ANY(:keys) AND jsonb_typeof(e.value) = 'object' "
+                "AND e.value->'picked' = 'true'::jsonb ORDER BY r.number DESC LIMIT :n"
+            ),
+            {"f": form.id, "keys": ids, "n": MAX_PLACES},
+        )
+    ).all()
+    out = []
+    for number, key, value in rows:
+        p = _place(number, value)
+        if "lat" in p:
+            out.append({**p, "question_id": key})
+    return out
 
 
 # --------------------------------------------------------------------
@@ -324,6 +397,8 @@ async def question_answers(
     if search:
         if q.get("kind") in TEXT_KINDS:
             cond.append("(r.answers ->> CAST(:q AS text)) ILIKE :pat ESCAPE '\\'")
+        elif q.get("kind") == "location":
+            cond.append("(r.answers -> CAST(:q AS text) ->> 'text') ILIKE :pat ESCAPE '\\'")
         else:
             # "Other" text on choice questions.
             cond.append("(r.answers -> CAST(:q AS text) ->> 'other') ILIKE :pat ESCAPE '\\'")
@@ -547,6 +622,7 @@ __all__ = [
     "export",
     "names_of",
     "one",
+    "places",
     "question_answers",
     "summary",
     "who",

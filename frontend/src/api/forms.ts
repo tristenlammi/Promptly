@@ -44,7 +44,8 @@ export type QuestionKind =
   | "time"
   | "file_upload"
   | "choice_grid"
-  | "checkbox_grid";
+  | "checkbox_grid"
+  | "location";
 export type BlockKind = "text" | "image" | "section";
 export type ItemKind = QuestionKind | BlockKind;
 
@@ -127,6 +128,10 @@ export interface CheckboxGridConfig {
   each_row: boolean;
   shuffle_rows: boolean;
 }
+/** A Location question: what to ask for (suggestions follow it). */
+export interface LocationConfig {
+  ask: "address" | "town" | "any";
+}
 export interface ImageConfig {
   alt: string;
 }
@@ -148,6 +153,7 @@ export interface ConfigByKind {
   file_upload: FileUploadConfig;
   choice_grid: ChoiceGridConfig;
   checkbox_grid: CheckboxGridConfig;
+  location: LocationConfig;
   text: Record<string, never>;
   image: ImageConfig;
   section: SectionConfig;
@@ -299,6 +305,18 @@ export interface SummaryQuestion {
   /** Grids (WP-F2.1): how many picked each column, per row. */
   rows?: { id: string; label: string; answered: number; counts: Record<string, number> }[];
   columns?: GridLine[];
+  /** Location questions (WP-F2.2): the newest places, and how many have a spot. */
+  places?: AnswerPlace[];
+  with_spot?: number;
+}
+
+/** A Location answer: its words, and its spot when a suggestion was picked. */
+export interface AnswerPlace {
+  number: number;
+  text: string;
+  lat?: number;
+  lon?: number;
+  question_id?: string;
 }
 
 /** A file someone sent with an answer: signed links that work for a few
@@ -456,6 +474,11 @@ export const formsApi = {
     const { data } = await apiClient.get<QuestionAnswers>(`/forms/${fileId}/responses`, {
       params: { question, before: opts.before ?? undefined, q: opts.q || undefined },
     });
+    return data;
+  },
+  /** Every picked place (with a spot), for "Show on a map". */
+  async places(fileId: string, question?: string): Promise<{ places: AnswerPlace[]; capped: boolean }> {
+    const { data } = await apiClient.get(`/forms/${fileId}/places`, { params: question ? { question } : undefined });
     return data;
   },
   async response(fileId: string, number: number): Promise<OneResponse> {

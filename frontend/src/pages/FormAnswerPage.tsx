@@ -368,6 +368,26 @@ export function FormAnswerPage() {
     }
   };
 
+  // Location questions: the form's own place search (Photon on this
+  // server, never anyone's saved places); your own saved places too when
+  // you're signed in.
+  const signedInHere = view.kind === "page" && view.page.state === "open" && !!view.page.respondent;
+  const places = useMemo(
+    () => ({
+      key: `form:${token}`,
+      saved: signedInHere,
+      search: async (q: string, questionId: string, near: { lat: number; lon: number } | null, signal?: AbortSignal) => {
+        try {
+          return (await formAnswerApi.places(token, q, { question: questionId, near, signal })).results;
+        } catch {
+          // Busy, offline, or Maps not there: typing still works.
+          return [];
+        }
+      },
+    }),
+    [token, signedInHere]
+  );
+
   const onFileBusy = useCallback((questionId: string, busy: boolean) => {
     if (busy) busyFiles.current.add(questionId);
     else busyFiles.current.delete(questionId);
@@ -603,6 +623,7 @@ export function FormAnswerPage() {
             onBusy={onFileBusy}
           />
         )}
+        places={places}
         footer={<FooterLinks token={token} link={page.audience === "link"} />}
         className="flex-1"
       />

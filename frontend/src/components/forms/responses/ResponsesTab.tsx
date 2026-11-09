@@ -9,12 +9,15 @@ import {
   FileText,
   Inbox,
   Loader2,
+  Map as MapIcon,
+  MapPin,
   MoreHorizontal,
   Search,
   Send,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import {
   formsApi,
@@ -33,8 +36,14 @@ import { confirm } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { mapsPinLink } from "@/maps/links";
+import type { MapCard } from "@/maps/MapChips";
+import { useMapsReady } from "@/maps/useMapsReady";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+
+// The map library is big: loaded only when "Show on a map" is pressed.
+const MapCardModal = lazy(() => import("@/maps/MapCardModal").then((m) => ({ default: m.MapCardModal })));
 
 import { ChoiceBars, ScaleColumns, pct, type ChoiceRow } from "./charts";
 import { FileList, FileStrip } from "./Files";
@@ -455,7 +464,7 @@ function SummaryView({
     <div className="mt-4 space-y-3" data-testid="responses-summary">
       {summary.questions.map((q) => (
         <Card key={q.id} q={q}>
-          {q.answered === 0 ? <p className="text-sm text-[var(--text-muted)]">No answers to this question yet.</p> : <QuestionSummary q={q} narrow={narrow} onQuestion={onQuestion} onAnswer={onAnswer} />}
+          {q.answered === 0 ? <p className="text-sm text-[var(--text-muted)]">No answers to this question yet.</p> : <QuestionSummary fileId={fileId} q={q} narrow={narrow} onQuestion={onQuestion} onAnswer={onAnswer} />}
           {TEXTY.has(q.kind) && <Summarise fileId={fileId} questionId={q.id} answered={q.answered} onAnswer={onAnswer} />}
         </Card>
       ))}
@@ -526,8 +535,87 @@ function GridSummary({ q, narrow }: { q: SummaryQuestion; narrow: boolean }) {
   );
 }
 
-function QuestionSummary({ q, narrow, onQuestion, onAnswer }: { q: SummaryQuestion; narrow: boolean; onQuestion: (id: string) => void; onAnswer: (n: number) => void }) {
+/** A Location question's summary: the newest places (a pin when one was
+ *  picked from the suggestions, with "Open in P Maps"), and "Show on a
+ *  map" for all of them when this server has Maps. */
+function PlacesSummary({ fileId, q, onQuestion, onAnswer }: { fileId: string; q: SummaryQuestion; onQuestion: (id: string) => void; onAnswer: (n: number) => void }) {
+  const maps = useMapsReady();
+  const [card, setCard] = useState<MapCard | null>(null);
+  const [loading, setLoading] = useState(false);
+  const showMap = async () => {
+    setLoading(true);
+    try {
+      const { places, capped } = await formsApi.places(fileId, q.id);
+      if (!places.length) {
+        toast.info("None of these answers has a spot on the map yet.");
+        return;
+      }
+      if (capped) toast.info("Showing the newest 2,000 places.");
+      setCard({
+        kind: "places",
+        title: q.title,
+        places: places.map((p) => ({ lat: p.lat!, lon: p.lon!, name: `#${p.number}: ${p.text}`.slice(0, 120) })),
+      });
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const list = q.places ?? [];
+  return (
+    <>
+      <ul className="divide-y divide-[var(--border)]">
+        {list.map((p) => (
+          <li key={p.number} className="flex items-center gap-2 py-1.5 text-sm">
+            {p.lat !== undefined ? (
+              <MapPin className="h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-label="On the map" />
+            ) : (
+              <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+            )}
+            <button type="button" onClick={() => onAnswer(p.number)} className="min-w-0 flex-1 truncate text-left text-[var(--text)] hover:underline" title={`Open answer #${p.number}`}>
+              {p.text}
+            </button>
+            {maps && p.lat !== undefined && p.lon !== undefined && (
+              <Link to={mapsPinLink(p.lat, p.lon, p.text.slice(0, 80))} className="shrink-0 text-xs font-medium text-[var(--accent-text)] hover:underline">
+                Open in P Maps
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {q.answered > list.length && (
+          <button type="button" onClick={() => onQuestion(q.id)} className="text-sm font-medium text-[var(--accent-text)] hover:underline">
+            Show all {q.answered.toLocaleString()}
+          </button>
+        )}
+        {maps && !!q.with_spot && (
+          <button
+            type="button"
+            onClick={() => void showMap()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent-text)] hover:underline disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <MapIcon className="h-4 w-4" aria-hidden="true" />} Show on a map
+          </button>
+        )}
+        <span className="text-xs text-[var(--text-muted)]">
+          {q.with_spot === 1 ? "1 place is on the map" : `${(q.with_spot ?? 0).toLocaleString()} places are on the map`}; typed ones have no spot.
+        </span>
+      </div>
+      {card && (
+        <Suspense fallback={null}>
+          <MapCardModal card={card} onClose={() => setCard(null)} />
+        </Suspense>
+      )}
+    </>
+  );
+}
+
+function QuestionSummary({ fileId, q, narrow, onQuestion, onAnswer }: { fileId: string; q: SummaryQuestion; narrow: boolean; onQuestion: (id: string) => void; onAnswer: (n: number) => void }) {
   if (q.rows && q.columns) return <GridSummary q={q} narrow={narrow} />;
+  if (q.places) return <PlacesSummary fileId={fileId} q={q} onQuestion={onQuestion} onAnswer={onAnswer} />;
   if (q.options) {
     const rows: ChoiceRow[] = q.options.map((o) => ({
       key: o.id,
@@ -672,7 +760,7 @@ function QuestionView({
     setTyped("");
     setSearch("");
   }, [questionId]);
-  const searchable = !!q && (TEXTY.has(q.kind) || q.other !== undefined && q.other !== null);
+  const searchable = !!q && (TEXTY.has(q.kind) || q.kind === "location" || (q.other !== undefined && q.other !== null));
   const query = useInfiniteQuery({
     queryKey: ["form-question", fileId, q?.id, search, summary.total],
     queryFn: ({ pageParam }) => formsApi.questionAnswers(fileId, q!.id, { before: pageParam, q: search }),
@@ -698,7 +786,7 @@ function QuestionView({
         </label>
         {searchable && (
           <label className="relative flex flex-col gap-1 text-xs text-[var(--text-muted)] sm:w-64">
-            {TEXTY.has(q.kind) ? "Search these answers" : "Search “Other”"}
+            {TEXTY.has(q.kind) || q.kind === "location" ? "Search these answers" : "Search “Other”"}
             <Search className="pointer-events-none absolute bottom-2.5 left-2.5 h-4 w-4" aria-hidden="true" />
             <input type="search" className={cn(fieldCls, "pl-8")} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search" />
           </label>

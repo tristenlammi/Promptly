@@ -211,7 +211,8 @@ class ReadFormResponsesTool(Tool):
                     lines.append(f"- {row['label']}: {counts}")
             elif q.get("groups") is not None:
                 lines.append("- " + ", ".join(f"{g['value']}: {g['count']}" for g in q["groups"][:30]))
-            elif q["kind"] in results.TEXT_KINDS and q["answered"]:
+            elif (q["kind"] in results.TEXT_KINDS or q["kind"] == "location") and q["answered"]:
+                # Location answers go as the words people gave, never their spot.
                 page = await results.question_answers(ctx.db, form, q["id"])
                 for it in (page or {}).get("items", [])[:READ_TEXTS]:
                     text = (it["text"] or "").replace("\n", " ")[:READ_TEXT_CHARS]

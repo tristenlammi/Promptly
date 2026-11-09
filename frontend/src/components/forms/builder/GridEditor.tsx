@@ -11,7 +11,7 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 
 import type { ChoiceGridConfig, FormItem, GridLine } from "@/api/forms";
 import { cn } from "@/utils/cn";
@@ -100,14 +100,22 @@ function Lines({
 }) {
   const word = kind === "r" ? "Row" : "Column";
   const inputs = useRef(new Map<string, HTMLInputElement>());
-  const [focusId, setFocusId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!focusId) return;
-    const el = inputs.current.get(focusId);
-    el?.focus();
-    el?.select();
-    setFocusId(null);
-  }, [focusId, lines]);
+  // A new line is focused (its "Row 3" selected, so typing replaces it)
+  // once, as soon as it's on screen. A ref, not state: it's used up the
+  // moment it's applied, so a keystroke can never select it again.
+  const focusNext = useRef<string | null>(null);
+  const setFocusId = (id: string | null) => {
+    focusNext.current = id;
+  };
+  useLayoutEffect(() => {
+    const id = focusNext.current;
+    if (!id) return;
+    const el = inputs.current.get(id);
+    if (!el) return;
+    focusNext.current = null;
+    el.focus();
+    el.select();
+  });
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),

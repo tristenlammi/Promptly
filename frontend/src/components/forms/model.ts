@@ -9,6 +9,7 @@ import {
   Heading,
   Image as ImageIcon,
   LayoutGrid,
+  MapPin,
   SeparatorHorizontal,
   SlidersHorizontal,
   Star,
@@ -47,6 +48,7 @@ export const QUESTION_KINDS: QuestionKind[] = [
   "file_upload",
   "choice_grid",
   "checkbox_grid",
+  "location",
 ];
 export const GRID_KINDS: ItemKind[] = ["choice_grid", "checkbox_grid"];
 /** Grids stay usable on a phone: at most this many rows and columns. */
@@ -69,6 +71,7 @@ export const KIND_META: Record<ItemKind, { label: string; icon: LucideIcon }> = 
   file_upload: { label: "File upload", icon: Upload },
   choice_grid: { label: "Multiple-choice grid", icon: Grid3x3 },
   checkbox_grid: { label: "Checkbox grid", icon: LayoutGrid },
+  location: { label: "Location", icon: MapPin },
   text: { label: "Title & text", icon: Heading },
   image: { label: "Image", icon: ImageIcon },
   section: { label: "Section", icon: SeparatorHorizontal },
@@ -112,6 +115,7 @@ export function defaultConfig<K extends ItemKind>(kind: K): ConfigByKind[K] {
       one_per_column: false,
     },
     checkbox_grid: { rows: [newGridLine("r", "Row 1")], columns: [newGridLine("c", "Column 1")], each_row: false, shuffle_rows: false },
+    location: { ask: "address" },
     text: {},
     image: { alt: "" },
     section: { after: "continue" },

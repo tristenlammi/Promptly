@@ -24,6 +24,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 <!-- Forms phase 2, WP-F2.1 -->
 - Forms: multiple-choice grids and checkbox grids (for example days down the side and times across the top). On a computer a grid is a table; on a phone each row becomes its own small group of big buttons, so nothing scrolls sideways. You can require an answer in every row, allow each column only once ("rank these"), and shuffle the rows. Up to 20 rows and 8 short columns. Responses show bars for each row, and downloads and the linked sheet get one column per row.
+<!-- Forms phase 2, WP-F2.2 -->
+- Forms: a Location question. Ask for an address, a suburb or town, or any place. People type it or pick one of the suggestions from this server's own map (signed-in people also see their own saved places, never their contacts). Nobody is asked for their location, and without P Maps it is simply a text box. Responses list the places, open them in P Maps, and show the picked ones together on a map; downloads and the linked sheet get the place and a column with its spot.
 
 ## [0.34.0] - 2026-11-09
 

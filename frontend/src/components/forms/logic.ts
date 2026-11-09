@@ -22,6 +22,7 @@ import { BRANCHING_KINDS, isQuestion, sectionsOf, type SectionInfo } from "./mod
  * - choice_grid: ``{rows: {rowId: columnId}}``; checkbox_grid ``{rows: {rowId:
  *   columnId[]}}`` (only answered rows; ``required`` = any row, ``each_row``
  *   = every row)
+ * - location: ``{text, lat?, lon?, picked}`` (a spot only for a picked suggestion)
  *
  * Branching: when a section ends, the last question in it with branching on
  * whose chosen option has a ``go_to`` decides; otherwise the section's own
@@ -33,7 +34,8 @@ import { BRANCHING_KINDS, isQuestion, sectionsOf, type SectionInfo } from "./mod
 export type ChoiceAnswer = { option: string } | { other: string };
 export type CheckboxAnswer = { options: string[]; other?: string };
 export type GridAnswer = { rows: Record<string, string | string[]> };
-export type AnswerValue = string | number | ChoiceAnswer | CheckboxAnswer | GridAnswer | string[];
+export type LocationAnswer = { text: string; lat?: number; lon?: number; picked: boolean };
+export type AnswerValue = string | number | ChoiceAnswer | CheckboxAnswer | GridAnswer | LocationAnswer | string[];
 export type Answers = Record<string, AnswerValue | undefined>;
 
 export function isEmpty(item: FormItem, v: AnswerValue | undefined): boolean {
@@ -46,6 +48,7 @@ export function isEmpty(item: FormItem, v: AnswerValue | undefined): boolean {
     if (!rows || typeof rows !== "object") return true;
     return !Object.values(rows).some((x) => x !== undefined && x !== null && x !== "" && !(Array.isArray(x) && x.length === 0));
   }
+  if (item.kind === "location") return !(v as Partial<LocationAnswer>).text?.trim();
   if (item.kind === "checkboxes") {
     const c = v as CheckboxAnswer;
     return (c.options?.length ?? 0) === 0 && c.other === undefined;
@@ -179,6 +182,10 @@ export function problemWith(item: FormItem, v: AnswerValue | undefined): string 
         if (new Set(picked).size !== picked.length) return "Pick each column in one row only.";
       }
       return null;
+    }
+    case "location": {
+      const t = (v as LocationAnswer).text.trim().replace(/\s+/g, " ");
+      return t.length > 300 ? "Keep the place to 300 characters or fewer." : null;
     }
     case "time": {
       const cfg = item.config as import("@/api/forms").TimeConfig;

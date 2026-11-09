@@ -1,4 +1,4 @@
-import { Heart, MoreHorizontal, Star, ThumbsUp, Upload } from "lucide-react";
+import { Heart, MapPin, MoreHorizontal, Star, ThumbsUp, Upload } from "lucide-react";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import type {
@@ -11,12 +11,15 @@ import type {
   FormItem,
   FormOption,
   LinearScaleConfig,
+  LocationConfig,
   MultipleChoiceConfig,
   ParagraphConfig,
   RatingConfig,
   ShortTextConfig,
   TimeConfig,
 } from "@/api/forms";
+import { LocationInput } from "@/components/maps/LocationInput";
+import { locationText, type SearchRowLike } from "@/lib/locationSuggest";
 import { cn } from "@/utils/cn";
 
 import "./forms.css";
@@ -31,6 +34,7 @@ import {
   type CheckboxAnswer,
   type ChoiceAnswer,
   type GridAnswer,
+  type LocationAnswer,
 } from "./logic";
 import { isQuestion, sectionsOf } from "./model";
 import { themeVars } from "./theme";
@@ -75,6 +79,15 @@ export interface FormRendererProps {
   fieldErrors?: Record<string, string> | null;
   /** The file question's control (the answer page's uploader). */
   renderUpload?: (item: FormItem<"file_upload">, value: string[], onChange: (ids: string[]) => void) => ReactNode;
+  /** Location questions (WP-F2.2): where suggestions come from on the
+   *  answer page — the form's own place search (never anyone's saved
+   *  places), plus your own saved places when you're signed in. Without it
+   *  (the builder's preview) the question is a plain text box. */
+  places?: {
+    search: (q: string, questionId: string, near: { lat: number; lon: number } | null, signal?: AbortSignal) => Promise<SearchRowLike[]>;
+    key: string;
+    saved: boolean;
+  };
   footer?: ReactNode;
   className?: string;
 }
@@ -98,6 +111,7 @@ export function FormRenderer({
   onEmailChange,
   fieldErrors,
   renderUpload,
+  places,
   footer,
   className,
 }: FormRendererProps) {
@@ -306,6 +320,7 @@ export function FormRenderer({
                 remaining={remainingFor(item)}
                 showRemaining={!!showRemaining}
                 renderUpload={renderUpload}
+                places={places}
               />
             ) : (
               <BlockCard item={item} assetUrls={assetUrls} />
@@ -605,6 +620,7 @@ interface QuestionProps {
   remaining?: Record<string, number>;
   showRemaining: boolean;
   renderUpload?: FormRendererProps["renderUpload"];
+  places?: FormRendererProps["places"];
 }
 
 function QuestionCard(p: QuestionProps) {
@@ -614,7 +630,7 @@ function QuestionCard(p: QuestionProps) {
   const img = item.image_asset_id ? assetUrls[item.image_asset_id] : undefined;
   const described = [item.description ? descId : null, error ? errId : null].filter(Boolean).join(" ") || undefined;
   // Single-field kinds label their field; the rest are a fieldset.
-  const single = ["short_text", "paragraph", "dropdown", "date", "time"].includes(item.kind);
+  const single = ["short_text", "paragraph", "dropdown", "date", "time", "location"].includes(item.kind);
   const titleNode = (
     <>
       <span className="[overflow-wrap:anywhere]">{item.title || "Untitled question"}</span>
@@ -807,6 +823,8 @@ function Control(p: QuestionProps & { describedBy?: string; labelId: string }) {
     case "choice_grid":
     case "checkbox_grid":
       return <GridControl {...p} />;
+    case "location":
+      return <LocationControl {...p} fieldProps={fieldProps} />;
     case "file_upload": {
       const cfg = item.config as FileUploadConfig;
       if (p.renderUpload && p.mode === "answer")
@@ -948,6 +966,63 @@ function Choices(p: QuestionProps & { multi: boolean; describedBy?: string }) {
   );
 }
 
+const ASK_PLACEHOLDER: Record<LocationConfig["ask"], string> = {
+  address: "Start typing an address",
+  town: "Start typing a suburb or town",
+  any: "Start typing a place",
+};
+
+/**
+ * A Location question: type a place, or pick one of the suggestions. A
+ * picked place keeps its spot on the map (shown under the box as a chip
+ * with a pin); a typed place is fine too and just has no spot. No "use my
+ * location" button: nobody's asked for a location permission here.
+ */
+function LocationControl(p: QuestionProps & { fieldProps: FieldProps }) {
+  const { item, value, onChange, places } = p;
+  const cfg = item.config as LocationConfig;
+  const v = value as LocationAnswer | undefined;
+  const search = useMemo(
+    () =>
+      places
+        ? { key: `${places.key}:${item.id}`, run: (q: string, near: { lat: number; lon: number } | null, signal?: AbortSignal) => places.search(q, item.id, near, signal) }
+        : { key: `none:${item.id}`, run: async () => [] as SearchRowLike[] },
+    [places, item.id]
+  );
+  const fp = p.fieldProps as { id: string; "aria-invalid"?: true; "aria-describedby"?: string; "aria-required"?: boolean };
+  return (
+    <div className="flex flex-col gap-2">
+      <LocationInput
+        id={fp.id}
+        unstyled
+        className="pf-input"
+        value={v?.text ?? ""}
+        maxLength={300}
+        placeholder={ASK_PLACEHOLDER[cfg.ask] ?? ASK_PLACEHOLDER.any}
+        aria-invalid={fp["aria-invalid"]}
+        aria-describedby={fp["aria-describedby"]}
+        aria-required={fp["aria-required"]}
+        search={search}
+        sources={{ saved: !!places?.saved, contacts: false, here: false }}
+        onChange={(text) => onChange(text.trim() ? { text, picked: false } : undefined)}
+        onPick={(s) => {
+          // Your own "Home" / "Work" is your label, not the form's: the
+          // answer is the address.
+          const text = (s.kind === "home" || s.kind === "work") && s.address ? s.address : locationText(s);
+          onChange(s.lat != null && s.lon != null ? { text, lat: s.lat, lon: s.lon, picked: true } : { text, picked: false });
+        }}
+      />
+      {v?.picked && (
+        <span className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-sm" style={{ background: "var(--pf-selected)" }}>
+          <MapPin className="h-4 w-4 shrink-0" style={{ color: "var(--pf-accent)" }} aria-hidden="true" />
+          <span className="min-w-0 truncate">{v.text}</span>
+          <span className="sr-only">(a place on the map)</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** The room a box has, kept up to date (grids pick table or phone rows by it). */
 function useWidth<T extends HTMLElement>(): [RefObject<T>, number] {
   const ref = useRef<T>(null);
@@ -982,7 +1057,8 @@ function GridControl(p: QuestionProps & { describedBy?: string }) {
     [cfg.shuffle_rows, cfg.rows, p.seed, item.id]
   );
   const cur = ((value as GridAnswer | undefined)?.rows ?? {}) as Record<string, string | string[]>;
-  const table = width >= 600 && width >= 150 + cfg.columns.length * 76;
+  // A table only when every column gets a comfortable 76px beside the row words.
+  const table = width >= Math.max(420, 150 + cfg.columns.length * 76);
 
   const put = (next: Record<string, string | string[]>) => {
     const out: GridAnswer = { rows: next };

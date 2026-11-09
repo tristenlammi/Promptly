@@ -87,6 +87,8 @@ QUESTION_KINDS = (
     # Phase 2 (WP-F2.1): a grid of rows × columns.
     "choice_grid",
     "checkbox_grid",
+    # WP-F2.2: a place someone picks or types (never a GPS fix).
+    "location",
 )
 BLOCK_KINDS = ("text", "image", "section")
 ItemKind = Literal[
@@ -102,6 +104,7 @@ ItemKind = Literal[
     "file_upload",
     "choice_grid",
     "checkbox_grid",
+    "location",
     "text",
     "image",
     "section",
@@ -308,6 +311,12 @@ class CheckboxGridConfig(_GridBase):
     pass
 
 
+class LocationConfig(_Strict):
+    # What to ask for: a street address, a suburb or town (no street
+    # needed), or any place at all. Suggestions follow it.
+    ask: Literal["address", "town", "any"] = "address"
+
+
 class TextConfig(_Strict):
     pass
 
@@ -375,6 +384,7 @@ CONFIGS: dict[str, type[_Strict]] = {
     "file_upload": FileUploadConfig,
     "choice_grid": ChoiceGridConfig,
     "checkbox_grid": CheckboxGridConfig,
+    "location": LocationConfig,
     "text": TextConfig,
     "image": ImageConfig,
     "section": SectionConfig,

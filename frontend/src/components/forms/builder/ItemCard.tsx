@@ -19,6 +19,7 @@ import { forwardRef, useEffect, useRef, useState, type CSSProperties, type React
 
 import { editorAiApi } from "@/api/editorAi";
 import { NO_MODEL_MESSAGE, useEditorModel } from "@/lib/editorModel";
+import { useMapsReady } from "@/maps/useMapsReady";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -32,6 +33,7 @@ import type {
   ImageConfig,
   ItemKind,
   LinearScaleConfig,
+  LocationConfig,
   MultipleChoiceConfig,
   ParagraphConfig,
   RatingConfig,
@@ -85,6 +87,7 @@ const KIND_GROUPS: { label: string; kinds: ItemKind[] }[] = [
   { label: "Scales", kinds: ["linear_scale", "rating"] },
   { label: "Grids", kinds: ["choice_grid", "checkbox_grid"] },
   { label: "Date and time", kinds: ["date", "time"] },
+  { label: "Places", kinds: ["location"] },
   { label: "Files", kinds: ["file_upload"] },
 ];
 
@@ -338,6 +341,9 @@ function Summary({ item, label, assetUrls }: { item: FormItem; label: string; as
       {img && <img src={img} alt="" className="max-h-40 w-full rounded-md object-cover" />}
       {item.kind === "image" && !img && <span className="text-sm text-[var(--text-muted)]">No picture yet</span>}
       {(item.kind === "choice_grid" || item.kind === "checkbox_grid") && <GridSummary item={item} />}
+      {item.kind === "location" && (
+        <span className="text-sm text-[var(--text-muted)]">{ASK_WORDS[(item.config as LocationConfig).ask] ?? ASK_WORDS.any}</span>
+      )}
       {opts && opts.length > 0 && (
         <span className="flex flex-col gap-1 text-sm text-[var(--text)]">
           {opts.slice(0, 6).map((o) => (
@@ -616,6 +622,8 @@ function KindEditor(p: KindEditorProps) {
     case "choice_grid":
     case "checkbox_grid":
       return <GridEditor item={item as FormItem<"choice_grid">} setConfig={setConfig} />;
+    case "location":
+      return <LocationEditor item={item as FormItem<"location">} setConfig={setConfig} />;
     case "file_upload":
       return <UploadEditor item={item as FormItem<"file_upload">} setConfig={setConfig} />;
     case "image":
@@ -660,6 +668,44 @@ function ShortTextRules({ item, setConfig }: { item: FormItem<"short_text">; set
         <NumberBox className="w-40" label="Shortest (characters)" value={c.min_length} min={1} max={1000} onChange={(n) => setConfig((x: ShortTextConfig) => ({ ...x, min_length: n ? Math.round(n) : null }), `${item.id}:minl`)} />
         <NumberBox className="w-40" label="Longest (characters)" value={c.max_length} min={1} max={1000} onChange={(n) => setConfig((x: ShortTextConfig) => ({ ...x, max_length: n ? Math.min(1000, Math.round(n)) : null }), `${item.id}:maxl`)} />
       </div>
+    </div>
+  );
+}
+
+const ASK_WORDS: Record<LocationConfig["ask"], string> = {
+  address: "Asks for an address",
+  town: "Asks for a suburb or town",
+  any: "Asks for any place",
+};
+
+function LocationEditor({ item, setConfig }: { item: FormItem<"location">; setConfig: KindEditorProps["setConfig"] }) {
+  const c = item.config;
+  const maps = useMapsReady();
+  const choices: { key: LocationConfig["ask"]; label: string }[] = [
+    { key: "address", label: "An address" },
+    { key: "town", label: "A suburb or town" },
+    { key: "any", label: "Any place" },
+  ];
+  return (
+    <div className="flex flex-col gap-2">
+      <fieldset className="flex flex-col gap-1">
+        <legend className="mb-1 text-xs text-[var(--text-muted)]">Ask for</legend>
+        <div className="flex w-fit flex-wrap overflow-hidden rounded-md border border-[var(--border)]">
+          {choices.map((o) => (
+            <label key={o.key} className={cn("flex h-10 cursor-pointer items-center px-3 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-[var(--accent)]", c.ask === o.key ? "bg-[var(--accent)] text-white" : "hover:bg-[var(--hover)]")}>
+              <input type="radio" className="sr-only" name={`${item.id}-ask`} checked={c.ask === o.key} onChange={() => setConfig((x: LocationConfig) => ({ ...x, ask: o.key }))} />
+              {o.label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <p className="text-xs text-[var(--text-muted)]">
+        {c.ask === "town" ? "People can answer without giving a street address. " : ""}
+        {maps
+          ? "People type a place or pick one of the suggestions. Picked places can be shown on a map in Responses."
+          : "Suggestions need P Maps; people can still type a place."}{" "}
+        Nobody is asked for their location.
+      </p>
     </div>
   );
 }

@@ -27,7 +27,9 @@ time; ``MM-DD…`` without the year); time ``HH:MM`` or a duration
 ``H:MM:SS``; file_upload a list of upload ids (stored as ``[{id, name}]``,
 WP-F1.6); choice_grid ``{rows: {row_id: column_id}}``; checkbox_grid
 ``{rows: {row_id: [column_id…]}}`` (WP-F2.1: only answered rows are kept;
-``required`` means at least one row, ``each_row`` every row).
+``required`` means at least one row, ``each_row`` every row); location
+``{text, lat?, lon?, picked}`` (WP-F2.2: coordinates only for a picked
+suggestion, rounded to 5 decimals).
 """
 from __future__ import annotations
 
@@ -58,6 +60,9 @@ UPLOADS_OPEN = True
 FileMode = str
 
 MAX_ANSWERS_BYTES = 64 * 1024
+LOCATION_TEXT_MAX = 300
+#: About a metre: enough for an address, no more exact than that.
+LOCATION_DECIMALS = 5
 OTHER_MAX = 500
 SHORT_MAX = 1000
 EMAIL_MAX = 254
@@ -266,6 +271,9 @@ def is_empty(item: dict[str, Any], v: Any) -> bool:
             if not isinstance(rows, dict):
                 return True
             return not any(x is not None and x != "" and x != [] for x in rows.values())
+        if item.get("kind") == "location":
+            t = v.get("text")
+            return not isinstance(t, str) or t.strip() == ""
         if item.get("kind") == "checkboxes":
             opts = v.get("options")
             return (not isinstance(opts, list) or len(opts) == 0) and "other" not in v
@@ -467,7 +475,40 @@ def check_one(item: dict[str, Any], v: Any) -> Any:
     if kind in GRID_KINDS:
         return _check_grid(item, v, bad)
 
+    if kind == "location":
+        return _check_location(v, bad)
+
     raise bad("This question can't take answers here.")
+
+
+def _coord(v: Any, lo: float, hi: float) -> float | None:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    f = float(v)
+    if math.isnan(f) or not lo <= f <= hi:
+        return None
+    return round(f, LOCATION_DECIMALS)
+
+
+def _check_location(v: Any, bad: Any) -> dict[str, Any]:
+    """A place: the words always, a spot only when a suggestion was picked
+    (rounded to about a metre; ranges checked). A typed place with no pick
+    is fine and just has no spot."""
+    if not isinstance(v, dict) or set(v) - {"text", "lat", "lon", "picked"}:
+        raise bad("Type the place again.")
+    t = v.get("text")
+    if not isinstance(t, str) or not t.strip():
+        raise bad("Type a place.")
+    text = " ".join(t.split())
+    if len(text) > LOCATION_TEXT_MAX:
+        raise bad(f"Keep the place to {LOCATION_TEXT_MAX} characters or fewer.")
+    picked = v.get("picked") is True
+    if not picked:
+        return {"text": text, "picked": False}
+    lat, lon = _coord(v.get("lat"), -90, 90), _coord(v.get("lon"), -180, 180)
+    if lat is None or lon is None:
+        raise bad("That place's spot on the map isn't right. Pick it again, or just type it.")
+    return {"text": text, "lat": lat, "lon": lon, "picked": True}
 
 
 def _check_grid(item: dict[str, Any], v: Any, bad: Any) -> dict[str, Any]:

@@ -13,6 +13,8 @@ that shows or exports answers reads them through :func:`answer_text`:
   ``"MM-DDTHH:MM"`` (no year)
 * time: ``"HH:MM"`` (time of day) or ``"H:MM:SS"`` (a duration)
 * file upload: ``[{"id": "<upload id>", "name": "receipt.jpg"}, …]``
+* grids: ``{"rows": {"<row id>": "<column id>"}}`` (checkbox grid: a list)
+* location: ``{"text": "12 Smith St, Hobart", "lat"?, "lon"?, "picked"}``
 
 Older shapes (a bare option id, a list of ids) are read too. Anything that
 doesn't fit its question's shape (the question's type was changed after
@@ -118,6 +120,13 @@ def _grid_text(question: dict[str, Any], value: Any) -> str:
     return "; ".join(parts)
 
 
+def location_spot(value: Any) -> str:
+    """A picked place's spot as ``lat, lon`` text (empty for a typed one)."""
+    if isinstance(value, dict) and value.get("picked") and isinstance(value.get("lat"), (int, float))             and isinstance(value.get("lon"), (int, float)):
+        return f"{value['lat']}, {value['lon']}"
+    return ""
+
+
 def answer_text(question: dict[str, Any], value: Any) -> str:
     """One answer as readable text (not yet neutralised)."""
     if value is None:
@@ -125,6 +134,10 @@ def answer_text(question: dict[str, Any], value: Any) -> str:
     kind = question.get("kind")
     if kind in GRID_KINDS:
         return _grid_text(question, value)
+    if kind == "location":
+        if isinstance(value, dict) and isinstance(value.get("text"), str):
+            return value["text"]
+        return _plain(value)
     if kind in ("multiple_choice", "dropdown"):
         names = labels(question)
         if isinstance(value, dict) and isinstance(value.get("option"), str):
@@ -164,6 +177,13 @@ def question_columns(question: dict[str, Any]) -> list[tuple[str, str, Callable[
         return [
             (f"q:{qid}:{rid}", f"{title} [{label}]{gone}", (lambda v, rid=rid: grid_cell(question, v, rid)))
             for rid, label in grid_rows(question)
+        ]
+    if question.get("kind") == "location":
+        # The place as words, and its spot when one was picked (text: it
+        # opens nowhere by itself).
+        return [
+            (f"q:{qid}", f"{title}{gone}", lambda v: answer_text(question, v)),
+            (f"q:{qid}:map", f"{title} (map){gone}", location_spot),
         ]
     return [(f"q:{qid}", f"{title}{gone}", lambda v: answer_text(question, v))]
 
@@ -295,6 +315,7 @@ __all__ = [
     "grid_cell",
     "grid_columns",
     "grid_rows",
+    "location_spot",
     "question_columns",
     "form_zip",
     "labels",
