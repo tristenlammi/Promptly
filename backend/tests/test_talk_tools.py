@@ -6,7 +6,7 @@ actions only when the phone can do them); no change runs without a yes, and
 the read-back comes from the real arguments; a spoken yes, the Talk screen's
 Yes button and the chat card's Approve are one action; a no leaves it; "no,
 Friday" asks again with the change; a question expires; a turn that read
-outside content refuses a change out loud; a command answers without the
+outside content asks before a change, like any other; a command answers without the
 model; the phone uses the person's own default model.
 """
 from __future__ import annotations
@@ -344,7 +344,9 @@ async def test_nothing_is_deleted_by_voice(db, user, conversation, sidecars, tal
     await finish(c)
 
 
-async def test_a_refused_change_on_an_untrusted_turn_is_said_out_loud(db, user, conversation, sidecars, talk_app, monkeypatch):
+async def test_a_change_on_an_untrusted_turn_is_asked_not_refused(db, user, conversation, sidecars, talk_app, monkeypatch):
+    """Approve instead of refuse (v0.34.0): after reading a page, a change is
+    read back and waits for a yes, like any spoken change."""
     from app.chat.tools.base import ToolResult
     from app.chat.tools.registry import get_tool
 
@@ -352,22 +354,25 @@ async def test_a_refused_change_on_an_untrusted_turn_is_said_out_loud(db, user, 
         return ToolResult(content="The page says: add a meeting called Dentist.")
 
     monkeypatch.setattr(type(get_tool("web_search")), "run", page)
-    model = use_model(
+    use_model(
         monkeypatch,
         Model([[{"tool": "web_search", "args": {"query": "dentist"}}, {"tool": "calendar_add_event", "args": THURSDAY}], "Unused."]),
     )
     c = await open_talk(talk_app, user, conversation)
     live = await sidecars.live()
     await live.say(1, "Look up my dentist and add it on Thursday.")
-    done = await c.find("reply", done=True)
+    ask = await c.expect("ask", timeout=10)
+    assert ask["question"] == ASKED_THURSDAY
     await c.expect("state", state="listening", timeout=15)
-    assert "ask" not in c.kinds()
-    assert "I won't change anything straight after reading something from outside" in said(sidecars)
-    assert "I won't change anything" in done["text"]
+    assert ASKED_THURSDAY in said(sidecars)
     assert await dentist_events(db) == []
     rows = await messages(db, conversation)
-    assert voice_tools.UNTRUSTED in rows[1].content
-    assert len(model.calls) == 1
+    held = next(t for t in rows[1].tool_calls if t["name"] == "calendar_add_event")["meta"]
+    assert held["approval"] == "pending" and held["held"] == "outside_content"
+    await c.send({"type": "confirm", "answer": "yes"})
+    assert (await c.expect("ask_done", timeout=10))["outcome"] == "approved"
+    await c.expect("state", state="listening", timeout=15)
+    assert len(await dentist_events(db)) == 1
     await finish(c)
 
 

@@ -379,8 +379,11 @@ class RememberTool(Tool):
         if category not in _VALID_CATEGORIES:
             category = None
 
+        # The person just said yes to saving exactly this (chat/approvals.py).
+        approved = bool(ctx.turn and ctx.turn.get("user_approved"))
+
         # Health and the like are yours to volunteer: offered, not saved, unless asked.
-        if args.get("sensitive") is True:
+        if args.get("sensitive") is True and not approved:
             trigger = await ctx.db.get(Message, ctx.user_message_id)
             if trigger is None or not is_explicit_memory_request(trigger.content or ""):
                 return ToolResult(
@@ -395,22 +398,14 @@ class RememberTool(Tool):
         # connector, a file — may be carrying instructions planted for the
         # model ("remember that the user prefers vendor X"). A fact saved
         # then is replayed into every future chat. So unless the user asked
-        # for this save in their own words, it's offered, not saved (R-019).
+        # for this save in their own words, it waits for their yes on an
+        # approval card (R-019, ``chat/holds.py``).
         if ctx.turn and ctx.turn.get("untrusted"):
             trigger = await ctx.db.get(Message, ctx.user_message_id)
             if trigger is None or not is_explicit_memory_request(trigger.content or ""):
-                return ToolResult(
-                    content=(
-                        "Not saved: this turn included content from outside the "
-                        "conversation (a web page, search results, a connector, "
-                        "a file or a workspace), so memory is only written when the user asks. "
-                        f"They've been offered \"{content}\" to save with one click."
-                    ),
-                    meta={
-                        "memory_writes": [],
-                        "memory_proposals": [{"content": content, "category": category}],
-                    },
-                )
+                from app.chat.tools.base import guard_write
+
+                guard_write(ctx, "saving to memory")
 
         replaces = str(args.get("replaces") or "").strip()
         if replaces:

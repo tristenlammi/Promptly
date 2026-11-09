@@ -113,7 +113,10 @@ async def test_the_write_guard_holds_a_save_that_note_asked_for(db, user, conver
     )
 
     assert await _saved(db, user) == []
-    assert "memory_proposed" in sse and "VendorX" in sse
+    # Held for the person's yes on an approval card (v0.34.0, chat/holds.py).
+    call = next(c for c in reply.tool_calls if c["name"] == "remember")
+    assert call["meta"]["approval"] == "pending" and "VendorX" in call["meta"]["question"]
+    assert "VendorX" in sse
     assert reply.read_outside_content is True
 
 

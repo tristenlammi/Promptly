@@ -196,6 +196,14 @@ _DONE = {
     "mail_reply": "Sent.",
     "remember": "Saved.",
     "use_item": "Done.",
+    # Held on a chat turn that read outside content (chat/holds.py).
+    "post_to_room": "Sent.",
+    "create_note": "Made the note.",
+    "add_to_note": "Added.",
+    "tick_note_items": "Done.",
+    "draft_form": "Made the draft form. It's in Forms for you to check and send.",
+    "timeline_day": "Here's what your timeline shows.",
+    "timeline_visits": "Here's what your timeline shows.",
 }
 
 

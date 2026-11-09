@@ -31,15 +31,11 @@ _KINDS = [
 
 
 def _guard_write(ctx: ToolContext) -> None:
-    """The untrusted-turn write guard, per tool for now.
+    """The shared untrusted-turn write guard: on a turn that read outside
+    content, the draft waits for the person's yes (``chat/holds.py``)."""
+    from app.chat.tools.base import guard_write
 
-    MERGE NOTE: the notes branch adds ``app.chat.tools.base.guard_write``
-    as the one guard; at merge replace this body with
-    ``guard_write(ctx, "Not making a form")`` (same refusal)."""
-    if ctx.turn and ctx.turn.get("untrusted"):
-        raise ToolError(
-            "Not making a form on a turn that read outside content — ask the user to confirm in a new message."
-        )
+    guard_write(ctx, "making a form")
 
 
 class DraftFormTool(Tool):

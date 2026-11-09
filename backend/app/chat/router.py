@@ -145,7 +145,7 @@ from app.chat.tools import (
     get_tool,
     list_openai_tools,
 )
-from app.chat.tools.base import TurnState
+from app.chat.tools.base import HoldForApproval, TurnState
 from app.chat.tools.validation import ToolArgsInvalid, validate_tool_args
 from app.background import spawn as spawn_background
 from app.database import SessionLocal, get_db
@@ -3691,6 +3691,10 @@ async def _run_native_tool(
             "operation is too slow right now.",
             _ms(),
         )
+    except HoldForApproval as e:
+        # Asked for on a turn that read outside content: waits for a yes
+        # (``app/chat/holds.py``). The dispatcher decides whether it can ask.
+        return ("held", str(e), _ms())
     except ToolError as e:
         return ("tool_error", str(e), _ms())
     except Exception as e:  # noqa: BLE001 — uncaught tool bug
@@ -3753,6 +3757,11 @@ async def _dispatch_tools(
     # changes something (``app/talk/tools.py``). It holds the call for a yes
     # (``held``), or refuses it, before anything runs.
     voice_gate=None,  # noqa: ANN001 - app.talk.tools.VoiceGate | None
+    # Approve instead of refuse (``app/chat/holds.py``): a write a tool's
+    # guard holds on an untrusted turn becomes an approval card. Only where
+    # the reply's ``tool_calls`` are saved for the person to see (the chat's
+    # own loop); sub-agents and headless runs keep the refusal.
+    can_hold: bool = False,
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
 ]:
@@ -4001,7 +4010,7 @@ async def _dispatch_tools(
             )
         )
         tasks.append(task)
-        plan.append((call_id, name, "task", (tool, task, cache_key)))
+        plan.append((call_id, name, "task", (tool, task, cache_key, args)))
 
     # ---- Phase 2: drain results in call order -------------------------
     def _record_tool_event(
@@ -4231,7 +4240,7 @@ async def _dispatch_tools(
                 continue
 
             # kind == "task" — a native tool running concurrently.
-            tool, task, cache_key = payload
+            tool, task, cache_key, call_args = payload
             # Interleave progress while this task runs: poll the queue
             # every 100ms (imperceptible for a multi-second tool, and
             # the sleep yields the loop). Progress from OTHER still-
@@ -4248,6 +4257,57 @@ async def _dispatch_tools(
             async for prog in _drain_progress():
                 yield prog
             outcome, out, elapsed_ms = await task
+
+            if outcome == "held":
+                # Approve instead of refuse (app/chat/holds.py): the tool's
+                # guard stopped a write on a turn that read outside content.
+                # Where the person can be asked, it becomes an approval card;
+                # their yes runs it through chat/approvals.py.
+                from app.chat import holds
+
+                asked: str | None = None
+                problem: str | None = None
+                if can_hold and holds.holdable(name):
+                    try:
+                        # Its own short session, like Talk's gate: the
+                        # lookups mustn't hold locks the approval waits on.
+                        async with SessionLocal() as hdb:
+                            asked, problem = await holds.ask(hdb, user, name, call_args)
+                    except Exception:  # noqa: BLE001 - fall back to the refusal
+                        logger.exception("holding %s for approval failed", name)
+                        asked = None
+                if asked and not problem and voice_gate is not None:
+                    # Talk asks one change at a time: a second held call in
+                    # the same spoken turn waits for the first.
+                    from app.talk.tools import ONE_AT_A_TIME
+
+                    if voice_gate.held:
+                        asked, problem = None, None
+                        out = ONE_AT_A_TIME
+                    else:
+                        voice_gate.held += 1
+                if asked and not problem:
+                    hold_meta = holds.meta_for(name, call_args, asked, spoken=voice_gate is not None)
+                    event = {
+                        "event": "tool_finished",
+                        "id": call_id,
+                        "name": name,
+                        "ok": True,
+                        "elapsed_ms": elapsed_ms,
+                        "meta": hold_meta,
+                    }
+                    _record_tool_event(event, elapsed_ms=elapsed_ms, meta=hold_meta)
+                    yield (
+                        sse_yield(event),
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": holds.note_for_model(asked),
+                        },
+                    )
+                    continue
+                outcome = "tool_error"
+                out = f"That can't be done: {problem}" if problem else out
 
             if outcome in ("tool_error", "timeout"):
                 err_msg = str(out)
@@ -5669,6 +5729,7 @@ async def _stream_generator(
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
                     on_tool_event=_log_visible,
+                    can_hold=True,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,
@@ -5751,6 +5812,7 @@ async def _stream_generator(
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
                     on_tool_event=_log_visible,
+                    can_hold=True,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,
@@ -6516,6 +6578,7 @@ async def _stream_generator(
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
                     on_tool_event=_log_visible if voice_gate is None else _log_voice,
+                    can_hold=True,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,

@@ -229,20 +229,41 @@ def reads_outside_content(tool_name: str) -> bool:
     return tool_name in UNTRUSTED_CONTENT_TOOLS or tool_name.startswith("mcp__")
 
 
+class HoldForApproval(ToolError):
+    """A change asked for on a turn that read outside content (R-019): not
+    run, and not refused either. The chat dispatcher turns it into an
+    approval card (``app/chat/holds.py``): the person sees exactly what would
+    happen, and their tap (or spoken yes) runs it on a fresh turn marked
+    ``user_approved`` (``chat/approvals.py::decide``). Where nobody can be
+    asked (a sub-agent, a headless run) it stays a refusal: it's a
+    :class:`ToolError` with the old words."""
+
+    def __init__(self, doing: str) -> None:
+        super().__init__(
+            f"Not {doing} on a turn that read outside content — ask the user to confirm in a new message."
+        )
+        self.doing = doing
+
+
 def guard_write(ctx: ToolContext, doing: str, *, own_attachments_ok: bool = False) -> None:
     """The one rule for chat tools that change something for the user (add an
-    event, post to a room, run an app action, write a note): not on a turn
-    that read outside content (R-019) — the person asks again in a new
-    message. ``doing`` finishes "Not … on a turn that read outside content"
-    ("changing the calendar"). ``own_attachments_ok`` lets a write through
-    when the only outside content is files the person attached themselves
-    (a health document they asked to log).
+    event, post to a room, run an app action, write a note, save to memory)
+    or read something private on a turn a page could be steering (the
+    timeline): on a turn that read outside content (R-019) it waits for the
+    person's yes — :class:`HoldForApproval`, which the chat shows as an
+    approval card. ``doing`` finishes "Not … on a turn that read outside
+    content" ("changing the calendar"). ``own_attachments_ok`` lets a write
+    through when the only outside content is files the person attached
+    themselves (a health document they asked to log).
+
+    A turn marked ``user_approved`` is the person's yes to exactly these
+    arguments (``chat/approvals.py``), so it runs.
 
     Every write tool goes through here, so how such turns are handled can
     change in one place."""
     turn = ctx.turn
-    if not turn or not turn.get("untrusted"):
+    if not turn or not turn.get("untrusted") or turn.get("user_approved"):
         return
     if own_attachments_ok and turn.get("own_attachments_only"):
         return
-    raise ToolError(f"Not {doing} on a turn that read outside content — ask the user to confirm in a new message.")
+    raise HoldForApproval(doing)

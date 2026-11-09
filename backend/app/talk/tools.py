@@ -16,14 +16,12 @@ pending approval (``meta.approval = "pending"``, the shape destructive
 connector tools use), the reply ends with the read-back question built from
 the real arguments (``readback.py``), and it runs only on a yes, spoken or
 tapped, through the same ``chat/approvals.py`` the chat card uses. A turn
-that read outside content (an email, a web page, a shared file) can't change
-the calendar, your item files or your memory, the same rule those tools apply
-themselves, and it says so out loud. Nothing is deleted by voice.
-
-To let such a turn *ask* instead of refusing (an idea under discussion, not
-built), :meth:`VoiceGate.check` returns ``hold`` instead of ``refuse`` for it:
-the approval runs the tool on a fresh turn marked ``user_approved``, so the
-tools' own guards don't refuse the change the person said yes to.
+that read outside content (an email, a web page, a shared file) asks the
+same way instead of refusing (v0.34.0, "approve instead of refuse", the rule
+the tools' own guard follows in typed chats too, ``chat/holds.py``): the
+approval runs the tool on a fresh turn marked ``user_approved``, so the
+tools' own guards don't refuse the change the person said yes to. Nothing is
+deleted by voice.
 """
 from __future__ import annotations
 
@@ -67,18 +65,15 @@ NOT_ON_VOICE = (
     "propose_file_changes", "propose_photo_action", "propose_workspace_note", "propose_board_cards",
     "propose_board_updates", "forget", "post_to_room", "read_room", "mail_draft_reply",
 )
-# Writes whose tools refuse on a turn that read outside content (R-019);
-# the gate refuses them first, out loud. ``mail_reply`` isn't one: its
-# read-back comes from the email itself and it always needed a yes.
+# Writes whose tools hold on a turn that read outside content (R-019); the
+# gate asks first, out loud, like any change, and marks the card as held for
+# that reason. ``mail_reply`` isn't one: its read-back comes from the email
+# itself and it always needed a yes.
 GUARDED = frozenset({"calendar_add_event", "calendar_change_event", "use_item", "remember"})
 
 # Tool categories a spoken turn may draw from; the names above narrow them.
 CATEGORIES = frozenset({"calendar", "apps", "items", "mail", "phone", "photos", "memory", "search", "drive", "device"})
 
-UNTRUSTED = (
-    "I won't change anything straight after reading something from outside, like an email or a web page. "
-    "Ask me again on its own and I'll do it."
-)
 NO_DELETING = "I can't delete things by voice. You can do that in the app."
 ONE_AT_A_TIME = "One change at a time: ask about the first one, and then this."
 HELD_FOR_MODEL = (
@@ -250,8 +245,9 @@ class VoiceGate:
             return None
         if _deletes(name, args):
             return self._refuse(NO_DELETING)
-        if name in GUARDED and turn and turn.get("untrusted"):
-            return self._refuse(UNTRUSTED)
+        # Approve instead of refuse (v0.34.0): a guarded write on a turn that
+        # read outside content is asked about like any other change.
+        outside = bool(name in GUARDED and turn and turn.get("untrusted"))
         if self.held:
             return Verdict("fail", ONE_AT_A_TIME)
         if name in DEVICE_HELD:
@@ -273,23 +269,25 @@ class VoiceGate:
                 return Verdict("fail", f"That can't be done: {problem}")
         self.held += 1
         now = datetime.now(timezone.utc)
-        return Verdict(
-            "hold",
-            question,
-            meta={
-                "approval": "pending",
-                "native": True,
-                "spoken": True,
-                "tool": name,
-                "title": LABELS.get(name) or name.replace("_", " "),
-                "question": question,
-                "arguments": args,
-                "asked_at": now.isoformat(),
-                # The session's own clock is 20 s from when the question has
-                # been said; this is the backstop for a card left in a chat.
-                "expires_at": (now + timedelta(seconds=ASK_TTL_S + 25)).isoformat(),
-            },
-        )
+        meta = {
+            "approval": "pending",
+            "native": True,
+            "spoken": True,
+            "tool": name,
+            "title": LABELS.get(name) or name.replace("_", " "),
+            "question": question,
+            "arguments": args,
+            "asked_at": now.isoformat(),
+            # The session's own clock is 20 s from when the question has
+            # been said; this is the backstop for a card left in a chat.
+            "expires_at": (now + timedelta(seconds=ASK_TTL_S + 25)).isoformat(),
+        }
+        if outside:
+            from app.chat.holds import WHY
+
+            meta["held"] = "outside_content"
+            meta["why"] = WHY
+        return Verdict("hold", question, meta=meta)
 
     def _refuse(self, why: str) -> Verdict:
         self.say.append(why)

@@ -202,8 +202,11 @@ class MapsChargersTool(Tool):
 
 
 def _guard(ctx: ToolContext) -> None:
-    if ctx.turn and ctx.turn.get("untrusted"):
-        raise ToolError("Not reading the timeline on a turn that read outside content. Ask the user to ask again in a new message.")
+    """The private timeline on a turn a page could be steering: it waits for
+    the person's yes (the shared guard, ``chat/holds.py``)."""
+    from app.chat.tools.base import guard_write
+
+    guard_write(ctx, "reading the timeline")
 
 
 def _nothing(ctx: ToolContext) -> str:

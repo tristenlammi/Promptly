@@ -5,7 +5,9 @@ Two kinds of call wait on the person whose chat it is:
 * a **connector action** that can't be taken back (unlock, open, delete),
   held in any chat (WP-2.1); and
 * a **change to your own data** asked for out loud (WP-T3): Talk holds every
-  write (``app/talk/tools.py``) and reads it back from its real arguments.
+  write (``app/talk/tools.py``) and reads it back from its real arguments; and
+* a **change asked for on a turn that read outside content** (v0.34.0,
+  ``holds.py``): the write tools' guard holds it instead of refusing.
 
 Both are saved on the reply's ``tool_calls`` entry with ``meta.approval =
 "pending"``, and both are decided here, whether the person taps the chat's
@@ -194,8 +196,15 @@ async def decide(
     meta = dict(call.get("meta") or {})
     action = result_meta.get("device_action") if ok and isinstance(result_meta.get("device_action"), dict) else None
     if ok:
+        from app.chat.holds import RESULT_CHARS, SHOWS_RESULT
+
         meta["approval"] = "approved"
-        meta["result"] = (content or "")[:RESULT_PREVIEW_CHARS]
+        if name in SHOWS_RESULT:
+            # A held read (the timeline): the yes was to see this.
+            meta["result"] = (content or "")[:RESULT_CHARS]
+            meta["show_result"] = True
+        else:
+            meta["result"] = (content or "")[:RESULT_PREVIEW_CHARS]
         for key in ("url", "summary"):
             if isinstance(result_meta.get(key), str):
                 meta[key] = result_meta[key]
@@ -245,6 +254,7 @@ async def _run_native(
 ) -> tuple[bool, str | None, dict[str, Any], str | None]:
     """``(ok, content, result meta, error)``. Its own session, like the chat
     dispatcher runs tools."""
+    from app.chat.holds import holdable
     from app.chat.tools.base import ToolContext, ToolError, TurnState
     from app.chat.tools.registry import get_tool
     from app.chat.tools.validation import ToolArgsInvalid, validate_tool_args
@@ -252,7 +262,7 @@ async def _run_native(
     from app.talk.tools import approvable
 
     tool = get_tool(name)
-    if tool is None or not approvable(name):
+    if tool is None or not (approvable(name) or holdable(name)):
         return False, None, {}, "That can't be done any more."
     try:
         validate_tool_args(tool.parameters, args)

@@ -19,6 +19,12 @@ type Approval = "pending" | "running" | "approved" | "declined" | "failed" | "ex
  * ("Add Dentist to your calendar for Friday 20 November at 9 AM?"):
  * ``meta.native`` with the read-back in ``meta.question``. Saying "yes"
  * and pressing Approve here are the same action on the server.
+ *
+ * A typed chat that read outside content (a web page, an email, a file, a
+ * workspace note) holds its changes the same way instead of refusing them
+ * (``meta.held = "outside_content"``, backend ``chat/holds.py``), and says
+ * why. A held look at something private (the timeline) shows what it found
+ * once you say yes (``meta.show_result``).
  */
 export function ToolApprovalCards({
   messageId,
@@ -44,8 +50,11 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
   const [busy, setBusy] = useState<"approve" | "decline" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const native = meta.native === true;
+  const spoken = native && meta.spoken === true;
+  const why = native && meta.held === "outside_content" && typeof meta.why === "string" ? meta.why : null;
+  const result = meta.show_result === true && typeof meta.result === "string" && meta.result.trim() ? meta.result : null;
   const question = native && typeof meta.question === "string" ? meta.question : null;
-  const connector = native ? "Asked out loud" : String(meta.connector ?? "Connector");
+  const connector = spoken ? "Asked out loud" : native ? "Checking with you" : String(meta.connector ?? "Connector");
   const title = String(meta.title ?? meta.tool ?? call.name);
   const target = typeof meta.target === "string" ? meta.target : null;
   const args = (meta.arguments ?? {}) as Record<string, unknown>;
@@ -89,7 +98,7 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
       aria-label={question ?? `${connector}: ${title}`}
     >
       <div className="flex items-start gap-2">
-        {native ? (
+        {spoken ? (
           <Mic className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden />
         ) : (
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" aria-hidden />
@@ -103,7 +112,8 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
               {target && <span className="text-[var(--text-muted)]"> · {target}</span>}
             </div>
           )}
-          {!native && Object.keys(args).length > 0 && (
+          {why && <div className="mt-0.5 text-xs text-[var(--text-muted)]">{why}</div>}
+          {!spoken && Object.keys(args).length > 0 && (
             <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-xs text-[var(--text-muted)]">
               {Object.entries(args).map(([k, v]) => (
                 <div key={k} className="contents">
@@ -136,7 +146,7 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
                 Don't run it
               </button>
               <span className="text-xs text-[var(--text-muted)]">
-                {native ? "Or say yes. Nothing has happened yet." : "Nothing has happened yet."}
+                {spoken ? "Or say yes. Nothing has happened yet." : "Nothing has happened yet."}
               </span>
             </div>
           ) : (
@@ -151,6 +161,11 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
               {shown === "declined" && (native ? "Left alone: nothing was changed." : "Not run.")}
               {shown === "expired" && "Not done: nobody said yes in time. Ask again if you still want it."}
               {shown === "failed" && `Approved, but it failed: ${call.error ?? "unknown error"}`}
+            </div>
+          )}
+          {shown === "approved" && result && (
+            <div className="mt-1.5 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--surface-2)] px-2 py-1.5 text-xs text-[var(--text)]">
+              {result}
             </div>
           )}
           {error && (
