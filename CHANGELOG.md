@@ -34,6 +34,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Fetching a web page (the AI's page reader, remote images in Mail, automations, link previews) connects to the exact address that was checked, so a site can't switch its DNS to an address inside your network between the check and the request.
 - nginx ignores the visitor address in CF-Connecting-IP when it arrives through Docker's gateway, so a device on your network can't pretend to be someone else to the rate limits. cloudflared should run as a container on Promptly's network (README, "Cloudflare Tunnel").
 - New optional NGINX_BIND in .env picks which address ports 8087/8488 open on (usually the server's LAN address). By default they now open on IPv4 only. The README has a new "Exposure" section: what should be reachable, and how to check from outside on IPv4 and IPv6.
+- The server, its workers, the upload service and the Office converter run with almost all Linux privileges removed and can't gain new ones.
 
 ## [0.35.0] - 2026-11-09
 

@@ -50,6 +50,24 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+# The containers that parse what people upload or receive (the backend and
+# its workers, tusd, the Office converter) drop every Linux capability but
+# the three that root needs to read and write ./data whoever's uid owns a
+# file, and can never gain privileges (setuid binaries, file capabilities).
+# Gone: raw sockets, mknod, chroot, binding low ports, changing uids, and
+# the rest of Docker's default set (security review M4). They still run as
+# root: ./data on existing installs is owned by root, and switching them to
+# another user would need a chown of every upload on the way.
+x-hardened: &hardened
+  cap_drop:
+    - ALL
+  cap_add:
+    - CHOWN
+    - DAC_OVERRIDE
+    - FOWNER
+  security_opt:
+    - no-new-privileges:true
+
 services:
   nginx:
     # Pinned to a release line, bumped on purpose (R-243): `update.sh` pulls
@@ -138,6 +156,9 @@ services:
     # its own): one build per update, and the two can never drift apart.
     image: promptly-backend:local
     container_name: Promptly-Backend
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Operator settings in .env (COOKIE_SECURE, RATE_LIMIT_*, LOCKOUT_*,
     # SETUP_TOKEN, …) reach the backend. Without this only the handful of
@@ -315,6 +336,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-ArqWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Bypass the shared entrypoint (which runs Alembic migrations + singleton
     # provisioning) — the backend owns those. The worker just needs a migrated
@@ -546,6 +570,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-MediaWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     entrypoint: ["arq", "app.tasks.media_worker.MediaWorkerSettings"]
     env_file:
@@ -578,6 +605,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-MailWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     entrypoint: ["python", "-m", "app.mail.worker"]
     env_file:
@@ -609,6 +639,9 @@ services:
   tusd:
     image: tusproject/tusd:v2.10.1
     container_name: Promptly-Tusd
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Root, so it can write into the uploads folder whoever owns it (the
     # backend runs as root too); it's only reachable through nginx.
@@ -996,6 +1029,11 @@ services:
     # can't make LibreOffice fetch anything.
     image: gotenberg/gotenberg:8.37.0
     container_name: Promptly-Convert
+    # Runs as its own non-root user; needs no capabilities at all (M4).
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     command:
       - gotenberg
