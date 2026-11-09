@@ -55,9 +55,9 @@ export function LibraryExport() {
       </div>
       <p className="mt-1 text-xs text-[var(--text-muted)]">
         Everything you own as an ordinary folder tree: your files in their folders with their names and dates, documents
-        as Word files, spreadsheets as Excel, and beside each photo its date, place, description and albums (as .json and
-        .xmp, which other photo apps read), plus your P Maps offline areas. Unzip every part into one place. Another Promptly can import it as “A folder of
-        photos”.
+        as Word files, spreadsheets as Excel, beside each photo its date, place, description and albums (as .json and
+        .xmp, which other photo apps read), your notes as Markdown files with their pictures and recordings, and your P
+        Maps offline areas. Unzip every part into one place. Another Promptly can import it as “A folder of photos”.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
@@ -82,6 +82,7 @@ export function LibraryExport() {
         <div className="mt-4">
           <p className="text-xs text-[var(--text-muted)]">
             {current.counts.files.toLocaleString()} files · {current.counts.photos.toLocaleString()} photos and videos ·{" "}
+            {current.counts.notes ? `${current.counts.notes.toLocaleString()} ${current.counts.notes === 1 ? "note" : "notes"} · ` : ""}
             {humanSize(current.bytes)} · prepared {new Date(current.created * 1000).toLocaleString()} · links work until{" "}
             {new Date(current.expires * 1000).toLocaleDateString()}
           </p>

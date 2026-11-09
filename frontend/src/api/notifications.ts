@@ -24,6 +24,13 @@ export interface NotificationPreferences {
   mail: boolean;
   /** Forms: new answers to my forms (counts only), and a form closing. */
   form_response: boolean;
+  /** Calls ringing you and missed calls (DM calls). */
+  call: boolean;
+  /** "Don't ring me during quiet hours": calls then become missed calls, told when quiet hours end (off: calls always ring). */
+  call_quiet_hold?: boolean;
+  notes: boolean;
+  /** Porch: which kinds, and how, are chosen in Porch → Settings. */
+  porch?: boolean;
   /** Quiet hours, "HH:MM" in your own time zone (one setting for all of Promptly). */
   quiet_enabled: boolean;
   quiet_start: string;
@@ -59,7 +66,11 @@ export type NotificationSwitch =
   | "calendar"
   | "passwords"
   | "mail"
-  | "form_response";
+  | "form_response"
+  | "call"
+  | "call_quiet_hold"
+  | "notes"
+  | "porch";
 
 export interface NotificationRow {
   id: string;

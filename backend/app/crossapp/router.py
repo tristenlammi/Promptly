@@ -2,6 +2,7 @@
 
   POST /share                                 post a "Send to…" card in a room (optionally letting the room in)
   GET  /share/card/{message_id}               a card as you see it ({card: null} = no access)
+  GET  /share/preview?kind=&id=               the card of something you're about to send (404: you can't open it)
   GET  /trip/{file_id}/{trip_id}/album        your trip album and its first photos
   POST /trip/{file_id}/{trip_id}/album        make / bring up to date your trip album
   GET  /trip/{file_id}/{trip_id}/spending     "Spent so far" from your Budget
@@ -13,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,6 +78,28 @@ async def share(body: ShareIn, db: AsyncSession = Depends(get_db), user: User = 
                     await rooms_core.publish([uid], {"type": "room", "room": await rooms_core.room_out(db, room, u)})
     spawn(fan_out(msg.id), name=f"rooms-push-{msg.id}")
     return {"message": out, "granted": granted}
+
+
+@router.get("/share/preview")
+async def share_preview(
+    kind: str = Query(..., max_length=16),
+    id: str = Query(..., min_length=1, max_length=64),  # noqa: A002 — the thing's id, as in ShareIn
+    file_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """The card of something you're about to send (the Rooms composer's
+    attachment, e.g. ``?share=porch_post:<id>``), as you see it — 404 when
+    you can't open it yourself."""
+    if kind not in shares.KINDS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    snap: dict = {"kind": kind, "id": id}
+    if kind in shares.IN_ITEM:
+        snap["file_id"] = str(file_id) if file_id else None
+    got = await shares.card(db, user, snap)
+    if got is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return {"kind": kind, "label": shares.LABELS[kind], "card": got}
 
 
 @router.get("/share/card/{message_id}")

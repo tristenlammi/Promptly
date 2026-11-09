@@ -15,6 +15,13 @@ Replies are driven by markers in the user's message:
     (none)   "Echo #<n>: <text>" — <n> counts up, so a regenerated
              reply always differs from the one it replaces
 
+Spoken turns (Talk, WP-T4) can't carry markers, so plain words do:
+
+    "long story"       a long reply of real sentences (time to talk over it)
+    "dentist" + tools  call calendar_add_event for "Dentist" next week at 9
+    "timer" + tools    call set_timer for 10 minutes (the phone, WP-T5)
+    "alarm" + tools    call set_alarm for 6:30 (held for a yes)
+
 Requests the backend makes on its own are recognised by their system
 prompt: the chat titler gets "E2E chat", memory capture gets "[]", and
 the vision relay gets a fixed caption. The editors' AI (WP-5.5) gets
@@ -66,6 +73,19 @@ def _text_of(content) -> tuple[str, int]:
 
 _TOOL_RE = re.compile(r"\[tool:(\w+)(?:\s+(\{.*\}))?\]", re.S)
 
+LONG_STORY = [
+    "Once upon a time there was a lighthouse keeper who loved the sea.",
+    "Every evening she climbed the winding stairs to light the lamp.",
+    "The ships far out on the water would blink their lights in thanks.",
+    "One winter a storm rolled in from the west and the waves grew tall.",
+    "She kept the lamp burning all night while the wind howled outside.",
+    "In the morning a small fishing boat came safely into the harbour.",
+    "The fishermen walked up the hill to thank her with a basket of bread.",
+    "She made a pot of tea and they told stories until the sun went down.",
+    "After that, the village rang the harbour bell for her every new year.",
+    "And the lighthouse keeper never once let the lamp go out again.",
+]
+
 
 def _tool_call_for(body: dict) -> tuple[str, str] | None:
     """(name, arguments) when the turn asks for a tool and hasn't had its
@@ -74,8 +94,18 @@ def _tool_call_for(body: dict) -> tuple[str, str] | None:
     if messages and messages[-1].get("role") == "tool":
         return None
     last_user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
-    m = _TOOL_RE.search(_text_of(last_user.get("content"))[0])
+    text = _text_of(last_user.get("content"))[0]
+    m = _TOOL_RE.search(text)
     if not m:
+        offered = {(t.get("function") or {}).get("name") for t in body.get("tools") or []}
+        if re.search(r"dentist", text, re.I) and "calendar_add_event" in offered:
+            day = time.strftime("%Y-%m-%d", time.localtime(time.time() + 7 * 86400))
+            return "calendar_add_event", json.dumps({"title": "Dentist", "start": f"{day}T09:00"})
+        # The phone's device actions (WP-T5): only offered when hello.caps lists them.
+        if re.search(r"\btimer\b", text, re.I) and "set_timer" in offered:
+            return "set_timer", json.dumps({"seconds": 600, "label": "Tea"})
+        if re.search(r"\balarm\b", text, re.I) and "set_alarm" in offered:
+            return "set_alarm", json.dumps({"hour": 6, "minute": 30})
         return None
     return m.group(1), m.group(2) or "{}"
 
@@ -100,6 +130,32 @@ def _editor_ai_reply(system: str, messages: list) -> str | None:
                            "rows": [["Rent", 900], ["Food", 300], ["Total", "=SUM(B2:B3)"]]})
     if system.startswith("You turn the extracted text of a document into clean Markdown"):
         return "# Converted\n\n" + prompt.strip()
+    # Notes (N1.5): AI proposals on one note, read from between <note> tags.
+    if system.startswith(("You tidy up a note", "You turn a note into a checklist", "You suggest a title for a note",
+                          "You pick the to-dos in a note", "You make a calendar event from a note")):
+        import datetime as _dt
+        import re as _re
+
+        inner = prompt.split("<note>", 1)[-1].split("</note>", 1)[0]
+        lines = [ln.strip() for ln in inner.splitlines() if ln.strip() and not ln.startswith(("Title:", "Recorded and transcribed:"))]
+        if system.startswith("You tidy up a note"):
+            out = []
+            for ln in lines:
+                words = [w for w in ln.split() if w.lower().strip(",.") not in ("um", "uh", "like", "so")]
+                s = " ".join(words).strip(" ,")
+                if s:
+                    out.append(s[0].upper() + s[1:] + ("" if s.endswith((".", "!", "?")) else "."))
+            return json.dumps({"text": "\n\n".join(out)})
+        if system.startswith("You turn a note into a checklist"):
+            return json.dumps({"items": lines})
+        if system.startswith("You suggest a title for a note"):
+            return json.dumps({"title": "E2E title"})
+        if system.startswith("You pick the to-dos in a note"):
+            return json.dumps({"tasks": [{"title": ln.lstrip("[ ]x").strip(), "due": None, "time": None} for ln in lines]})
+        today = _re.search(r"Today is \w+ (\d{4}-\d{2}-\d{2})", prompt)
+        day = (_dt.date.fromisoformat(today.group(1)) if today else _dt.date.today()) + _dt.timedelta(days=1)
+        return json.dumps({"title": "E2E event", "date": day.isoformat(), "start": "10:00", "end": "11:30", "all_day": False,
+                           "location": "The workshop", "description": ""})
     if system.startswith("You draft a slide deck"):
         # Three slides, the last two citing the first source (Stage 12).
         import re
@@ -157,6 +213,8 @@ def _reply_for(body: dict) -> tuple[list[str], float, bool]:
         return words, 0.25, False
     if "[fail]" in text:
         return ["Partial ", "reply ", "before ", "the ", "drop "], 0.1, True
+    if re.search(r"long story", text, re.I):
+        return [w + " " for w in " ".join(LONG_STORY).split(" ")], 0.03, False
     n = next(_counter)
     seen = f"I can see {images} image{'s' if images != 1 else ''}. " if images else ""
     reply = f"Echo #{n}: {seen}{text.strip()[:200]}"

@@ -184,11 +184,9 @@ class UseItemTool(Tool):
         if action.writes:
             if access != "edit":
                 raise ToolError("The user can only read that file.")
-            if ctx.turn and ctx.turn.get("untrusted") and not (action.from_documents and ctx.turn.get("own_attachments_only")):
-                raise ToolError(
-                    "Not changing the file on a turn that read outside content — ask the user to confirm in a "
-                    "new message."
-                )
+            from app.chat.tools.base import guard_write
+
+            guard_write(ctx, "changing the file", own_attachments_ok=action.from_documents)
         data = copy.deepcopy(doc.data)
         sctx = service.make_context(ctx.db, ctx.user, row.id, spec)
         try:

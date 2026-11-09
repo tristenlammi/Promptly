@@ -28,6 +28,9 @@ APPS = [
     ("meals", "P Macros", "/app/open/meals", "item-icons/meals-maskable-512.png"),
     ("trip", "P Trips", "/app/open/trip", "item-icons/trip-maskable-512.png"),
     ("tasks", "P Tasks", "/app/open/tasks", "item-icons/tasks-maskable-512.png"),
+    # Notes (docs/notes-plan.md §9): long-press → New note · New list · Voice note (native, in :app).
+    ("notes", "P Notes", "/notes", "item-icons/notes-maskable-512.png"),
+    ("porch", "P Porch", "/porch/", "item-icons/porch-maskable-512.png"),
 ]
 
 # maps-offline (WP-M7): launchers that open a native screen in :app when there's no
@@ -40,6 +43,10 @@ MAPS_SHORTCUTS = [
     ("maps_drive", "ic_maps", "maps_drive", "org.promptly.sync.maps.NavigationActivity"),
     ("maps_offline", "ic_maps", "maps_offline_areas", "org.promptly.sync.maps.offline.OfflineAreasActivity"),
 ]
+# Launchers with a long-press menu of their own (shortcuts_<key>.xml, written below).
+# Append a key here to give another launcher one.
+SHORTCUT_KEYS = ["promptly", "photos", "maps"]
+SHORTCUT_KEYS += ["notes"]  # Notes
 
 # Native screens in :app, not web pages: they get an icon and a row in the picker, but no
 # TWA launcher class or activity here. :app's manifest declares the activity-alias.
@@ -47,6 +54,26 @@ NATIVE = [
     # key, label, alias class, icon
     ("passwords", "P Passwords", "org.promptly.app.PasswordsLauncher", "item-icons/passwords-maskable-512.png"),
 ]
+
+# Porch (WP-P1.7): launchers that are also a share target in Android's share
+# sheet ("Share → P Porch"). A TWA does that with SEND / SEND_MULTIPLE intent
+# filters plus METADATA_SHARE_TARGET: Chrome POSTs what was shared to the
+# action, the web app's service worker takes it from there (as the PWA's
+# share_target does). The action is a path; SuiteLauncher puts the saved
+# server in front of it at launch. key -> (action path, MIME types, file field)
+SHARE_TARGETS = {
+    "porch": ("/porch/share-target", ("image/*", "video/*", "text/plain"), "media"),
+}
+
+
+def share_target_json(action: str, mimes: tuple[str, ...], field: str) -> str:
+    files = [m for m in mimes if not m.startswith("text/")]
+    return (
+        '{"action": "%s", "method": "POST", "enctype": "multipart/form-data", '
+        '"params": {"title": "title", "text": "text", "files": [{"name": "%s", "accept": [%s]}]}}'
+        % (action, field, ", ".join(f'"{m}"' for m in files))
+    )
+
 
 java = MOD / "java/org/promptly/app"
 for d in (java, MOD / "res/mipmap-anydpi-v26", MOD / "res/drawable-nodpi", MOD / "res/values"):
@@ -103,12 +130,24 @@ for key, label, path, icon in APPS + NATIVE:
     # P Maps → Drive / Offline areas.
     shortcuts = (
         f'\n            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts_{key}" />'
-        if key in ("promptly", "photos", "maps") else ""
+        if key in SHORTCUT_KEYS else ""
     )
     if key != "promptly":
         registry.append(f'        {{"{key}", "{label}", "org.promptly.app.{cls}"}},')
     # Only Promptly is on out of the box; the picker turns the rest on.
     enabled = "true" if key == "promptly" else "false"
+    # Porch (WP-P1.7): in the share sheet too, for what this app takes.
+    share = ""
+    if key in SHARE_TARGETS:
+        _action, mimes, _field = SHARE_TARGETS[key]
+        types = "".join(f'\n                <data android:mimeType="{m}" />' for m in mimes)
+        share = f'''
+            <meta-data android:name="android.support.customtabs.trusted.METADATA_SHARE_TARGET" android:resource="@string/share_target_{key}" />
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />{types}
+            </intent-filter>'''
     activities.append(f'''
         <activity
             android:name=".{cls}"
@@ -125,7 +164,7 @@ for key, label, path, icon in APPS + NATIVE:
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+            </intent-filter>{share}
         </activity>''')
 
 def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
@@ -148,6 +187,8 @@ def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
     ("apps", "ic_promptly", "choose_apps", "org.promptly.app.ChooseAppsActivity"),
     ("server", "ic_promptly", "change_server", "org.promptly.app.SetupActivity"),
     ("backup", "ic_photos", "photo_backup", "org.promptly.sync.MainActivity"),
+    # Talking to Promptly (WP-T5): a Talk conversation, in the assistant sheet.
+    ("talk", "ic_promptly", "talk", "org.promptly.sync.assistant.AssistantActivity"),
 ]))
 (MOD / "res/xml/shortcuts_photos.xml").write_text(shortcut_xml("Long-press P Photos: photo backup (the app module's MainActivity).", [
     ("photos_backup", "ic_photos", "backup_settings", "org.promptly.sync.MainActivity"),
@@ -162,7 +203,44 @@ def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
     '    <string name="backup_settings">Backup settings</string>\n'
     '    <string name="photo_backup">Photo backup</string>\n'
     '    <string name="maps_drive">Drive</string>\n'
-    '    <string name="maps_offline_areas">Offline areas</string>\n</resources>\n'
+    '    <string name="maps_offline_areas">Offline areas</string>\n'
+    '    <string name="talk">Talk</string>\n'
+    # Notes: P Notes' long-press menu.
+    '    <string name="notes_new_note">New note</string>\n'
+    '    <string name="notes_new_list">New list</string>\n'
+    '    <string name="notes_voice_note">Voice note</string>\n'
+    '</resources>\n'
+)
+# Notes: long-press P Notes → the native quick capture screens in :app (they work with
+# no signal). New list is Quick note opened as a list (its data says so).
+(MOD / "res/xml/shortcuts_notes.xml").write_text(
+    '<?xml version="1.0" encoding="utf-8"?>\n<!-- Long-press P Notes: quick capture (the app module\'s capture screens). -->\n'
+    '<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">\n'
+    + "".join(
+        f'    <shortcut android:shortcutId="{sid}" android:enabled="true" android:icon="@mipmap/ic_notes"\n'
+        f'        android:shortcutShortLabel="@string/{label}">\n'
+        '        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"\n'
+        f'            android:targetClass="{target}" android:data="{data}" />\n'
+        '    </shortcut>\n'
+        for sid, label, target, data in (
+            ("notes_new_note", "notes_new_note", "org.promptly.sync.capture.QuickNoteActivity", "promptly-widget://new-note"),
+            ("notes_new_list", "notes_new_list", "org.promptly.sync.capture.QuickNoteActivity", "promptly-widget://new-list"),
+            ("notes_voice_note", "notes_voice_note", "org.promptly.sync.capture.VoiceNoteActivity", "promptly-widget://voice-note"),
+        )
+    )
+    + '</shortcuts>\n'
+)
+# Porch (WP-P1.7): each share target's JSON, in its own resource file.
+(MOD / "res/values/share_targets.xml").write_text(
+    '<?xml version="1.0" encoding="utf-8"?>\n'
+    '<!-- Generated by android/gen_suite.py: METADATA_SHARE_TARGET for each launcher that takes shares. -->\n'
+    '<resources>\n'
+    + "".join(
+        # Quotes escaped, or Android's resource compiler drops them.
+        f'    <string name="share_target_{k}" translatable="false">{share_target_json(*v).replace(chr(34), chr(92) + chr(34))}</string>\n'
+        for k, v in SHARE_TARGETS.items()
+    )
+    + '</resources>\n'
 )
 (java / "Apps.java").write_text(
     "package org.promptly.app;\n\n"

@@ -10,6 +10,7 @@ import {
   File as FileIcon,
   GitMerge,
   Images,
+  Lightbulb,
   Pencil,
   Receipt,
   Tag as TagIcon,
@@ -42,6 +43,7 @@ const APP_ICON: Record<string, typeof FileIcon> = {
   journal_entry: BookOpen,
   recipe: UtensilsCrossed,
   transaction: Receipt,
+  note: Lightbulb,
 };
 
 export function TagsPage() {

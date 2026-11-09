@@ -19,6 +19,7 @@ from app.auth.models import User
 from . import refs
 
 KIND_ORDER = ("event", "task", "contact", "person", "user", "file", "photo", "album", "trip", "recipe", "journal", "txn", "witem")
+KIND_ORDER = (*KIND_ORDER, "note")  # Notes (app/notes)
 
 
 def _like(q: str) -> str:
@@ -180,7 +181,22 @@ async def search(db: AsyncSession, user: User, q: str, limit: int = 6, kinds: se
                     .limit(limit)
                 )
             ).all()
-            out += [_r("witem", str(it.id), it.title, f"{(it.kind or 'item').capitalize()} · {wt}") for it, wt in rows]
+            out += [_r("witem", str(it.id), it.title, f"{refs.witem_kind(it.kind)} · {wt}") for it, wt in rows]
+
+    if "note" in want:
+        from app.notes.access import visible_predicate
+        from app.notes.models import Note
+        from app.notes.service import display_title
+
+        rows = (
+            await db.execute(
+                select(Note)
+                .where(visible_predicate(user.id), or_(Note.title.ilike(pat, escape="\\"), Note.search_text.ilike(pat, escape="\\")))
+                .order_by(Note.updated_at.desc())
+                .limit(limit)
+            )
+        ).scalars()
+        out += [_r("note", str(n.id), display_title(n), "Note", f"/notes/n/{n.id}") for n in rows]
 
     order = {k: i for i, k in enumerate(KIND_ORDER)}
     per: dict[str, int] = {}

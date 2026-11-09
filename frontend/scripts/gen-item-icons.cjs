@@ -35,6 +35,9 @@ const KINDS = [
   ["mail", "Mail", TERRACOTTA],
   ["passwords", "KeyRound", TERRACOTTA],
   ["forms", "ClipboardList", "#7C4DCC"],
+  ["notes", "Lightbulb", "#E0A526"], // Notes
+  // Porch
+  ["porch", "House", "#E0803A"],
   ["example", "ListChecks", "#4F8A8B"],
   ["item", "LayoutGrid", TERRACOTTA], // fallback for a kind without its own
 ];

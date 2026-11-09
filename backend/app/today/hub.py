@@ -599,6 +599,15 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
             sec["maps"] = m
     except Exception:  # noqa: BLE001
         logger.exception("today maps section failed")
+    # Notes (app/notes): pinned notes and voice notes still being transcribed.
+    try:
+        from app.notes.today import section as notes_section
+
+        n = await notes_section(db, user)
+        if n:
+            sec["notes"] = n
+    except Exception:  # noqa: BLE001
+        logger.exception("today notes section failed")
 
     # Forms (WP-F1.4): new answers and forms closing today. Counts only.
     try:
@@ -618,6 +627,16 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
             sec["voice"] = v
     except Exception:  # noqa: BLE001
         logger.exception("today voice section failed")
+
+    # Porch: new posts from your ticked groups, today's birthdays in them.
+    try:
+        from app.porch.today import today_section as porch_section
+
+        p = await porch_section(db, user, now, today)
+        if p:
+            sec["porch"] = p
+    except Exception:  # noqa: BLE001
+        logger.exception("today porch section failed")
 
     found = await _primary(db, user, "tasks")
     tasks_data = found[1].data if found else None

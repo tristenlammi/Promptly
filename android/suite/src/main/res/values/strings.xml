@@ -6,4 +6,8 @@
     <string name="photo_backup">Photo backup</string>
     <string name="maps_drive">Drive</string>
     <string name="maps_offline_areas">Offline areas</string>
+    <string name="talk">Talk</string>
+    <string name="notes_new_note">New note</string>
+    <string name="notes_new_list">New list</string>
+    <string name="notes_voice_note">Voice note</string>
 </resources>

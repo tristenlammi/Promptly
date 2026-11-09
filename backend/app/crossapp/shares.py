@@ -35,10 +35,19 @@ LABELS = {
     "file": "a file", "folder": "a folder", "photo": "a photo", "album": "an album",
     "task": "a task", "recipe": "a recipe", "trip": "a trip", "form": "a form",
 }
+# Notes (app/notes): a note card. Only people the note is shared with can
+# open it; the room's other people see "This note isn't shared with you".
+KINDS = (*KINDS, "note")
+LABELS["note"] = "a note"
 # Kinds whose own sharing can let the room in.
 GRANTABLE = ("file", "folder", "photo", "album")
 # Kinds that live inside an app file (``file_id``) under their own ``id``.
 IN_ITEM = {"task": "tasks", "recipe": "mealplan", "trip": "trip"}
+
+# Porch (WP-P1.6): a post. Never grantable — who sees it is the post's
+# groups; anyone else in the room gets "This post isn't shared with you".
+KINDS = (*KINDS, "porch_post")
+LABELS["porch_post"] = "a Porch post"
 
 
 def _uuid(v: Any) -> uuid.UUID | None:
@@ -297,6 +306,27 @@ async def _form_card(db: AsyncSession, user: User, share: dict) -> dict | None:
     return out
 
 
+async def _note_card(db: AsyncSession, user: User, share: dict) -> dict | None:
+    """A note from Notes, as ``user`` sees it: only if they can open it."""
+    from app.notes import access as note_access
+    from app.notes.models import Note, NoteItem
+    from app.notes.service import display_title
+
+    nid = _uuid(share.get("id"))
+    note = await db.get(Note, nid) if nid else None
+    if note is None or not await note_access.can_open(db, user, note):
+        return None
+    if note.kind == "list":
+        left = (
+            await db.execute(select(func.count()).select_from(NoteItem).where(NoteItem.note_id == note.id, NoteItem.checked.is_(False)))
+        ).scalar() or 0
+        subtitle = f"List · {left} left"
+    else:
+        first = next((ln.strip() for ln in (note.body_text or "").splitlines() if ln.strip()), "")
+        subtitle = "Note" + (f" · {first[:60]}" if first and note.title.strip() else "")
+    return {"title": display_title(note), "subtitle": subtitle, "thumb": None, "href": f"/notes/n/{note.id}"}
+
+
 async def card(db: AsyncSession, user: User, share: dict) -> dict | None:
     """The card as ``user`` sees it — None when they can't open the thing
     (or it's gone): the client then draws "you don't have access"."""
@@ -311,6 +341,12 @@ async def card(db: AsyncSession, user: User, share: dict) -> dict | None:
         out = await _item_card(db, user, share, kind)
     elif kind == "form":
         out = await _form_card(db, user, share)
+    elif kind == "note":
+        out = await _note_card(db, user, share)
+    elif kind == "porch_post":
+        from app.porch.handoffs import card as porch_card
+
+        out = await porch_card(db, user, share.get("id"))
     else:
         out = None
     if out is None:

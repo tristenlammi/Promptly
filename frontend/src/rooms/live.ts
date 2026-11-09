@@ -127,7 +127,9 @@ export function applyRoomEvent(qc: QueryClient, ev: RoomEvent) {
       store.setThinking(ev.room_id, ev.on);
       return;
     case "room":
-      if (!upsertRoom(qc, ev.room)) refetchBootstrapSoon(qc);
+      if (!upsertRoom(qc, ev.room, ev.users)) refetchBootstrapSoon(qc);
+      // Someone in it this page has no name for: fetch the names.
+      else if ((ev.room.members ?? []).some((id) => !qc.getQueryData<Bootstrap>(BOOTSTRAP_KEY)?.users[id])) refetchBootstrapSoon(qc);
       return;
     case "room_delete":
       removeRoom(qc, ev.room_id);

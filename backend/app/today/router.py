@@ -3,7 +3,7 @@
     GET  /api/today            the day: events, tasks, habits, workout, meals,
                                on-this-day photos, unread rooms, my work
     PUT  /api/today/morning    the morning summary push: on/off and time
-    GET  /api/today/search     events, contacts and tasks matching ``q``
+    GET  /api/today/search     events, contacts, tasks, mail and notes matching ``q``
 
 Search covers your calendar events (not free/busy-only calendars, not ones
 you removed), your Contacts and your Tasks. Rooms messages are never
@@ -99,7 +99,7 @@ async def search(
 
     term = q.strip().lower()
     if len(term) < 2:
-        return {"events": [], "contacts": [], "tasks": [], "mail": []}
+        return {"events": [], "contacts": [], "tasks": [], "mail": [], "notes": []}
     events = [
         {"id": e["id"], "event_id": e["event_id"], "title": e["title"], "start": e["start"], "all_day": e["all_day"],
          "location": e.get("location") or "", "url": f"/calendar?event={e['event_id']}"}
@@ -117,6 +117,14 @@ async def search(
 
     tags, tagged_events = await search_hook.everyday(db, user, term, limit, {e["event_id"] for e in events})
     events = (events + tagged_events)[:limit]
+    notes: list[dict] = []
+    try:
+        # Notes (app/notes): only notes you can open.
+        from app.notes.today import search as notes_search
+
+        notes = await notes_search(db, user, q.strip(), limit)
+    except Exception:  # noqa: BLE001 — the other results still matter
+        logger.exception("notes search failed")
     mail: list[dict] = []
     try:
         from app.mail.apps import quick_search
@@ -124,4 +132,11 @@ async def search(
         mail = await quick_search(db, user, q.strip(), limit)
     except Exception:  # noqa: BLE001 — the other results still matter
         logger.exception("mail search failed")
-    return {"events": events, "contacts": contacts[:limit], "tasks": tasks[:limit], "tags": tags, "mail": mail}
+    porch: list[dict] = []
+    try:
+        from app.porch.search import quick as porch_quick
+
+        porch = await porch_quick(db, user, q.strip(), limit)
+    except Exception:  # noqa: BLE001
+        logger.exception("porch search failed")
+    return {"events": events, "contacts": contacts[:limit], "tasks": tasks[:limit], "tags": tags, "mail": mail, "notes": notes, "porch": porch}

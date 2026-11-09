@@ -74,6 +74,10 @@ K_KICKED = "voice:kicked:{}:{}"
 K_ROOMS = "voice:rooms"
 K_SPEAK = "voice:spk:{}:{}"
 K_AUDIENCE = "voice:aud:{}"
+# LiveKit sids of connections a reload or another device replaced in a
+# channel: their late ``participant_left`` must not end the new session.
+K_STALE = "voice:stale:{}:{}"
+STALE_SID_TTL = 15 * 60
 
 
 class VoiceError(Exception):
@@ -505,6 +509,10 @@ async def join(db: AsyncSession, user: User, room: Room, sm: RoomSpaceMember, cs
     """Join (or move to) a voice channel. Removes you from any other
     channel, and replaces this channel's connection on another device."""
     rv = await voice_settings(db, room)
+    # One live conversation at a time: joining a channel hangs up a DM call.
+    from app.calls import dm
+
+    await dm.leave_elsewhere(db, user, voice_too=False)
     async with await _lock(user.id):
         return await _join_locked(db, user, room, sm, rv, cs, device)
 
@@ -532,6 +540,9 @@ async def _join_locked(
     cur = await where(user.id)
     if cur is not None:
         # Your other channel, or this one on another device (or a reload).
+        # Remember the old connection's LiveKit sid: the new session starts
+        # with no sid of its own, and the old one's leave arrives late.
+        await _remember_stale(cur["room_id"], user.id)
         await _drop_locked(
             db, user.id, cur, reason="replaced", kick=kick_old, notify=notify_old, remember=cur["room_id"] != str(room.id)
         )
@@ -567,6 +578,19 @@ async def _join_locked(
     out["members"] = await members(room.id)
     out["space_name"] = await _space_name(db, room)
     return out
+
+
+async def _remember_stale(room_id: uuid.UUID | str, user_id: uuid.UUID | str) -> None:
+    old = _loads(await redis.hget(K_ROOM.format(room_id), str(user_id))) or {}
+    sid = old.get("lk_sid")
+    if sid:
+        key = K_STALE.format(room_id, user_id)
+        await redis.sadd(key, sid)
+        await redis.expire(key, STALE_SID_TTL)
+
+
+async def _is_stale(room_id: uuid.UUID | str, user_id: uuid.UUID | str, sid: str) -> bool:
+    return bool(sid) and bool(await redis.sismember(K_STALE.format(room_id, user_id), sid))
 
 
 async def _space_name(db: AsyncSession, room: Room) -> str:
@@ -992,8 +1016,12 @@ async def on_webhook(event) -> None:  # noqa: ANN001 — livekit.api.WebhookEven
                 await _kick_identity(room_id, p.identity)
             return
         if event.event == "participant_joined":
+            if here and await _is_stale(room_id, uid, p.sid):
+                return  # a replaced connection's late join: not the session's
             await _on_joined(db, room_id, uid, p.sid, cur)
         elif event.event == "participant_left":
+            if here and await _is_stale(room_id, uid, p.sid):
+                return  # the connection a reload or another device replaced
             if here:
                 m = (await raw_members(room_id)).get(str(uid)) or {}
                 # Only the connection we know about: a reconnect's or a newer

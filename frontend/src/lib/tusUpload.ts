@@ -22,6 +22,9 @@ export interface TusArgs {
   metadata: Record<string, string>;
   signal: AbortSignal;
   onProgress: (sent: number, total: number) => void;
+  /** Smaller pieces on a phone's flaky connection lose less on a drop
+   *  (Notes' recordings use 2 MB); default ~50 MB. */
+  chunkSize?: number;
 }
 
 export class TusRejected extends Error {
@@ -52,12 +55,12 @@ function rejection(err: unknown): TusRejected | Error {
 }
 
 /** Upload ``file``; resolves with the new (or replaced) file's id. */
-export function tusUpload({ file, metadata, signal, onProgress }: TusArgs): Promise<string> {
+export function tusUpload({ file, metadata, signal, onProgress, chunkSize }: TusArgs): Promise<string> {
   return new Promise((resolve, reject) => {
     let refreshing: Promise<unknown> | null = null;
     const upload = new Upload(file, {
       endpoint: TUS_ENDPOINT,
-      chunkSize: TUS_CHUNK,
+      chunkSize: chunkSize ?? TUS_CHUNK,
       metadata,
       retryDelays: [0, 1000, 3000, 5000, 10_000, 20_000, 30_000, 60_000],
       removeFingerprintOnSuccess: true,
@@ -129,8 +132,9 @@ export interface UnfinishedUpload {
 export async function unfinishedUploads(): Promise<UnfinishedUpload[]> {
   try {
     const all = await defaultOptions.urlStorage.findAllUploads();
-    // Import archives (WP-10.1) resume on the import page, not here.
-    return all.filter((u) => !u.metadata?.import_job).map((u) => ({
+    // Import archives (WP-10.1) resume on the import page, not here; a
+    // note's pictures and recordings carry on by themselves in Notes.
+    return all.filter((u) => !u.metadata?.import_job && u.metadata?.route !== "note").map((u) => ({
       key: u.urlStorageKey,
       name: u.metadata?.filename ?? "file",
       size: u.size,

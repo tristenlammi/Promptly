@@ -21,7 +21,7 @@ export function WorkspaceMobileGate() {
         <EmptyState
           icon={<Monitor className="h-5 w-5" />}
           title="Workspaces are designed for desktop"
-          description="The multi-pane project layout — navigator, notes, boards, sheets, and canvases — needs a bigger screen. Your workspaces are all here waiting on desktop; chats inside them still work from the regular chat list on your phone."
+          description="The multi-pane project layout — navigator, pages, boards, sheets, and canvases — needs a bigger screen. Your workspaces are all here waiting on desktop; chats inside them still work from the regular chat list on your phone."
           action={
             <Button variant="primary" onClick={() => navigate("/chat")}>
               Back to chat

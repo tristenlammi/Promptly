@@ -70,6 +70,20 @@ export function useDrivePwaManifest(): void {
       setAppleMobileTitle("P Maps");
       return;
     }
+    if (location.pathname === "/notes" || location.pathname.startsWith("/notes/")) {
+      // Promptly Notes: its own app, scope ``/notes/``.
+      setManifestHref("/notes.webmanifest");
+      setAppleTouchIconHref("/item-icons/notes-apple-180.png");
+      setAppleMobileTitle("Notes");
+      return;
+    }
+    if (location.pathname === "/porch" || location.pathname.startsWith("/porch/")) {
+      // Porch: its own app, scope ``/porch/``.
+      setManifestHref("/porch.webmanifest");
+      setAppleTouchIconHref("/item-icons/porch-apple-180.png");
+      setAppleMobileTitle("Porch");
+      return;
+    }
     const onCalendar =
       location.pathname === "/calendar" || location.pathname.startsWith("/calendar/");
     if (onCalendar) {

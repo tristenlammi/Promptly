@@ -15,6 +15,8 @@ import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { TimelineScrubber, type TimelinePosition } from "@/components/photos/TimelineScrubber";
 import { FamilyDialog } from "@/components/photos/FamilyDialog";
 import { justify, rowsHeight, type JustifiedRow } from "@/lib/justify";
+import { porchTrashWarning } from "@/api/porch";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -245,6 +247,8 @@ export function PhotosPage() {
         toast.success(what === "archive" ? `Archived ${ids.length} — find them under Archive.` : `Back in Photos.`);
       } else if (what === "download") await filesApi.bulkZipDownload(bulk);
       else if (what === "trash") {
+        const warn = await porchTrashWarning(ids);
+        if (warn && !(await confirm({ title: ids.length === 1 ? "Move this photo to the trash?" : `Move ${ids.length} photos to the trash?`, message: warn, confirmLabel: "Move to trash", danger: true }))) return;
         await filesApi.bulkTrash(bulk);
         toast.success(`${ids.length} moved to the trash.`);
       }

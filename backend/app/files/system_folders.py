@@ -73,6 +73,10 @@ class SystemKind(str, Enum):
     # Forms: where a form made from the Forms home (``/forms``) goes, made
     # the first time it's needed. A form can be moved anywhere after.
     FORMS = "forms"
+    # Notes (app/notes): recordings and images added to notes —
+    # ``My files/Notes/``. Kept out of Photos (``hide_from_photos``); a photo
+    # picked from the library is referenced, not copied here.
+    NOTES = "notes"
     # NOTE: a Phase-12 ``EMAIL_ATTACHMENTS`` kind used to live here, lazily
     # seeded on first email-account connect. Email/calendar integration was
     # removed, and migration ``0106_remove_email_attachments_folder`` deletes
@@ -90,6 +94,7 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.APPS: "Apps",
     SystemKind.MAIL_ATTACHMENTS: "Email Attachments",
     SystemKind.FORMS: "Forms",
+    SystemKind.NOTES: "Notes",
 }
 
 # The per-type subfolders auto-created inside each workspace's Drive
@@ -139,6 +144,16 @@ async def ensure_forms_folder(db: AsyncSession, user) -> FileFolder:  # noqa: AN
     """The ``Forms`` folder at the top of My files — made the first time a
     form is made from the Forms home."""
     return await _ensure(db, user.id, SystemKind.FORMS)
+
+
+async def ensure_notes(db: AsyncSession, user) -> FileFolder:  # noqa: ANN001
+    """``My files/Notes``, made the first time something is added to a note.
+    Its pictures never show in Photos."""
+    folder = await _ensure(db, user.id, SystemKind.NOTES)
+    if not folder.hide_from_photos:
+        folder.hide_from_photos = True
+        await db.flush()
+    return folder
 
 
 async def _ensure(

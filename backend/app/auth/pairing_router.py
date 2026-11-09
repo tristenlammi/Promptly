@@ -33,7 +33,7 @@ from app.database import get_db
 router = APIRouter()
 
 PAIR_SECONDS = 600
-SCOPES = ["upload", "dav:read", "maps", "assistant"]
+SCOPES = ["upload", "dav:read", "maps", "assistant", "widgets"]
 _KEY = "promptly:pair:{}"
 _DONE = "promptly:pair-done:{}"  # what the waiting page reads once it's claimed
 

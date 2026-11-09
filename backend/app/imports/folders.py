@@ -25,6 +25,10 @@ Junk is left out: ``__MACOSX/``, ``.DS_Store``, ``._*``, ``Thumbs.db``,
   read for its date, place, description, favourite, archived and
   ``promptly.albums`` (so albums come back) — and its own ``README.txt`` /
   ``albums.json``, left out. Its files keep their folders from ``My files``.
+  Its notes (Notes N1.6) come back from ``Promptly/Notes/notes.json``
+  with their pictures and recordings: those in ``My files/Notes`` go to the
+  new account's Notes folder (not "Imported – …"), a photo from the
+  library is the photo imported with the rest (``imports.keep``).
 """
 from __future__ import annotations
 
@@ -59,6 +63,7 @@ class FolderScan:
     xmp: dict[str, bytes] = field(default_factory=dict)  # path → XMP bytes
     json: dict[str, bytes] = field(default_factory=dict)  # media path → its .json sidecar
     csvs: list[bytes] = field(default_factory=list)
+    notes_json: list[bytes] = field(default_factory=list)  # a Promptly export's Promptly/Notes/notes.json
 
 
 def _clean(name: str) -> str | None:
@@ -107,6 +112,12 @@ def _take(out: FolderScan, part: int, name: str, rel: str, size: int, local: str
     if low.endswith(".json") and size <= _SIDE_MAX and _is_media_name(rel[: -len(".json")]):
         out.json[rel[: -len(".json")]] = read()
         return
+    if low == _NOTES_JSON.lower():
+        from app.imports.keep import NOTES_JSON_MAX
+
+        if size <= NOTES_JSON_MAX:
+            out.notes_json.append(read())
+        # (kept as an entry too: outside an export it's just someone's file)
     if low.endswith(".csv") and size <= _CSV_MAX:
         out.csvs.append(read())
         # (a CSV is also kept as a file below — it may be someone's data)
@@ -274,6 +285,43 @@ def parse_csvs(blobs: list[bytes]) -> dict[str, dict[str, Any]]:
 
 _DASH_N = re.compile(r"-\d+(\.[^.]+)$")
 _EXPORT_FILES = "Promptly/My files/"
+_NOTES_JSON = "Promptly/Notes/notes.json"
+
+
+def _note_records(scans: list[FolderScan]) -> list[dict[str, Any]]:
+    from app.imports.keep import read_notes_json
+
+    out: list[dict[str, Any]] = []
+    for s in scans:
+        for raw in s.notes_json:
+            out.extend(read_notes_json(raw))
+    return out
+
+
+def _export_path(path: str) -> str:
+    """A note's attachment path (``My files/…`` or ``../My files/…``) as the
+    archive path ``Promptly/My files/…``."""
+    p = path.replace("\\", "/")
+    while p.startswith("../"):
+        p = p[3:]
+    p = p.lstrip("./")
+    return p if p.startswith("Promptly/") else "Promptly/" + p
+
+
+def _note_file_paths(records: list[dict[str, Any]]) -> set[str]:
+    """Attachments that are a note's own files (not photos from the library)."""
+    out: set[str] = set()
+    for d in records:
+        extra = d.get("promptly") if isinstance(d.get("promptly"), dict) else None
+        if extra and isinstance(extra.get("attachments"), list):
+            for a in extra["attachments"]:
+                if isinstance(a, dict) and isinstance(a.get("path"), str) and not a.get("inPhotos"):
+                    out.add(_export_path(a["path"]).lower())
+        else:
+            for a in d.get("attachments") or []:
+                if isinstance(a, dict) and isinstance(a.get("filePath"), str):
+                    out.add(_export_path(a["filePath"]).lower())
+    return out
 
 
 def build_plan(scans: list[FolderScan], *, source: str, archive_names: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -289,6 +337,11 @@ def build_plan(scans: list[FolderScan], *, source: str, archive_names: list[str]
         csv_blobs.extend(s.csvs)
     # A Promptly export: its files are under Promptly/My files/.
     export = any(e.path.startswith(_EXPORT_FILES) for s in scans for e in s.entries)
+    records = _note_records(scans) if export else []
+    note_paths = _note_file_paths(records)
+    note_files: dict[str, Entry] = {}  # lower path → entry: a note's own picture or recording
+    photo_at: dict[str, int] = {}  # lower path → index in photos
+    photo_key: dict[tuple[str, int], int] = {}
     details = parse_csvs(csv_blobs) if source == "apple" else {}
     xmp_lower = {k.lower(): v for k, v in xmp.items()}
 
@@ -301,6 +354,9 @@ def build_plan(scans: list[FolderScan], *, source: str, archive_names: list[str]
         for e in s.entries:
             fname = e.path.rsplit("/", 1)[-1]
             ext = ("." + fname.rsplit(".", 1)[-1].lower()) if "." in fname else ""
+            if e.path.lower() in note_paths:
+                note_files[e.path.lower()] = e
+                continue
             if ext not in exts:
                 path = e.path
                 if export:
@@ -311,6 +367,8 @@ def build_plan(scans: list[FolderScan], *, source: str, archive_names: list[str]
                 continue
             key = (fname.lower(), e.size)
             if key in seen:
+                if key in photo_key:
+                    photo_at[e.path.lower()] = photo_key[key]
                 continue
             seen.add(key)
             info: dict[str, Any] = {}
@@ -341,6 +399,7 @@ def build_plan(scans: list[FolderScan], *, source: str, archive_names: list[str]
                 # The file's own date in the archive: the last resort.
                 "mtime_naive": e.mtime, "mtime": e.mtime_epoch,
             })
+            photo_key[key] = photo_at[e.path.lower()] = len(photos) - 1
             for title in side.get("albums") or []:
                 albums.setdefault(title, []).append(len(photos) - 1)
             if isinstance(when, int):
@@ -351,7 +410,8 @@ def build_plan(scans: list[FolderScan], *, source: str, archive_names: list[str]
                 years.append(int(e.mtime[:4]))
     stem = re.sub(r"\.(zip|tgz|tar\.gz|tar)$", "", archive_names[0], flags=re.I) if archive_names else "archive"
     root = ("Imported – Apple " if source == "apple" else "Imported – ") + stem[:120]
-    plan = {"photos": photos, "albums": albums, "drive": files, "files_root": root, "source": source}
+    notes, notes_report = _plan_notes(records, note_files, photo_at, photos)
+    plan = {"photos": photos, "albums": albums, "drive": files, "files_root": root, "source": source, "notes": notes}
     videos = sum(1 for p in photos if p["mime"].startswith("video/"))
     report = {
         "photos": len(photos) - videos, "videos": videos,
@@ -363,8 +423,52 @@ def build_plan(scans: list[FolderScan], *, source: str, archive_names: list[str]
         "drive_files": len(files), "files_root": root,
         "skipped": {"other_products": 0, "trash": skipped_deleted, "unsupported": 0}, "other_products": [],
         "parts": len(scans),
+        "notes": notes_report,
     }
     return plan, report
+
+
+def _plan_notes(
+    records: list[dict[str, Any]], note_files: dict[str, Entry], photo_at: dict[str, int], photos: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    if not records:
+        return [], None
+    from app.imports.keep import _usec, note_from_keep
+
+    def resolve(path: str, mime: str | None) -> dict[str, Any] | None:  # noqa: ARG001
+        full = _export_path(path).lower()
+        e = note_files.get(full)
+        if e is not None:
+            return {"part": e.part, "member": e.name, "name": e.path.rsplit("/", 1)[-1], "size": e.size}
+        if full in photo_at:
+            return {"photo": photo_at[full], "name": photos[photo_at[full]]["name"]}
+        return None
+
+    notes: list[dict[str, Any]] = []
+    report = {
+        "notes": 0, "lists": 0, "pinned": 0, "archived": 0, "trashed": 0, "with_pictures": 0, "with_recordings": 0,
+        "labels": [], "missing_attachments": 0, "shared": 0, "cut": 0, "unreadable": 0,
+    }
+    labels: dict[str, str] = {}
+    for i, d in enumerate(records):
+        if d.get("isTrashed") is True:
+            report["trashed"] += 1
+            continue
+        created = _usec(d.get("createdTimestampUsec"))
+        ref = f"keep:{int(float(d['createdTimestampUsec']))}" if created else f"export:{i}"
+        note, tell = note_from_keep(d, ref=ref, resolve=resolve)
+        notes.append(note)
+        report["notes"] += 1
+        report["lists"] += note["kind"] == "list"
+        report["pinned"] += note["pinned"] and not note["archived"]
+        report["archived"] += note["archived"]
+        report["with_pictures"] += any(a["kind"] == "image" for a in note["attachments"])
+        report["with_recordings"] += any(a["kind"] == "audio" for a in note["attachments"])
+        report["missing_attachments"] += tell["missing"]
+        for lb in note["labels"]:
+            labels.setdefault(lb.casefold(), lb)
+    report["labels"] = sorted(labels.values(), key=str.casefold)[:200]
+    return notes, report
 
 
 __all__ = ["build_plan", "parse_csvs", "parse_date", "parse_xmp", "scan_part"]

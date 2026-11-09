@@ -497,6 +497,7 @@ export function ChatWindow({
                     : undefined
               }
               editedAt={m.edited_at ?? null}
+              voice={m.voice ?? null}
               onBranch={onBranchFrom ? callbacksFor(m.id).branch : undefined}
               onRegenerate={canRegenerate(m) ? callbacksFor(m.id).regenerate : undefined}
               onDigDeeper={onDigDeeper ? callbacksFor(m.id).digDeeper : undefined}

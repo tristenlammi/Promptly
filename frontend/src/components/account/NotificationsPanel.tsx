@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -16,6 +17,7 @@ import {
   type NotificationSwitch,
   type SubscriptionSummary,
 } from "@/api/notifications";
+import { porchApi } from "@/api/porch";
 import { Button } from "@/components/shared/Button";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
 import { cn } from "@/utils/cn";
@@ -37,6 +39,8 @@ import { cn } from "@/utils/cn";
  */
 export function NotificationsPanel() {
   const push = usePushSubscription();
+  // Porch's row only for people Porch is on for.
+  const { data: porchOn } = useQuery({ queryKey: ["porch", "available"], queryFn: porchApi.available, staleTime: 5 * 60_000 });
 
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [prefsBusy, setPrefsBusy] = useState<string | null>(null);
@@ -371,6 +375,17 @@ export function NotificationsPanel() {
                 dimmed={!prefs.enabled}
                 extra={(prefs.mail ?? true) && summaryMode("mail")}
               />
+              {porchOn && (
+              <CategoryRow
+                title="Porch"
+                subtitle="Posts, comments, mentions, tags, invites, reactions and birthdays. Choose which, and how, in Porch → Settings."
+                checked={prefs.porch ?? true}
+                busy={prefsBusy === "porch"}
+                onChange={(v) => toggle("porch", v)}
+                dimmed={!prefs.enabled}
+                extra={(prefs.porch ?? true) && summaryMode("porch")}
+              />
+              )}
               <CategoryRow
                 title="Forms"
                 subtitle="New answers to your forms, and a form closing. Only how many came in, never what anyone wrote (each form's own setting still applies)."
@@ -381,11 +396,41 @@ export function NotificationsPanel() {
                 extra={(prefs.form_response ?? true) && summaryMode("form_response")}
               />
               <CategoryRow
+                title="Calls"
+                subtitle="Someone calling you in Rooms, and calls you missed."
+                checked={prefs.call ?? true}
+                busy={prefsBusy === "call"}
+                onChange={(v) => toggle("call", v)}
+                dimmed={!prefs.enabled}
+                extra={
+                  (prefs.call ?? true) && prefs.quiet_enabled ? (
+                    <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                      <input
+                        type="checkbox"
+                        checked={prefs.call_quiet_hold ?? false}
+                        disabled={prefsBusy === "call_quiet_hold"}
+                        onChange={(e) => toggle("call_quiet_hold", e.target.checked)}
+                        data-testid="call-quiet-hold"
+                      />
+                      Don&apos;t ring me during quiet hours (you&apos;ll see who called when they end)
+                    </label>
+                  ) : null
+                }
+              />
+              <CategoryRow
                 title="Passwords"
                 subtitle="A new device asking to join your vault, or someone sharing a vault with you. These never carry anything from the vault."
                 checked={prefs.passwords ?? true}
                 busy={prefsBusy === "passwords"}
                 onChange={(v) => toggle("passwords", v)}
+                dimmed={!prefs.enabled}
+              />
+              <CategoryRow
+                title="Notes"
+                subtitle="Someone shared a note with you. Reminders on notes come from Tasks."
+                checked={prefs.notes ?? true}
+                busy={prefsBusy === "notes"}
+                onChange={(v) => toggle("notes", v)}
                 dimmed={!prefs.enabled}
               />
             </div>
@@ -456,7 +501,7 @@ function QuietHours({
     <div className="mb-4 overflow-hidden rounded-md border border-[var(--border)]">
       <CategoryRow
         title="Quiet hours"
-        subtitle="Notifications wait until quiet hours end, then arrive together. Calls, Calendar reminders, item reminders, Passwords and admin alerts always get through."
+        subtitle="Notifications wait until quiet hours end, then arrive together. Calls, Calendar reminders, item reminders, Passwords and admin alerts always get through (calls can be held too, under Calls)."
         checked={prefs.quiet_enabled}
         busy={busy}
         onChange={(v) => onSave({ quiet_enabled: v })}

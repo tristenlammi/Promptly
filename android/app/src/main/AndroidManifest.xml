@@ -44,6 +44,19 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- DM calls (Calls WP-D3): a ring that fills the lock screen, and a call that
+         Android treats as a phone call (Core-Telecom: the car, headsets, audio focus).
+         The Play build needs the calling-app declaration for full-screen rings. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <!-- DM calls (Calls WP-D5): the phone's own camera in a video call, which keeps
+         going with the screen locked. Phones without a camera can still install. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <application
         android:name=".SyncApp"
@@ -199,6 +212,24 @@
             android:label="Phone assistant"
             android:taskAffinity="org.promptly.app.assistant.settings" />
 
+        <!-- Talk (Voice Phase 3): the conversation's lock-screen notification, Quick
+             Settings tile. Opened from the sheet, never on its own. -->
+        <service
+            android:name=".talk.TalkService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <service
+            android:name=".talk.TalkTile"
+            android:exported="true"
+            android:icon="@drawable/ic_map_mic"
+            android:label="Talk to Promptly"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="false" />
+        </service>
+
         <!-- Android Auto. -->
         <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="2" />
         <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
@@ -323,11 +354,207 @@
             android:exported="false"
             android:foregroundServiceType="microphone|mediaPlayback" />
 
+        <!-- DM calls (Calls WP-D3): Chrome's ring goes to org.promptly.app.Delegation,
+             which hands it to the calls package: the full-screen ring and call screen,
+             the call's audio, and the ring's Decline. -->
+        <activity
+            android:name=".calls.CallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity="org.promptly.app.calls"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+        <service
+            android:name=".calls.CallService"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall|microphone|camera|mediaPlayback" />
+        <!-- Calls WP-D5: Call / Video call on the page hands the call to this app
+             (promptly://call/start?…), which holds it like a call it answered. -->
+        <activity
+            android:name=".calls.CallStartActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.callstart"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptly" android:host="call" android:path="/start" />
+            </intent-filter>
+        </activity>
+        <receiver android:name=".calls.CallActions" android:exported="false" />
+
         <!-- WorkManager's foreground service, for long backups. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+
+        <!-- Notes widgets (org.promptly.sync.widgets, docs/notes-plan.md §9): the
+             home-screen widgets, their settings, quick capture and refreshes. -->
+        <receiver
+            android:name=".widgets.AgendaWidgetReceiver"
+            android:label="@string/wg_agenda_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_agenda_info" />
+        </receiver>
+        <receiver
+            android:name=".widgets.TasksWidgetReceiver"
+            android:label="@string/wg_tasks_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_tasks_info" />
+        </receiver>
+        <!-- Boot, the clock or time zone changing, the widgets' own redraw alarm, and
+             a P app being opened (SuiteLauncher's explicit broadcast). -->
+        <receiver android:name=".widgets.WidgetEvents" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <activity
+            android:name=".widgets.AgendaConfigActivity"
+            android:label="Agenda widget"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".widgets.TasksConfigActivity"
+            android:label="Tasks widget"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".widgets.OpenActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Promptly.Invisible" />
+        <activity
+            android:name=".capture.QuickTaskActivity"
+            android:label="Quick task"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.capture"
+            android:theme="@style/Theme.Promptly.Capture"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+
+        <!-- Notes widgets (W1.3): Notes and One note, quick note, voice note, the
+             One note widget's +, and Share to Notes from other apps. -->
+        <receiver
+            android:name=".widgets.NotesWidgetReceiver"
+            android:label="@string/wg_notes_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_notes_info" />
+        </receiver>
+        <receiver
+            android:name=".widgets.OneNoteWidgetReceiver"
+            android:label="@string/wg_one_note_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_one_note_info" />
+        </receiver>
+        <activity
+            android:name=".widgets.NotesConfigActivity"
+            android:label="Notes widget"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".widgets.OneNoteConfigActivity"
+            android:label="One note widget"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <!-- P Notes' long-press shortcuts (android/gen_suite.py) open these two. -->
+        <activity
+            android:name=".capture.QuickNoteActivity"
+            android:label="New note"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.capture"
+            android:theme="@style/Theme.Promptly.Capture"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+        <activity
+            android:name=".capture.VoiceNoteActivity"
+            android:label="Voice note"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="org.promptly.app.voice"
+            android:theme="@style/Theme.Promptly.Capture" />
+        <activity
+            android:name=".capture.AddItemActivity"
+            android:label="Add to list"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.capture"
+            android:theme="@style/Theme.Promptly.Capture"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+        <activity
+            android:name=".capture.ShareToNotesActivity"
+            android:label="Promptly Notes"
+            android:icon="@mipmap/ic_promptly"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.share"
+            android:theme="@style/Theme.Promptly.Capture"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter android:label="Promptly Notes">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter android:label="Promptly Notes">
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+        </activity>
+        <!-- Only while a voice note records (a notification says so). -->
+        <service
+            android:name=".capture.RecorderService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
     <queries>

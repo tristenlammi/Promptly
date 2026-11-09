@@ -209,3 +209,64 @@ async def test_p_maps_offline_areas_come_too(client, db, user):
         },
     ]
     assert "maps/offline-areas.json" in z.read("Promptly/README.txt").decode()
+
+
+@pytest.mark.asyncio
+async def test_porch_json_has_only_your_porch_things(client, db, user, tmp_path):
+    """WP-P1.6: ``porch.json`` — your posts (with which photos, as paths in
+    the export), the comments on them, your comments elsewhere and your
+    groups. Nobody else's posts, and no group you aren't in."""
+    from app.files.models import UserFile
+
+    await _library(client, db, user, tmp_path)
+    other, stranger = await _other_user(db), await _other_user(db)
+    beach = (await db.execute(select(UserFile).where(UserFile.user_id == user.id, UserFile.filename == "IMG_0001.jpg"))).scalar_one()
+
+    async def call(u, method, url, **kw):
+        r = await client.request(method, "/api/porch" + url, headers=_auth(u), **kw)
+        assert r.status_code in (200, 201, 204), r.text
+        return r.json() if r.content else None
+
+    fam = (await call(user, "POST", "/groups", json={"name": "Family", "visibility": "private", "invite": [str(other.id)]}))["id"]
+    await call(other, "POST", f"/groups/{fam}/accept")
+    secret = (await call(stranger, "POST", "/groups", json={"name": "Stranger things", "visibility": "private"}))["id"]
+    mine = await call(user, "POST", "/posts", json={
+        "kind": "photo", "body": "Noosa with the kids", "groups": [fam], "place": {"name": "Noosa Heads"},
+        "media": [{"file_id": str(beach.id), "alt_text": "The main beach"}],
+    })
+    poll = await call(user, "POST", "/posts", json={"kind": "poll", "body": "Pizza or BBQ?", "groups": "all", "poll": {"options": ["Pizza", "BBQ"], "closes": "never"}})
+    theirs = await call(other, "POST", "/posts", json={"kind": "text", "body": "Their own news", "groups": [fam]})
+    await call(stranger, "POST", "/posts", json={"kind": "text", "body": "Not for you", "groups": [secret]})
+    top = await call(other, "POST", f"/posts/{mine['id']}/comments", json={"body": "Gorgeous!"})
+    await call(user, "POST", f"/posts/{mine['id']}/comments", json={"body": "Thanks", "parent_id": top["id"]})
+    await call(user, "POST", f"/posts/{theirs['id']}/comments", json={"body": "Congrats"})
+    await call(other, "POST", f"/posts/{theirs['id']}/comments", json={"body": "Not mine to export"})
+    opt = next(o for o in (await call(other, "GET", f"/posts/{poll['id']}"))["poll"]["options"] if o["label"] == "BBQ")
+    await call(other, "PUT", f"/posts/{poll['id']}/vote", json={"option_id": opt["id"]})
+
+    export = (await client.post("/api/files/exports", json={"part_gb": 2}, headers=_auth(user))).json()
+    z = await _download(client, export["parts"][0]["url"])
+    assert "porch.json" in z.read("Promptly/README.txt").decode()
+    got = json.loads(z.read("Promptly/porch.json"))
+    assert got["profile"]["username"] == user.username
+    assert {g["name"] for g in got["groups"]} == {"Everyone", "Family"}
+    assert [p["text"] for p in got["posts"]] == ["Noosa with the kids", "Pizza or BBQ?"]
+    p = got["posts"][0]
+    assert p["groups"] == ["Family"] and p["place"]["name"] == "Noosa Heads"
+    assert p["photos"] == [{"file": "My files/Photos/2019/06/IMG_0001.jpg", "description": "The main beach", "edited_for_this_post": False}]
+    assert "Promptly/" + p["photos"][0]["file"] in z.namelist()
+    assert [(c["by"], c["text"], [r["text"] for r in c["replies"]]) for c in p["comments"]] == [(other.username, "Gorgeous!", ["Thanks"])]
+    assert got["posts"][1]["poll"]["options"] == [{"option": "Pizza", "votes": 0}, {"option": "BBQ", "votes": 1}]
+    assert [(c["text"], c["on_post_by"]) for c in got["your_comments_on_other_posts"]] == [("Congrats", other.username)]
+    flat = json.dumps(got)
+    assert "Their own news" not in flat and "Not for you" not in flat and "Not mine to export" not in flat and "Stranger things" not in flat
+
+
+@pytest.mark.asyncio
+async def test_no_porch_json_for_someone_who_never_used_porch(client, db, user, tmp_path):
+    await _library(client, db, user, tmp_path)
+    export = (await client.post("/api/files/exports", json={"part_gb": 2}, headers=_auth(user))).json()
+    z = await _download(client, export["parts"][0]["url"])
+    assert "Promptly/porch.json" not in z.namelist()
+    assert "porch.json" not in z.read("Promptly/README.txt").decode()
+

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AudioLines,
   Bell,
   CalendarDays,
   Check,
@@ -39,10 +40,11 @@ import {
   DiscoverCard,
   GlanceRow,
   HealthCard,
-  FormsCard, JournalCard, MailCard, PasswordsCard, VoiceCard,
+  FormsCard, JournalCard, MailCard, NotesCard, PasswordsCard, VoiceCard,
   MedsCard,
   NutritionCard,
   PeopleCard,
+  PorchCard,
   Ring,
   ScheduleCard,
   StudyCard,
@@ -84,7 +86,24 @@ export function TodayPage() {
 
   return (
     <>
-      <TopNav title="Today" actions={<CustomiseToday />} />
+      <TopNav
+        title="Today"
+        actions={
+          <div className="flex items-center gap-2">
+            {/* Talk to Promptly (WP-T4): "What's on today?" out loud. */}
+            <Link
+              to="/chat?talk=1"
+              className="promptly-voice-orb inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-white transition hover:opacity-90"
+              aria-label="Talk to Promptly"
+              title="Talk to Promptly (Ctrl+Shift+Space)"
+            >
+              <AudioLines className="h-3.5 w-3.5" />
+              Talk
+            </Link>
+            <CustomiseToday />
+          </div>
+        }
+      />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-7xl px-4 py-5 md:py-8">
           {isLoading ? (
@@ -125,6 +144,7 @@ const SECTIONS: { key: string; label: string; grid: boolean }[] = [
   { key: "forms", label: "Forms", grid: true },
   { key: "meds", label: "Medication", grid: true },
   { key: "tasks", label: "Tasks", grid: true },
+  { key: "notes", label: "Notes", grid: true },
   { key: "habits", label: "Habits", grid: true },
   { key: "nutrition", label: "Food and water", grid: true },
   { key: "health", label: "Body & Health", grid: true },
@@ -137,6 +157,7 @@ const SECTIONS: { key: string; label: string; grid: boolean }[] = [
   { key: "study", label: "Flashcards", grid: true },
   { key: "journal", label: "Journal", grid: true },
   { key: "people", label: "People", grid: true },
+  { key: "porch", label: "Porch", grid: true },
   { key: "work", label: "Workspace cards and shifts", grid: true },
   { key: "rooms", label: "Unread rooms", grid: true },
   { key: "automations", label: "Automations", grid: true },
@@ -179,6 +200,7 @@ function TodayBody({ data }: { data: TodayData }) {
     passwords: s.passwords && <PasswordsCard p={s.passwords} />,
     forms: s.forms && <FormsCard f={s.forms} />,
     voice: s.voice && s.voice.channels.length > 0 && <VoiceCard v={s.voice} />,
+    notes: s.notes && <NotesCard n={s.notes} />,
     meds: s.health && s.health.doses.length > 0 && <MedsCard health={s.health} />,
     health: s.health && <HealthCard health={s.health} today={data.date} hideWater={!!s.nutrition} />,
     nutrition: s.nutrition && <NutritionCard n={s.nutrition} />,
@@ -189,6 +211,7 @@ function TodayBody({ data }: { data: TodayData }) {
     study: s.study && <StudyCard s={s.study} />,
     journal: s.journal && <JournalCard j={s.journal} />,
     people: s.people && <PeopleCard p={s.people} today={data.date} />,
+    porch: s.porch && <PorchCard p={s.porch} />,
     automations: s.automations && <AutomationsCard a={s.automations} />,
     discover: data.discover.length > 0 && <DiscoverCard apps={data.discover} />,
     tasks: s.tasks && <TasksCard tasks={s.tasks} />,

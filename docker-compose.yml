@@ -862,6 +862,11 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-base}
       - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
       - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+      # Talk's live lane (WS /live): its own model, whatever WHISPER_MODEL is
+      # (``small`` can't keep up live on CPU; "off" skips it), and how many
+      # live passes run at once (4 threads each).
+      - WHISPER_LIVE_MODEL=${WHISPER_LIVE_MODEL:-base}
+      - WHISPER_LIVE_SLOTS=${WHISPER_LIVE_SLOTS:-2}
     volumes:
       # Persist downloaded model weights so the pull is a one-time cost.
       - ./data/whisper:/root/.cache
@@ -994,6 +999,10 @@ services:
     environment:
       - TTS_VOICE=${TTS_VOICE:-af_heart}
       - TTS_LANG=${TTS_LANG:-en-us}
+      # onnxruntime threads for Kokoro (4 beat one-per-core on a busy box).
+      - TTS_THREADS=${TTS_THREADS:-4}
+      # Talk answers spoken at once through /tts/stream (others wait their turn).
+      - TTS_STREAM_SLOTS=${TTS_STREAM_SLOTS:-2}
     volumes:
       # Persist downloaded model weights so the pull is a one-time cost.
       - ./data/tts:/root/.cache

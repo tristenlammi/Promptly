@@ -125,7 +125,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
   return (
     <div>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Invite a teammate to the workspace — its notes, boards, sheets, files
+        Invite a teammate to the workspace — its pages, boards, sheets, files
         and instructions, plus any chats people share with it. Chats and
         drafts stay private to whoever made them until they share them.{" "}
         <span className="font-medium text-[var(--text)]">Admins</span>{" "}
@@ -264,7 +264,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
                             "They lose access straight away. Files they pinned " +
                             "here are unpinned and drop out of the workspace's " +
                             "AI context (the files stay in their Drive). Their " +
-                            "notes, cards and shared chats stay.",
+                            "pages, cards and shared chats stay.",
                           confirmLabel: "Remove",
                           danger: true,
                         });

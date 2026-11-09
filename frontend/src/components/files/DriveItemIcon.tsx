@@ -13,6 +13,7 @@ import {
   Music,
   PenTool,
   Sparkles,
+  StickyNote,
   Table as TableIcon,
 } from "lucide-react";
 
@@ -123,6 +124,8 @@ function folderTint(kind: SystemFolderKind | null | undefined): Tint {
               ? Camera
               : kind === "forms"
                 ? ClipboardList
+                : kind === "notes"
+                  ? StickyNote
                 : FolderIcon;
   // Folders anchor the structure — the accent tile, echoing the navigator.
   return { Icon, text: "text-[var(--accent-text)]", tile: "bg-[var(--accent-soft)]" };

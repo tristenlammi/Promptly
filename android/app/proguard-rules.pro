@@ -21,3 +21,8 @@
 -keep class com.lambdapioneer.argon2kt.** { *; }
 -dontwarn org.bouncycastle.**
 -dontwarn javax.naming.**
+
+# Notes widgets. Glance makes each widget action's ActionCallback by its class name;
+# keep them (and their no-argument constructors) whatever its own rules say.
+-keep class * implements androidx.glance.appwidget.action.ActionCallback { <init>(); }
+-keep class org.promptly.sync.widgets.** extends androidx.glance.appwidget.GlanceAppWidgetReceiver { <init>(); }

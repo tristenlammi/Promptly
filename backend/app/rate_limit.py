@@ -22,6 +22,7 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from starlette.requests import HTTPConnection
 from limits import parse
 from limits.aio.storage import RedisStorage
 from limits.aio.strategies import FixedWindowRateLimiter, MovingWindowRateLimiter
@@ -109,7 +110,9 @@ def _is_service_call(request: Request) -> bool:
 # throttle at all — a flood or scraper against any of them was unbounded.
 # Health + internal (private-IP) traffic are exempt so orchestration and
 # service-to-service calls (collab snapshots, healthchecks) never trip it.
-async def blanket_rate_limit(request: Request) -> None:
+# ``HTTPConnection``, not ``Request``: an app-level dependency runs for
+# WebSocket routes too (Talk, ``/api/talk/ws``), where there is no Request.
+async def blanket_rate_limit(request: HTTPConnection) -> None:
     if not _settings.RATE_LIMIT_ENABLED:
         return
     if request.url.path.startswith("/api/health"):
@@ -134,6 +137,10 @@ async def blanket_rate_limit(request: Request) -> None:
         key,
         request.url.path,
     )
+    if request.scope.get("type") == "websocket":
+        from fastapi import WebSocketException
+
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="Too many requests.")
     raise HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail="Too many requests. Please slow down and try again.",

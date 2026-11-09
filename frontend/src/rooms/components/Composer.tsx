@@ -1,7 +1,8 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AtSign, CalendarPlus, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { crossApi, type ShareKind } from "@/api/crossapp";
 import { roomsApi, type Attachment, type Message, type RoomUser } from "@/api/rooms";
 import { useThingMentions } from "@/components/links/useThingMentions";
 import { Sheet } from "@/items/ui";
@@ -12,6 +13,7 @@ import { cn } from "@/utils/cn";
 import { editMessage, sendMessage } from "../actions";
 import { fileSize, plainSnippet } from "../format";
 import { useRoomsStore } from "../store";
+import { SHARE_ICONS } from "./ShareCard";
 import { EmojiGrid, Popover, UserAvatar } from "./ui";
 
 const MAX_FILE = 50 * 1024 * 1024;
@@ -36,6 +38,11 @@ interface Candidate {
   special?: "promptly" | "everyone";
 }
 
+export interface ComposerAttachment {
+  kind: ShareKind;
+  id: string;
+}
+
 export interface ComposerHandle {
   addFiles: (files: File[]) => void;
   focus: () => void;
@@ -56,8 +63,12 @@ export const Composer = forwardRef<
     users: Record<string, RoomUser>;
     /** "Plan an event" in the + menu (opens the calendar's editor in room mode). */
     onPlanEvent?: () => void;
+    /** Something to send as a card with the next message (``?share=kind:id``,
+     *  e.g. Porch's "Reply privately"). */
+    attachment?: ComposerAttachment | null;
+    onClearAttachment?: () => void;
   }
->(function Composer({ roomId, placeholder, members, meId, isPhone, replyTo, onCancelReply, editing, onEdit, users, onPlanEvent }, ref) {
+>(function Composer({ roomId, placeholder, members, meId, isPhone, replyTo, onCancelReply, editing, onEdit, users, onPlanEvent, attachment, onClearAttachment }, ref) {
   const qc = useQueryClient();
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -220,7 +231,9 @@ export const Composer = forwardRef<
   // ---- send ----
   const uploading = uploads.some((u) => !u.att && !u.error);
   const ready = uploads.filter((u) => u.att).map((u) => u.att!);
-  const canSend = !uploading && (text.trim().length > 0 || (!editing && ready.length > 0));
+  const attached = !editing && attachment ? attachment : null;
+  const canSend = !uploading && (text.trim().length > 0 || (!editing && ready.length > 0) || !!attached);
+  const [sharing, setSharing] = useState(false);
 
   const submit = async () => {
     if (!canSend) return;
@@ -232,6 +245,30 @@ export const Composer = forwardRef<
       }
       savedDraft.current = "";
       onEdit(null);
+      return;
+    }
+    if (attached) {
+      // The card goes as its own message, with the words as its note.
+      if (sharing) return;
+      setSharing(true);
+      try {
+        await crossApi.share({ room_id: roomId, kind: attached.kind, id: attached.id, note: body });
+      } catch (err) {
+        const gone = (err as { response?: { status?: number } })?.response?.status === 404;
+        toast.error(gone ? "That can't be sent: it's gone, or it isn't shared with you." : apiErrorMessage(err, "Couldn't send that. Try again."));
+        return;
+      } finally {
+        setSharing(false);
+      }
+      onClearAttachment?.();
+      setText("");
+      drafts.delete(roomId);
+      lastTyping.current = 0;
+      if (ready.length) {
+        uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
+        setUploads([]);
+        void sendMessage(qc, roomId, { body: "", reply_to_id: null, attachments: ready });
+      }
       return;
     }
     setText("");
@@ -385,6 +422,8 @@ export const Composer = forwardRef<
         </div>
       )}
 
+      {attached && <AttachedShare attachment={attached} onRemove={() => onClearAttachment?.()} />}
+
       {uploads.length > 0 && (
         <div className="mb-1.5 flex gap-2 overflow-x-auto pb-1">
           {uploads.map((u) => (
@@ -464,8 +503,8 @@ export const Composer = forwardRef<
             thingMention.onSelect();
           }}
           onPaste={onPaste}
-          placeholder={editing ? "Edit your message" : placeholder}
-          aria-label={editing ? "Edit message" : placeholder}
+          placeholder={editing ? "Edit your message" : attached ? "Add a message (optional)" : placeholder}
+          aria-label={editing ? "Edit message" : attached ? "Message to send with it" : placeholder}
           enterKeyHint={isPhone ? "enter" : "send"}
           className="max-h-[40vh] min-h-[44px] flex-1 resize-none bg-transparent px-1 py-[11px] text-base leading-[22px] text-[var(--text)] !outline-none placeholder:text-[var(--text-muted)] md:min-h-[40px] md:py-[9px] md:text-sm"
         />
@@ -495,7 +534,7 @@ export const Composer = forwardRef<
             canSend ? "!text-[var(--item-accent)]" : "opacity-40",
           )}
         >
-          {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizontal className="h-5 w-5" />}
+          {uploading || sharing ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizontal className="h-5 w-5" />}
         </button>
       </div>
 
@@ -551,6 +590,45 @@ export const Composer = forwardRef<
     </div>
   );
 });
+
+/** What ``?share=`` attached: its card as you see it, sent with your next message. */
+function AttachedShare({ attachment, onRemove }: { attachment: ComposerAttachment; onRemove: () => void }) {
+  const q = useQuery({
+    queryKey: ["rooms", "share-preview", attachment.kind, attachment.id],
+    queryFn: () => crossApi.preview(attachment.kind, attachment.id),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const Icon = SHARE_ICONS[attachment.kind] ?? Paperclip;
+  const card = q.data?.card;
+  return (
+    <div className="mb-1.5 flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2" role="group" aria-label="Attached to your message">
+      {card?.thumb ? (
+        <img src={card.thumb} alt="" className="h-11 w-11 shrink-0 rounded-lg bg-[var(--hover)] object-cover" />
+      ) : (
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--item-accent)_12%,transparent)] text-[var(--item-accent)]">
+          {q.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-5 w-5" />}
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-[var(--text)]">
+          {q.isPending ? "Loading…" : card ? card.title : "This can't be sent"}
+        </span>
+        <span className="block truncate text-xs text-[var(--text-muted)]">
+          {q.isPending ? " " : card ? card.subtitle : "It's gone, or it isn't shared with you."}
+        </span>
+      </span>
+      <button
+        type="button"
+        aria-label="Remove the attachment"
+        onClick={onRemove}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
 
 function PlusRow({ icon: Icon, label, hint, onClick }: { icon: LucideIcon; label: string; hint: string; onClick: () => void }) {
   return (

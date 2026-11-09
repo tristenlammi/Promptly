@@ -26,6 +26,7 @@ import { applyTheme } from "@/store/themeStore";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { voiceHarnessEnabled } from "@/pages/dev/flags";
 import { VoiceRoot } from "@/rtc/ui/VoiceRoot";
+import { CallRoot } from "@/rtc/call/ui/CallRoot";
 
 // Route-level code splitting. Every page used to be imported eagerly,
 // so opening a chat downloaded the admin console, the automations flow
@@ -277,6 +278,25 @@ function RoomsGate() {
   return <AppLayout />;
 }
 
+const PorchApp = lazyWithRetry(
+  () => import("@/porch/PorchApp").then((m) => ({ default: m.PorchApp })),
+  "PorchApp"
+);
+
+/** Porch is its own app on a phone and when launched as the installed
+ *  Porch app; in a desktop browser it sits inside Promptly's layout. */
+function PorchGate() {
+  const isMobile = useIsMobile();
+  if (isMobile || isOwnAppWindow("porch")) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <PorchApp />
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
+
 const CalendarApp = lazyWithRetry(
   () => import("@/calendar/CalendarApp").then((m) => ({ default: m.CalendarApp })),
   "CalendarApp"
@@ -343,6 +363,25 @@ function CalendarGate() {
     return (
       <Suspense fallback={<FullScreenLoading />}>
         <CalendarApp />
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
+
+// Promptly Notes (Keep-style notes and lists).
+const NotesApp = lazyWithRetry(
+  () => import("@/notes/NotesApp").then((m) => ({ default: m.NotesApp })),
+  "NotesApp"
+);
+
+/** Notes sits inside Promptly's layout; only the installed Notes app shows
+ *  it on its own. */
+function NotesGate() {
+  if (isOwnAppWindow("notes")) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <NotesApp />
       </Suspense>
     );
   }
@@ -761,6 +800,12 @@ export default function App() {
           </Suspense>
         }
       />
+      {/* Porch: photos and news shared through groups. Its own app on a
+          phone and when installed; inside Promptly in a desktop browser. */}
+      <Route path="/porch" element={<PorchGate />}>
+        <Route index element={<PorchApp embedded />} />
+        <Route path="*" element={<PorchApp embedded />} />
+      </Route>
       {/* An emailed invitation's answer page (no Promptly chrome) — beats /calendar/*. */}
       <Route
         path="/calendar/answer/:token"
@@ -774,6 +819,11 @@ export default function App() {
       <Route path="/calendar" element={<CalendarGate />}>
         <Route index element={<CalendarApp embedded />} />
         <Route path="*" element={<CalendarApp embedded />} />
+      </Route>
+      {/* Promptly Notes: inside Promptly, except as the installed Notes app. */}
+      <Route path="/notes" element={<NotesGate />}>
+        <Route index element={<NotesApp embedded />} />
+        <Route path="*" element={<NotesApp embedded />} />
       </Route>
       <Route path="/mail" element={<MailGate />}>
         <Route index element={<MailApp />} />
@@ -902,6 +952,8 @@ export default function App() {
       {authedApp}
       {/* Calls: voice prompts and sheets, on every page. */}
       <VoiceRoot />
+      {/* Calls: DM calls ringing and the call screen, on every page. */}
+      <CallRoot />
       <UpdateBanner />
       <ToastViewport />
       <ConfirmHost />

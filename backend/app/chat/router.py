@@ -3700,6 +3700,34 @@ async def _run_native_tool(
         return ("unexpected", type(e).__name__, _ms())
 
 
+async def _talk_categories(
+    db: AsyncSession, user: User, memory_mode: str, talk: dict[str, Any]
+) -> set[str]:
+    """The tool categories a Talk turn draws from (WP-T3). The same "does
+    this person have it" checks as a typed turn; the voice allowlist in
+    ``app/talk/tools.py`` then keeps only the quick tools."""
+    from app.chat.tools.items import has_items
+    from app.chat.tools.mail import has_mail
+    from app.chat.tools.photos import has_library
+    from app.files.drive_index import chat_mode_for
+    from app.talk.tools import device_tools
+
+    cats = {"calendar", "apps", "search"}
+    if await has_items(db, user.id):
+        cats.add("items")
+    if await has_mail(db, user.id):
+        cats |= {"mail", "phone"}
+    if await has_library(db, user.id):
+        cats.add("photos")
+    if memory_mode != "off":
+        cats.add("memory")
+    if chat_mode_for(user) != "off":
+        cats.add("drive")
+    if device_tools(talk.get("caps")):
+        cats.add("device")
+    return cats
+
+
 async def _dispatch_tools(
     *,
     db: AsyncSession,
@@ -3721,6 +3749,10 @@ async def _dispatch_tools(
     # main loop always passes it, so a tool that wasn't offered — named by
     # a confused model or by injected web/file content — never runs.
     allowed_tool_names: set[str] | None = None,
+    # Talk (WP-T3): on a spoken turn, the gate in front of every tool that
+    # changes something (``app/talk/tools.py``). It holds the call for a yes
+    # (``held``), or refuses it, before anything runs.
+    voice_gate=None,  # noqa: ANN001 - app.talk.tools.VoiceGate | None
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
 ]:
@@ -3877,6 +3909,18 @@ async def _dispatch_tools(
                 (call_id, name, "fail", (parse_error, "bad_arguments", None))
             )
             continue
+
+        # A spoken turn's change waits for a yes (or is refused out loud).
+        if voice_gate is not None:
+            verdict = await voice_gate.check(name, args, ctx.turn)
+            if verdict is not None:
+                if verdict.kind == "hold":
+                    plan.append((call_id, name, "held", verdict))
+                else:
+                    plan.append(
+                        (call_id, name, "fail", (verdict.say, f"voice_{verdict.kind}", None))
+                    )
+                continue
 
         # Cross-hop dedup: if the model already ran this exact tool with
         # these exact args earlier in the turn, replay the cached content
@@ -4042,6 +4086,32 @@ async def _dispatch_tools(
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": content,
+                    },
+                )
+                continue
+
+            if kind == "held":
+                # Talk (WP-T3): a change asked for out loud. Not run: the
+                # reply ends with the read-back, and a yes (spoken, or the
+                # card) runs it through chat/approvals.py.
+                from app.talk.tools import held_note
+
+                verdict = payload
+                event = {
+                    "event": "tool_finished",
+                    "id": call_id,
+                    "name": name,
+                    "ok": True,
+                    "elapsed_ms": 0,
+                    "meta": verdict.meta,
+                }
+                _record_tool_event(event, elapsed_ms=0, meta=verdict.meta)
+                yield (
+                    sse_yield(event),
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": held_note(verdict.say),
                     },
                 )
                 continue
@@ -4520,6 +4590,8 @@ async def _stream_generator(
         # A sheet holding a form's answers (other people's words) was read
         # into this turn: it's outside content (Forms WP-F1.5).
         workspace_untrusted = False
+        # Whether that block carried item or file text (not just the map).
+        workspace_text_seen = False
         if conv.workspace_id is not None:
             # Walk the workspace-share ACL so a collaborator's send
             # still picks up the workspace's system prompt + pinned
@@ -4601,6 +4673,7 @@ async def _stream_generator(
                     injection = WorkspaceInjection()
                 if injection.system_block:
                     workspace_knowledge_block = injection.system_block
+                    workspace_text_seen = injection.has_content
                 workspace_untrusted = injection.untrusted
 
                 # ACL for pinned files in a (possibly shared) workspace:
@@ -4643,6 +4716,8 @@ async def _stream_generator(
         # abort the turn.
         attachment_indexed_ids: set[uuid.UUID] = set()
         attachment_rag_system: str | None = None
+        # The files behind those chunks, for the outside-content mark below.
+        attachment_rag_files: list[UserFile] = []
         try:
             from app.chat.attachment_rag import (
                 attachment_rag_block,
@@ -4676,6 +4751,16 @@ async def _stream_generator(
                         len(attachment_indexed_ids),
                     )
                     attachment_indexed_ids = set()
+                if attachment_rag_system:
+                    attachment_rag_files = list(
+                        (
+                            await db.execute(
+                                select(UserFile).where(
+                                    UserFile.id.in_(attachment_indexed_ids)
+                                )
+                            )
+                        ).scalars()
+                    )
         except Exception:
             logger.exception(
                 "attachment RAG gathering failed (conversation_id=%s); "
@@ -4694,15 +4779,31 @@ async def _stream_generator(
         # emitted per image so the user sees what happened.
         triggering_files = per_message_attachments.get(triggering_user_msg_id, [])
         # Shared by every tool call this turn (see ToolContext.turn).
-        # Attached files are outside content too.
-        turn_state = TurnState(
-            untrusted=bool(triggering_files) or workspace_untrusted,
-            # Your own files, attached here, and not a shared workspace's: enough to
-            # log what they say (see ItemAction.from_documents), and nothing more.
-            own_attachments_only=bool(triggering_files)
-            and conv.workspace_id is None
-            and all(f.user_id == user.id for f in triggering_files),
-        )
+        # Attached files are outside content too. Your own files, attached here,
+        # and not a workspace's: enough to log what they say (see
+        # ItemAction.from_documents), and nothing more.
+        in_workspace = conv.workspace_id is not None
+        turn_state = TurnState(untrusted=False, own_attachments_only=False)
+        turn_state.saw_files(triggering_files, user_id=user.id, in_workspace=in_workspace)
+        # Chunks retrieved from files attached on earlier turns: the same files.
+        turn_state.saw_files(attachment_rag_files, user_id=user.id, in_workspace=in_workspace)
+        if attachment_rag_system and not attachment_rag_files:
+            turn_state["untrusted"] = True
+        # Workspace text injected before the model answers is outside content,
+        # whoever wrote it — the same rule as read_workspace_item and
+        # query_board_cards, which mark the turn for any item. Authorship isn't
+        # knowable here: boards, sheets, rosters and discussions are saved under
+        # the workspace owner's name whoever edited them, any member can edit a
+        # note, and the user's "own" items include imported files, web clippings
+        # and notes an earlier chat wrote after reading a web page. Only the map
+        # of item titles doesn't count, so a chat in an empty workspace isn't
+        # marked. An explicit "remember …" still saves (R-019).
+        if workspace_text_seen:
+            turn_state["untrusted"] = True
+        # A sheet holding a form's answers (other people's words) was read
+        # into this turn: it's outside content (Forms WP-F1.5).
+        if workspace_untrusted:
+            turn_state["untrusted"] = True
         # On a DeepSeek model, web_search / fetch_url use DeepSeek's own
         # Search and Fetch (app.search.deepseek).
         from app.search.deepseek import mark_turn
@@ -4911,6 +5012,9 @@ async def _stream_generator(
             snaps = {
                 str(a.get("id")): a for a in (m.attachments or []) if isinstance(a, dict)
             }
+            # An earlier turn's files whose text, caption or picture is re-sent
+            # below: outside content, the same as on the turn that brought them.
+            resent_files: list[UserFile] = []
 
             # Text/PDF preamble. The turn that brought a file gets all of it.
             # Later turns used to get nothing — the model answered follow-ups
@@ -4939,6 +5043,8 @@ async def _stream_generator(
                     preamble_files,
                     vision_handles_images=vision_effective,
                 )
+                if not is_triggering and preamble.strip():
+                    resent_files.extend(preamble_files)
             else:
                 preamble = ""
 
@@ -4961,6 +5067,9 @@ async def _stream_generator(
                 ]
                 if cached:
                     preamble = format_captions_as_text(cached) + "\n\n" + preamble
+                    if not is_triggering:
+                        cached_ids = {fid for fid, _n, _c in cached}
+                        resent_files.extend(f for f in earlier_images if f.id in cached_ids)
                 elif earlier_images and model_supports_vision:
                     names = ", ".join(f.filename or "image" for f in earlier_images)
                     preamble = (
@@ -5014,8 +5123,12 @@ async def _stream_generator(
                 # don't need to re-warn even if the file changed since.
                 if is_triggering:
                     triggering_warnings.extend(_img_warnings)
+                elif images:
+                    resent_files.extend(f for f in attachments if looks_image(f))
                 image_parts = images
             image_parts = image_parts + scan_parts
+            if resent_files:
+                turn_state.saw_files(resent_files, user_id=user.id, in_workspace=in_workspace)
 
             # Hydrate DeepSeek thinking-mode chain-of-thought on
             # assistant rows. NULL on non-DeepSeek providers and on
@@ -5100,8 +5213,23 @@ async def _stream_generator(
         # prompt already steers voice toward short, direct answers, so tools
         # rarely help here anyway. (Users who want to look something up can
         # do it as an explicit text turn.)
+        #
+        # Talk (WP-T3) brings tools back for its turns, narrowly: the voice
+        # allowlist in ``app/talk/tools.py`` (quick look-ups, small changes
+        # that wait for a spoken yes, the phone's own actions). The older
+        # voice overlay (no ``talk`` in the context) still gets none: it
+        # can't take a spoken yes.
+        talk_turn: dict[str, Any] | None = (
+            ctx.get("talk") if voice_turn and isinstance(ctx.get("talk"), dict) else None
+        )
+        voice_gate = None
         if voice_turn:
-            pass  # no tool/search categories on voice
+            if talk_turn is not None:
+                enabled_categories |= await _talk_categories(db, user, memory_mode, talk_turn)
+                turn_state["talk"] = {
+                    "device": talk_turn.get("device") or "web",
+                    "driving": bool(talk_turn.get("driving")),
+                }
         else:
             if ctx.get("tools_enabled"):
                 enabled_categories.add("artefact")
@@ -5125,6 +5253,8 @@ async def _stream_generator(
                     enabled_categories.add("items")
                 # The calendar: everyone has one.
                 enabled_categories.add("calendar")
+                # Notes (app/notes): everyone has them.
+                enabled_categories.add("notes")
                 # Across the apps (my_day, find_person, search_apps): everyone.
                 enabled_categories.add("apps")
                 # Mail: for anyone who's connected a mailbox.
@@ -5197,6 +5327,15 @@ async def _stream_generator(
         tools_payload: list[dict[str, Any]] | None = (
             list_openai_tools(enabled_categories) if enabled_categories else None
         )
+        if talk_turn is not None and tools_payload:
+            from app.talk.tools import VoiceGate, voice_tool_names
+
+            _voice_names = voice_tool_names(talk_turn.get("caps"))
+            tools_payload = [
+                t for t in tools_payload if t.get("function", {}).get("name") in _voice_names
+            ] or None
+            if tools_payload:
+                voice_gate = VoiceGate(user=user, talk=talk_turn)
         if tools_payload and excluded_tools:
             tools_payload = [
                 t
@@ -5396,9 +5535,16 @@ async def _stream_generator(
             if (
                 data.get("event") in ("tool_started", "tool_finished")
                 and data.get("name") in SILENT_TOOL_NAMES
+                # A silent tool held for a yes (Talk) still shows its card.
+                and not (data.get("meta") or {}).get("approval")
             ):
                 return ""
             return _sse(data)
+
+        def _log_voice(rec: dict) -> None:
+            if voice_gate is not None:
+                voice_gate.saw(rec)
+            _log_visible(rec)
 
         def _log_visible(rec: dict) -> None:
             meta = rec.get("meta") or {}
@@ -5409,7 +5555,7 @@ async def _stream_generator(
             tool_memory_proposals.extend(meta.get("memory_proposals") or [])
             if rec.get("id") and rec.get("name"):
                 call_names[rec["id"]] = rec["name"]
-            if rec.get("name") not in SILENT_TOOL_NAMES:
+            if rec.get("name") not in SILENT_TOOL_NAMES or meta.get("approval"):
                 tool_call_log.append(rec)
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
@@ -5623,7 +5769,15 @@ async def _stream_generator(
         # the tool". Sidesteps the common refusal pattern (Gemini in
         # particular) where the model insists it can't produce binary
         # artefacts even with a valid tools[] payload in scope.
-        if enabled_categories and tools_payload:
+        if talk_turn is not None and tools_payload:
+            from app.talk.tools import prompt as _talk_tools_prompt
+
+            tools_prompt_text = _talk_tools_prompt(
+                {t.get("function", {}).get("name") for t in tools_payload},
+                device=str(talk_turn.get("device") or "web"),
+                driving=bool(talk_turn.get("driving")),
+            )
+        elif enabled_categories and tools_payload:
             tools_prompt_text = (
                 build_tools_system_prompt(
                     enabled_categories,
@@ -5731,6 +5885,10 @@ async def _stream_generator(
                 ref_block = build_reference_system_block(refs)
                 if ref_block:
                     turn_context.append(ref_block)
+                    # Another chat's summary may repeat a web page, a file or
+                    # someone else's words: outside content, like
+                    # search_past_chats (R-019).
+                    turn_state["untrusted"] = True
 
             # Drive-file @-mentions (Phase 2.2). Resolve each referenced
             # file the caller can read and inject its extracted text as
@@ -5761,6 +5919,8 @@ async def _stream_generator(
                 file_block = await asyncio.to_thread(build_file_mention_block, resolved_files)
                 if file_block:
                     turn_context.append(file_block)
+                    # File text, like read_file (R-019).
+                    turn_state.saw_files(resolved_files, user_id=user.id, in_workspace=in_workspace)
 
             # Connector @-mentions (Phase 10). ``@[name](connector:id)``
             # explicitly invokes an MCP connector's tools for this turn —
@@ -5855,6 +6015,10 @@ async def _stream_generator(
             knowledge_block = format_retrieved_block(retrieved)
             if knowledge_block:
                 turn_context.append(knowledge_block)
+                # Documents an admin uploaded to the model: file text the user
+                # didn't write (R-019). The personality above is the model's
+                # standing instructions, which the user chose by picking it.
+                turn_state["untrusted"] = True
 
         # A model that can't call tools still gets "always" Drive answers:
         # the passages ride in this turn's context, with the same citations.
@@ -5884,6 +6048,22 @@ async def _stream_generator(
         if voice_turn:
             system_prompt = merge_system_prompt(
                 VOICE_SYSTEM_PROMPT, system_prompt or ""
+            )
+        # Talk (WP-T3): they were asked to confirm a change and said
+        # something other than yes ("no, Friday"). It wasn't done; their
+        # answer is the latest message.
+        _talk_pending = (talk_turn or {}).get("pending")
+        if isinstance(_talk_pending, dict) and _talk_pending.get("question"):
+            turn_context.append(
+                "You had just asked them: \""
+                + str(_talk_pending.get("question"))[:300]
+                + "\" (that's "
+                + str(_talk_pending.get("tool") or "a change")[:40]
+                + " with "
+                + json.dumps(_talk_pending.get("arguments") or {}, default=str)[:600]
+                + "). Their answer is their latest message, and it wasn't a yes, so nothing was done. "
+                "If they're changing what they asked for, call the tool again with the change, and "
+                "they'll be asked again. If they don't want it, say you'll leave it, in a few words."
             )
 
         # Standing layers first (cacheable), this turn's context last.
@@ -6335,7 +6515,7 @@ async def _stream_generator(
                     on_attachment=assistant_attachment_snaps.append,
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
-                    on_tool_event=_log_visible,
+                    on_tool_event=_log_visible if voice_gate is None else _log_voice,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,
@@ -6344,6 +6524,7 @@ async def _stream_generator(
                         t.get("function", {}).get("name")
                         for t in (tools_payload or [])
                     },
+                    voice_gate=voice_gate,
                 ):
                     # Always forward the SSE event. ``tool_history_msg``
                     # is None for "started" pre-events (which have no
@@ -6359,7 +6540,32 @@ async def _stream_generator(
                                 **tool_history_msg,
                                 "content": _frame_untrusted(tool_history_msg["content"], _name),
                             }
+                        if talk_turn is not None and isinstance(tool_history_msg.get("content"), str):
+                            # How to say it out loud (the headline; the
+                            # details are on the screen), outside the frame.
+                            from app.talk.tools import result_note
+
+                            _note = result_note(
+                                _name,
+                                tool_history_msg["content"],
+                                device=str(talk_turn.get("device") or "web"),
+                            )
+                            if _note:
+                                tool_history_msg = {
+                                    **tool_history_msg,
+                                    "content": f"{tool_history_msg['content']}\n\n[Saying it: {_note}]",
+                                }
                         running_history.append(tool_history_msg)
+                # Talk (WP-T3): a change held for a yes, refused, or done on
+                # the phone ends the turn here, with the read-back (or what
+                # happened) as the rest of the reply: no second model call.
+                if voice_gate is not None and voice_gate.ends:
+                    _line = voice_gate.line()
+                    if _line:
+                        _sep = " " if "".join(collected_text).strip() else ""
+                        yield _sse({"delta": _sep + _line})
+                        collected_text.append(_sep + _line)
+                    break
             # NOTE: no ``for...else`` clause here on purpose. The
             # forced-finish hop's unconditional ``break`` above
             # guarantees we always exit via ``break``, so the
@@ -7059,6 +7265,29 @@ async def _bridge_generator_to_session(
     """
     async for chunk in _stream_generator(stream_id, user, request, session=session):
         session.push(chunk)
+
+
+async def start_spoken_reply(
+    stream_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    user: User,
+    connection: Any,
+) -> StreamSession:
+    """Talk (``app/talk``) starts a reply here, the same run a typed send
+    starts, and follows its session's events instead of an SSE response.
+    ``connection`` stands in for the request (audit rows read its client
+    address and headers). The stream context must already be enqueued."""
+    return await get_or_create_session(
+        stream_id=stream_id,
+        user_id=user.id,
+        conversation_id=conversation_id,
+        runner=lambda s: _bridge_generator_to_session(stream_id, user, connection, s),
+    )
+
+
+async def enforce_send_quotas(connection: Any, user: User, db: AsyncSession) -> None:
+    """The send-rate and budget checks a typed message gets, for Talk."""
+    await _enforce_send_quotas(connection, user, db)
 
 
 async def _subscribe_session_to_response(

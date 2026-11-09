@@ -103,6 +103,9 @@ interface InputBarProps {
   /** Voice mode (Phase 2) — open the hands-free voice conversation
    *  overlay. Only provided on the main chat surface. */
   onVoiceMode?: () => void;
+  /** False when Talk is off for this account (Admin → Talk): no Talk orb,
+   *  and the + menu offers the tap-to-talk voice mode instead (WP-T6). */
+  talkAvailable?: boolean;
   /** Open a Subchat — a floating, throwaway side-conversation that
    *  inherits this thread's context. Only provided on the main chat
    *  surface once the conversation has at least one message. */
@@ -161,6 +164,7 @@ export function InputBar({
   workspaceId = null,
   onResearch,
   onVoiceMode,
+  talkAvailable = true,
   onSubchat,
   newlineOnEnter = false,
   showEnhance = true,
@@ -987,10 +991,11 @@ export function InputBar({
     </button>
   );
 
-  // Mobile: when the input is empty the send slot is dead weight (send is
-  // disabled without text) — surface voice mode there instead, ChatGPT-
-  // style. Typing swaps it back to send; streaming still shows stop.
-  const talkOrb = onVoiceMode ? (
+  // The Talk orb, the one obvious way to start talking (WP-T4). On the
+  // phone it takes the send slot while the input is empty (send is disabled
+  // without text); typing swaps it back to send, streaming shows stop. On a
+  // desktop it sits beside Send.
+  const talkOrb = onVoiceMode && talkAvailable ? (
     <button
       type="button"
       onClick={onVoiceMode}
@@ -999,12 +1004,30 @@ export function InputBar({
         "promptly-voice-orb inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white",
         "transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
       )}
-      aria-label="Voice mode — talk hands-free"
-      title="Voice mode — talk hands-free"
+      aria-label="Talk to Promptly"
+      title="Talk to Promptly"
     >
       <AudioLines className="h-4 w-4" />
     </button>
   ) : null;
+  // Talk off for this account (WP-T6): on the phone, where there's no +
+  // menu, the empty send slot opens the tap-to-talk voice mode instead.
+  const voiceModeButton =
+    onVoiceMode && !talkAvailable ? (
+      <button
+        type="button"
+        onClick={onVoiceMode}
+        disabled={disabled || streaming}
+        className={cn(
+          "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text-muted)]",
+          "transition hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+        )}
+        aria-label="Voice mode (tap to talk)"
+        title="Voice mode (tap to talk)"
+      >
+        <AudioLines className="h-4 w-4" />
+      </button>
+    ) : null;
 
   const dictateButton = dictation.supported ? (
     <button
@@ -1406,8 +1429,8 @@ export function InputBar({
             />
             {isMobile && dictateButton}
             {isMobile &&
-              (talkOrb && !streaming && value.trim().length === 0
-                ? talkOrb
+              ((talkOrb ?? voiceModeButton) && !streaming && value.trim().length === 0
+                ? (talkOrb ?? voiceModeButton)
                 : sendOrStop)}
           </div>
           {/* Desktop: [+] [More] … [Enhance] [Queue] [mic] [send] — the
@@ -1470,7 +1493,7 @@ export function InputBar({
                             className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)] focus:bg-[var(--hover)] focus:outline-none disabled:opacity-50"
                           >
                             <AudioLines className="h-4 w-4 text-[var(--text-muted)]" />
-                            Talk — voice mode
+                            {talkAvailable ? "Talk to Promptly" : "Voice mode (tap to talk)"}
                           </button>
                         )}
                         {onSubchat && (
@@ -1553,6 +1576,7 @@ export function InputBar({
                   </button>
                 )}
                 {dictateButton}
+                {talkOrb}
                 {sendOrStop}
               </div>
             </div>

@@ -3,7 +3,7 @@ import { Check, CircleCheck } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { calendarApi, type EventSource } from "@/api/calendar";
+import { calendarApi, type TaskEventSource } from "@/api/calendar";
 import { extractError } from "@/components/files/helpers";
 import { itemsApi } from "@/items/api";
 import { toast } from "@/store/toastStore";
@@ -18,7 +18,7 @@ import { EXTRAS_KEY } from "../data";
  *
  *   {v.ev.source?.kind === "task" && <TaskSourceBadge source={v.ev.source} />}
  */
-export function TaskSourceBadge({ source, onNavigate }: { source: EventSource; onNavigate?: () => void }) {
+export function TaskSourceBadge({ source, onNavigate }: { source: TaskEventSource; onNavigate?: () => void }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const key = ["calendar", "task-status", source.file_id, source.task_id];

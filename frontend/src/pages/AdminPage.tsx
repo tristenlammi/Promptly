@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  AudioLines,
   BarChart3,
   DatabaseBackup,
   HardDrive,
@@ -10,7 +11,7 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2, KeyRound, ClipboardList, PhoneCall } from "lucide-react";
+  Users2, KeyRound, ClipboardList, PhoneCall, House } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
@@ -19,7 +20,9 @@ import { BackupsPanel } from "@/components/admin/BackupsPanel";
 import { FormsAdminPanel } from "@/components/admin/FormsAdminPanel";
 import { CallsPanel } from "@/components/admin/CallsPanel";
 import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
+import { PorchPanel } from "@/components/admin/PorchPanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
+import { TalkAdminPanel } from "@/components/admin/TalkAdminPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
 import { GroupsPanel } from "@/components/admin/GroupsPanel";
 import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
@@ -38,7 +41,9 @@ type TabId =
   | "settings"
   | "backups"
   | "passwords"
+  | "porch"
   | "storage"
+  | "talk"
   | "models"
   | "connectors"
   // Forms (WP-F1.3)
@@ -117,6 +122,12 @@ const TABS: TabDef[] = [
     subtitle: "Answers from people without an account, link forms and reports.",
   },
   {
+    id: "porch",
+    label: "Porch",
+    icon: <House className="h-3.5 w-3.5" />,
+    subtitle: "Who can use Porch, video limits, the Everyone group, and reports.",
+  },
+  {
     id: "storage",
     label: "Storage",
     icon: <HardDrive className="h-3.5 w-3.5" />,
@@ -127,6 +138,12 @@ const TABS: TabDef[] = [
     label: "Calls",
     icon: <PhoneCall className="h-3.5 w-3.5" />,
     subtitle: "Voice channels: turn them on, check they work from outside, and see who's in voice now.",
+  },
+  {
+    id: "talk",
+    label: "Talk",
+    icon: <AudioLines className="h-3.5 w-3.5" />,
+    subtitle: "Live spoken conversations: who can talk, how many at once, and how fast it answers.",
   },
   {
     id: "settings",
@@ -200,9 +217,11 @@ export function AdminPage() {
             {tab === "audit" && <AuditLogPanel />}
             {tab === "backups" && <BackupsPanel />}
             {tab === "passwords" && <PasswordsPanel />}
+            {tab === "porch" && <PorchPanel />}
             {tab === "storage" && <StoragePanel />}
             {tab === "forms" && <FormsAdminPanel />}
             {tab === "calls" && <CallsPanel />}
+            {tab === "talk" && <TalkAdminPanel />}
             {tab === "settings" && <AppSettingsPanel />}
           </div>
         </div>

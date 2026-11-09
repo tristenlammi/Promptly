@@ -120,6 +120,19 @@ export interface TodayComing {
   color?: string | null;
 }
 
+export interface TodayNoteCard {
+  id: string;
+  title: string;
+  kind: "text" | "list";
+  color: string;
+  snippet: string;
+  /** Lists: unticked items, and all of them. */
+  left: number | null;
+  total: number | null;
+  shared: boolean;
+  url: string;
+}
+
 export interface TodayHub {
   passwords?: { attention: number; updated_at: string | null };
   /** Forms (WP-F1.4): answers you haven't seen, and your forms closing today. Counts only. */
@@ -134,6 +147,13 @@ export interface TodayHub {
   voice?: {
     channels: { room_id: string; name: string; space: string; user_ids: string[]; people: string[]; here: boolean; url: string }[];
     in_voice: string | null;
+  };
+  /** Notes: your pinned notes, and voice notes still being transcribed. */
+  notes?: {
+    url: string;
+    pinned: TodayNoteCard[];
+    more_pinned: boolean;
+    transcribing: { id: string; title: string; url: string }[];
   };
   mail?: {
     url: string;
@@ -214,6 +234,12 @@ export interface TodayHub {
     catchup_total: number;
   };
   automations?: { url: string; failed_24h: number; next: { id: string; title: string; at: string }[] };
+  /** Porch: new posts in your ticked groups since you last looked, and today's birthdays. */
+  porch?: {
+    url: string;
+    new_posts: { count: number; thumbs: { post_id: string; thumb: string | null; url: string }[]; from: string[]; more_people: number } | null;
+    birthdays: { user: { id: string; username: string; name: string; avatar_url: string | null; color: string | null }; profile_url: string; post_url: string }[];
+  };
 }
 
 export interface MorningSummary {
@@ -245,6 +271,10 @@ export interface EverydaySearch {
   tasks: { id: string; title: string; done: boolean; due: string | null; time: string | null; list: string; url: string }[];
   /** Shared tags matching the query (#tags). */
   tags?: { id: string; name: string; color: string | null; count?: number; url: string }[];
+  /** Notes you can open whose title, text, items or recordings match. */
+  notes?: TodayNoteCard[];
+  /** Porch posts you can see (words, and photos by what's in them). */
+  porch?: { id: string; title: string; subtitle: string; thumb: string | null; url: string }[];
 }
 
 export interface JournalDay {

@@ -68,16 +68,32 @@ import org.promptly.sync.MainActivity
 import org.promptly.sync.maps.Maps
 import org.promptly.sync.maps.Nav
 import org.promptly.sync.maps.Voice
+import org.promptly.sync.talk.Phase
+import org.promptly.sync.talk.Talk
+import org.promptly.sync.talk.TalkActions
+import org.promptly.sync.talk.TalkCard
+import org.promptly.sync.talk.TalkScreen
+import org.promptly.sync.talk.TalkService
 import kotlin.concurrent.thread
 
-/** The sheet the assistant gesture opens: listening, thinking, the answer. It can
- *  appear over the lock screen only to ask you to unlock: nothing is heard or
+/** The sheet the assistant gesture opens (also the Quick Settings tile, the icon's
+ *  Talk shortcut and the Talk notification). Normally a Talk conversation: you just
+ *  talk, it answers, you talk over it to interrupt, and it carries on if the screen
+ *  locks ([Talk]). If the server has no live Talk, or it's turned off in the
+ *  settings, it's one question at a time over `/api/assistant`, as before.
+ *  It can appear over the lock screen only to ask you to unlock: nothing is heard or
  *  shown until you do, and it can't come back on the lock screen afterwards. */
 class AssistantActivity : ComponentActivity() {
     /** What has to be sorted out before it can listen. */
     private enum class Gate { UNLOCK, NOT_LINKED, NO_MIC, OPEN }
 
+    /** A Talk conversation, or one question at a time. */
+    private enum class Mode { TALK, CLASSIC }
+
     private val gate = mutableStateOf(Gate.UNLOCK)
+    private val mode = mutableStateOf(Mode.TALK)
+    /** Why it's one question at a time this time, when Talk couldn't be used. */
+    private val fellBack = mutableStateOf<String?>(null)
     @Volatile private var alive = true
     @Volatile private var busy = false
     @Volatile private var hearing = false
@@ -167,8 +183,48 @@ class AssistantActivity : ComponentActivity() {
             return
         }
         gate.value = Gate.OPEN
+        fellBack.value = null
+        if (Talk.live) {
+            // A conversation that's still going: back to it.
+            mode.value = Mode.TALK
+            return
+        }
+        Talk.dismissEnded()
+        if (Talk.enabled(this)) {
+            mode.value = Mode.TALK
+            startTalk()
+        } else {
+            classic(null)
+        }
+    }
+
+    private fun startTalk() {
+        Talk.start(this)
+        // The notification that keeps it going after the screen locks may only start
+        // while this is on screen; onResume does it when that's still to come.
+        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) TalkService.start(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (gate.value == Gate.OPEN && mode.value == Mode.TALK && Talk.live) TalkService.start(this)
+    }
+
+    /** One question at a time over `/api/assistant`, once Talk has let go of the microphone. */
+    private fun classic(why: String?) {
+        mode.value = Mode.CLASSIC
+        fellBack.value = why
+        Talk.dismissEnded()
         Voice.newConversation()
-        listen()
+        if (!Talk.live) {
+            listen()
+            return
+        }
+        thread(name = "assistant-wait") {
+            val until = System.currentTimeMillis() + 3000
+            while (Talk.live && System.currentTimeMillis() < until) Thread.sleep(50)
+            runOnUiThread { if (alive && mode.value == Mode.CLASSIC) listen() }
+        }
     }
 
     private fun askForMic() {
@@ -253,6 +309,8 @@ class AssistantActivity : ComponentActivity() {
     private fun dismiss() {
         alive = false
         Nav.hush()
+        // Close ends the conversation; leaving the sheet (home, lock) doesn't.
+        if (mode.value == Mode.TALK) Talk.end()
         finish()
     }
 
@@ -316,7 +374,7 @@ class AssistantActivity : ComponentActivity() {
                                 Text("Promptly needs the microphone to hear you.", style = MaterialTheme.typography.titleMedium)
                                 Button(onClick = ::askForMic) { Text("Allow microphone") }
                             }
-                            Gate.OPEN -> Talking()
+                            Gate.OPEN -> if (mode.value == Mode.TALK) TalkPane() else Talking()
                         }
                     }
                 }
@@ -325,8 +383,94 @@ class AssistantActivity : ComponentActivity() {
         }
     }
 
+    private val talkActions = object : TalkActions {
+        override fun close() = dismiss()
+        override fun end() = Talk.end()
+        override fun stop() {
+            Talk.stop()
+        }
+        override fun toggleMute() = Talk.toggleMute()
+        override fun orb() {
+            val ui = Talk.ui.value
+            when {
+                ui.turnMode == "tap" && ui.talking -> Talk.releaseTalk()
+                ui.turnMode == "tap" -> Talk.pressTalk()
+                ui.muted || ui.paused -> Talk.toggleMute()
+                ui.state == "speaking" -> Talk.interrupt()
+            }
+        }
+        override fun confirm(yes: Boolean) {
+            Talk.confirm(yes)
+        }
+        override fun text(words: String) {
+            Talk.text(words)
+        }
+        override fun captions(on: Boolean) {
+            Talk.captions(on)
+        }
+        override fun openCard(card: TalkCard) {
+            val url = card.url ?: return
+            val full = if (url.startsWith("/")) (Maps.server(this@AssistantActivity) ?: return) + url else url
+            if (!full.startsWith("https://") && !full.startsWith("http://")) return
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(full))) }
+        }
+        override fun oneAtATime() {
+            Talk.end()
+            classic("Weak connection, so it's one question at a time. Tap Ask for each.")
+        }
+        override fun clearNotice() {
+            Talk.clearNotice()
+        }
+        override fun settings() {
+            startActivity(Intent(this@AssistantActivity, AssistantSettingsActivity::class.java))
+        }
+    }
+
+    @Composable
+    private fun TalkPane() {
+        val ui by Talk.ui.collectAsState()
+        LaunchedEffect(ui.phase, ui.problem) {
+            if (ui.phase != Phase.ENDED) return@LaunchedEffect
+            val problem = ui.problem
+            when {
+                problem == null -> {
+                    // Said goodbye, went quiet for two minutes, or End.
+                    Talk.dismissEnded()
+                    finish()
+                }
+                problem.fallback -> classic("${problem.show} One question at a time instead.")
+            }
+        }
+        val problem = ui.problem
+        if (ui.phase == Phase.ENDED && problem != null && !problem.fallback) {
+            Text(problem.show, style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (problem.code == "not_signed_in" || problem.code == "not_linked") {
+                    Button(onClick = {
+                        startActivity(Intent(this@AssistantActivity, MainActivity::class.java))
+                        finish()
+                    }) { Text("Link this phone") }
+                } else {
+                    Button(onClick = {
+                        Talk.dismissEnded()
+                        startTalk()
+                    }) { Text("Try again") }
+                }
+                OutlinedButton(onClick = {
+                    Talk.dismissEnded()
+                    finish()
+                }) { Text("Close") }
+            }
+            return
+        }
+        TalkScreen(ui, talkActions)
+    }
+
     @Composable
     private fun Talking() {
+        fellBack.value?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         val state by Voice.state.collectAsState()
         val reply by Voice.reply.collectAsState()
         val heard by Voice.heard.collectAsState()
@@ -388,6 +532,9 @@ class AssistantActivity : ComponentActivity() {
     companion object {
         private const val RAISE_MS = 240
         private const val LOWER_MS = 160
+
+        /** Where it was opened from ("tile", "shortcut"): for the record only. */
+        const val EXTRA_FROM = "org.promptly.assistant.FROM"
 
         /** The sheet that's open right now, if any. */
         @Volatile var current: AssistantActivity? = null

@@ -60,6 +60,14 @@ from app.mfa.models import (  # noqa: F401
 from app.models_config.models import ModelProvider  # noqa: F401
 from app.notifications.models import PushHeld, PushPreferences, PushSubscription  # noqa: F401
 from app.people.blocks import UserBlock  # noqa: F401
+from app.porch.models import (  # noqa: F401
+    PorchGroup,
+    PorchGroupMember,
+    PorchPost,
+    PorchPostGroup,
+    PorchPostMedia,
+    PorchProfile,
+)
 from app.search.models import SearchProvider  # noqa: F401
 from app.secrets.models import UserSecret  # noqa: F401
 from app.items.models import ItemDocument, ItemInstall, ItemReminder, ItemState  # noqa: F401
@@ -144,3 +152,15 @@ from app.workspaces.meetings_models import MeetingJob  # noqa: F401
 from app.forms.models import Form, FormNotify, FormOptionCount, FormReport, FormResponse, FormUpload  # noqa: F401
 # Calls (voice channels): channel settings and voice-session history (0281).
 from app.calls.models import Call, CallParticipant, RoomVoice  # noqa: F401
+# Talking to Promptly (WP-T2): per-turn timings.
+from app.talk.models import TalkMetric  # noqa: F401
+# --- Notes (0261_notes_core) ---
+from app.notes.models import (  # noqa: F401
+    Note,
+    NoteAttachment,
+    NoteItem,
+    NoteMember,
+    NoteReminder,
+    NoteUserState,
+    NoteVersion,
+)

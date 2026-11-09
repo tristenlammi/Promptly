@@ -1,4 +1,4 @@
-import type { CalUser, Repeat } from "@/api/calendar";
+import type { CalUser, EventSource, Repeat } from "@/api/calendar";
 
 /** What a new event starts with, beyond its start: from quick add ("Dinner
  * with Sam Fri 7–9pm at Mum's"), or planning one in a room. */
@@ -13,4 +13,9 @@ export interface EventPrefill {
   calendarId?: string;
   /** Planned in a room: everyone in it is invited and a card is posted there. */
   room?: { id: string; name: string };
+  /** What it's made from (saved with the event). */
+  source?: EventSource;
+  /** Guests can only come from these people ("Make this an event" on a
+   *  Porch post: the people who can see it); ``note`` says why. */
+  guestPool?: { people: CalUser[]; note: string };
 }

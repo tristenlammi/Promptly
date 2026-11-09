@@ -7,7 +7,11 @@ import type { FileItem } from "@/api/files";
  * photo album and Budget spending, and the grocery list → Tasks.
  */
 
-export type ShareKind = "file" | "folder" | "photo" | "album" | "task" | "recipe" | "trip" | "form";
+export type ShareKind = "file" | "folder" | "photo" | "album" | "task" | "recipe" | "trip" | "form"
+  // A note in Notes.
+  | "note"
+  | "porch_post";
+export const SHARE_KINDS: readonly ShareKind[] = ["file", "folder", "photo", "album", "task", "recipe", "trip", "form", "note", "porch_post"];
 
 /** What's being shared: ``id`` is the thing; tasks, recipes and trips also
  *  name the app file they live in (``file_id``). */
@@ -110,6 +114,14 @@ export const crossApi = {
   },
   card: async (messageId: string) => {
     const { data } = await apiClient.get<ShareCardResp>(`/crossapp/share/card/${messageId}`);
+    return data;
+  },
+  /** The card of something you're about to send (the Rooms composer's
+   *  ``?share=kind:id`` attachment), as you see it — 404 when you can't. */
+  preview: async (kind: ShareKind, id: string, fileId?: string) => {
+    const { data } = await apiClient.get<{ kind: ShareKind; label: string; card: ShareCard }>("/crossapp/share/preview", {
+      params: { kind, id, ...(fileId ? { file_id: fileId } : {}) },
+    });
     return data;
   },
   tripAlbum: async (fileId: string, tripId: string) => {

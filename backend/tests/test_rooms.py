@@ -466,3 +466,30 @@ async def test_rooms_stay_out_of_drive_search(client, people):
     await say(client, ann, room, "zebracornflakes")
     r = await client.get("/api/files/search", headers=H(ann), params={"q": "zebracornflakes"})
     assert r.status_code == 200 and r.json()["hits"] == []
+
+
+async def test_open_dm_helper_refuses_a_new_one_to_one_across_a_block(client, db, people):
+    """``service.open_dm`` (what Porch's "Reply privately" uses, WP-P1.6):
+    the same 1:1 every time; a block either way refuses a new one."""
+    from fastapi import HTTPException
+
+    from app.people import blocks
+    from app.rooms import service
+
+    ann, bob, cat, dan = people
+    room = await service.open_dm(db, ann, [bob.id])
+    assert (await service.open_dm(db, ann, [bob.id])).id == room.id
+    assert (await service.open_dm(db, bob, [ann.id])).id == room.id
+    await blocks.block(db, dan.id, cat.id)
+    await db.commit()
+    for a, b in ((cat, dan), (dan, cat)):
+        with pytest.raises(HTTPException) as e:
+            await service.open_dm(db, a, [b.id])
+        assert e.value.status_code == 403
+    # An existing conversation still opens (to read); sending is what's refused.
+    await blocks.block(db, ann.id, bob.id)
+    await db.commit()
+    assert (await service.open_dm(db, bob, [ann.id])).id == room.id
+    assert await service.dm_refusal(db, room, bob.id)
+    with pytest.raises(HTTPException):
+        await service.open_dm(db, ann, [ann.id])

@@ -9,6 +9,8 @@ import { OpenInBrowserGuide } from "@/components/pwa/OpenInBrowserGuide";
 import { isStandaloneDisplay } from "@/lib/installPrompt";
 import { toast } from "@/store/toastStore";
 
+import { porchApi } from "@/api/porch";
+
 import { itemsApi } from "./api";
 import "./ui/items.css";
 
@@ -67,11 +69,26 @@ const CORE: Installable[] = [
     href: "/mail/",
   },
   {
+    id: "notes",
+    name: "Promptly Notes",
+    blurb: "Quick notes and checklists — pin, colour, label, and they work with no signal.",
+    icon: "/item-icons/notes-192.png",
+    href: "/notes/",
+  },
+  {
     id: "passwords",
     name: "Promptly Passwords",
     blurb: "Your passwords and 2FA codes, end-to-end encrypted. Your server can't read them.",
     icon: "/item-icons/passwords-192.png",
     href: "/passwords/",
+  },
+  // Porch (listed only for people it's turned on for)
+  {
+    id: "porch",
+    name: "Porch",
+    blurb: "Share photos and news with your family and friends here, through groups.",
+    icon: "/item-icons/porch-192.png",
+    href: "/porch/",
   },
 ];
 
@@ -319,6 +336,7 @@ function BrowserExtensionCard() {
 export function InstallAppsPage() {
   const navigate = useNavigate();
   const { data: apps, isLoading } = useQuery({ queryKey: ["apps-launcher"], queryFn: itemsApi.launcher });
+  const { data: porchOn } = useQuery({ queryKey: ["porch", "available"], queryFn: porchApi.available, staleTime: 5 * 60_000 });
   const [busy, setBusy] = useState<string | null>(null);
   // Inside an installed app a page just opens in the same app window, where
   // the browser won't offer an install: hand it to the browser instead.
@@ -404,7 +422,7 @@ export function InstallAppsPage() {
           <section className="flex flex-col gap-2">
             <h2 className="px-1 text-sm font-semibold text-[var(--text)]">Promptly</h2>
             <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
-              {CORE.map(rowEl)}
+              {CORE.filter((a) => a.id !== "porch" || porchOn === true).map(rowEl)}
             </ul>
           </section>
 

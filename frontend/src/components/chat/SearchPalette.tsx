@@ -11,7 +11,10 @@ import {
   User as UserIcon,
   Loader2,
   X,
+  House,
   Mail,
+  ListChecks,
+  StickyNote,
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
@@ -23,6 +26,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { SearchDateFilter, type DateRange } from "./SearchDateFilter";
 import { ActionRows, usePaletteActions, type PaletteAction } from "./usePaletteActions";
+import { itemKindWord } from "@/components/workspaces/itemKindWord";
 
 /**
  * Global command palette for full-text conversation search.
@@ -194,7 +198,13 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   // without having to worry about section boundaries.
   const flat = useMemo(() => [...owned, ...shared], [owned, shared]);
   const everydayCount =
-    (everyday?.mail?.length ?? 0) + (everyday?.events.length ?? 0) + (everyday?.contacts.length ?? 0) + (everyday?.tasks.length ?? 0) + (everyday?.tags?.length ?? 0);
+    (everyday?.notes?.length ?? 0) +
+    (everyday?.mail?.length ?? 0) +
+    (everyday?.events.length ?? 0) +
+    (everyday?.contacts.length ?? 0) +
+    (everyday?.tasks.length ?? 0) +
+    (everyday?.tags?.length ?? 0) +
+    (everyday?.porch?.length ?? 0);
 
   // The ↑↓ cursor runs over the Do / Create rows, then the chat hits. A
   // command said outright starts selected; a guess is only offered (-1:
@@ -295,7 +305,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search chats, events, people, tasks…"
+            placeholder="Search chats, notes, events, people, tasks…"
             className={cn(
               "flex-1 bg-transparent text-sm focus:outline-none",
               "placeholder:text-[var(--text-muted)]"
@@ -360,8 +370,8 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
             )}
           {!error && !query.trim() && !dateRange && (
             <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
-              Type to search your chats, workspaces, calendar, contacts and
-              tasks — or filter by date to browse your chats. Commands work
+              Type to search your chats, workspaces, calendar, contacts,
+              tasks and notes — or filter by date to browse your chats. Commands work
               too: “add task buy milk tomorrow”, “log $40 fuel”, “go to
               calendar”.
             </div>
@@ -427,7 +437,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
                       className="flex w-full items-start gap-2 px-3 py-1.5 text-left transition hover:bg-[var(--surface-2)]"
                     >
                       <span className="mt-0.5 shrink-0 rounded bg-[var(--surface-2)] px-1 py-0.5 text-[9px] uppercase tracking-wide text-[var(--text-muted)]">
-                        {h.kind}
+                        {itemKindWord(h.kind)}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm text-[var(--text)]">
@@ -524,11 +534,39 @@ function EverydaySection({ data, onOpen }: { data: EverydaySearch; onOpen: (url:
           {data.contacts.map((c) => row(`c-${c.id}`, <UserIcon className="h-3.5 w-3.5" />, c.name, c.detail, c.url))}
         </>
       )}
+      {(data.notes?.length ?? 0) > 0 && (
+        <>
+          {label("Notes", <StickyNote className="h-3 w-3" />)}
+          {data.notes!.map((n) =>
+            row(
+              `n-${n.id}`,
+              n.kind === "list" ? <ListChecks className="h-3.5 w-3.5" /> : <StickyNote className="h-3.5 w-3.5" />,
+              n.title,
+              [n.kind === "list" && n.total ? `${n.left} left` : n.snippet, n.shared ? "Shared with you" : ""].filter(Boolean).join(" · "),
+              n.url,
+            ),
+          )}
+        </>
+      )}
       {(data.mail?.length ?? 0) > 0 && (
         <>
           {label("Mail", <Mail className="h-3 w-3" />)}
           {data.mail!.map((m) =>
             row(`m-${m.id}`, <Mail className="h-3.5 w-3.5" />, m.subject, [m.from, new Date(m.at).toLocaleDateString([], { day: "numeric", month: "short" })].join(" · "), m.url),
+          )}
+        </>
+      )}
+      {(data.porch?.length ?? 0) > 0 && (
+        <>
+          {label("Porch", <House className="h-3 w-3" />)}
+          {data.porch!.map((p) =>
+            row(
+              `p-${p.id}`,
+              p.thumb ? <img src={p.thumb} alt="" className="-my-0.5 h-5 w-5 rounded object-cover" /> : <House className="h-3.5 w-3.5" />,
+              p.title,
+              p.subtitle,
+              p.url,
+            ),
           )}
         </>
       )}

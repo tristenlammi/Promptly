@@ -12,6 +12,7 @@ import {
   COLORS, EMOJI, HIGHLIGHT_FACTOR, STICKERS, TEXT_FONT, TEXT_SIZES, WIDTHS, drawMarkup, hitTest, itemBox, onStickerLoad,
   shapeBounds, stickerUrl,
 } from "@/components/photos/photoMarkup";
+import { FILTER_PRESETS, cssFilter, presetOf } from "@/components/photos/filterPresets";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -27,7 +28,7 @@ import { cn } from "@/utils/cn";
 const NONE: EditOps = { rotate: 0, flip: false, crop: null, brightness: 0, contrast: 0, saturation: 0, markup: [] };
 type Crop = NonNullable<EditOps["crop"]>;
 type Handle = "move" | "nw" | "ne" | "sw" | "se";
-type Tab = "crop" | "adjust" | "markup";
+type Tab = "crop" | "filters" | "adjust" | "markup";
 type Tool = "select" | Exclude<MarkupType, "emoji" | "sticker">;
 const WHOLE: Crop = { x: 0, y: 0, w: 1, h: 1 };
 const ASPECTS: { label: string; ratio: number | "original" | null }[] = [
@@ -37,6 +38,14 @@ const ASPECTS: { label: string; ratio: number | "original" | null }[] = [
   { label: "4:3", ratio: 4 / 3 },
   { label: "3:2", ratio: 3 / 2 },
   { label: "16:9", ratio: 16 / 9 },
+];
+// Porch's "for this post only" crops (WP-P1.4): the photo as it is, or the
+// shapes a feed shows well.
+const POST_ASPECTS: { label: string; ratio: number | "original" | null }[] = [
+  { label: "Original", ratio: "original" },
+  { label: "Square", ratio: 1 },
+  { label: "4:5", ratio: 4 / 5 },
+  { label: "Free", ratio: null },
 ];
 const TOOLS: { id: Tool; label: string; icon: typeof Pencil }[] = [
   { id: "select", label: "Select", icon: MousePointer2 },
@@ -82,21 +91,27 @@ function saveBlob(blob: Blob, name: string) {
 }
 
 export function PhotoEditor({
-  photo, onClose, onSaved, onSavedAsNew,
+  photo, onClose, onSaved, onSavedAsNew, opsOnly,
 }: {
   photo: PhotoItem;
   onClose: () => void;
-  onSaved: (item: PhotoItem | null) => void;
+  onSaved?: (item: PhotoItem | null) => void;
   /** A new photo was made from the edit (``item`` once it's ready). */
   onSavedAsNew?: (item: PhotoItem | null) => void;
+  /** Ops only (Porch, WP-P1.4): crop, filters and adjustments for one post.
+   *  Nothing is saved to the library; Done hands the ops back (null: none).
+   *  No markup, which stays a Photos feature. */
+  opsOnly?: { initial: EditOps | null; onDone: (ops: EditOps | null) => void };
 }) {
   const own = photo.mine !== false;
-  const [ops, setOps] = useState<EditOps>(NONE);
-  const [baseline, setBaseline] = useState(plain(NONE));
+  const start0: EditOps = opsOnly?.initial ? { ...NONE, ...opsOnly.initial, markup: [] } : NONE;
+  const [ops, setOps] = useState<EditOps>(start0);
+  const [baseline, setBaseline] = useState(plain(start0));
   const [had, setHad] = useState(false);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [tab, setTab] = useState<Tab>("crop");
-  const [aspect, setAspect] = useState<number | "original" | null>(null);
+  const [aspect, setAspect] = useState<number | "original" | null>(opsOnly ? (opsOnly.initial?.crop ? null : "original") : null);
+  const aspects = opsOnly ? POST_ASPECTS : ASPECTS;
   const [busy, setBusy] = useState<null | "save" | "new" | "copy" | "share">(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
@@ -123,12 +138,15 @@ export function PhotoEditor({
 
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const opsOnlyRef = useRef(opsOnly);
+  opsOnlyRef.current = opsOnly;
 
   // The original's preview and the edit so far (yours only; someone
   // else's photo is marked up from the original, to copy or share).
   useEffect(() => {
     let off = false;
-    void Promise.all([filesApi.signedUrls(photo.id), own ? photosApi.getEdit(photo.id) : Promise.resolve({ ops: null })])
+    const forPost = !!opsOnlyRef.current;
+    void Promise.all([filesApi.signedUrls(photo.id), own && !forPost ? photosApi.getEdit(photo.id) : Promise.resolve({ ops: null })])
       .then(([urls, edit]) => {
         if (off) return;
         if (edit.ops) {
@@ -188,7 +206,7 @@ export function PhotoEditor({
     return c;
   }, [img, ops.rotate, ops.flip, turned]);
 
-  const filter = `brightness(${1 + ops.brightness}) contrast(${1 + ops.contrast}) saturate(${1 + ops.saturation})`;
+  const filter = cssFilter(ops);
   const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 
   // Paint: the picture, then the marks (not while cropping — they belong
@@ -251,6 +269,11 @@ export function PhotoEditor({
   // A crop of this aspect, as big as fits, centred.
   const fitAspect = (a: number | "original" | null) => {
     setAspect(a);
+    // For a post, "Original" is the whole photo, uncropped.
+    if (opsOnly && a === "original") {
+      setOps((o) => ({ ...o, crop: null }));
+      return;
+    }
     const r = ratioOf(a);
     if (!r || !fullNat) return;
     let w = 1;
@@ -519,16 +542,21 @@ export function PhotoEditor({
   // ------------------------------------------------------------- ways out
 
   const requestClose = useCallback(() => {
-    if (plain(opsRef.current) !== baseline && !window.confirm("Close without saving? Your changes will be lost.")) return;
+    const ask = opsOnlyRef.current ? "Close without keeping these changes?" : "Close without saving? Your changes will be lost.";
+    if (plain(opsRef.current) !== baseline && !window.confirm(ask)) return;
     closeRef.current();
   }, [baseline]);
+  const finish = () => {
+    const o = { ...opsRef.current, markup: [] };
+    opsOnlyRef.current?.onDone(plain(o) === plain(NONE) ? null : o);
+  };
 
   const save = async () => {
     setBusy("save");
     try {
       const out = await photosApi.saveEdit(photo.id, ops);
       toast.success(out.ops ? "Saved — the original is kept." : "Back to the original.");
-      onSaved(out.item);
+      onSaved?.(out.item);
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't save the edit."));
     } finally {
@@ -540,7 +568,7 @@ export function PhotoEditor({
     try {
       const out = await photosApi.revertEdit(photo.id);
       toast.success("Back to the original.");
-      onSaved(out.item);
+      onSaved?.(out.item);
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't revert it."));
     } finally {
@@ -679,13 +707,22 @@ export function PhotoEditor({
   const action = "flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[11px] text-white/90 hover:bg-white/10 disabled:opacity-40 sm:flex-none sm:flex-row sm:gap-1.5 sm:px-3 sm:text-sm";
 
   return createPortal(
-    <div role="dialog" aria-modal="true" aria-label="Edit photo" className="fixed inset-0 z-[70] flex flex-col bg-black text-white">
+    <div role="dialog" aria-modal="true" aria-label={opsOnly ? "Edit for this post" : "Edit photo"} className="fixed inset-0 z-[70] flex flex-col bg-black text-white">
       <div className="flex items-center gap-2 px-3 py-2">
         <button type="button" aria-label="Close editor" onClick={requestClose} className={btn}>
           <X className="h-5 w-5" />
         </button>
-        <span className="flex-1 truncate text-sm font-medium">{own ? "Edit" : "Mark up"}</span>
-        {own && had && (
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm font-medium">{opsOnly ? "Edit for this post" : own ? "Edit" : "Mark up"}</span>
+          {opsOnly && <span className="truncate text-xs text-white/70">The photo in your library stays as it is.</span>}
+        </span>
+        {opsOnly && anything && (
+          <Button size="sm" variant="ghost" leftIcon={<Undo2 className="h-3.5 w-3.5" />} onClick={() => { setOps(NONE); setAspect("original"); }}
+            className="text-white hover:bg-white/10">
+            Reset
+          </Button>
+        )}
+        {!opsOnly && own && had && (
           <Button size="sm" variant="ghost" leftIcon={<Undo2 className="h-3.5 w-3.5" />} disabled={!!busy} onClick={() => void revert()}
             className="text-white hover:bg-white/10">
             Revert to original
@@ -770,10 +807,10 @@ export function PhotoEditor({
 
       <div className="border-t border-white/10 px-2 pt-2 sm:px-3">
         <div className="mb-2 flex justify-center gap-1" role="tablist">
-          {(["crop", "adjust", "markup"] as const).map((t) => (
+          {(opsOnly ? (["crop", "filters", "adjust"] as const) : (["crop", "adjust", "markup"] as const)).map((t) => (
             <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => { setTab(t); setSelected(null); setPicker(null); }}
-              className={cn("rounded-full px-3 py-1 text-xs", tab === t ? "bg-white text-black" : "text-white/80 hover:bg-white/10")}>
-              {t === "crop" ? "Crop & rotate" : t === "adjust" ? "Adjust" : "Mark up"}
+              className={cn("rounded-full px-3 text-xs", opsOnly ? "py-1.5" : "py-1", tab === t ? "bg-white text-black" : "text-white/80 hover:bg-white/10")}>
+              {t === "crop" ? (opsOnly ? "Crop" : "Crop & rotate") : t === "filters" ? "Filters" : t === "adjust" ? "Adjust" : "Mark up"}
             </button>
           ))}
         </div>
@@ -785,18 +822,35 @@ export function PhotoEditor({
               <FlipHorizontal2 className="h-5 w-5" />
             </button>
             <span className="mx-2 h-5 w-px bg-white/20" />
-            {ASPECTS.map((a) => (
+            {aspects.map((a) => (
               <button key={a.label} type="button" aria-pressed={aspect === a.ratio} onClick={() => (a.ratio ? fitAspect(a.ratio) : setAspect(null))}
                 className={cn("rounded-full px-2.5 py-1 text-xs", aspect === a.ratio ? "bg-white/20" : "text-white/80 hover:bg-white/10")}>
                 {a.label}
               </button>
             ))}
-            {ops.crop && (
+            {ops.crop && !opsOnly && (
               <button type="button" onClick={() => setOps((o) => ({ ...o, crop: null }))} className="rounded-full px-2.5 py-1 text-xs text-white/80 hover:bg-white/10">
                 No crop
               </button>
             )}
             {markup.length > 0 && <p className="w-full text-center text-[11px] text-white/50">Marks sit on the cropped picture — they move with the crop.</p>}
+          </div>
+        )}
+        {tab === "filters" && (
+          <div role="radiogroup" aria-label="Filters" className="flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] sm:justify-center">
+            {FILTER_PRESETS.map((p) => {
+              const on = presetOf(ops)?.id === p.id;
+              return (
+                <button key={p.id} type="button" role="radio" aria-checked={on} aria-label={p.label}
+                  onClick={() => setOps((o) => ({ ...o, brightness: p.brightness, contrast: p.contrast, saturation: p.saturation }))}
+                  className="flex shrink-0 flex-col items-center gap-1 rounded-lg p-1 text-[11px] text-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+                  <span className={cn("block h-16 w-16 overflow-hidden rounded-lg border-2", on ? "border-white" : "border-transparent")}>
+                    {img && <img src={img.src} alt="" className="h-full w-full object-cover" style={{ filter: cssFilter(p) }} />}
+                  </span>
+                  <span className={cn(on && "font-semibold text-white")}>{p.label}</span>
+                </button>
+              );
+            })}
           </div>
         )}
         {tab === "adjust" && (
@@ -896,6 +950,16 @@ export function PhotoEditor({
             {isItem(sel) && <p className="text-center text-[11px] text-white/50">Drag to move · drag the round handle to resize and turn</p>}
           </div>
         )}
+        {opsOnly ? (
+          <div className="mt-2 flex items-center justify-end gap-2 border-t border-white/10 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2">
+            <Button size="sm" variant="ghost" onClick={requestClose} className="text-white hover:bg-white/10">
+              Cancel
+            </Button>
+            <Button size="sm" variant="primary" disabled={!img} onClick={finish} className="min-w-[5rem]">
+              Done
+            </Button>
+          </div>
+        ) : (
         <div className="mt-2 flex items-stretch gap-1 border-t border-white/10 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-1.5 sm:justify-end" aria-label="Save or share">
           <button type="button" onClick={copy} disabled={!!busy || !img} className={action} aria-label="Copy to clipboard">
             <Copy className="h-5 w-5" /> {busy === "copy" ? "Copying…" : "Copy"}
@@ -914,6 +978,7 @@ export function PhotoEditor({
             </>
           )}
         </div>
+        )}
       </div>
     </div>,
     document.body,

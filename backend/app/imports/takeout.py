@@ -76,6 +76,11 @@ class Scan:
     members: list[Member] = field(default_factory=list)
     # "Google Photos/<folder>/<file>.json" → parsed JSON
     json: dict[str, Any] = field(default_factory=dict)
+    # Google Keep (Notes N1.6): "Keep/<note>.json" → parsed JSON (only
+    # what looks like a Keep note), "Keep/<note>.html" → its page (old
+    # exports without JSON).
+    keep_json: dict[str, Any] = field(default_factory=dict)
+    keep_html: dict[str, bytes] = field(default_factory=dict)
 
 
 def _media_exts() -> dict[str, str]:
@@ -116,7 +121,41 @@ def scan_part(path: Path, part: int) -> Scan:
                 out.json[rel] = json.loads(read())
             except (ValueError, UnicodeDecodeError):
                 pass
+        elif _maybe_keep(product, rel, size):
+            _read_keep(out, product, rel, read)
     return out
+
+
+def _maybe_keep(product: str, rel: str, size: int) -> bool:
+    """A member that may be a Keep note: any small JSON outside Photos and
+    Drive (Keep's folder is "Keep" in most languages, but not every one —
+    a note is recognised by its fields), and Keep's own HTML pages."""
+    from app.imports.keep import JSON_MAX, KEEP_PRODUCT
+
+    low = rel.lower()
+    if "/" not in rel or _DRIVE_PRODUCT.match(product) or _PHOTOS_PRODUCT.match(product):
+        return False
+    if low.endswith(".json"):
+        return size <= JSON_MAX
+    return low.endswith(".html") and size <= JSON_MAX and bool(KEEP_PRODUCT.match(product))
+
+
+def _read_keep(out: Scan, product: str, rel: str, read) -> None:  # noqa: ANN001
+    from app.imports.keep import KEEP_PRODUCT, is_keep_note
+
+    if rel.lower().endswith(".html"):
+        out.keep_html[rel] = read()
+        return
+    try:
+        data = json.loads(read().decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError):
+        if KEEP_PRODUCT.match(product):
+            out.keep_json[rel] = None  # told as unreadable
+        return
+    if is_keep_note(data):
+        out.keep_json[rel] = data
+    elif KEEP_PRODUCT.match(product):
+        out.keep_json[rel] = None
 
 
 def _iter_archive(path: Path) -> Iterator[tuple[str, int, Any]]:
@@ -264,11 +303,20 @@ def _where(data: dict[str, Any]) -> tuple[float, float] | None:
 
 def build_plan(scans: list[Scan]) -> tuple[dict[str, Any], dict[str, Any]]:
     """(plan, report) from every part's scan."""
+    from app.imports.keep import KEEP_PRODUCT, plan_keep
+
     exts = _media_exts()
     members = [m for s in scans for m in s.members]
     jsons: dict[str, Any] = {}
+    keep_json: dict[str, Any] = {}
+    keep_html: dict[str, bytes] = {}
     for s in scans:
         jsons.update(s.json)
+        keep_json.update(s.keep_json)
+        keep_html.update(s.keep_html)
+    # Keep's product folder: named Keep, or holding Keep notes.
+    keep_products = {p.split("/", 1)[0] for p, d in keep_json.items() if d is not None}
+    keep_members: list[Member] = []
 
     folders: dict[str, list[Member]] = {}
     drive: list[Member] = []
@@ -285,6 +333,8 @@ def build_plan(scans: list[Scan]) -> tuple[dict[str, Any], dict[str, Any]]:
             folders.setdefault(folder, []).append(m)
         elif _DRIVE_PRODUCT.match(product):
             drive.append(m)
+        elif product in keep_products or KEEP_PRODUCT.match(product):
+            keep_members.append(m)
         else:
             products[product] = products.get(product, 0) + 1
             skipped["other_products"] += 1
@@ -366,7 +416,8 @@ def build_plan(scans: list[Scan]) -> tuple[dict[str, Any], dict[str, Any]]:
         _product, _, rest = m.path.partition("/")
         drive_files.append({"part": m.part, "member": m.name, "path": rest, "size": m.size})
 
-    plan = {"photos": photos, "albums": albums, "drive": drive_files}
+    notes, keep_report, _used = plan_keep(keep_members, keep_json, keep_html)
+    plan = {"photos": photos, "albums": albums, "drive": drive_files, "notes": notes}
     videos = sum(1 for p in photos if p["mime"].startswith("video/"))
     report = {
         "photos": len(photos) - videos,
@@ -383,8 +434,26 @@ def build_plan(scans: list[Scan]) -> tuple[dict[str, Any], dict[str, Any]]:
         "skipped": skipped,
         "other_products": sorted(products),
         "parts": len(scans),
+        "notes": keep_report if (keep_members or notes) else None,
     }
     return plan, report
 
 
-__all__ = ["FolderMatcher", "Member", "Scan", "build_plan", "open_member", "scan_part", "sidecar_key", "split_counter", "strip_extra"]
+def only_notes(plan: dict[str, Any], report: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A Google Keep import (Notes N1.6) brings the notes only: photos and
+    Drive files in the same Takeout are named, not imported (that's the
+    Google Takeout import's job)."""
+    others = list(report.get("other_products") or [])
+    if plan["photos"]:
+        others.append("Google Photos")
+    if plan["drive"]:
+        others.append("Drive")
+    plan = {**plan, "photos": [], "albums": {}, "drive": []}
+    report = {
+        **report, "photos": 0, "videos": 0, "bytes": 0, "with_details": 0, "albums": [], "years": None,
+        "favorites": 0, "archived": 0, "drive_files": 0, "unmatched_sample": [], "other_products": sorted(set(others)),
+    }
+    return plan, report
+
+
+__all__ = ["FolderMatcher", "only_notes", "Member", "Scan", "build_plan", "open_member", "scan_part", "sidecar_key", "split_counter", "strip_extra"]

@@ -143,6 +143,25 @@ class PushPreferences(Base):
     form_response: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Calls (0282): a DM call ringing you and missed calls.
+    call: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Calls (0284): calls ring through quiet hours unless this is on ("Don't
+    # ring me during quiet hours"): then a call in your quiet hours doesn't
+    # ring, and you hear about the missed call when they end.
+    call_quiet_hold: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Notes (0261): someone shared a note with you. Reminders come from Tasks.
+    notes: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Porch (0272): the app's switch; which kinds (posts, comments…) and
+    # how (on / daily summary / off) are chosen in Porch → Settings.
+    porch: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     # Quiet hours (0320), in the person's own time zone. One setting for all
     # of Promptly; ``dispatch.RULES`` says which categories they may hold.
     # The weekend pair, when set, is used for quiet periods that end on a

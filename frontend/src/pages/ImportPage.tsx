@@ -1,9 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, CheckCircle2, FileArchive, FolderArchive, Images, Loader2, Trash2, Upload, X } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { AlertTriangle, ArrowLeft, CheckCircle2, FileArchive, FolderArchive, Images, Loader2, StickyNote, Trash2, Upload, X } from "lucide-react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { importsApi, type ImportJob, type ImportReport, type ImportSource } from "@/api/imports";
+import { importsApi, type ImportJob, type ImportReport, type ImportSource, type NotesReport } from "@/api/imports";
 import { humanSize } from "@/components/files/helpers";
 import { LibraryExport } from "@/components/files/LibraryExport";
 import { Button } from "@/components/shared/Button";
@@ -15,8 +15,9 @@ import { cn } from "@/utils/cn";
 
 /**
  * Moving in (WP-10.1, 10.3, Part C §4.9): bring a Google Takeout, a folder of
- * photos or an Apple export across — upload its parts, let Promptly read
- * them, see what's in them, then import.
+ * photos, an Apple export or Google Keep (Notes N1.6) across — upload its
+ * parts, let Promptly read them, see what's in them, then import.
+ * `?start=<source>` (Notes' "Import from Google Keep") starts one straight away.
  */
 
 interface SourceText {
@@ -58,6 +59,19 @@ const SOURCES: Record<ImportSource, SourceText> = {
     trash: "were left out",
     files: "other files",
   },
+  keep: {
+    title: "Google Keep",
+    card: "Your Keep notes and lists, with their colours, labels, pictures and recordings.",
+    add: "Add your Keep Takeout",
+    how:
+      "At takeout.google.com choose Deselect all, tick Keep, and create the export. Add the .zip Google sends " +
+      "(or every part, if it's split).",
+    wrongFile: "add the .zip or .tgz files Google Takeout gave you.",
+    details: "",
+    otherwise: "",
+    trash: "in Keep's trash are left out",
+    files: "files",
+  },
   apple: {
     title: "Apple Photos export",
     card: "An iCloud Photos download or a Photos app export.",
@@ -84,27 +98,41 @@ const STATE_LABEL: Record<ImportJob["state"], string> = {
   cancelled: "Cancelled",
 };
 
+const ICONS: Record<ImportSource, typeof Images> = { takeout: Images, keep: StickyNote, folder: FolderArchive, apple: Images };
+const ORDER: ImportSource[] = ["takeout", "keep", "folder", "apple"];
+
 export function ImportsPage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const { data: jobs = [], isLoading } = useQuery({ queryKey: ["imports"], queryFn: importsApi.list });
-  const start = async (source: ImportSource) => {
+  const start = async (source: ImportSource, replace = false) => {
     try {
       const job = await importsApi.create(source);
-      navigate(`/files/import/${job.id}`);
+      navigate(`/files/import/${job.id}`, { replace });
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't start an import."));
     }
   };
+  // Notes' "Import from Google Keep" lands here with ?start=keep.
+  const wanted = params.get("start");
+  const started = useRef(false);
+  useEffect(() => {
+    if (wanted && wanted in SOURCES && !started.current) {
+      started.current = true;
+      void start(wanted as ImportSource, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted]);
   return (
     <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
       <h1 className="text-lg font-semibold text-[var(--text)]">Import &amp; export</h1>
       <p className="mt-1 text-sm text-[var(--text-muted)]">
-        Bring your photos, videos and files across from another service. They land in your Files and Photos with
-        their dates, places and albums — and importing the same thing twice doesn't make copies.
+        Bring your photos, videos, files and notes across from another service. They land in your Files, Photos and
+        Notes with their dates, places, albums and labels — and importing the same thing twice doesn't make copies.
       </p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        {(Object.keys(SOURCES) as ImportSource[]).map((source) => {
-          const Icon = source === "folder" ? FolderArchive : Images;
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {ORDER.map((source) => {
+          const Icon = ICONS[source];
           return (
             <button
               key={source}
@@ -287,7 +315,8 @@ export function ImportJobPage() {
 
       {job.state === "indexing" && (
         <p className="mt-4 flex items-center gap-2 text-sm text-[var(--text-muted)]">
-          <Loader2 className="h-4 w-4 animate-spin" /> Reading every part and matching photos with their details…
+          <Loader2 className="h-4 w-4 animate-spin" />{" "}
+          {job.source === "keep" ? "Reading every part and finding your notes…" : "Reading every part and matching photos with their details…"}
         </p>
       )}
       {job.error && (
@@ -295,7 +324,13 @@ export function ImportJobPage() {
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" /> {job.error}
         </p>
       )}
-      {job.report && job.state !== "importing" && job.state !== "done" && <Report report={job.report} text={text} />}
+      {job.report && job.state !== "importing" && job.state !== "done" && (
+        job.source === "keep" ? (
+          job.report.notes && <NotesFound notes={job.report.notes} others={job.report.other_products} />
+        ) : (
+          <Report report={job.report} text={text} />
+        )
+      )}
       {job.report && (job.state === "ready" || (job.state === "failed" && job.progress)) && (
         <div className="mt-4">
           <p className="mb-2 text-sm text-[var(--text)]">3. Bring it in</p>
@@ -307,8 +342,10 @@ export function ImportJobPage() {
             {job.state === "failed" ? "Carry on importing" : "Import"}
           </Button>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Photos go to your Photos folder by the month they were taken; anything you already have isn't copied again. You
-            can leave this page — you'll get a notification when it's done.
+            {job.source === "keep"
+              ? "Notes go to Notes, their pictures and recordings to My files › Notes; a note you already brought in isn't copied again. "
+              : "Photos go to your Photos folder by the month they were taken; anything you already have isn't copied again. "}
+            You can leave this page — you'll get a notification when it's done.
           </p>
         </div>
       )}
@@ -337,7 +374,7 @@ export function ImportJobPage() {
   );
 }
 
-const STAGE: Record<string, string> = { photos: "Photos and videos", albums: "Albums", drive: "Drive files" };
+const STAGE: Record<string, string> = { photos: "Photos and videos", albums: "Albums", drive: "Drive files", notes: "Notes" };
 
 function Progress({ job }: { job: ImportJob }) {
   const p = job.progress!;
@@ -352,7 +389,7 @@ function Progress({ job }: { job: ImportJob }) {
       ) : (
         <>
           <p className="text-sm text-[var(--text)]">
-            {STAGE[(p as { stage?: string }).stage ?? "photos"] ?? "Importing"} — {p.done.toLocaleString()} of {p.total.toLocaleString()}
+            {STAGE[p.stage ?? (job.source === "keep" ? "notes" : "photos")] ?? "Importing"} — {p.done.toLocaleString()} of {p.total.toLocaleString()}
           </p>
           <div className="mt-2 h-2 overflow-hidden rounded bg-[var(--hover)]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
             <div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${pct}%` }} />
@@ -360,14 +397,24 @@ function Progress({ job }: { job: ImportJob }) {
         </>
       )}
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat label="new" value={p.imported.toLocaleString()} />
+        <Stat label={job.source === "keep" ? "new notes" : "new"} value={p.imported.toLocaleString()} />
         <Stat label="already there" value={p.duplicates.toLocaleString()} />
         {(job.source === "takeout" || (p.albums ?? 0) > 0) && <Stat label="albums made" value={(p.albums ?? 0).toLocaleString()} />}
+        {job.source !== "keep" && (p.notes ?? 0) > 0 && <Stat label="notes" value={(p.notes ?? 0).toLocaleString()} />}
         <Stat label="couldn't import" value={p.failed.toLocaleString()} />
       </div>
       {done && (
         <p className="mt-3 flex flex-wrap gap-3 text-sm">
-          <Link to="/files/photos" className="text-[var(--accent-text)] hover:underline">Open Photos</Link>
+          {(p.notes ?? 0) > 0 && (
+            <Link to="/notes" className="text-[var(--accent-text)] hover:underline">
+              Open Notes
+            </Link>
+          )}
+          {job.source !== "keep" && (
+            <Link to="/files/photos" className="text-[var(--accent-text)] hover:underline">
+              Open Photos
+            </Link>
+          )}
           {(job.source === "takeout" || (p.albums ?? 0) > 0) && <Link to="/files/photos/albums" className="text-[var(--accent-text)] hover:underline">Albums</Link>}
           {(p.drive ?? 0) > 0 && (
             <Link to="/files" className="text-[var(--accent-text)] hover:underline">
@@ -439,6 +486,7 @@ function Report({ report: r, text }: { report: ImportReport; text: SourceText })
           </ul>
         </details>
       )}
+      {r.notes && r.notes.notes > 0 && <NotesFound notes={r.notes} others={[]} inline />}
       {r.unmatched_sample.length > 0 && (
         <details className="mt-2 text-xs">
           <summary className="cursor-pointer text-[var(--text)]">Some without Google's details</summary>
@@ -451,6 +499,61 @@ function Report({ report: r, text }: { report: ImportReport; text: SourceText })
           </ul>
         </details>
       )}
+    </section>
+  );
+}
+
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+/** What a Keep Takeout (or a Promptly export) holds of notes. */
+function NotesFound({ notes: n, others, inline }: { notes: NotesReport; others: string[]; inline?: boolean }) {
+  const lines = [
+    n.pinned > 0 && `${plural(n.pinned, "pinned note stays", "pinned notes stay")} pinned`,
+    n.archived > 0 && `${plural(n.archived, "archived note stays", "archived notes stay")} archived`,
+    n.with_pictures > 0 && `${plural(n.with_pictures, "note has", "notes have")} pictures`,
+    n.with_recordings > 0 && `${plural(n.with_recordings, "note has", "notes have")} recordings`,
+    n.shared > 0 && `${plural(n.shared, "note was", "notes were")} shared in Keep — the note says with whom; share it again here if you like`,
+    n.trashed > 0 && `${plural(n.trashed, "note", "notes")} in Keep's trash ${n.trashed === 1 ? "is" : "are"} left out`,
+    n.missing_attachments > 0 &&
+      `${plural(n.missing_attachments, "picture or recording isn't", "pictures or recordings aren't")} in these archives — add every part`,
+    n.cut > 0 && `${plural(n.cut, "note is", "notes are")} longer than a note holds and will be shortened`,
+    n.unreadable > 0 && `${plural(n.unreadable, "file couldn't", "files couldn't")} be read as a note`,
+    others.length > 0 && `Not imported here: ${others.join(", ")} (the Google Takeout import brings those)`,
+  ].filter(Boolean) as string[];
+  const body = (
+    <>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Stat label="notes" value={n.notes.toLocaleString()} />
+        <Stat label="lists" value={n.lists.toLocaleString()} />
+        <Stat label="labels" value={n.labels.length.toLocaleString()} />
+        <Stat label="with pictures or recordings" value={Math.max(n.with_pictures, n.with_recordings).toLocaleString()} />
+      </div>
+      <ul className="mt-3 space-y-1 text-xs text-[var(--text-muted)]">
+        <li>Colours, pins, labels and ticked items come with them, and so do the dates you wrote them</li>
+        {lines.map((l) => (
+          <li key={l}>{l}</li>
+        ))}
+      </ul>
+      {n.labels.length > 0 && (
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer text-[var(--text)]">Labels</summary>
+          <p className="mt-1 text-[var(--text-muted)]">{n.labels.join(", ")}</p>
+        </details>
+      )}
+    </>
+  );
+  if (inline) {
+    return (
+      <div className="mt-4 border-t border-[var(--border)] pt-3">
+        <p className="text-sm font-medium text-[var(--text)]">Notes</p>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <section aria-label="What's in it" className="mt-4 rounded-card border border-[var(--border)] bg-[var(--surface)] p-4">
+      <p className="text-sm font-medium text-[var(--text)]">What's in it</p>
+      {body}
     </section>
   );
 }

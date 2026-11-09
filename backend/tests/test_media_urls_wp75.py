@@ -270,3 +270,18 @@ async def test_media_links_have_their_own_rate_bucket(client, user, monkeypatch)
     urls = await _urls(client, user, fid)
     await client.get(_path(urls["original"]), headers={"X-Real-IP": "203.0.113.9"})
     assert ("media", str(rate_limit._LIMIT_MEDIA)) in buckets
+
+
+def test_claim_codes_are_append_only_and_porch_kinds_round_trip():
+    """Codes are on the wire in every issued link: existing ones never move,
+    Porch's go on the end (Porch WP-P1.1)."""
+    from app.files import media_urls
+
+    assert [media_urls._CODE[n] for n in ("thumb", "preview", "poster", "video", "original", "zip", "version", "export", "face",
+                                          "thumb_edit", "preview_edit", "basemap")] == list(range(1, 13))
+    assert [media_urls._CODE[n] for n in media_urls.PORCH_RENDITIONS] == list(range(13, 19))
+    assert len(set(media_urls._CODE.values())) == len(media_urls._CODE)
+    mid, uid = uuid.uuid4(), uuid.uuid4()
+    for name in media_urls.PORCH_RENDITIONS:
+        claim = media_urls.verify(media_urls.sign(mid, uid, 2, name, 7).removeprefix("/m/"))
+        assert (claim.file_id, claim.rendition, claim.ver) == (mid, name, 7)

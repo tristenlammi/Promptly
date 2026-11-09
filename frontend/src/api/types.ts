@@ -64,6 +64,8 @@ export interface UserSettings {
   nav_app_icons?: "line" | "color";
   /** The desktop sidebar stays as you left it, everywhere. */
   sidebar_collapsed?: boolean;
+  /** Notes as a grid of cards or one column. */
+  notes_view?: "grid" | "list";
   /** Today cards the user hid, and the order the rest show in. */
   today_hidden?: string[];
   today_order?: string[];
@@ -89,6 +91,14 @@ export interface UserSettings {
   /** Preferred Kokoro TTS voice id (e.g. ``"af_heart"``) for read-aloud
    *  and voice mode. Absent = the server default. */
   tts_voice?: string;
+  /** Talk (WP-T4), Account → Voice: speaking speed 0.9–1.3, how you take
+   *  turns, whether talking over it interrupts, captions, and whether a
+   *  Talk started outside a chat is kept or temporary. */
+  tts_speed?: number;
+  talk_turn_mode?: "hands_free" | "tap";
+  talk_interrupt?: "talk" | "tap";
+  talk_captions?: boolean;
+  talk_save?: "chat" | "temporary";
   /** Preferred display currency (ISO 4217 code, e.g. ``"AUD"``). Surfaces in
    *  the ambient personal-context block and overrides locale inference.
    *  Absent / ``""`` = infer from location. */
@@ -135,6 +145,8 @@ export interface UserPreferencesUpdate {
   nav_app_icons?: "line" | "color";
   /** The desktop sidebar stays as you left it, everywhere. */
   sidebar_collapsed?: boolean;
+  /** Notes as a grid of cards or one column. */
+  notes_view?: "grid" | "list";
   /** Replace the hidden Today cards / their order. */
   today_hidden?: string[];
   today_order?: string[];
@@ -152,6 +164,11 @@ export interface UserPreferencesUpdate {
   custom_system_prompt?: string;
   /** Preferred TTS voice id. Pass an empty string to clear (use default). */
   tts_voice?: string;
+  tts_speed?: number;
+  talk_turn_mode?: "hands_free" | "tap";
+  talk_interrupt?: "talk" | "tap";
+  talk_captions?: boolean;
+  talk_save?: "chat" | "temporary";
   /** Preferred display currency (ISO 4217). Pass an empty string to clear
    *  (fall back to locale inference). */
   currency?: string;
@@ -829,6 +846,9 @@ export interface ChatMessage {
    *  Lets scrollback render the same collapsed activity summary the
    *  live stream showed. ``null``/absent when no tools ran. */
   tool_calls?: PersistedToolCall[] | null;
+  /** Talk (0300): ``{spoken, interrupted, heard_chars, …}`` on a turn
+   *  that was spoken. Drives the "Spoken" mark and "Interrupted" note. */
+  voice?: { spoken?: boolean; interrupted?: boolean; [k: string]: unknown } | null;
   /** Files attached to the message:
    *  - on ``user`` rows: files the user picked via the paperclip modal.
    *  - on ``assistant`` rows: artefacts produced by tool calls during

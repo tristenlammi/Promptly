@@ -274,6 +274,7 @@ def render_conversation_json(
                 "ttft_ms": m.ttft_ms,
                 "total_ms": m.total_ms,
                 "cost_usd_micros": m.cost_usd_micros,
+                "voice": getattr(m, "voice", None),
             }
             for m in messages
         ],

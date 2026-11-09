@@ -33,7 +33,9 @@ export type SystemFolderKind =
   | "camera_uploads"
   | "apps"
   | "mail_attachments"
-  | "forms";
+  | "forms"
+  // Notes: recordings and pictures added to notes.
+  | "notes";
 
 /** Compact representation of one grantee on a file/folder.
  *  Mirrors :class:`GranteeBrief` on the backend. ``grant_id`` is

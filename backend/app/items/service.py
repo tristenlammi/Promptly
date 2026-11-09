@@ -465,6 +465,11 @@ async def save_data(
     from app.items.shared import after_save as _shared_after_save
 
     await _shared_after_save(db, user, row, doc.kind, before or {}, clean)
+    # Notes: a reminder on a note is a task here (app/notes/reminders.py).
+    if doc.kind == "tasks":
+        from app.notes.reminders import after_tasks_save as _notes_after_save
+
+        await _notes_after_save(db, row.id, before or {}, clean)
     return version
 
 

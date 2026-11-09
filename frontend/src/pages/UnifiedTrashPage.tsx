@@ -13,6 +13,7 @@ import {
   ListChecks,
   RotateCcw,
   Search,
+  StickyNote,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -34,6 +35,7 @@ const APPS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: "calendar", label: "Calendar", icon: CalendarDays },
   { key: "tasks", label: "Tasks", icon: ListChecks },
   { key: "contacts", label: "Contacts", icon: Contact },
+  { key: "notes", label: "Notes", icon: StickyNote },
   { key: "apps", label: "Apps", icon: Blocks },
 ];
 
@@ -53,6 +55,9 @@ function kindLabel(it: TrashItem): string {
       return "Task";
     case "contact":
       return "Contact";
+    case "note":
+      // A workspace "note" is a Page; a Notes note is a Note (N1.7).
+      return it.type === "workspace_item" ? "Page" : "Note";
     case "workspace":
       return "Workspace";
     case "container":
@@ -208,7 +213,7 @@ export function UnifiedTrashPage() {
             <EmptyState
               icon={<Trash2 className="h-5 w-5" />}
               title="Trash is empty"
-              description={`Files, photos, workspace pages, events, albums, tasks and contacts you delete stay here for ${days} days.`}
+              description={`Files, photos, workspace pages, events, albums, tasks, contacts and notes you delete stay here for ${days} days.`}
             />
           )}
 

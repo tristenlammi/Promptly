@@ -35,8 +35,10 @@ class RoomVoice(Base):
 
 
 class Call(UUIDPKMixin, Base):
-    """One voice session: a channel's first join until it's empty again.
-    Phases 2-4 (DM calls, meetings, notes) add their columns."""
+    """One voice session (a channel's first join until it's empty again),
+    or one DM call (``kind == "dm"``: ringing until it ends; 0282 added who
+    started it, audio or video, when someone answered and how it ended).
+    Phases 3-4 (meetings, notes) add their columns."""
 
     __tablename__ = "calls"
 
@@ -45,10 +47,19 @@ class Call(UUIDPKMixin, Base):
     lk_room: Mapped[str] = mapped_column(String(64), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # DM calls (0282).
+    started_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    media: Mapped[str | None] = mapped_column(String(8), nullable=True)  # audio/video: how it started
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # completed / missed (nobody answered) / cancelled (the caller hung up
+    # first) / declined / ended (access lost, calls switched off)
+    ended_reason: Mapped[str | None] = mapped_column(String(12), nullable=True)
 
 
 class CallParticipant(Base):
-    """Who was in a session and for how long (history and usage only)."""
+    """Who was in a session and for how long (history and usage). For a DM
+    call also everyone it rang: ``ring`` says how that went, and
+    ``in_call_since`` who's connected now (NULL: not in it)."""
 
     __tablename__ = "call_participants"
 
@@ -56,6 +67,17 @@ class CallParticipant(Base):
     identity: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
-    first_joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # NULL: rung but never joined (DM calls).
+    first_joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, server_default=func.now())
     last_left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # DM calls (0282).
+    ring: Mapped[str | None] = mapped_column(String(10), nullable=True)  # ringing/answered/declined/missed
+    rung_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    in_call_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    session: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    device: Mapped[str | None] = mapped_column(String(8), nullable=True)  # web/android
+    lk_sid: Mapped[str | None] = mapped_column(String(48), nullable=True)  # the LiveKit connection we know about
+    # Calls WP-D4 (0283): when you saw a call you missed (the Calls tab's badge).
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")  # removed from my history

@@ -16,6 +16,8 @@ import {
 import { useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { openNewNote } from "@/notes/newNote";
+
 import { filesApi, type FileScope } from "@/api/files";
 import { officeApi, type NewOfficeKind } from "@/api/office";
 import { Button } from "@/components/shared/Button";
@@ -157,7 +159,8 @@ export function useNewItems({
   const actions: NewItemAction[] = [
     { key: "folder", group: "create", label: "Folder", icon: <FolderPlus className={ic} />, onSelect: () => setShowNewFolder(true) },
     { key: "document", group: "create", label: "Document", icon: <FileText className={cn(ic, "text-sky-600")} />, onSelect: () => void newOffice("document") },
-    { key: "note", group: "create", label: "Note", icon: <StickyNote className={cn(ic, "text-yellow-600")} />, onSelect: () => void newOffice("note") },
+    // A note is a Notes note (N1.7); long writing is a Document.
+    { key: "note", group: "create", label: "Note", icon: <StickyNote className={cn(ic, "text-yellow-600")} />, onSelect: () => openNewNote(navigate, "note") },
     { key: "sheet", group: "create", label: "Spreadsheet", icon: <Table2 className={cn(ic, "text-emerald-600")} />, onSelect: () => void newOffice("sheet") },
     { key: "presentation", group: "create", label: "Presentation", icon: <Presentation className={cn(ic, "text-orange-600")} />, onSelect: () => void newPresentation() },
     { key: "whiteboard", group: "create", label: "Whiteboard", icon: <Shapes className={cn(ic, "text-violet-600")} />, onSelect: () => void newOffice("whiteboard") },

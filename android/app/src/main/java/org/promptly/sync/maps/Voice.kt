@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.promptly.sync.assistant.PhoneActions
+import org.promptly.sync.assistant.VoiceTrail
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -104,8 +105,26 @@ object Voice {
         }
     }
 
+    /** When this conversation started, for the crash breadcrumb. */
+    @Volatile private var since = 0L
+
     internal fun setState(value: State) {
         _state.value = value
+        if (value != State.OFF && since == 0L) since = System.currentTimeMillis()
+        val path = if (inCar) "car" else "sheet"
+        when (value) {
+            State.HEARD -> VoiceTrail.note(path, "listening", since)
+            State.THINKING -> VoiceTrail.note(path, "thinking", since)
+            State.OFF -> VoiceTrail.note(path, if (SpokenAnswer.speaking) "speaking" else "off", since)
+        }
+    }
+
+    /** The answer has been said (or stopped): nothing voice is going on now. */
+    internal fun quiet() {
+        if (_state.value == State.OFF && !SpokenAnswer.speaking) {
+            VoiceTrail.note(if (inCar) "car" else "sheet", "off", since)
+            since = 0L
+        }
     }
 
     /** Silence at this level of background noise: from the sound before you spoke. */

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notes widgets: Notes (pinned and recent cards; take a note, a list, a voice note). Refreshed by WorkManager (widgets-refresh), not by updatePeriodMillis. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/wg_notes_description"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="80dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="3"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:configure="org.promptly.sync.widgets.NotesConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional" />

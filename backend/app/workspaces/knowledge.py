@@ -2362,7 +2362,9 @@ class WorkspaceInjection:
     matched). ``attach_file_ids`` — files to fold into the triggering
     turn's attachments (full-dump mode: everything; retrieval mode:
     images + not-yet-indexed text as a fallback). ``retrieval_active``
-    is surfaced for logging / SSE only.
+    is surfaced for logging / SSE only. ``has_content`` is True when
+    ``system_block`` carries item or file text, not just the map of titles:
+    the chat counts that as outside content (R-019).
     """
 
     system_block: str | None = None
@@ -2372,6 +2374,7 @@ class WorkspaceInjection:
     # answers into (``Spreadsheet.outside_content``, Forms WP-F1.5): the
     # chat turn that reads it is untrusted, like one that read a web page.
     untrusted: bool = False
+    has_content: bool = False
 
 
 async def _indexed_token_total(
@@ -2847,7 +2850,7 @@ def _format_context_block(
 _MAP_KIND_LABEL = {
     "folder": "Folder",
     "container": "Notebook",
-    "note": "Note",
+    "note": "Page",  # the "note" kind is called a Page (Notes N1.7)
     "sheet": "Sheet",
     "canvas": "Canvas",
     "board": "Board",
@@ -3221,6 +3224,7 @@ async def build_workspace_injection(
             attach_file_ids=[uf.id for _, uf in file_rows],
             retrieval_active=False,
             untrusted=outside,
+            has_content=bool(struct_block),
         )
 
     # Retrieval mode. The retrieved block already spans the whole
@@ -3276,6 +3280,7 @@ async def build_workspace_injection(
         attach_file_ids=attach_ids,
         retrieval_active=True,
         untrusted=outside,
+        has_content=bool(combined),
     )
 
 

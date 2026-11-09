@@ -41,6 +41,21 @@ class TurnState(dict):
             dict.__setitem__(self, "own_attachments_only", False)
         dict.__setitem__(self, key, value)
 
+    def saw_files(self, files: Any, *, user_id: Any, in_workspace: bool) -> None:
+        """File text reached this turn's prompt: outside content, whoever owns the file
+        (the same as ``read_file`` / ``search_my_files``). Files the person attached to
+        this chat themselves, outside a workspace, keep the narrow ``own_attachments_only``
+        exception, unless something else has already marked the turn."""
+        files = list(files)
+        if not files:
+            return
+        if not in_workspace and all(getattr(f, "user_id", None) == user_id for f in files):
+            if not self.get("untrusted"):
+                dict.__setitem__(self, "untrusted", True)
+                dict.__setitem__(self, "own_attachments_only", True)
+            return
+        self["untrusted"] = True
+
 
 @dataclass
 class ToolContext:
@@ -212,3 +227,22 @@ UNTRUSTED_CONTENT_TOOLS = frozenset(
 
 def reads_outside_content(tool_name: str) -> bool:
     return tool_name in UNTRUSTED_CONTENT_TOOLS or tool_name.startswith("mcp__")
+
+
+def guard_write(ctx: ToolContext, doing: str, *, own_attachments_ok: bool = False) -> None:
+    """The one rule for chat tools that change something for the user (add an
+    event, post to a room, run an app action, write a note): not on a turn
+    that read outside content (R-019) — the person asks again in a new
+    message. ``doing`` finishes "Not … on a turn that read outside content"
+    ("changing the calendar"). ``own_attachments_ok`` lets a write through
+    when the only outside content is files the person attached themselves
+    (a health document they asked to log).
+
+    Every write tool goes through here, so how such turns are handled can
+    change in one place."""
+    turn = ctx.turn
+    if not turn or not turn.get("untrusted"):
+        return
+    if own_attachments_ok and turn.get("own_attachments_only"):
+        return
+    raise ToolError(f"Not {doing} on a turn that read outside content — ask the user to confirm in a new message.")

@@ -15,6 +15,7 @@ import {
   Dumbbell,
   GraduationCap,
   HeartPulse,
+  House,
   Layers,
   ListChecks,
   MessageCircle,
@@ -22,8 +23,10 @@ import {
   Navigation,
   Plane,
   Plus,
+  Loader2,
   Receipt,
   Sparkles,
+  StickyNote,
   Stethoscope,
   Users,
   UtensilsCrossed,
@@ -813,6 +816,51 @@ export function FormsCard({ f }: { f: NonNullable<Sections["forms"]> }) {
   );
 }
 
+// -------------------------------------------------------------------- porch
+
+/** Porch: new posts in your ticked groups since you last looked (a few
+ *  thumbnails and who posted), and today's birthdays with "Post for Sam". */
+export function PorchCard({ p }: { p: NonNullable<Sections["porch"]> }) {
+  const n = p.new_posts;
+  const who = n ? [...n.from, ...(n.more_people ? [`${n.more_people} more`] : [])] : [];
+  const whoText = who.length > 1 ? `${who.slice(0, -1).join(", ")} and ${who[who.length - 1]}` : who[0] ?? "";
+  return (
+    <HubCard icon={House} title="Porch" to={p.url} open="Open Porch">
+      {n && (
+        <Link to={p.url} className="flex items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-[var(--text)]">{n.count === 1 ? "1 new post" : `${n.count > 99 ? "99+" : n.count} new posts`}</span>
+            {whoText && <span className="block truncate text-xs text-[var(--text-muted)]">from {whoText}</span>}
+          </span>
+          {n.thumbs.length > 0 && (
+            <span className="flex shrink-0 -space-x-2">
+              {n.thumbs.map((t) => (
+                <img key={t.post_id} src={t.thumb ?? undefined} alt="" loading="lazy" className="h-10 w-10 rounded-lg border-2 border-[var(--surface)] object-cover" />
+              ))}
+            </span>
+          )}
+        </Link>
+      )}
+      {p.birthdays.length > 0 && (
+        <ul className={cn(n && "mt-1 border-t border-[var(--border)] pt-1")}>
+          {p.birthdays.map((b) => (
+            <li key={b.user.id} className="flex items-center gap-2 px-1 py-1.5">
+              <Cake className="h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-hidden />
+              <Link to={b.profile_url} className="min-w-0 flex-1 hover:underline">
+                <span className="block truncate text-sm text-[var(--text)]">{b.user.name}</span>
+                <span className="block text-xs text-[var(--text-muted)]">Birthday today</span>
+              </Link>
+              <Link to={b.post_url} className="shrink-0 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90">
+                Post for {b.user.name.split(" ")[0]}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </HubCard>
+  );
+}
+
 export function JournalCard({ j }: { j: NonNullable<Sections["journal"]> }) {
   return (
     <HubCard icon={BookOpen} title="Journal" to={j.url} open="Open">
@@ -907,6 +955,50 @@ export function ComingCard({ coming, today }: { coming: TodayComing[]; today: st
             </div>
           ))}
         </div>
+      )}
+    </HubCard>
+  );
+}
+
+// -------------------------------------------------------------- notes
+
+/** Notes (app/notes): your pinned notes — a list says how much is left —
+ *  and voice notes whose words are still being worked out. */
+export function NotesCard({ n }: { n: NonNullable<Sections["notes"]> }) {
+  return (
+    <HubCard icon={StickyNote} title="Notes" to={n.url} open={n.more_pinned ? "All pinned" : "Open"}>
+      <ul aria-label="Pinned notes">
+        {n.pinned.map((c) => {
+          const detail = c.kind === "list" ? (c.total ? (c.left ? `${c.left} left` : "All ticked off") : "Empty list") : c.snippet;
+          return (
+            <li key={c.id}>
+              <Link to={c.url} state={{ from: "/today" }} className="flex items-start gap-2.5 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+                {c.kind === "list" ? (
+                  <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
+                ) : (
+                  <StickyNote className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-[var(--text)]">{c.title}</span>
+                  {detail && <span className="block truncate text-xs text-[var(--text-muted)]">{detail}{c.shared ? " · shared with you" : ""}</span>}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+      {n.transcribing.length > 0 && (
+        <ul aria-label="Voice notes being transcribed" className={cn(n.pinned.length > 0 && "mt-1 border-t border-[var(--border)] pt-1")}>
+          {n.transcribing.map((t) => (
+            <li key={t.id}>
+              <Link to={t.url} state={{ from: "/today" }} className="flex items-center gap-2.5 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--text-muted)]" aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{t.title}</span>
+                <span className="shrink-0 text-xs text-[var(--text-muted)]">Transcribing…</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </HubCard>
   );

@@ -30,11 +30,13 @@ import {
   Wand2,
   X,
   Bookmark,
+  CopyCheck,
 } from "lucide-react";
 import { AliasesScreen } from "./Aliases";
 import { BookmarksScreen } from "./Bookmarks";
 import { Laptop } from "lucide-react";
 import { BrowserSyncScreen } from "./BrowserSync";
+import { DuplicatesScreen, useDuplicates } from "./Duplicates";
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError, OfflineError } from "../core/api";
@@ -230,6 +232,7 @@ const TOOLS: { id: string; label: string; icon: ReactNode }[] = [
   { id: "generator", label: "Generator", icon: <Wand2 className="h-4 w-4" /> },
   { id: "aliases", label: "Aliases", icon: <AtSign className="h-4 w-4" /> },
   { id: "security", label: "Security check", icon: <ShieldCheck className="h-4 w-4" /> },
+  { id: "duplicates", label: "Duplicates", icon: <CopyCheck className="h-4 w-4" /> },
   { id: "shared", label: "Shared vaults", icon: <Users className="h-4 w-4" /> },
   { id: "sends", label: "Sends", icon: <Send className="h-4 w-4" /> },
   { id: "bookmarks", label: "Bookmarks", icon: <Bookmark className="h-4 w-4" /> },
@@ -408,6 +411,9 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
     return [...set].sort();
   }, [vault, version]);
 
+  // Worked out here, on every change, for the count beside Duplicates.
+  const dupes = useDuplicates(vault, version);
+
   const [vaultRows, setVaultRows] = useState<VaultInfo[]>([]);
   useEffect(() => {
     void version;
@@ -442,7 +448,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
       ))}
       <div className="mt-2 border-t border-[var(--border)] pt-2" />
       {TOOLS.map((s) => (
-        <NavRow key={s.id} active={route === s.id} icon={s.icon} label={s.label} onClick={() => go(s.id)} />
+        <NavRow key={s.id} active={route === s.id} icon={s.icon} label={s.label} badge={s.id === "duplicates" ? dupes.groups.length : undefined} onClick={() => go(s.id)} />
       ))}
       <div className="mt-auto pt-2">
         <Button className="w-full" onClick={lock}><Lock className="h-4 w-4" /> Lock</Button>
@@ -461,6 +467,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   else if (route === "sends") content = <SendsScreen />;
   else if (route === "bookmarks") content = <BookmarksScreen />;
   else if (route === "browser-sync") content = <BrowserSyncScreen />;
+  else if (route === "duplicates") content = <DuplicatesScreen />;
   else if (route === "trash") content = <TrashScreen />;
   else if (route === "devices") content = <DevicesScreen />;
   else if (route === "activity") content = <ActivityScreen />;
@@ -530,7 +537,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   );
 }
 
-function NavRow({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
+function NavRow({ active, icon, label, onClick, badge }: { active: boolean; icon: ReactNode; label: string; onClick: () => void; badge?: number }) {
   return (
     <button
       type="button"
@@ -540,6 +547,12 @@ function NavRow({ active, icon, label, onClick }: { active: boolean; icon: React
     >
       <span className="text-[var(--text-muted)]">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      {!!badge && (
+        <span data-testid={`nav-count-${label}`} className="shrink-0 rounded-full bg-[var(--surface-2)] px-1.5 text-xs font-medium text-[var(--text)]">
+          {badge}
+          <span className="sr-only"> to review</span>
+        </span>
+      )}
     </button>
   );
 }

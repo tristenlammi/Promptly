@@ -41,6 +41,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.promptly.sync.maps.Voice
+import org.promptly.sync.talk.PlaybackRoute
+import org.promptly.sync.talk.Talk
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.RadioButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.Role
 
 /** Making Promptly the phone's assistant, and what went wrong lately. */
 class AssistantSettingsActivity : ComponentActivity() {
@@ -78,6 +84,74 @@ class AssistantSettingsActivity : ComponentActivity() {
         }
     }
 
+    /** Talk: conversations, and where the answers are played. */
+    @Composable
+    private fun TalkSettings() {
+        val context = this@AssistantSettingsActivity
+        var live by remember { mutableStateOf(Talk.enabled(context)) }
+        var route by remember { mutableStateOf(Talk.playbackRoute(context)) }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Talking", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Hands-free conversations")
+                        Text(
+                            if (live) "Just talk: it answers, and you can talk over it. Say \"that's all\" to finish. Nothing is saved as a chat."
+                            else "One question at a time: tap Ask for each.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = live, onCheckedChange = {
+                        live = it
+                        Talk.setEnabled(context, it)
+                    })
+                }
+                if (live) {
+                    Text("Play answers as", style = MaterialTheme.typography.labelLarge)
+                    RouteChoice(
+                        "Call audio (recommended)",
+                        "So it doesn't hear itself on the speaker, and you can talk over it.",
+                        route == PlaybackRoute.CALL,
+                    ) {
+                        route = PlaybackRoute.CALL
+                        Talk.setPlaybackRoute(context, it)
+                    }
+                    RouteChoice(
+                        "Assistant audio",
+                        "Can be louder, and goes to music headphones. On the speaker it may hear itself.",
+                        route == PlaybackRoute.ASSISTANT,
+                    ) {
+                        route = PlaybackRoute.ASSISTANT
+                        Talk.setPlaybackRoute(context, it)
+                    }
+                    Text(
+                        "Your voice, speaking speed, captions and how you take turns are in your Promptly account under Voice.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun RouteChoice(title: String, detail: String, selected: Boolean, pick: (PlaybackRoute) -> Unit) {
+        val which = if (title.startsWith("Call")) PlaybackRoute.CALL else PlaybackRoute.ASSISTANT
+        Row(
+            Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton) { pick(which) },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RadioButton(selected = selected, onClick = null)
+            Column {
+                Text(title)
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+
     @Composable
     private fun Screen() {
         val context = this@AssistantSettingsActivity
@@ -100,7 +174,8 @@ class AssistantSettingsActivity : ComponentActivity() {
                     }
                 }
             }
-            Text("Nothing listens in the background. The microphone only opens when you use that gesture, or press the button in P Maps or on your car's screen.")
+            TalkSettings()
+            Text("Nothing listens in the background. The microphone only opens when you use that gesture, the Quick Settings tile, the Talk shortcut on the Promptly icon, or the button in P Maps or on your car's screen, and it closes when the conversation ends.")
             val problems = remember(tick) { Crashes.recent(context) }
             if (problems.isNotEmpty()) {
                 Card(Modifier.fillMaxWidth()) {

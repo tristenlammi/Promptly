@@ -31,6 +31,12 @@ import { markdownToSpeech, stripInlineCitations } from "@/utils/speechText";
  *
  * Mounted only while open, so mount = enter, unmount = leave; all the
  * teardown lives in the unmount cleanup.
+ *
+ * Since Talk (Voice Phase 3, WP-T4) this is the fallback: used when live
+ * Talk can't run (switched off, the server is busy or older, speech
+ * offline) or the connection is too weak for it. It plays through an
+ * ``<audio>`` element, which browsers don't echo-cancel, so it stays
+ * tap-to-interrupt.
  */
 
 interface VoiceModeOverlayProps {
@@ -41,6 +47,12 @@ interface VoiceModeOverlayProps {
   onCancelStream: () => void;
   /** False when no model is configured — we can't run a turn then. */
   modelReady: boolean;
+  /** A line under the header (Talk's fallback: "Weak connection…"). */
+  notice?: string | null;
+  /** A button beside the notice ("Back to hands-free"). */
+  action?: { label: string; onClick: () => void } | null;
+  /** Told whenever the phase changes (with the one before). */
+  onPhaseChange?: (phase: string, prev: string | null) => void;
 }
 
 type Phase =
@@ -71,6 +83,9 @@ export function VoiceModeOverlay({
   onSend,
   onCancelStream,
   modelReady,
+  notice = null,
+  action = null,
+  onPhaseChange,
 }: VoiceModeOverlayProps) {
   const isStreaming = useChatStore((s) => s.isStreaming);
   const messages = useChatStore((s) => s.messages);
@@ -422,6 +437,15 @@ export function VoiceModeOverlay({
             ? "transcribing"
             : "idle";
 
+  const prevPhaseRef = useRef<string | null>(null);
+  const onPhaseChangeRef = useRef(onPhaseChange);
+  onPhaseChangeRef.current = onPhaseChange;
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (prev !== phase) onPhaseChangeRef.current?.(phase, prev);
+  }, [phase]);
+
   const handleOrbTap = () => {
     switch (phase) {
       case "listening":
@@ -503,6 +527,19 @@ export function VoiceModeOverlay({
           <X className="h-5 w-5" />
         </button>
       </div>
+      {notice && (
+        <div
+          role="status"
+          className="mx-4 flex items-center justify-center gap-3 rounded-full border border-[var(--warning-border)] bg-[var(--warning-bg)] px-4 py-1.5 text-xs text-[var(--warning)]"
+        >
+          <span>{notice}</span>
+          {action && (
+            <button type="button" onClick={action.onClick} className="font-semibold underline">
+              {action.label}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Center stage */}
       <div className="flex flex-1 flex-col items-center justify-center gap-8 px-6">

@@ -108,7 +108,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_DEFAULT_NOTE_TITLE = "Untitled note"
+_DEFAULT_NOTE_TITLE = "Untitled page"  # a workspace "note" is a Page (Notes N1.7)
 _DEFAULT_FOLDER_TITLE = "New folder"
 _DEFAULT_CANVAS_TITLE = "Untitled canvas"
 _DEFAULT_BOARD_TITLE = "Board"

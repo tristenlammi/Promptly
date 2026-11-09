@@ -18,6 +18,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import {
   ArrowDownToLine,
+  AudioLines,
   AtSign,
   Check,
   ChevronDown,
@@ -159,6 +160,9 @@ interface MessageBubbleProps {
    *  replies at a glance. ``null`` / ``undefined`` for every
    *  original-state row. */
   editedAt?: string | null;
+  /** Talk (WP-T4): a spoken turn gets a small "Spoken" mark, and a reply
+   *  cut off by talking over it says "Interrupted". */
+  voice?: { spoken?: boolean; interrupted?: boolean } | null;
   /** Regenerate-this-reply hook. Only passed for the most recent
    *  persisted assistant message. Called with ``null`` when the user
    *  clicks the primary "Regenerate" button (reuses the currently
@@ -861,6 +865,7 @@ function MessageBubbleImpl({
   currentUserId,
   onEdit,
   editedAt,
+  voice,
   onBranch,
   onRegenerate,
   onDigDeeper,
@@ -1143,6 +1148,19 @@ function MessageBubbleImpl({
               costUsd={costUsd}
               modelLabel={modelLabel}
             />
+          )}
+          {voice?.spoken && !streaming && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded px-1.5 py-px text-[10px] font-medium",
+                "bg-black/[0.05] text-[var(--text-muted)]",
+                "dark:bg-white/[0.06]"
+              )}
+              title={voice.interrupted ? "Spoken, and cut off when you talked over it" : "Spoken in Talk"}
+            >
+              <AudioLines className="h-2.5 w-2.5" aria-hidden />
+              {voice.interrupted ? "Spoken · interrupted" : "Spoken"}
+            </span>
           )}
           {editedAt && !streaming && (
             <span
