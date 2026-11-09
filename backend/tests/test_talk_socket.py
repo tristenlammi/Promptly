@@ -282,7 +282,7 @@ async def test_config_says_what_the_client_needs(db, user, http):
     r = await http.get("/api/talk/config", headers=bearer(user))
     body = r.json()
     assert r.status_code == 200 and body["enabled"] is True and body["protocol"] == 1
-    assert body["prefs"] == {"voice": "bm_george", "speed": 1.3, "save": "temporary", "turn_mode": "hands_free", "interrupt": "tap", "captions": True}
+    assert body["prefs"] == {"voice": "bm_george", "speed": 1.3, "save": "temporary", "turn_mode": "hands_free", "interrupt": "tap", "captions": True, "bluetooth_locked": False}
     assert body["limits"]["live_slots"] == 2
     assert (await http.get("/api/talk/config")).status_code in (401, 403)
 
@@ -341,6 +341,6 @@ async def test_account_voice_saves_the_talk_settings(db, user, http):
     )
     assert r.status_code == 200, r.text
     body = (await http.get("/api/talk/config", headers=bearer(user))).json()
-    assert body["prefs"] == {"voice": None, "speed": 1.1, "save": "temporary", "turn_mode": "tap", "interrupt": "tap", "captions": False}
+    assert body["prefs"] == {"voice": None, "speed": 1.1, "save": "temporary", "turn_mode": "tap", "interrupt": "tap", "captions": False, "bluetooth_locked": False}
     bad = await http.patch("/api/auth/me/preferences", json={"tts_speed": 3}, headers=bearer(user))
     assert bad.status_code == 422

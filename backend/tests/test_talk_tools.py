@@ -30,6 +30,8 @@ from .test_talk_turns import finish, ident, messages, open_talk, sidecars, talk_
 THURSDAY = {"title": "Dentist", "start": "2026-11-19T09:00"}
 FRIDAY = {"title": "Dentist", "start": "2026-11-20T09:00"}
 ASKED_THURSDAY = "Add Dentist to your calendar for Thursday 19 November at 9 AM?"
+# Since Talk phase 2 a change after reading something says where it came from.
+FROM_PAGE = "From that web page: add Dentist to your calendar for Thursday 19 November at 9 AM?"
 ASKED_FRIDAY = "Add Dentist to your calendar for Friday 20 November at 9 AM?"
 
 
@@ -49,7 +51,7 @@ def test_the_voice_allowlist():
     from app.chat.tools.registry import get_tool
 
     names = voice_tools.voice_tool_names([])
-    assert set(voice_tools.READS) | set(voice_tools.WRITES) | set(voice_tools.QUICK) == names
+    assert set(voice_tools.READS) | set(voice_tools.WRITES) | set(voice_tools.QUICK) | set(voice_tools.SEND) == names
     for name in (*names, *voice_tools.DEVICE, *voice_tools.DRIVE):
         assert get_tool(name) is not None, name
     # What needs a screen and minutes, or deletes: never.
@@ -364,9 +366,9 @@ async def test_a_change_on_an_untrusted_turn_is_asked_not_refused(db, user, conv
     live = await sidecars.live()
     await live.say(1, "Look up my dentist and add it on Thursday.")
     ask = await c.expect("ask", timeout=10)
-    assert ask["question"] == ASKED_THURSDAY
+    assert ask["question"] == FROM_PAGE
     await c.expect("state", state="listening", timeout=15)
-    assert ASKED_THURSDAY in said(sidecars)
+    assert FROM_PAGE in said(sidecars)
     assert await dentist_events(db) == []
     rows = await messages(db, conversation)
     held = next(t for t in rows[1].tool_calls if t["name"] == "calendar_add_event")["meta"]
