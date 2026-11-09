@@ -283,14 +283,23 @@ const PorchApp = lazyWithRetry(
   "PorchApp"
 );
 
-/** Porch is its own app on a phone and when launched as the installed
- *  Porch app; in a desktop browser it sits inside Promptly's layout. */
+/** Porch on its own only as the installed Porch app. Anywhere else (a
+ *  browser tab, the installed Promptly window) it's inside Promptly: in its
+ *  layout on a big screen, and full screen with Promptly's menu on a phone. */
 function PorchGate() {
   const isMobile = useIsMobile();
-  if (isMobile || isOwnAppWindow("porch")) {
+  if (isOwnAppWindow("porch")) {
     return (
       <Suspense fallback={<FullScreenLoading />}>
         <PorchApp />
+      </Suspense>
+    );
+  }
+  if (isMobile) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <PorchApp promptlyNav />
+        <PromptlyNavDrawer />
       </Suspense>
     );
   }

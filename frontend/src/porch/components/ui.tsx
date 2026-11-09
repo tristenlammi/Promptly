@@ -3,6 +3,7 @@ import { useContext, useState, type ComponentType, type ReactNode } from "react"
 import { Link, useNavigate } from "react-router-dom";
 
 import type { GroupLabel, PorchGroup, PorchUser } from "@/api/porch";
+import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { Callout } from "@/components/shared/Callout";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { defaultColorForUserId } from "@/components/shared/UserAvatar";
@@ -144,8 +145,12 @@ export function PageHeader({
   className?: string;
 }) {
   const navigate = useNavigate();
+  // Inside Promptly on a phone: a top-level page offers Promptly's menu.
+  const { promptlyNav } = useContext(PorchContext);
+  const menu = promptlyNav && !back;
   return (
     <header className={cn("flex h-14 shrink-0 items-center gap-1 px-2 md:px-0", className)}>
+      {menu && <PromptlyMenuButton className="h-11 w-11 rounded-xl" />}
       {back && (
         <button
           type="button"
@@ -156,7 +161,7 @@ export function PageHeader({
           <ArrowLeft className="h-5 w-5" />
         </button>
       )}
-      <h1 className={cn("min-w-0 flex-1 truncate text-lg font-bold text-[var(--text)]", !back && "px-2 md:px-0")}>{title}</h1>
+      <h1 className={cn("min-w-0 flex-1 truncate text-lg font-bold text-[var(--text)]", !back && !menu && "px-2 md:px-0")}>{title}</h1>
       {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
     </header>
   );

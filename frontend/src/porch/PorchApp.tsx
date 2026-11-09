@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Bell, Bookmark, Check, Home, Loader2, Newspaper, PenSquare, Plus, Search, Settings, UserRound, Users } from "lucide-react";
+import { Bell, Bookmark, Check, Loader2, Newspaper, PenSquare, Plus, Search, Settings, UserRound, Users } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { porchApi, type Bootstrap } from "@/api/porch";
 import { NetworkStatusToast } from "@/components/layout/NetworkStatusToast";
+import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { InstallFromLink } from "@/components/pwa/InstallFromLink";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ItemButton, List } from "@/items/ui";
@@ -19,7 +20,7 @@ import { NewGroupSheet } from "./components/GroupSheets";
 import { SearchSheet } from "./components/SearchSheet";
 import { GroupTile, PorchAvatar } from "./components/ui";
 import { WelcomeSheet } from "./components/WelcomeSheet";
-import { PorchContext, isStandalone } from "./context";
+import { PorchContext } from "./context";
 import { usePorchEvents } from "./live";
 import { ActivityPage } from "./pages/ActivityPage";
 import { FeedPage } from "./pages/FeedPage";
@@ -72,7 +73,13 @@ function parse(path: string): Route {
  * through groups. Its own app on a phone and when installed (manifest scope
  * ``/porch/``); inside Promptly's layout in a desktop browser (``PorchGate``).
  */
-export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
+/**
+ * Porch. Inside Promptly it keeps Promptly's navigation: in Promptly's layout
+ * on a big screen (``embedded``), or full screen with Promptly's menu button
+ * in its page headers on a phone (``promptlyNav``). Only the installed Porch
+ * app shows Porch on its own (``App.tsx`` ``PorchGate``).
+ */
+export function PorchApp({ embedded = false, promptlyNav = false }: { embedded?: boolean; promptlyNav?: boolean } = {}) {
   const location = useLocation();
   const isPhone = useIsMobile(767);
   const q = useQuery({
@@ -130,7 +137,7 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
   const frame = (children: ReactNode) => (
     <div
       className={cn(
-        "flex flex-col overflow-hidden bg-[var(--bg)] text-[var(--text)]",
+        "relative flex flex-col overflow-hidden bg-[var(--bg)] text-[var(--text)]",
         embedded ? "h-full min-h-0" : "h-[100dvh] pl-safe pr-safe pt-safe",
       )}
     >
@@ -155,10 +162,10 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
               🏡
             </span>
             <p className="max-w-sm text-base text-[var(--text)]">Porch isn't turned on for you. Ask the person who runs this Promptly.</p>
-            {!embedded && (
-              <Link to="/chat" className="font-medium text-[var(--accent-text)] hover:underline">
-                Back to Promptly
-              </Link>
+            {promptlyNav && (
+              <div className="absolute left-2 top-2 pt-safe">
+                <PromptlyMenuButton className="h-11 w-11 rounded-xl" />
+              </div>
             )}
           </>
         ) : (
@@ -210,7 +217,7 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
   // Inside Promptly's layout there's a <main> already.
   const Main = embedded ? "div" : "main";
   return (
-    <PorchContext.Provider value={{ isPhone, embedded, b }}>
+    <PorchContext.Provider value={{ isPhone, embedded, promptlyNav, b }}>
       {frame(
         isPhone ? (
           <>
@@ -222,7 +229,7 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
           </>
         ) : (
           <div className="flex min-h-0 flex-1">
-            <SideNav b={b} route={route} embedded={embedded} />
+            <SideNav b={b} route={route} />
             <Main id={SCROLLER_ID} className="min-w-0 flex-1 overflow-y-auto">
               <div className="px-2 pt-2 lg:px-6">{page}</div>
             </Main>
@@ -296,7 +303,7 @@ function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
 }
 
 /** Desktop: Porch's own column — pages, your groups with their ticks, Find groups. */
-function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded: boolean }) {
+function SideNav({ b, route }: { b: Bootstrap; route: Route }) {
   const navigate = useNavigate();
   const { setTicks } = useGroupActions();
   const item = (on: boolean) =>
@@ -385,11 +392,6 @@ function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded:
       <Link to="/porch/groups#find" className={item(false)}>
         <Search className="h-[18px] w-[18px]" aria-hidden /> Find groups
       </Link>
-      {!embedded && !isStandalone() && (
-        <Link to="/chat" className={cn(item(false), "mt-auto")}>
-          <Home className="h-[18px] w-[18px]" aria-hidden /> Back to Promptly
-        </Link>
-      )}
     </nav>
   );
 }

@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Bell, Bookmark, Cake, ContactRound, Home, MessageCircle, MoreHorizontal, Pencil, Sparkles, UserX } from "lucide-react";
+import { Bell, Bookmark, Cake, ContactRound, MessageCircle, MoreHorizontal, Pencil, Sparkles, UserX } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -14,7 +14,7 @@ import { useBlock } from "../actions";
 import { BOOTSTRAP_KEY, listPosts, profileKey, userPostsKey } from "../cache";
 import { LIFE_EVENTS, PostCard, PostList } from "../components/PostCard";
 import { ActionSheet, Column, LoadError, PageHeader, PorchAvatar, PostSkeleton, dayWords, type MenuAction } from "../components/ui";
-import { isStandalone, usePorch } from "../context";
+import { usePorch } from "../context";
 import { AlertButton } from "../notify";
 import { useSentinel } from "../scroll";
 import { PhotoGrid } from "./GroupPage";
@@ -30,7 +30,7 @@ function relationLine(p: Profile): string | null {
 
 /** ``/porch/u/:id``: someone's profile, as you're allowed to see it. */
 export function ProfilePage({ userId }: { userId: string }) {
-  const { b, embedded } = usePorch();
+  const { b } = usePorch();
   const navigate = useNavigate();
   const block = useBlock();
   const [tab, setTab] = useState<Exclude<ProfileTab, "all">>("photos");
@@ -149,11 +149,6 @@ export function ProfilePage({ userId }: { userId: string }) {
               <ItemButton variant="secondary" icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>
                 Edit profile
               </ItemButton>
-              {!embedded && !isStandalone() && (
-                <ItemButton variant="ghost" icon={<Home className="h-4 w-4" />} onClick={() => navigate("/chat")}>
-                  Back to Promptly
-                </ItemButton>
-              )}
             </>
           ) : (
             <>

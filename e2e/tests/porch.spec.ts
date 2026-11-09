@@ -237,7 +237,8 @@ test("on a phone: its own app with a bottom bar, and the screens pass an accessi
 
   await bar.getByRole("link", { name: "Profile" }).click();
   await expect(alice.getByRole("heading", { name: "Your profile" })).toBeVisible();
-  await expect(alice.getByRole("button", { name: "Back to Promptly" })).toBeVisible();
+  // Inside Promptly on a phone: Promptly's menu in the header (no "Back to Promptly").
+  await expect(alice.getByRole("button", { name: "Open navigation menu" })).toBeVisible();
   found.push(...(await scan(alice, "phone profile")));
 
   await alice.goto(`/porch/p/${pid}`);
