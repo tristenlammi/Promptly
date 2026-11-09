@@ -53,7 +53,7 @@ async def send_due(db) -> int:  # noqa: ANN001
             category="item_reminder",
             title=rem.title,
             body=rem.body,
-            url=f"/files/item/{f.id}",
+            url=await _note_url(db, rem, f) or f"/files/item/{f.id}",
             tag=f"item:{rem.key}"[:120],
             # A Tasks reminder gets "Done" / "Snooze 1 hour" buttons.
             extra=await _buttons(db, rem, f),
@@ -61,6 +61,21 @@ async def send_due(db) -> int:  # noqa: ANN001
         n += 1
     await db.commit()
     return n
+
+
+async def _note_url(db, rem, f) -> str | None:  # noqa: ANN001
+    """A reminder set on a note (Notes) opens the note, not the Tasks file."""
+    key = rem.key.split(":", 2)[2] if rem.key.startswith("snooze:") and rem.key.count(":") >= 2 else rem.key
+    parts = key.split(":")
+    if len(parts) < 2 or parts[0] != "task":
+        return None
+    try:
+        from app.notes.reminders import note_for_task
+
+        nid = await note_for_task(db, rem.user_id, f.id, parts[1])
+    except Exception:  # noqa: BLE001 — the Tasks link still works
+        return None
+    return f"/notes/n/{nid}" if nid else None
 
 
 async def _buttons(db, rem, f) -> dict | None:  # noqa: ANN001

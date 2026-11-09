@@ -86,6 +86,9 @@ Category = Literal[
     # Calls (0282): a DM call ringing you, a missed call, and the silent
     # "answered on another device" that stops the ringing. Push only.
     "call",
+    # Notes: someone shared a note with you (app/notes/push.py). Nothing
+    # time-critical — a note's reminders arrive as ``item_reminder``.
+    "notes",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -111,6 +114,7 @@ CATEGORIES: tuple[str, ...] = (
     # Forms
     "form_response",
     "call",
+    "notes",
     "test",
 )
 
@@ -181,6 +185,9 @@ RULES: dict[str, Rule] = {
         kinds=(("closed", "form closed", "forms closed"), ("busy", "busy form", "busy forms")),
         coalesce=True,
     ),
+    # Notes: someone shared a note with you. Nothing urgent (reminders
+    # come as ``item_reminder``), so quiet hours may hold it.
+    "notes": Rule(True, app="Notes", one="shared note", many="shared notes", url="/notes"),
 }
 _missing = set(CATEGORIES) - set(RULES)
 assert not _missing, f"notification categories without a quiet-hours rule: {_missing}"

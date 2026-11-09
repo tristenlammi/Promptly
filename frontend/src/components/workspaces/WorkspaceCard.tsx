@@ -254,7 +254,7 @@ function hueForId(id: string): number {
 function buildStats(ws: WorkspaceSummary) {
   const counts = ws.item_counts ?? {};
   const defs = [
-    { key: "note", one: "note", many: "notes", icon: StickyNote },
+    { key: "note", one: "page", many: "pages", icon: FileText },
     { key: "board", one: "board", many: "boards", icon: Columns3 },
     { key: "sheet", one: "sheet", many: "sheets", icon: Table2 },
     { key: "canvas", one: "canvas", many: "canvases", icon: PenTool },

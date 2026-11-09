@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press P Notes: quick capture (the app module's capture screens). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="notes_new_note" android:enabled="true" android:icon="@mipmap/ic_notes"
+        android:shortcutShortLabel="@string/notes_new_note">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.sync.capture.QuickNoteActivity" android:data="promptly-widget://new-note" />
+    </shortcut>
+    <shortcut android:shortcutId="notes_new_list" android:enabled="true" android:icon="@mipmap/ic_notes"
+        android:shortcutShortLabel="@string/notes_new_list">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.sync.capture.QuickNoteActivity" android:data="promptly-widget://new-list" />
+    </shortcut>
+    <shortcut android:shortcutId="notes_voice_note" android:enabled="true" android:icon="@mipmap/ic_notes"
+        android:shortcutShortLabel="@string/notes_voice_note">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.sync.capture.VoiceNoteActivity" android:data="promptly-widget://voice-note" />
+    </shortcut>
+</shortcuts>

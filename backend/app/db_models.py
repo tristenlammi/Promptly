@@ -146,3 +146,13 @@ from app.forms.models import Form, FormNotify, FormOptionCount, FormReport, Form
 from app.calls.models import Call, CallParticipant, RoomVoice  # noqa: F401
 # Talking to Promptly (WP-T2): per-turn timings.
 from app.talk.models import TalkMetric  # noqa: F401
+# --- Notes (0261_notes_core) ---
+from app.notes.models import (  # noqa: F401
+    Note,
+    NoteAttachment,
+    NoteItem,
+    NoteMember,
+    NoteReminder,
+    NoteUserState,
+    NoteVersion,
+)

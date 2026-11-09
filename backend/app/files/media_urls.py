@@ -63,6 +63,11 @@ _CODE = {name: i + 1 for i, name in enumerate((
     # shared one), ``ver`` the build it's from.
     "offline",
 ))}
+# Notes (app/notes/media.py): a note's picture or recording — the "file" is
+# the ``note_attachments`` row, so the link names the note and the file;
+# which rendition (original, tile, preview, playback copy) rides in the low
+# bits of ``ver``.
+_CODE["note"] = 16
 _NAME = {v: k for k, v in _CODE.items()}
 # What each rendition is on disk under derived/<file_id>/.
 RENDITION_FILE = {

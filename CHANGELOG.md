@@ -54,6 +54,42 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Admin → Talk: turn Talk on or off, limit it to some user groups, set how many people can talk at once, see the speech models in use, and see how fast answers have been (usual and slow-end times for knowing you'd finished, the transcript, the model, the first sound, and going quiet when talked over, per device). Only timings are kept for this, for 30 days, never words or audio.
 - The Talk screen shows a small cloud when answers come from a hosted model; hover or tap it to see which ("Answers come from OpenRouter").
 - README: "Talking to Promptly" setup notes, with the speech settings `WHISPER_LIVE_MODEL`, `WHISPER_LIVE_SLOTS`, `TTS_THREADS` and `TTS_STREAM_SLOTS` (now also settable in `.env`).
+- Notes (groundwork for the new Notes app): notes and checklists you can pin, colour, label with your #tags, archive, share with chosen people on this server (who can edit, or leave) and restore from earlier versions. Ticking and adding list items never clash between people, and everyone on a note sees changes live. Nothing about a note is ever shown to someone it isn't shared with.
+- Notes: a "Notes" switch in Notifications, for when someone shares a note with you.
+- Notes: deleted notes go to the Trash for 30 days, with Restore and Delete forever, and show in the one Trash under "Notes".
+- Notes: the Notes app at /notes (a tile in Apps, and it installs as its own app). "Take a note…" saves as you type with no Save button; lists tick, indent and reorder; notes can be pinned, coloured, labelled with your #tags, archived, deleted to the Trash, dragged into your own order, searched with filter chips, and picked several at a time. Grid or list view. On a phone it's Keep's layout: a two-column grid, + and New list at the bottom, and the note as a full page.
+- Notes: works with no connection. Notes are kept on the device, changes wait there (even if the page is closed) and save when you're back; if someone else edited the same note meanwhile, both versions are kept.
+- Notes: share text or a link from another app into the installed Notes app to make a note.
+- Notes: pictures in notes, from this device (or the phone's camera) or from your Photos. They sit at the top of the note and on its card, and open full size; added pictures are kept in My files › Notes, and a photo from your library isn't copied.
+- Notes: voice notes. Record one in the browser (pause, stop, or discard; up to 3 hours), or add an audio file. It plays in the note with a waveform, a scrubber and 1×/1.5×/2×, and uploads in the background, carrying on where it left off if the connection drops, or later if you're offline.
+- Notes: recordings are turned into words by the server's own Whisper. The words sit under the recording (Show all, Copy, Add to note), never replace what you wrote, and search finds them in Notes and in Files. With cloud speech-to-text it's off until an admin turns it on (Admin → Defaults → Voice notes in Notes).
+- Notes: share pictures and recordings from another app into the installed Notes app, and a "Voice note" shortcut on its icon.
+- Notes: the people a note is shared with see and play its pictures and recordings, and nobody else can, even with a link.
+- Notes: Share a note with people on this Promptly (the people picker, with names from your Contacts and Photos). It turns up in their Notes straight away and they get a notification (held during quiet hours); they can edit it, see who else has it, and Leave. The owner can take anyone off. Someone you've blocked, or who has blocked you, can't be added, and the message never tells anyone they were blocked.
+- Notes: everyone on a shared note sees the others' ticks and edits within a second or two. If two people type in the same note at once, each sees the other's words appear; a paragraph both changed keeps both versions, with a line saying so. A shared note someone else changed shows "Sam made changes" on its card until you open it.
+- Notes: Remind me (Later today, Tomorrow, Next week, or a day and time, repeating daily, weekly, monthly or yearly). A reminder is a task in your Tasks, linked to the note, with Done and Snooze on its notification, which opens the note. Ticking it off anywhere (the notification, Tasks, Today) clears the note's reminder straight away. Reminders are your own, even on a shared note.
+- Notes: a Reminders view (Overdue, Today, Upcoming) and a Reminders search filter.
+- Notes: if someone takes you off a note while you have it open, it says so and offers Keep a copy.
+- Notes: a Notes card on Today with your pinned notes (a list says how many items are left) and voice notes still being turned into words.
+- Notes: Ctrl+K finds your notes by their title, words, list items and what was said in their recordings, including notes shared with you.
+- Notes: type [[ (or @ after a space) in a note to link anything you can open: another note, a task, an event, a file, a person. Clicking the link opens it, and the other note shows where it was mentioned. Notes can be linked the same way from documents, chats, journal entries and room messages.
+- Notes in chat: "add oat milk and eggs to my shopping list" puts them on your note called Shopping or Groceries (your own or one shared with you), or on the Shopping list in Tasks when you don't have one, and the reply says which. Chat can also find, read and make notes and tick items off. It won't change your notes in a reply that read a web page, a file or someone else's words.
+- Notes: AI in a note's ⋯ menu. Tidy up, Make a list and Suggest a title show what they'd do first, nothing changes until you choose Use this, and Undo puts the note back. Only offered when an AI model is available to you.
+- Notes: Make an event opens a new Calendar event filled in from the note, with the day, time and place read by AI when a model is available.
+- Notes: Turn into tasks adds a list's unticked items, or the to-dos AI finds in a text note, to the Tasks list you pick, each linked to the note, with Undo.
+- Notes: Send to… posts a note card in a room or to a person. Only people the note is shared with can open it; everyone else sees "This note isn't shared with you".
+- Notes: Make a copy (pictures and recordings come too) and Open as document (the note's words become a Document in your Files, and the note keeps a card that opens it), each with Undo.
+- Calendar: a link to `/calendar?new=1` with a title, notes, place, day and times opens a new event filled in.
+- Notes: bring your Google Keep notes across (Import from Google Keep in Notes, or Files → Import & export → Google Keep). Colours, pins, archived notes, labels, ticked lists, pictures and recordings come with them, with the dates you wrote them. Links Keep found stay in the note, notes in Keep's trash are left out, and importing the same Takeout again skips what's already in. Keep's older voice recordings are converted so browsers can play them. The Google Takeout import brings Keep notes too, along with Photos and Drive.
+- Export my library includes your notes: a Markdown file for each (colour, pin, labels, dates, reminder and who it's shared with at the top; lists as checkboxes; pictures and recordings linked) and a notes.json with all of them. Importing the export into another Promptly ("A folder of photos") brings the notes back with their colours, pins, labels, lists, formatting, pictures, recordings and transcripts, and importing it twice adds nothing new.
+- Notes: Ctrl+K has New note, New list ("new list milk, eggs" makes the list with its items) and Record a voice note, each opening Notes.
+- Promptly for Android: home-screen widgets. **Agenda** shows today and the week ahead from your calendars (tap an event to open it in P Calendar, + to add one) and **Tasks** shows today's and overdue tasks: tick them off right on the home screen (tap again within a moment to undo), add one with Quick task, tap a task to open it in P Tasks. Both work with no signal: they show the last saved copy, ticks and new tasks wait on the phone and sync when you're back, and they move on by themselves at midnight. Each has settings (which calendars, titles only; which list, tasks with no date). They refresh every 30 minutes and a couple of minutes after you open a Promptly app, and look like Promptly in light and dark.
+- Account → Devices: phones now show what they can do (maps, phone assistant, home-screen widgets), with a tick to turn a phone's widgets off. Phones already linked can use the widgets without linking again; a removed phone's widgets wipe what they showed.
+- Promptly for Android: a **Notes** widget (your pinned and latest notes as cards in their colours, with list items you can tick right there, and Take a note, New list and a mic at the top) and a **One note** widget (a note or list you pick, its items to tick, ticked ones below, + to add more). Both work with no signal and can show titles only.
+- Promptly for Android: Quick note (a title and text, or a list) and Voice note from the Notes widget or a long-press on P Notes. A voice note records even with no signal and with the screen locked (a notification shows while it records, with Pause and Stop & save); it uploads when you're back online, carrying on where it left off, and the server turns it into words.
+- Promptly for Android: Share to Notes. Share a link, text, pictures or recordings from Chrome, Photos or any app as a new note, or add them to one of your notes. A link gets its page's title.
+- Promptly for Android: a P Notes icon (turn it on in Choose apps), with New note, New list and Voice note on a long-press.
+- Promptly for Android: the widget picker shows a preview of each widget (Android 15 and newer).
 
 ### Changed
 <!-- Calls (DM calls), WP-D5 -->
@@ -62,6 +98,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Memory learns from voice conversations knowing which of your words were transcribed, and skips facts that look misheard (it won't save a name, number or date from speech unless the conversation confirms it).
 - Read-aloud runs Kokoro on 4 threads (`TTS_THREADS`) instead of one per core, which was 2–3× slower when the server was busy.
 - Phone assistant: a spoken yes or no is now judged by the same strict rule everywhere. "Okay, do it" and "nope, never mind" are understood without asking the AI, and anything with a "wait" or "no" in it is never taken as a yes.
+- One thing in Promptly is called a note now. A workspace's documents are called Pages (New page, Untitled page, pages in counts, search, the trash, automations and links); they work exactly as before. Files' New → Note and the Note tile on Files' home start a note in Notes; use Document for long writing.
 
 ### Fixed
 <!-- Calls (DM calls), WP-D5 -->
@@ -71,6 +108,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Chat: workspace notes, boards, sheets and files that the chat reads on its own before answering now count as outside content, the same as when it opens them with a tool, so text someone else wrote there can't make it save to memory, change your calendar or files, or post for you without you asking. The same goes for @-mentioned files and chats, a custom model's documents, and files attached earlier in the chat.
 - Android crash reports now say what the voice assistant was doing when the app stopped (listening, thinking or speaking, on the phone or in the car, and for how long), to help find the crash some people had while driving. The car's microphone is also now always let go if asking fails.
 - Phone assistant: it now uses the default model you chose in your account when the server has no voice model set. It used to skip your choice and fall back to the server's.
+- Notes: notes made while you were elsewhere in Promptly (an import, a chat) didn't show when you went back to Notes until the page was reloaded.
+- Notes: a note put back the way it was (an earlier version, or Undo) sometimes kept showing the newer words in an open note until it was reopened.
+- Notes: list tick boxes were plain white squares in dark mode; they now match the cards in both themes.
+- People picker (sharing in Notes, Files, Calendar, Rooms): each person in the list was a button inside a list option, which screen readers announce badly; the option itself is now what you pick.
+- Notes: a label's page opened while the label was new on the device stopped working once it was saved; it now keeps working.
 
 ## [0.33.0] - 2026-11-09
 

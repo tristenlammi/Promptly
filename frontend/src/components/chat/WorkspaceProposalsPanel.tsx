@@ -89,7 +89,7 @@ export function WorkspaceProposalsPanel({
       qc.invalidateQueries({ queryKey: ["workspaces", "tasks", workspaceId] });
       toast.success(
         updated.kind === "create_note"
-          ? "Note created"
+          ? "Page created"
           : updated.kind === "update_cards"
             ? "Cards updated"
             : "Cards added"
@@ -176,7 +176,7 @@ function ProposalCard({
     : isFiles
     ? "Files organised"
     : isNote
-    ? "Note created"
+    ? "Page created"
     : isUpdate
       ? `Updated ${cards.length} card${cards.length === 1 ? "" : "s"}`
       : `Added ${cards.length} card${cards.length === 1 ? "" : "s"}`;
@@ -308,7 +308,7 @@ function ProposalCard({
             </>
           ) : isNote ? (
             <>
-              create note{" "}
+              create page{" "}
               <span className="font-medium">
                 “{p.payload.title ?? "Untitled"}”
               </span>

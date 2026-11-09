@@ -13,7 +13,7 @@ import { cleanTitle, parseWhen } from "@/lib/quickdate";
  *   add task buy milk tomorrow           → a task (Tasks' quick add)
  *   remind me to call mum at 5           → a task at 17:00 today
  *   log $40 fuel / income $500 salary    → a Budget transaction
- *   note …                               → a Drive note
+ *   note … / new list … / voice note     → a note in Notes (a list, a recording)
  *   new doc / sheet / slides <title>     → a Drive file
  *   go to calendar                       → somewhere in Promptly
  *   message sam see you soon             → a direct message in Rooms
@@ -24,7 +24,7 @@ import { cleanTitle, parseWhen } from "@/lib/quickdate";
  * mum tomorrow") is only ever offered, never preselected.
  */
 
-export type DoKind = "event" | "task" | "money" | "note" | "doc" | "sheet" | "slides" | "form" | "goto" | "message";
+export type DoKind = "event" | "task" | "money" | "note" | "list" | "voice" | "doc" | "sheet" | "slides" | "form" | "goto" | "message";
 
 export interface Command {
   kind: DoKind;
@@ -42,7 +42,9 @@ export const CREATE_ACTIONS: { kind: DoKind; label: string; prefix: string; word
   { kind: "sheet", label: "New sheet", prefix: "new sheet ", words: "new create spreadsheet sheet excel" },
   { kind: "slides", label: "New slides", prefix: "new slides ", words: "new create slides presentation deck" },
   { kind: "form", label: "New form", prefix: "new form ", words: "new create form survey rsvp signup sign-up questionnaire poll" },
-  { kind: "note", label: "New note", prefix: "note ", words: "new create note" },
+  { kind: "note", label: "New note", prefix: "note ", words: "new create note notes keep" },
+  { kind: "list", label: "New list", prefix: "new list ", words: "new create list checklist shopping notes keep" },
+  { kind: "voice", label: "Record a voice note", prefix: "voice note", words: "new record voice note audio recording memo notes" },
   { kind: "money", label: "Log an expense", prefix: "log $", words: "new add log expense spend spent budget transaction money" },
   { kind: "message", label: "New room message", prefix: "message ", words: "new room message dm direct chat send" },
 ];
@@ -64,8 +66,11 @@ const RULES: [RegExp, DoKind][] = [
   [/^(?:task|to-?do)\s*:\s*(.*)$/i, "task"],
   [/^remind\s+me\s+(?:to\s+)?(.+)$/i, "task"],
   [/^(?:log|spent|spend|paid|(?:add|new|log)\s+(?:an?\s+)?expense|expense)\s+(.*)$/i, "money"],
+  [/^(?:new|create|make|record)\s+(?:an?\s+)?(?:voice\s+note|voice\s+memo|recording)\b:?\s*(.*)$/i, "voice"],
+  [/^voice\s+(?:note|memo)\b:?\s*(.*)$/i, "voice"],
   [/^(?:new|create|make)\s+(?:an?\s+)?note\b:?\s*(.*)$/i, "note"],
   [/^note\b:?\s*(.*)$/i, "note"],
+  [/^(?:new|create|make)\s+(?:an?\s+)?(?:list|checklist|shopping\s+list)\b:?\s*(.*)$/i, "list"],
   [/^(?:new|create|make)\s+(?:an?\s+)?(?:doc|document|word\s+doc(?:ument)?)\b:?\s*(.*)$/i, "doc"],
   [/^(?:new|create|make)\s+(?:an?\s+)?(?:sheet|spreadsheet)\b:?\s*(.*)$/i, "sheet"],
   [/^(?:new|create|make)\s+(?:an?\s+)?(?:slides?|slide\s*deck|deck|presentation)\b:?\s*(.*)$/i, "slides"],
@@ -199,6 +204,7 @@ export const PLACES: Place[] = [
   { label: "Today", to: "/today", words: ["today", "my day", "home", "my work", "cards", "shifts"] },
   { label: "Calendar", to: "/calendar", words: ["calendar", "cal", "events"] },
   { label: "Rooms", to: "/rooms", words: ["rooms", "room", "messages", "dms"] },
+  { label: "Notes", to: "/notes", words: ["notes", "keep", "my notes", "shopping list"] },
   // Passwords is its own page (the route in App.tsx does a full page load). Item
   // names can't be searched from here, by design; the vault page has its own palette.
   { label: "Passwords", to: "/passwords", words: ["passwords", "password", "vault", "logins", "2fa", "totp"] },

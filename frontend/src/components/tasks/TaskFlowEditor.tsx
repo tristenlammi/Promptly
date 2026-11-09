@@ -121,6 +121,7 @@ import type { WorkspaceItemNode } from "@/api/workspaces";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
+import { itemKindWord } from "@/components/workspaces/itemKindWord";
 
 // Shared by the custom node renderers so "Detailed" mode can show each node's
 // full settings on its face (the same inspector, rendered inline). Provided by
@@ -464,6 +465,8 @@ const WORKSPACE_EVENTS: { value: string; label: string }[] = [
   { value: "item_created", label: "An item is created" },
 ];
 const ITEM_KINDS = ["note", "canvas", "board", "sheet", "chat"];
+/** What each kind is called (the workspace "note" is a Page in the UI; N1.7). */
+const ITEM_KIND_LABEL: Record<string, string> = { note: "Page", canvas: "Canvas", board: "Board", sheet: "Sheet", chat: "Chat" };
 // AU-only for now (matches the Simple form), plus whatever the task already has.
 const TIMEZONES = [
   "Australia/Sydney",
@@ -507,7 +510,7 @@ function eventSummary(d: EventTriggerData): string {
   const base =
     WORKSPACE_EVENTS.find((e) => e.value === d.event)?.label ?? d.event;
   if (d.event === "card_moved" && d.column) return `${base} → ${d.column}`;
-  if (d.event === "item_created" && d.item_kind) return `${base} (${d.item_kind})`;
+  if (d.event === "item_created" && d.item_kind) return `${base} (${itemKindWord(d.item_kind)})`;
   return base;
 }
 
@@ -1240,14 +1243,14 @@ function NoteOutNode({ id, type, data, selected }: NodeProps) {
   return (
     <NodeShell
       icon={<NotebookPen className="h-3.5 w-3.5" />}
-      label="Create note"
+      label="Create page"
       accent="var(--warning)"
       selected={selected}
       hasIn
     >
       {detail ?? (
         <div className="truncate text-[var(--text)]">
-          {d.title ? `"${d.title}"` : "New note from the result"}
+          {d.title ? `"${d.title}"` : "New page from the result"}
         </div>
       )}
     </NodeShell>
@@ -1907,11 +1910,11 @@ const NODE_CATALOG: {
   {
     type: "workspace.read",
     label: "Workspace",
-    desc: "Search this workspace, or read a note, board, sheet or file.",
+    desc: "Search this workspace, or read a page, board, sheet or file.",
     icon: FolderSearch,
     color: "#14b8a6",
     group: "Data & web",
-    keywords: "rag docs knowledge note board sheet file read search drive",
+    keywords: "rag docs knowledge page note board sheet file read search drive",
   },
   {
     type: "http.request",
@@ -4718,7 +4721,7 @@ function NodeInspector({
                 ? [
                     { t: "output.board_card", label: "Board card" },
                     { t: "output.chat_message", label: "Chat message" },
-                    { t: "output.note", label: "Note" },
+                    { t: "output.note", label: "Page" },
                     { t: "output.sheet", label: "Sheet" },
                   ]
                 : []),
@@ -4922,7 +4925,7 @@ function NodeInspector({
                 <>
                   <p className="text-[11px] text-[var(--text-muted)]">
                     {isNote
-                      ? "Creates a new note from the result (Markdown becomes rich text) each run."
+                      ? "Creates a new page from the result (Markdown becomes rich text) each run."
                       : "Creates a new spreadsheet from the result each run — JSON, a Markdown table, or CSV/TSV rows are parsed into cells."}
                   </p>
                   <label className="text-xs font-medium text-[var(--text-muted)]">
@@ -5101,7 +5104,7 @@ function NodeInspector({
                       <option value="">Any kind</option>
                       {ITEM_KINDS.map((k) => (
                         <option key={k} value={k}>
-                          {k[0].toUpperCase() + k.slice(1)}
+                          {ITEM_KIND_LABEL[k] ?? k[0].toUpperCase() + k.slice(1)}
                         </option>
                       ))}
                     </select>
@@ -5470,7 +5473,7 @@ function WorkspaceReadFields({
           className={fieldCls}
         >
           <option value="search">Search the workspace</option>
-          <option value="item">One note, board, sheet or roster</option>
+          <option value="item">One page, board, sheet or roster</option>
           <option value="file">A file (e.g. the one that just arrived)</option>
         </select>
       </label>
@@ -5499,7 +5502,7 @@ function WorkspaceReadFields({
               <option value="">Find by title (below)</option>
               {items.map((it) => (
                 <option key={it.id} value={it.id}>
-                  {it.title} ({it.kind})
+                  {it.title} ({itemKindWord(it.kind)})
                 </option>
               ))}
             </select>

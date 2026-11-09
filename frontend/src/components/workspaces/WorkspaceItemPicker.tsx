@@ -25,7 +25,7 @@ const KIND_ICONS: Partial<Record<WorkspaceItemKind, typeof FileText>> = {
   task: Clock,
 };
 const KIND_LABELS: Partial<Record<WorkspaceItemKind, string>> = {
-  note: "Note",
+  note: "Page",
   canvas: "Canvas",
   board: "Board",
   sheet: "Sheet",

@@ -350,6 +350,8 @@ function systemFolderTooltip(kind: SystemFolderKind): string | undefined {
       return "Phone backups and shared photos land here, in a folder for each year and month.";
     case "forms":
       return "Forms you make from the Forms app land here. You can move them anywhere.";
+    case "notes":
+      return "Recordings and pictures you add to notes. They don't show in Photos.";
     default:
       return undefined;
   }

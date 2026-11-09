@@ -64,6 +64,8 @@ export interface UserSettings {
   nav_app_icons?: "line" | "color";
   /** The desktop sidebar stays as you left it, everywhere. */
   sidebar_collapsed?: boolean;
+  /** Notes as a grid of cards or one column. */
+  notes_view?: "grid" | "list";
   /** Today cards the user hid, and the order the rest show in. */
   today_hidden?: string[];
   today_order?: string[];
@@ -143,6 +145,8 @@ export interface UserPreferencesUpdate {
   nav_app_icons?: "line" | "color";
   /** The desktop sidebar stays as you left it, everywhere. */
   sidebar_collapsed?: boolean;
+  /** Notes as a grid of cards or one column. */
+  notes_view?: "grid" | "list";
   /** Replace the hidden Today cards / their order. */
   today_hidden?: string[];
   today_order?: string[];

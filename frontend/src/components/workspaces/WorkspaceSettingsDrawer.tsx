@@ -848,7 +848,7 @@ function SettingsTab({
               <>
                 <span className="font-medium text-[var(--text)]">Auto</span> — a
                 pinned <strong>Workspace Memory.md</strong> is auto-maintained
-                from recent chats and the workspace's notes, sheets, and boards,
+                from recent chats and the workspace's pages, sheets, and boards,
                 so other chats pick up the gist. Pinned items you{" "}
                 <strong>Save</strong> are kept verbatim.
               </>
@@ -939,11 +939,11 @@ function SettingsTab({
             </Button>
           </div>
           <p className="text-xs text-[var(--text-muted)]">
-            Everything in one archive: notes as Markdown, boards, sheets and
+            Everything in one archive: pages as Markdown, boards, sheets and
             rosters as CSV, discussions and chat transcripts, automations,
             pinned files, and a manifest of the structure. A readable export
             for hand-offs and records requests — not a restorable backup
-            (importing it brings back the notes only). Full backups are the
+            (importing it brings back the pages only). Full backups are the
             instance backup, under Admin → Backups.
           </p>
         </section>
@@ -984,7 +984,7 @@ function SettingsTab({
           </div>
           <p className="text-xs text-[var(--text-muted)]">
             Deleting moves the workspace to Recently deleted (in the Archive
-            tab) for 30 days, where you can restore it. After that its notes,
+            tab) for 30 days, where you can restore it. After that its pages,
             boards, sheets, canvases, rosters and discussions are gone for
             good; chats go back to whoever started them.
           </p>
@@ -1538,7 +1538,7 @@ function ReuseSection({ workspace }: { workspace: WorkspaceDetail }) {
           Offer as a template
           <span className="block text-xs text-[var(--text-muted)]">
             Members can start new workspaces from this one&apos;s setup —
-            instructions, notebooks, notes, boards and columns, sheets,
+            instructions, notebooks, pages, boards and columns, sheets,
             rosters and automations. Chats, discussions and files aren&apos;t
             copied.
           </span>

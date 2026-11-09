@@ -14,7 +14,7 @@ from arq.cron import cron
 from arq.worker import func
 
 from app.config import get_settings
-from app.tasks.queue import BUILD_ZIP, INDEX_IMPORT, RUN_IMPORT, RUN_MEETING, RUN_TASK
+from app.tasks.queue import BUILD_ZIP, INDEX_IMPORT, NOTE_AUDIO, RUN_IMPORT, RUN_MEETING, RUN_TASK
 
 
 async def execute_task_run(ctx, run_id: str) -> None:
@@ -230,6 +230,15 @@ async def breach_watch_tick(ctx: dict) -> dict:
     return await breach_tick(ctx)
 
 
+async def transcribe_note_audio_job(ctx: dict, attachment_id: str) -> str:
+    """Notes: a recording's playback copy, waveform and words (Whisper's batch
+    lane, ten minutes at a time). Owns its session; a failure is saved on
+    the recording ("Couldn't transcribe — Try again")."""
+    from app.notes.transcription import process
+
+    return await process(uuid.UUID(attachment_id))
+
+
 # Arq registers functions by their ``__name__``; pin it to the shared constant
 # so the enqueue side (queue.RUN_TASK) and the worker always agree.
 execute_task_run.__name__ = RUN_TASK
@@ -237,6 +246,7 @@ execute_meeting_job.__name__ = RUN_MEETING
 build_zip_job.__name__ = BUILD_ZIP
 index_import_job.__name__ = INDEX_IMPORT
 run_import_job.__name__ = RUN_IMPORT
+transcribe_note_audio_job.__name__ = NOTE_AUDIO
 
 
 async def memory_capture_sweep(ctx) -> dict[str, int]:
@@ -409,6 +419,9 @@ class WorkerSettings:
         func(index_import_job, timeout=2 * 3600, max_tries=1, keep_result=0),
         # The import itself; the watchdog restarts one that lost its worker.
         func(run_import_job, timeout=24 * 3600, max_tries=1, keep_result=0),
+        # Notes: a voice note's waveform and transcript (3 h of audio on CPU
+        # Whisper is slow; a worker lost mid-way gets one more go).
+        func(transcribe_note_audio_job, timeout=3 * 3600, max_tries=2, keep_result=0),
         # Photos and videos are the media worker's (WP-7.4,
         # app.tasks.media_worker), on their own queue.
         # Forms (WP-F1.5): one sync per form at a time (an advisory lock).

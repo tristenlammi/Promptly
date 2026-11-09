@@ -395,6 +395,166 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+
+        <!-- Notes widgets (org.promptly.sync.widgets, docs/notes-plan.md §9): the
+             home-screen widgets, their settings, quick capture and refreshes. -->
+        <receiver
+            android:name=".widgets.AgendaWidgetReceiver"
+            android:label="@string/wg_agenda_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_agenda_info" />
+        </receiver>
+        <receiver
+            android:name=".widgets.TasksWidgetReceiver"
+            android:label="@string/wg_tasks_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_tasks_info" />
+        </receiver>
+        <!-- Boot, the clock or time zone changing, the widgets' own redraw alarm, and
+             a P app being opened (SuiteLauncher's explicit broadcast). -->
+        <receiver android:name=".widgets.WidgetEvents" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <activity
+            android:name=".widgets.AgendaConfigActivity"
+            android:label="Agenda widget"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".widgets.TasksConfigActivity"
+            android:label="Tasks widget"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".widgets.OpenActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Promptly.Invisible" />
+        <activity
+            android:name=".capture.QuickTaskActivity"
+            android:label="Quick task"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.capture"
+            android:theme="@style/Theme.Promptly.Capture"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+
+        <!-- Notes widgets (W1.3): Notes and One note, quick note, voice note, the
+             One note widget's +, and Share to Notes from other apps. -->
+        <receiver
+            android:name=".widgets.NotesWidgetReceiver"
+            android:label="@string/wg_notes_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_notes_info" />
+        </receiver>
+        <receiver
+            android:name=".widgets.OneNoteWidgetReceiver"
+            android:label="@string/wg_one_note_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_one_note_info" />
+        </receiver>
+        <activity
+            android:name=".widgets.NotesConfigActivity"
+            android:label="Notes widget"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".widgets.OneNoteConfigActivity"
+            android:label="One note widget"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <!-- P Notes' long-press shortcuts (android/gen_suite.py) open these two. -->
+        <activity
+            android:name=".capture.QuickNoteActivity"
+            android:label="New note"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.capture"
+            android:theme="@style/Theme.Promptly.Capture"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+        <activity
+            android:name=".capture.VoiceNoteActivity"
+            android:label="Voice note"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="org.promptly.app.voice"
+            android:theme="@style/Theme.Promptly.Capture" />
+        <activity
+            android:name=".capture.AddItemActivity"
+            android:label="Add to list"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.capture"
+            android:theme="@style/Theme.Promptly.Capture"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+        <activity
+            android:name=".capture.ShareToNotesActivity"
+            android:label="Promptly Notes"
+            android:icon="@mipmap/ic_promptly"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.share"
+            android:theme="@style/Theme.Promptly.Capture"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter android:label="Promptly Notes">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter android:label="Promptly Notes">
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+        </activity>
+        <!-- Only while a voice note records (a notification says so). -->
+        <service
+            android:name=".capture.RecorderService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
     <queries>

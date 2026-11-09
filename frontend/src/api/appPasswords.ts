@@ -2,7 +2,7 @@ import { apiClient } from "./client";
 
 /** App passwords — how a device signs in to sync (WP-8.3). */
 
-export type AppPasswordScope = "dav:read" | "dav:write" | "dav:delete" | "upload";
+export type AppPasswordScope = "dav:read" | "dav:write" | "dav:delete" | "upload" | "maps" | "assistant" | "widgets";
 
 export interface AppPassword {
   id: string;

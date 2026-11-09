@@ -64,7 +64,7 @@ export function WorkspaceDrivePage() {
           )}
           {error && <ErrorState>This workspace isn’t available to you.</ErrorState>}
           {data && data.entries.length === 0 && (
-            <p className="text-sm text-[var(--text-muted)]">Nothing here yet — add notes, sheets or whiteboards in the workspace.</p>
+            <p className="text-sm text-[var(--text-muted)]">Nothing here yet — add pages, sheets or whiteboards in the workspace.</p>
           )}
           {data &&
             GROUPS.map((g) => {

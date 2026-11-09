@@ -154,6 +154,9 @@ class AppSettings(Base):
     # MB — a form for people on this server, and a link form.
     forms_upload_cap_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=500, server_default="500")
     forms_link_upload_cap_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    # Notes: transcribe voice notes. Unset: on with the server's own Whisper,
+    # off with cloud speech-to-text until the admin agrees (app/notes/transcription.py).
+    notes_transcribe: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # ----- Public origins (replaces the old static .env ALLOWED_ORIGINS) -----
     # JSON array of fully-qualified origins (scheme + host [+ :port]) the

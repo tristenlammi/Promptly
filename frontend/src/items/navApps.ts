@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, ClipboardList, KeyRound, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
+import { CalendarDays, ClipboardList, KeyRound, Lightbulb, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { authApi } from "@/api/auth";
@@ -30,6 +30,8 @@ export const BUILT_IN_APPS: NavApp[] = [
   { id: "passwords", name: "Passwords", icon: "/item-icons/passwords-192.png", glyph: KeyRound, to: "/passwords" },
   // Forms: a home page of your forms (each form is a file in Files).
   { id: "forms", name: "Forms", icon: "/item-icons/forms-192.png", glyph: ClipboardList, to: "/forms" },
+  // Notes (Keep-style notes and lists).
+  { id: "notes", name: "Notes", icon: "/item-icons/notes-192.png", glyph: Lightbulb, to: "/notes" },
 ];
 
 /**

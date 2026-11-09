@@ -130,6 +130,32 @@ def _editor_ai_reply(system: str, messages: list) -> str | None:
                            "rows": [["Rent", 900], ["Food", 300], ["Total", "=SUM(B2:B3)"]]})
     if system.startswith("You turn the extracted text of a document into clean Markdown"):
         return "# Converted\n\n" + prompt.strip()
+    # Notes (N1.5): AI proposals on one note, read from between <note> tags.
+    if system.startswith(("You tidy up a note", "You turn a note into a checklist", "You suggest a title for a note",
+                          "You pick the to-dos in a note", "You make a calendar event from a note")):
+        import datetime as _dt
+        import re as _re
+
+        inner = prompt.split("<note>", 1)[-1].split("</note>", 1)[0]
+        lines = [ln.strip() for ln in inner.splitlines() if ln.strip() and not ln.startswith(("Title:", "Recorded and transcribed:"))]
+        if system.startswith("You tidy up a note"):
+            out = []
+            for ln in lines:
+                words = [w for w in ln.split() if w.lower().strip(",.") not in ("um", "uh", "like", "so")]
+                s = " ".join(words).strip(" ,")
+                if s:
+                    out.append(s[0].upper() + s[1:] + ("" if s.endswith((".", "!", "?")) else "."))
+            return json.dumps({"text": "\n\n".join(out)})
+        if system.startswith("You turn a note into a checklist"):
+            return json.dumps({"items": lines})
+        if system.startswith("You suggest a title for a note"):
+            return json.dumps({"title": "E2E title"})
+        if system.startswith("You pick the to-dos in a note"):
+            return json.dumps({"tasks": [{"title": ln.lstrip("[ ]x").strip(), "due": None, "time": None} for ln in lines]})
+        today = _re.search(r"Today is \w+ (\d{4}-\d{2}-\d{2})", prompt)
+        day = (_dt.date.fromisoformat(today.group(1)) if today else _dt.date.today()) + _dt.timedelta(days=1)
+        return json.dumps({"title": "E2E event", "date": day.isoformat(), "start": "10:00", "end": "11:30", "all_day": False,
+                           "location": "The workshop", "description": ""})
     if system.startswith("You draft a slide deck"):
         # Three slides, the last two citing the first source (Stage 12).
         import re

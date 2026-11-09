@@ -23,9 +23,13 @@ What's inside a part, under ``Promptly/``:
   included; a location you removed is left out).
 * ``albums.json`` and ``README.txt`` in the first part, and
   ``maps/offline-areas.json`` (P Maps offline areas) when you have any.
+* ``Notes/<title>.md`` for each of your notes and ``Notes/notes.json``
+  (Notes N1.6, ``notes.porting``), in the first part: front-matter, the
+  body as Markdown, lists as checkboxes, pictures and recordings linked to
+  where they are under ``My files``.
 
 A Promptly export imported as "A folder of photos" comes back with its
-dates, places, favourites and albums (``imports.folders``).
+dates, places, favourites and albums — and its notes (``imports.folders``).
 """
 from __future__ import annotations
 
@@ -175,7 +179,7 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     arc_of: dict[uuid.UUID, str] = {}
     holding: set[uuid.UUID | None] = set()
-    counts = {"files": 0, "documents": 0, "photos": 0, "folders": len(order)}
+    counts = {"files": 0, "documents": 0, "photos": 0, "folders": len(order), "notes": 0}
     for f in sorted(files, key=lambda f: (paths[f.folder_id], f.filename.lower())):
         folder = paths[f.folder_id]
         mtime = int((f.client_mtime or f.modified_at or f.updated_at or f.created_at).timestamp())
@@ -220,6 +224,12 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
         arc_of[f.id] = arc
         holding.add(f.folder_id)
         counts["files"] += 1
+    # Notes (N1.6): written as the part is, from what they are then; first,
+    # so they're in part 1 with the README.
+    note_entry = await _notes_entry(db, user, arc_of, files, children)
+    if note_entry is not None:
+        entries.insert(0, note_entry)
+        counts["notes"] = len(note_entry["ids"])
     # Empty folders come back as they were.
     parents = {p for p, kids in children.items() if kids}
     for fid in order:
@@ -293,6 +303,41 @@ async def _voice_sessions(db: AsyncSession, user_id: Any) -> list[dict[str, Any]
     except Exception:  # noqa: BLE001
         logger.exception("library export: voice sessions failed")
         return []
+
+
+async def _notes_entry(
+    db: AsyncSession, user: Any, arc_of: dict[uuid.UUID, str], files: list[Any], children: dict[Any, list[tuple[uuid.UUID, str]]]
+) -> dict[str, Any] | None:
+    """The plan's one ``notes`` entry: your notes' ids, and where each of
+    their pictures and recordings is in the export (and which are photos
+    in your library)."""
+    from app.files.models import FileFolder
+    from app.files.system_folders import SystemKind
+    from app.notes import porting
+    from app.notes.models import NoteAttachment
+
+    ids = await porting.export_plan(db, user)
+    if not ids:
+        return None
+    wanted: dict[str, str] = {}
+    for i in range(0, len(ids), 5000):
+        batch = [uuid.UUID(x) for x in ids[i : i + 5000]]
+        for fid in (
+            await db.execute(select(NoteAttachment.file_id).where(NoteAttachment.note_id.in_(batch), NoteAttachment.file_id.is_not(None)))
+        ).scalars():
+            if fid in arc_of:
+                wanted[str(fid)] = arc_of[fid]
+    cam = await db.scalar(
+        select(FileFolder.id).where(FileFolder.user_id == user.id, FileFolder.system_kind == SystemKind.CAMERA_UPLOADS.value)
+    )
+    library: set[uuid.UUID] = set()
+    frontier = [cam] if cam is not None else []
+    while frontier:
+        fid = frontier.pop()
+        library.add(fid)
+        frontier.extend(c for c, _name in children.get(fid, []))
+    photos = sorted(str(f.id) for f in files if str(f.id) in wanted and f.folder_id in library)
+    return {"a": ROOT + "Notes/", "k": "notes", "ids": ids, "files": wanted, "photos": photos, "s": 2048 * len(ids), "t": int(time.time())}
 
 
 def _safe(name: str) -> str:
@@ -419,9 +464,12 @@ def readme(state: dict[str, Any]) -> bytes:
             if state.get("voice")
             else ""
         )
-        + "\n"
+        + "Notes/       each of your notes as a Markdown file (colour, pin, labels and dates at\n"
+        "             the top; lists as checkboxes; pictures and recordings linked from\n"
+        "             My files), and notes.json with all of them for other apps.\n"
+        "\n"
         "To bring it into another Promptly: Files -> Import -> A folder of photos, and add\n"
-        "the parts. Dates, places, favourites and albums come with it.\n\n"
+        "the parts. Dates, places, favourites, albums and notes come with it.\n\n"
         "Your passwords aren't here. This server can't read them, so it can't export them.\n"
         "Open Passwords, then Import and export, to save an encrypted copy from your device.\n"
     ).encode("utf-8")
@@ -449,7 +497,7 @@ async def create(user: Any, planned: dict[str, Any]) -> str:
     summary = {
         "user_id": str(user.id), "created": planned["created"], "part_gb": planned["part_gb"],
         "counts": planned["counts"], "bytes": planned["bytes"],
-        "parts": [{"n": i + 1, "files": sum(1 for e in p if e["k"] != "dir"), "bytes": sum(e["s"] for e in p)} for i, p in enumerate(planned["parts"])],
+        "parts": [{"n": i + 1, "files": sum(1 for e in p if e["k"] not in ("dir", "notes")), "bytes": sum(e["s"] for e in p)} for i, p in enumerate(planned["parts"])],
     }
     await r.set(_KEY.format(export_id), json.dumps(summary), ex=TTL_SECONDS)
     await r.set(_USER_KEY.format(user.id), export_id, ex=TTL_SECONDS)
@@ -572,6 +620,11 @@ async def stream_part(export_id: str, n: int) -> AsyncIterator[bytes]:
             yield sink.take()
         for e in entries:
             arc = e["a"]
+            if e["k"] == "notes":
+                for name, data, mtime in await _notes_bytes(planned, e):
+                    zf.writestr(_info(name, int(mtime), zone, zipfile.ZIP_DEFLATED), data)
+                yield sink.take()
+                continue
             if e["k"] == "dir":
                 zf.writestr(_info(arc, int(planned["created"]), zone, zipfile.ZIP_STORED), b"")
             elif e["k"] in ("doc", "shell"):
@@ -619,6 +672,19 @@ async def stream_part(export_id: str, n: int) -> AsyncIterator[bytes]:
         # Usually the download was stopped; it's started again from the top.
         logger.info("export %s part %s stopped", export_id, n, exc_info=True)
         raise
+
+
+async def _notes_bytes(planned: dict[str, Any], e: dict[str, Any]) -> list[tuple[str, bytes, float]]:
+    """Your notes' Markdown files and notes.json, as they are now."""
+    from app.database import SessionLocal
+    from app.notes import porting
+
+    try:
+        async with SessionLocal() as db:
+            return await porting.export_files(db, uuid.UUID(planned["user_id"]), e["ids"], e["files"], set(e.get("photos") or []))
+    except Exception:  # noqa: BLE001 — the rest of the export still comes
+        logger.warning("export: notes couldn't be written", exc_info=True)
+        return [(ROOT + "Notes/Not exported.txt", b"Your notes couldn't be written into this export. Try making it again.\n", time.time())]
 
 
 async def _office_bytes(e: dict[str, Any]) -> tuple[bytes | None, bool]:

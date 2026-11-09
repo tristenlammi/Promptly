@@ -2,6 +2,8 @@ import { ClipboardList, FileText, LayoutTemplate, Loader2, MessageSquareText, Pr
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { openNewNote } from "@/notes/newNote";
+
 import type { FileItem } from "@/api/files";
 import { officeApi, type NewOfficeKind } from "@/api/office";
 import { askAboutFiles, ASK_MAX_FILES } from "@/components/files/askAbout";
@@ -61,7 +63,8 @@ export function FilesHomePage() {
 
   const tiles: { label: string; icon: typeof FileText; tint: string; onClick: () => void; busy?: boolean }[] = [
     { label: "Document", icon: FileText, tint: "text-sky-600 bg-sky-500/10", onClick: () => void create("document"), busy: creating === "document" },
-    { label: "Note", icon: StickyNote, tint: "text-yellow-600 bg-yellow-500/10", onClick: () => void create("note"), busy: creating === "note" },
+    // A note is a Notes note (N1.7); long writing is a Document.
+    { label: "Note", icon: StickyNote, tint: "text-yellow-600 bg-yellow-500/10", onClick: () => openNewNote(navigate, "note") },
     { label: "Spreadsheet", icon: Table2, tint: "text-emerald-600 bg-emerald-500/10", onClick: () => void create("sheet"), busy: creating === "sheet" },
     { label: "Whiteboard", icon: Shapes, tint: "text-violet-600 bg-violet-500/10", onClick: () => void create("whiteboard"), busy: creating === "whiteboard" },
     // Forms: shown once the builder (WP-F1.2) is in.

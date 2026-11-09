@@ -619,7 +619,7 @@ export function WorkspaceDetailPage() {
                 <EmptyState
                   icon={<Monitor className="h-5 w-5" />}
                   title={`${KIND_META[activeNode.kind]?.label ?? "This item"} is best on desktop`}
-                  description="This needs the desktop layout — open this workspace on a computer to work on it. Notes, chats, discussions, boards, rosters, sheets and whiteboards (view only) work here."
+                  description="This needs the desktop layout — open this workspace on a computer to work on it. Pages, chats, discussions, boards, rosters, sheets and whiteboards (view only) work here."
                   action={
                     <Button variant="primary" onClick={() => setSelected(null)}>
                       Back to items
@@ -679,7 +679,7 @@ export function WorkspaceDetailPage() {
                 <EmptyState
                   icon={<Layers className="h-5 w-5" />}
                   title="Nothing here yet"
-                  description="Start a chat or discussion above, or add notes, boards, and more from the desktop app."
+                  description="Start a chat or discussion above, or add pages, boards, and more from the desktop app."
                 />
               </div>
             )}
@@ -1091,7 +1091,7 @@ const KIND_META: Partial<
 > = {
   // Icons must match the navigator rail's NodeIcon / notebookPageIcon so an
   // item shows the same symbol in its title as in the nav.
-  note: { icon: FileText, label: "Note" },
+  note: { icon: FileText, label: "Page" },
   canvas: { icon: Shapes, label: "Canvas" },
   board: { icon: Columns3, label: "Board" },
   sheet: { icon: Table2, label: "Sheet" },
@@ -1919,7 +1919,7 @@ function WorkspaceNotePane({
     setFile(null);
     syncedTitleRef.current = node.title;
     if (!node.ref_id) {
-      setError("This note has no underlying document.");
+      setError("This page has no underlying document.");
       return;
     }
     filesApi
@@ -1931,7 +1931,7 @@ function WorkspaceNotePane({
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(apiErrorMessage(err, "Couldn't open this note."));
+        setError(apiErrorMessage(err, "Couldn't open this page."));
       });
     return () => {
       cancelled = true;
@@ -1947,7 +1947,7 @@ function WorkspaceNotePane({
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
         <span className="inline-flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Opening “{node.title || "note"}”…
+          Opening “{node.title || "page"}”…
         </span>
       </div>
     );
@@ -2015,7 +2015,7 @@ type NotebookPageKind =
   | "roster";
 
 const NOTEBOOK_ADD_KINDS: { kind: NotebookPageKind; label: string }[] = [
-  { kind: "note", label: "Note" },
+  { kind: "note", label: "Page" },
   { kind: "sheet", label: "Sheet" },
   { kind: "canvas", label: "Canvas" },
   { kind: "board", label: "Board" },

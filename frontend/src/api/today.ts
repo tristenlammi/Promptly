@@ -120,6 +120,19 @@ export interface TodayComing {
   color?: string | null;
 }
 
+export interface TodayNoteCard {
+  id: string;
+  title: string;
+  kind: "text" | "list";
+  color: string;
+  snippet: string;
+  /** Lists: unticked items, and all of them. */
+  left: number | null;
+  total: number | null;
+  shared: boolean;
+  url: string;
+}
+
 export interface TodayHub {
   passwords?: { attention: number; updated_at: string | null };
   /** Forms (WP-F1.4): answers you haven't seen, and your forms closing today. Counts only. */
@@ -134,6 +147,13 @@ export interface TodayHub {
   voice?: {
     channels: { room_id: string; name: string; space: string; user_ids: string[]; people: string[]; here: boolean; url: string }[];
     in_voice: string | null;
+  };
+  /** Notes: your pinned notes, and voice notes still being transcribed. */
+  notes?: {
+    url: string;
+    pinned: TodayNoteCard[];
+    more_pinned: boolean;
+    transcribing: { id: string; title: string; url: string }[];
   };
   mail?: {
     url: string;
@@ -245,6 +265,8 @@ export interface EverydaySearch {
   tasks: { id: string; title: string; done: boolean; due: string | null; time: string | null; list: string; url: string }[];
   /** Shared tags matching the query (#tags). */
   tags?: { id: string; name: string; color: string | null; count?: number; url: string }[];
+  /** Notes you can open whose title, text, items or recordings match. */
+  notes?: TodayNoteCard[];
 }
 
 export interface JournalDay {

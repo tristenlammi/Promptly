@@ -599,6 +599,15 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
             sec["maps"] = m
     except Exception:  # noqa: BLE001
         logger.exception("today maps section failed")
+    # Notes (app/notes): pinned notes and voice notes still being transcribed.
+    try:
+        from app.notes.today import section as notes_section
+
+        n = await notes_section(db, user)
+        if n:
+            sec["notes"] = n
+    except Exception:  # noqa: BLE001
+        logger.exception("today notes section failed")
 
     # Forms (WP-F1.4): new answers and forms closing today. Counts only.
     try:

@@ -149,8 +149,8 @@ async def _run(jid: uuid.UUID, user_id: uuid.UUID, parts: list[dict]) -> str:
     r = _Run(jid)
     r.source = plan.get("source") or "takeout"
     r.progress = {
-        "done": 0, "total": len(plan["photos"]) + len(plan["drive"]), "imported": 0, "duplicates": 0, "failed": 0,
-        "albums": 0, "drive": 0, "failures": [], "stage": "photos",
+        "done": 0, "total": len(plan["photos"]) + len(plan["drive"]) + len(plan.get("notes") or []), "imported": 0,
+        "duplicates": 0, "failed": 0, "albums": 0, "drive": 0, "notes": 0, "failures": [], "stage": "photos",
     }
     try:
         await _photos(r, jid, user_id, parts, plan)
@@ -159,6 +159,10 @@ async def _run(jid: uuid.UUID, user_id: uuid.UUID, parts: list[dict]) -> str:
         await _albums(r, user_id, plan)
         r.progress["stage"] = "drive"
         await _drive(r, jid, user_id, parts, plan)
+        if plan.get("notes"):
+            r.progress["stage"] = "notes"
+            await r.save(force=True)
+            await _notes(r, jid, user_id, parts, plan)
         state, error = "done", None
     except Cancelled:
         state, error = "cancelled", None
@@ -423,6 +427,172 @@ async def _drive(r: _Run, jid: uuid.UUID, user_id: uuid.UUID, parts: list[dict],
             await r.save()
 
 
+# ------------------------------------------------------------------ notes (N1.6)
+
+# Recordings browsers can't play (Keep's older voice notes are AMR in .3gp):
+# made into .m4a on the way in.
+_TRANSCODE_AUDIO = (".3gp", ".3gpp", ".amr")
+
+
+def _playable(src: Path, name: str) -> tuple[Path, str] | None:
+    """An .m4a (AAC) copy of a recording browsers can't play, beside it;
+    None when ffmpeg can't (the original is imported as it is)."""
+    import shutil
+    import subprocess
+
+    if shutil.which("ffmpeg") is None:
+        return None
+    out = src.with_name(src.name + ".m4a")
+    try:
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostdin", "-v", "error", "-y", "-i", str(src), "-vn", "-c:a", "aac", "-b:a", "96k", str(out)],
+            check=True, timeout=600, capture_output=True,
+        )
+    except (subprocess.SubprocessError, OSError):
+        out.unlink(missing_ok=True)
+        return None
+    if not out.is_file() or out.stat().st_size == 0:
+        out.unlink(missing_ok=True)
+        return None
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    return out, f"{stem}.m4a"
+
+
+async def _notes(r: _Run, jid: uuid.UUID, user_id: uuid.UUID, parts: list[dict], plan: dict[str, Any]) -> None:
+    """Google Keep notes (or a Promptly export's): each with its pictures
+    and recordings (into My files › Notes; a photo from the library is the
+    one imported above). A note already imported is skipped."""
+    from fastapi import HTTPException
+
+    from app.auth.models import User
+    from app.database import SessionLocal
+    from app.files import blobstore, disk_guard
+    from app.files.models import UserFile
+    from app.files.router import ingest_staged
+    from app.imports import jobs
+    from app.imports.takeout import open_member
+    from app.notes import events, porting, transcription
+
+    specs = list(plan.get("notes") or [])
+    async with SessionLocal() as db:
+        have = await porting.existing_refs(db, user_id, specs)
+        cfg = await transcription.config(db)
+    todo = [s for s in specs if s["ref"] not in have]
+    skipped = len(specs) - len(todo)
+    r.progress["duplicates"] += skipped
+    r.progress["done"] += skipped
+    await r.save(force=True)
+    if not todo:
+        return
+
+    # Each archive part is read once, in order, for the files the new notes
+    # need (a .tgz can't be read any other way).
+    wanted: dict[int, dict[str, dict[str, Any]]] = {}
+    for s in todo:
+        for a in s.get("attachments") or []:
+            if "member" in a:
+                wanted.setdefault(int(a["part"]), {})[a["member"]] = a
+    files_of: dict[tuple[int, str], uuid.UUID] = {}
+
+    async def ingest(a: dict[str, Any], stream) -> None:  # noqa: ANN001
+        name = str(a.get("name") or a["member"].rsplit("/", 1)[-1])[:255]
+        try:
+            disk_guard.ensure_room(int(a.get("size") or 0))
+        except disk_guard.DiskFull as e:
+            raise _Stop(str(e)) from None
+        try:
+            staged = await asyncio.to_thread(blobstore.blobstore.stage_stream, stream, size_limit=int(a.get("size") or 0) + 1)
+        except Exception:  # noqa: BLE001
+            r.fail(name, "couldn't be read from the archive")
+            return
+        converted: tuple[Path, str] | None = None
+        try:
+            if a.get("kind") == "audio" and name.lower().endswith(_TRANSCODE_AUDIO):
+                converted = await asyncio.to_thread(_playable, staged.path, name)
+                if converted is not None:
+                    with open(converted[0], "rb") as f:
+                        again = await asyncio.to_thread(
+                            blobstore.blobstore.stage_stream, f, size_limit=converted[0].stat().st_size + 1
+                        )
+                    blobstore.blobstore.discard(staged)
+                    staged, name = again, converted[1]
+                    a = {**a, "mime": "audio/mp4"}
+            async with SessionLocal() as db:
+                same = await db.scalar(
+                    select(UserFile.id).where(
+                        UserFile.user_id == user_id, UserFile.content_sha256 == staged.sha256, UserFile.trashed_at.is_(None),
+                        UserFile.storage_path.is_not(None),
+                    ).limit(1)
+                )
+                if same is not None:
+                    files_of[(int(a["part"]), a["member"])] = same
+                    return
+                user = await db.get(User, user_id)
+                try:
+                    out = await ingest_staged(
+                        db, request=_request(), user=user, staged=staged, filename=name, declared_mime=a.get("mime") or None,
+                        scope="mine", folder_id=None, route="note", on_conflict="keep_both", workspace_id=None, last_modified=None,
+                    )
+                except HTTPException as e:
+                    if e.status_code == 413:
+                        raise _Stop(
+                            "Your storage is full, so the import stopped. Free some space and start it again — it carries on where it stopped."
+                        ) from None
+                    r.fail(name, e.detail if isinstance(e.detail, str) else "not accepted")
+                    return
+                row = await db.get(UserFile, out.id)
+                if row is not None and a.get("kind") == "audio" and not (row.mime_type or "").startswith("audio/"):
+                    # A recording in a video container (.3gp, .mp4): it's sound.
+                    row.mime_type = "audio/mp4" if name.lower().endswith((".mp4", ".m4a")) else "audio/3gpp"
+                    await db.commit()
+                files_of[(int(a["part"]), a["member"])] = out.id
+        finally:
+            blobstore.blobstore.discard(staged)
+            if converted is not None:
+                converted[0].unlink(missing_ok=True)
+
+    for part_no, members in sorted(wanted.items()):
+        path = jobs.job_dir(jid) / parts[part_no]["file"]
+        names = list(members)
+        for i, stream in _members(path, names, list(range(len(names))), open_member):
+            await ingest(members[names[i]], stream)
+            await _hold(jid)
+
+    for s in todo:
+        files: list[tuple[uuid.UUID, str, str | None]] = []
+        for a in s.get("attachments") or []:
+            fid: uuid.UUID | None = None
+            if "photo" in a:
+                got = r.results.get(int(a["photo"]))
+                fid = uuid.UUID(got) if got else None
+            elif "member" in a:
+                fid = files_of.get((int(a["part"]), a["member"]))
+            if fid is not None:
+                files.append((fid, a["kind"], a.get("transcript")))
+        try:
+            async with SessionLocal() as db:
+                user = await db.get(User, user_id)
+                note, audio = await porting.make_note(db, user, s, files, transcribe=cfg.on)
+                await db.commit()
+                event = events.note_event(note)
+            r.progress["notes"] += 1
+            r.progress["imported"] += 1
+            try:
+                await events.publish({user_id}, event)
+            except Exception:  # noqa: BLE001 — live updates are a nicety
+                pass
+            for aid in audio:
+                await transcription.enqueue(aid)
+        except _Stop:
+            raise
+        except Exception as e:  # noqa: BLE001 — one note that won't go in doesn't stop the rest
+            logger.warning("import %s: a note failed", jid, exc_info=True)
+            detail = getattr(e, "detail", None)
+            r.fail(str(s.get("title") or "A note"), detail if isinstance(detail, str) else "couldn't be made")
+        r.progress["done"] += 1
+        await r.save()
+
+
 def _epoch(naive_iso: str | None, zone) -> int | None:  # noqa: ANN001 — ZoneInfo | None
     """A wall-clock time with no zone, read in the owner's (UTC without one)."""
     if not naive_iso:
@@ -434,7 +604,10 @@ def _epoch(naive_iso: str | None, zone) -> int | None:  # noqa: ANN001 — ZoneI
     return int(dt.replace(tzinfo=zone or timezone.utc).timestamp())
 
 
-_TITLES = {"takeout": "Your Google Takeout is in", "folder": "Your photos are in", "apple": "Your Apple photos are in"}
+_TITLES = {
+    "takeout": "Your Google Takeout is in", "folder": "Your photos are in", "apple": "Your Apple photos are in",
+    "keep": "Your Google Keep notes are in",
+}
 
 
 async def _tell(user_id: uuid.UUID, progress: dict[str, Any], source: str = "takeout") -> None:
@@ -442,12 +615,16 @@ async def _tell(user_id: uuid.UUID, progress: dict[str, Any], source: str = "tak
         from app.notifications.dispatch import notify_user
 
         n = progress.get("imported", 0)
+        notes = progress.get("notes", 0)
+        only_notes = source == "keep" or bool(notes and notes == n)
+        what = f"{notes} new {'note' if notes == 1 else 'notes'}" if only_notes else f"{n} new {'item' if n == 1 else 'items'}"
         await notify_user(
             user_id=user_id, category="import_done", title=_TITLES.get(source, "Your import is in"),
-            body=f"{n} new {'item' if n == 1 else 'items'}"
+            body=what
             + (f", {progress.get('albums', 0)} albums" if progress.get("albums") else "")
+            + (f", {notes} of them notes" if notes and not only_notes else "")
             + (f"; {progress.get('duplicates', 0)} you already had" if progress.get("duplicates") else "") + ".",
-            url="/files/photos",
+            url="/notes" if only_notes else "/files/photos",
         )
     except Exception:  # noqa: BLE001 — telling them must never fail the import
         logger.warning("import notification failed", exc_info=True)

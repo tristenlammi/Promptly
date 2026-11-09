@@ -37,6 +37,8 @@ MEDIA_INGEST = "ingest_media_job"
 BUILD_ZIP = "build_zip_job"
 INDEX_IMPORT = "index_import_job"
 RUN_IMPORT = "run_import_job"
+# Notes (app/notes/transcription.py): a voice note's waveform and words.
+NOTE_AUDIO = "transcribe_note_audio_job"
 
 _pool = None
 _lock = asyncio.Lock()

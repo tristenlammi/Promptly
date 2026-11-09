@@ -1813,6 +1813,12 @@ async def _upload_core(
                 parent_folder = await folder_for_generated(
                     db, user, canonical_mime
                 )
+            elif route == "note":
+                # A picture or recording added to a note (app/notes):
+                # My files/Notes, kept out of Photos.
+                from app.files.system_folders import ensure_notes
+
+                parent_folder = await ensure_notes(db, user)
 
         # ----- 7) Storage cap, exactly, one upload at a time per person -----
         # Two uploads finishing together each passed the pre-check against

@@ -32,7 +32,7 @@ router = APIRouter()
 
 
 class ImportCreate(BaseModel):
-    source: Literal["takeout", "folder", "apple"] = "takeout"
+    source: Literal["takeout", "folder", "apple", "keep"] = "takeout"
 
 
 def _out(job: ImportJob) -> dict[str, Any]:

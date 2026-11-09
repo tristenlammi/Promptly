@@ -1,9 +1,30 @@
 import { apiClient } from "./client";
 
 /** Moving in (WP-10.1, 10.3): a Google Takeout, a folder of photos or an
- *  Apple export, uploaded in parts, read, then imported. */
+ *  Apple export, uploaded in parts, read, then imported. Google Keep
+ *  (Notes N1.6) is a Takeout that brings its notes only. */
 
-export type ImportSource = "takeout" | "folder" | "apple";
+export type ImportSource = "takeout" | "folder" | "apple" | "keep";
+
+/** What the check found of notes (Google Keep, or a Promptly export's). */
+export interface NotesReport {
+  notes: number;
+  lists: number;
+  pinned: number;
+  archived: number;
+  /** In Keep's trash: left out. */
+  trashed: number;
+  with_pictures: number;
+  with_recordings: number;
+  labels: string[];
+  /** Pictures or recordings a note names that aren't in the archives. */
+  missing_attachments: number;
+  /** Notes shared in Keep (the people aren't added here). */
+  shared: number;
+  /** Notes too long for a note, shortened. */
+  cut: number;
+  unreadable: number;
+}
 export type ImportState = "collecting" | "indexing" | "ready" | "importing" | "done" | "failed" | "cancelled";
 
 export interface ImportReport {
@@ -23,6 +44,7 @@ export interface ImportReport {
   skipped: { other_products: number; trash: number; unsupported: number };
   other_products: string[];
   parts: number;
+  notes?: NotesReport | null;
 }
 
 export interface ImportProgress {
@@ -33,6 +55,8 @@ export interface ImportProgress {
   failed: number;
   albums?: number;
   drive?: number;
+  notes?: number;
+  stage?: "photos" | "albums" | "drive" | "notes";
   failures?: { name: string; reason: string }[];
 }
 

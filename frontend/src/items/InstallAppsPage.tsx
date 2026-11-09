@@ -67,6 +67,13 @@ const CORE: Installable[] = [
     href: "/mail/",
   },
   {
+    id: "notes",
+    name: "Promptly Notes",
+    blurb: "Quick notes and checklists — pin, colour, label, and they work with no signal.",
+    icon: "/item-icons/notes-192.png",
+    href: "/notes/",
+  },
+  {
     id: "passwords",
     name: "Promptly Passwords",
     blurb: "Your passwords and 2FA codes, end-to-end encrypted. Your server can't read them.",

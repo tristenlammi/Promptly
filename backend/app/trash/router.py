@@ -8,7 +8,8 @@
 ``type`` is ``file`` / ``folder`` / ``workspace`` / ``workspace_item`` /
 ``entry`` (a snapshot, by its trash id), or ``calendar_event`` / ``album``
 / ``task`` / ``contact`` with the thing's own id — what an app's Undo
-toast sends, since it only knows what it deleted.
+toast sends, since it only knows what it deleted. ``note`` is a note in
+Notes, trashed in place (by its id).
 """
 from __future__ import annotations
 
@@ -29,7 +30,9 @@ from . import service
 router = APIRouter()
 
 TrashType = Literal[
-    "file", "folder", "workspace", "workspace_item", "entry", "calendar_event", "album", "task", "contact"
+    "file", "folder", "workspace", "workspace_item", "entry", "calendar_event", "album", "task", "contact",
+    # Notes (app/notes): trashed in place, by the note's id.
+    "note",
 ]
 
 

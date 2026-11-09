@@ -17,7 +17,11 @@ import { DeviceGuide } from "./DeviceGuide";
  * its own; your account password never works there.
  */
 
-const SCOPE_LABEL: Record<AppPasswordScope, string> = {
+/** What a new app password may do (a phone linked with the Promptly app gets
+ *  its own set: the map, the assistant, widgets). */
+type CreateScope = "dav:read" | "dav:write" | "dav:delete" | "upload";
+
+const SCOPE_LABEL: Record<CreateScope, string> = {
   "dav:read": "See and download files",
   "dav:write": "Add and change files",
   "dav:delete": "Delete files here when they're deleted on the device",
@@ -30,7 +34,13 @@ const SCOPE_SHORT: Record<AppPasswordScope, string> = {
   "dav:write": "add and change",
   "dav:delete": "delete",
   upload: "big uploads",
+  maps: "maps",
+  assistant: "phone assistant",
+  widgets: "home-screen widgets",
 };
+
+/** A phone linked with the Promptly app (it can use the assistant). */
+const isPhone = (scopes: AppPasswordScope[]) => scopes.includes("assistant") || scopes.includes("widgets");
 
 const KEY = ["app-passwords"];
 
@@ -39,7 +49,7 @@ export function DevicesPanel() {
   const { data: devices = [], isLoading } = useQuery({ queryKey: KEY, queryFn: appPasswordsApi.list });
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
-  const [scopes, setScopes] = useState<AppPasswordScope[]>(["dav:read", "dav:write"]);
+  const [scopes, setScopes] = useState<CreateScope[]>(["dav:read", "dav:write"]);
   const [made, setMade] = useState<AppPasswordCreated | null>(null);
 
   const create = useMutation({
@@ -53,13 +63,19 @@ export function DevicesPanel() {
     onError: (e) => toast.error(apiErrorMessage(e, "Couldn't add the device.")),
   });
 
-  const setDeletes = useMutation({
-    mutationFn: ({ id, scopes: next }: { id: string; scopes: AppPasswordScope[] }) => appPasswordsApi.update(id, next),
-    onSuccess: (row) => {
+  const setScopesOf = useMutation({
+    mutationFn: ({ id, scopes: next }: { id: string; scopes: AppPasswordScope[]; changed: "dav:delete" | "widgets" }) =>
+      appPasswordsApi.update(id, next),
+    onSuccess: (row, { changed }) => {
+      const on = row.scopes.includes(changed);
       toast.success(
-        row.scopes.includes("dav:delete")
-          ? `Deleting on “${row.name}” now deletes here too.`
-          : `Deleting on “${row.name}” now leaves the file here.`
+        changed === "widgets"
+          ? on
+            ? `“${row.name}” can show your calendar and tasks in its widgets.`
+            : `“${row.name}”'s widgets are off and clear themselves next time they refresh.`
+          : on
+            ? `Deleting on “${row.name}” now deletes here too.`
+            : `Deleting on “${row.name}” now leaves the file here.`
       );
       void qc.invalidateQueries({ queryKey: KEY });
     },
@@ -116,16 +132,35 @@ export function DevicesPanel() {
                     <input
                       type="checkbox"
                       checked={d.scopes.includes("dav:delete")}
-                      disabled={setDeletes.isPending}
+                      disabled={setScopesOf.isPending}
                       onChange={(e) =>
-                        setDeletes.mutate({
+                        setScopesOf.mutate({
                           id: d.id,
+                          changed: "dav:delete",
                           scopes: e.target.checked ? [...d.scopes, "dav:delete"] : d.scopes.filter((s) => s !== "dav:delete"),
                         })
                       }
                       className="accent-[var(--accent)]"
                     />
                     Deleting on this device deletes here too
+                  </label>
+                )}
+                {isPhone(d.scopes) && (
+                  <label className="mt-1 flex items-center gap-1.5 text-[var(--text-muted)]">
+                    <input
+                      type="checkbox"
+                      checked={d.scopes.includes("widgets")}
+                      disabled={setScopesOf.isPending}
+                      onChange={(e) =>
+                        setScopesOf.mutate({
+                          id: d.id,
+                          changed: "widgets",
+                          scopes: e.target.checked ? [...d.scopes, "widgets"] : d.scopes.filter((s) => s !== "widgets"),
+                        })
+                      }
+                      className="accent-[var(--accent)]"
+                    />
+                    Home-screen widgets (your calendar and tasks, readable on the unlocked phone)
                   </label>
                 )}
               </div>
@@ -161,7 +196,7 @@ export function DevicesPanel() {
           </label>
           <fieldset className="space-y-1.5 text-xs">
             <legend className="mb-1 font-medium text-[var(--text)]">It may</legend>
-            {(Object.keys(SCOPE_LABEL) as AppPasswordScope[]).map((s) => (
+            {(Object.keys(SCOPE_LABEL) as CreateScope[]).map((s) => (
               <label key={s} className="flex items-center gap-2 text-[var(--text)]">
                 <input
                   type="checkbox"

@@ -32,6 +32,7 @@ async def run_storage_maintenance() -> dict[str, int]:
     from app.files.link_roles import purge_dead_link_grants
     from app.workspaces.router import purge_trashed_workspaces
     from app.trash.service import purge_expired_entries, purge_expired_workspace_items
+    from app.notes.service import purge_expired as purge_expired_notes
 
     out = {
         "trash_purged": 0, "orphan_assets": 0, "docs_rerendered": 0,
@@ -56,6 +57,8 @@ async def run_storage_maintenance() -> dict[str, int]:
         # Access people got from comment / edit links that have since
         # expired (WP-6.6; the access checks already ignore them).
         ("link_grants_purged", purge_dead_link_grants),
+        # Notes 30+ days in Trash (app/notes).
+        ("notes_purged", purge_expired_notes),
     ):
         try:
             async with SessionLocal() as db:

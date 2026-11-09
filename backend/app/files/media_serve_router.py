@@ -111,6 +111,10 @@ async def serve(token: str, request: Request, db: AsyncSession = Depends(get_db)
         from app.forms import uploads as form_uploads
 
         return await form_uploads.serve(db, claim, user, request)
+    if claim.rendition == "note":
+        from app.notes.media import serve as serve_note
+
+        return await serve_note(db, claim, user, request)
     try:
         row = await _load_readable_file(db, claim.file_id, user)
     except HTTPException:

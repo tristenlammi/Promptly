@@ -10,6 +10,7 @@ import type { AppSettingsPatch } from "@/api/admin";
 import { useModelStore } from "@/store/modelStore";
 
 import { MailSearchCard } from "@/mail/AdminSearchCard";
+import { NotesTranscriptionCard } from "@/notes/AdminTranscriptionCard";
 
 import { EmbeddingConfigCard } from "./CustomModelsPanel";
 import { SettingsCard } from "./SettingsCard";
@@ -108,6 +109,7 @@ export function DefaultsTab() {
       />
       <EmbeddingConfigCard />
       <MailSearchCard />
+      <NotesTranscriptionCard />
     </div>
   );
 }

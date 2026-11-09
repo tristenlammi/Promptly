@@ -88,6 +88,10 @@ class Store(context: Context) {
         get() = prefs.getBoolean("unlinked", false)
         set(value) = prefs.edit().putBoolean("unlinked", value).apply()
 
+    /** Has an app password, without unsealing it (the widgets check this on every draw). */
+    val hasAccount: Boolean
+        get() = prefs.contains("password") && prefs.contains("server")
+
     var scheduleVersion: Int
         get() = prefs.getInt("schedule_version", 0)
         set(value) = prefs.edit().putInt("schedule_version", value).apply()

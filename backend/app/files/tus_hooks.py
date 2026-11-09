@@ -190,7 +190,7 @@ def _plan_args(meta: dict[str, str], *, at_finish: bool) -> dict[str, Any]:
         "scope": meta.get("scope") if meta.get("scope") in ("mine", "shared") else "mine",
         "folder_id": uid("folder_id"),
         "workspace_id": uid("workspace_id"),
-        "route": meta.get("route") if meta.get("route") in ("chat", "generated", "camera") else None,
+        "route": meta.get("route") if meta.get("route") in ("chat", "generated", "camera", "note") else None,
         "on_conflict": on_conflict,
         "last_modified": last_modified,
     }

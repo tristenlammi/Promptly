@@ -774,7 +774,7 @@ export function WorkspaceNavigatorTree({
               <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
                 Nothing here yet. Use{" "}
                 <span className="font-medium text-[var(--text)]">+ New</span> to
-                add a chat, note, canvas, or folder.
+                add a chat, page, canvas, or folder.
               </div>
             ) : (
               <ul>
@@ -2012,7 +2012,7 @@ function NodeActions({
                 <>
                   {(
                     [
-                      { kind: "note", label: "New note here", icon: FileText },
+                      { kind: "note", label: "New page here", icon: FileText },
                       { kind: "canvas", label: "New canvas here", icon: Shapes },
                       { kind: "board", label: "New board here", icon: Columns3 },
                       { kind: "sheet", label: "New sheet here", icon: Table2 },
@@ -2329,7 +2329,7 @@ function NewMenu({
             <MenuSection label="Documents" />
             <MenuItem
               icon={<FilePlus2 className="h-3.5 w-3.5" />}
-              label="New note"
+              label="New page"
               onClick={() => {
                 setOpen(false);
                 onNewNote();

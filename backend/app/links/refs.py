@@ -22,6 +22,7 @@ user        account id                             anyone signed in (not disable
 witem       workspace item id                      workspace member (private drafts: author)
 room_msg    room message id                        people in the room
 chat_msg    chat message id                        the chat's owner (or workspace, if shared)
+note        Notes note id                          owner or member, not trashed (app/notes)
 ==========  =====================================  =========================
 
 :func:`resolve` answers the thing as ``user`` sees it, or None when they
@@ -50,15 +51,25 @@ IN_ITEM: dict[str, str] = {
     "journal": "journal",
 }
 UUID_KINDS = ("file", "folder", "photo", "album", "event", "person", "user", "witem", "room_msg", "chat_msg")
+# Notes (app/notes).
+UUID_KINDS = (*UUID_KINDS, "note")
 KINDS: tuple[str, ...] = (*UUID_KINDS, *IN_ITEM)
 # Kinds whose text can mention things (the "Mentioned in" side).
 SOURCE_KINDS = ("file", "room_msg", "chat_msg", "journal")
+SOURCE_KINDS = (*SOURCE_KINDS, "note")  # Notes
 
 LABELS = {
     "file": "File", "folder": "Folder", "photo": "Photo", "album": "Album", "task": "Task", "recipe": "Recipe",
     "trip": "Trip", "contact": "Contact", "txn": "Transaction", "journal": "Journal entry", "event": "Event",
     "person": "Person", "user": "Person", "witem": "Workspace item", "room_msg": "Message", "chat_msg": "Chat",
 }
+LABELS["note"] = "Note"  # Notes
+
+
+def witem_kind(kind: str | None) -> str:
+    """A workspace item's kind as people see it: the "note" kind is a Page
+    (Notes N1.7 — one thing in Promptly is called a note)."""
+    return {"note": "Page", "container": "Notebook"}.get(kind or "", (kind or "item").capitalize())
 
 _SUB_RE = re.compile(r"^[A-Za-z0-9_\-]{1,60}$")
 
@@ -214,7 +225,7 @@ async def _witem(db: AsyncSession, user: User, iid: uuid.UUID) -> dict | None:
     except HTTPException:
         return None
     href = f"/workspaces/{ws.id}?item={item.id}&kind={item.kind}" + (f"&ref={item.ref_id}" if item.ref_id else "")
-    return {"title": item.title or "Untitled", "subtitle": f"{(item.kind or 'item').capitalize()} · {ws.title}", "href": href}
+    return {"title": item.title or "Untitled", "subtitle": f"{witem_kind(item.kind)} · {ws.title}", "href": href}
 
 
 async def _room_msg(db: AsyncSession, user: User, mid: uuid.UUID) -> dict | None:
@@ -254,6 +265,18 @@ async def _chat_msg(db: AsyncSession, user: User, mid: uuid.UUID) -> dict | None
     return {"title": conv.title or "Chat", "subtitle": "Chat · " + _snip(msg.content if isinstance(msg.content, str) else ""), "href": f"/chat/{conv.id}"}
 
 
+async def _note(db: AsyncSession, user: User, nid: uuid.UUID) -> dict | None:
+    from app.notes.access import can_open
+    from app.notes.models import Note
+    from app.notes.service import display_title
+
+    note = await db.get(Note, nid)
+    if note is None or not await can_open(db, user, note):
+        return None
+    snippet = _snip(note.body_text, 80) if note.title.strip() else ""
+    return {"title": display_title(note), "subtitle": "Note" + (f" · {snippet}" if snippet else ""), "href": f"/notes/n/{nid}"}
+
+
 async def resolve(db: AsyncSession, user: User, kind: str, id_: str) -> dict | None:
     """``{kind, id, label, title, subtitle, href, thumb, emoji, image_url}`` as
     ``user`` sees the thing, or None when they can't (or it's gone)."""
@@ -282,6 +305,8 @@ async def resolve(db: AsyncSession, user: User, kind: str, id_: str) -> dict | N
                 out = await _witem(db, user, oid)
             elif kind == "room_msg":
                 out = await _room_msg(db, user, oid)
+            elif kind == "note":
+                out = await _note(db, user, oid)
             else:
                 out = await _chat_msg(db, user, oid)
     except HTTPException:

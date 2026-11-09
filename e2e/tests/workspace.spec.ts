@@ -12,7 +12,7 @@ async function newWorkspace(page: Page, title: string): Promise<void> {
   await expect(page).toHaveURL(/\/workspaces\/[0-9a-f-]{36}/);
 }
 
-async function addItem(page: Page, kind: "New note" | "New board"): Promise<void> {
+async function addItem(page: Page, kind: "New page" | "New board"): Promise<void> {
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("menuitem", { name: kind, exact: true }).click();
 }
@@ -28,7 +28,7 @@ const column = (page: Page, name: string) =>
 test.describe("workspaces", () => {
   test("write in a note and share it with a public link", async ({ alice: page, browser }) => {
     await newWorkspace(page, `E2E notes ${stamp}`);
-    await addItem(page, "New note");
+    await addItem(page, "New page");
 
     const editor = page.locator('.ProseMirror[contenteditable="true"]');
     await expect(editor).toBeVisible({ timeout: 20_000 });
@@ -38,7 +38,7 @@ test.describe("workspaces", () => {
     await expect(editor).toContainText(words);
 
     const noteRow = tree(page).locator("li").filter({
-      has: page.getByRole("button", { name: "Untitled note", exact: true }),
+      has: page.getByRole("button", { name: "Untitled page", exact: true }),
     }).last();
     await noteRow.hover();
     // exact: the row itself is a role=button whose name also says "More actions".
@@ -116,9 +116,9 @@ test.describe("workspaces", () => {
   test("Back returns to the previous item instead of leaving the workspace", async ({ alice: page }) => {
     await newWorkspace(page, `E2E back ${stamp}`);
     const home = page.url().split("?")[0];
-    await addItem(page, "New note");
+    await addItem(page, "New page");
     await addItem(page, "New board");
-    await tree(page).getByRole("button", { name: "Untitled note", exact: true }).click();
+    await tree(page).getByRole("button", { name: "Untitled page", exact: true }).click();
     await expect(page).toHaveURL(/item=/);
     const noteUrl = page.url();
     await tree(page).getByRole("button", { name: "Board", exact: true }).click();
@@ -241,7 +241,7 @@ test.describe("workspaces", () => {
     // workspace's files — every title edit came back "Rename failed".
     const title = `E2E renamed ${stamp}`;
     await newWorkspace(page, `E2E titles ${stamp}`);
-    await addItem(page, "New note");
+    await addItem(page, "New page");
     await expect(page.locator('.ProseMirror[contenteditable="true"]')).toBeVisible({ timeout: 20_000 });
     const field = page.getByLabel("Document title").first();
     await field.fill(title);
