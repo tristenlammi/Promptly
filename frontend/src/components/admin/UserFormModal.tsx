@@ -12,6 +12,10 @@ import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
+import { useAppSettings } from "@/hooks/useAdminUsers";
+import { PasswordChecklist, passwordMeetsRules } from "@/components/account/PasswordChecklist";
+
+import { NewMemberCard, type NewMember } from "./NewMemberCard";
 import type { AdminModelOption, AdminUser, UserRole } from "@/api/types";
 import type { UserGroup } from "@/api/groups";
 
@@ -64,8 +68,9 @@ interface UserFormModalProps {
   /**
    * Commits the form. Resolve on success; throw to surface an error inline.
    * For edits, password is only included when the caller entered one.
+   * Create resolves with the new account, for the "Send them this" card.
    */
-  onSubmit: (values: UserFormValues) => Promise<void>;
+  onSubmit: (values: UserFormValues) => Promise<AdminUser | void>;
 }
 
 export function UserFormModal({
@@ -95,6 +100,9 @@ export function UserFormModal({
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // After Create: the details to send them (password held only here).
+  const [created, setCreated] = useState<NewMember | null>(null);
+  const { data: appSettings } = useAppSettings();
 
   // Quota fields stored as the strings the user types so an empty
   // input is distinguishable from "0" (which is a valid cap meaning
@@ -111,8 +119,12 @@ export function UserFormModal({
 
   // Re-initialize whenever the modal is opened.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setCreated(null);
+      return;
+    }
     setError(null);
+    setCreated(null);
     setBusy(false);
     setSearch("");
     if (mode === "edit" && user) {
@@ -202,7 +214,9 @@ export function UserFormModal({
   const canSubmit =
     email.trim().length > 0 &&
     username.trim().length >= 3 &&
-    (mode === "edit" || password.length >= 8) &&
+    (mode === "edit"
+      ? password.length === 0 || passwordMeetsRules(password, policy.min_length)
+      : passwordMeetsRules(password, policy.min_length)) &&
     !(role === "user" && locked && picked.size !== 1);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -222,7 +236,7 @@ export function UserFormModal({
     const storageBytes = parseGbToBytes(storageCapGb);
 
     try {
-      await onSubmit({
+      const result = await onSubmit({
         email: email.trim(),
         username: username.trim(),
         password,
@@ -242,7 +256,18 @@ export function UserFormModal({
         daily_token_budget: parseQuota(dailyTokens),
         monthly_token_budget: parseQuota(monthlyTokens),
       });
-      onClose();
+      if (mode === "create" && result) {
+        setCreated({
+          id: result.id,
+          username: result.username,
+          email: result.email,
+          password,
+          temporary: result.must_change_password ?? mustChangePassword,
+        });
+        setPassword("");
+      } else {
+        onClose();
+      }
     } catch (err) {
       setError(apiErrorMessage(err, "Request failed"));
     } finally {
@@ -253,8 +278,28 @@ export function UserFormModal({
   const title = mode === "create" ? "Create user" : `Edit ${user?.username ?? "user"}`;
   const description =
     mode === "create"
-      ? "Create a new account and choose which models they can use."
+      ? "Make an account for someone in your family. Next you'll get the details to send them."
       : "Update this user's details. Leave password blank to keep it unchanged.";
+
+  if (created) {
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Send them this"
+        description="How they get in. Copy it into a message, share it, or email it."
+        widthClass="max-w-lg"
+        dismissible={false}
+        footer={
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        }
+      >
+        <NewMemberCard member={created} smtpConfigured={!!appSettings?.smtp_configured} />
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -310,6 +355,9 @@ export function UserFormModal({
           autoComplete="new-password"
           placeholder={mode === "edit" ? "Leave blank to keep unchanged" : undefined}
         />
+        {(mode === "create" || password.length > 0) && (
+          <PasswordChecklist password={password} minLength={policy.min_length} />
+        )}
 
         {/* Role toggle */}
         <div>
@@ -322,14 +370,14 @@ export function UserFormModal({
               onClick={() => setRole("user")}
               icon={<UserIcon className="h-4 w-4" />}
               title="User"
-              body="Chat only. Model access limited to what you grant below."
+              body="Messages, photos, calendar, notes, files and the AI helper. Can't change settings or other people's accounts."
             />
             <RoleOption
               active={role === "admin"}
               onClick={() => setRole("admin")}
               icon={<ShieldCheck className="h-4 w-4" />}
               title="Admin"
-              body="Full access. Can manage users and model providers."
+              body="Everything, plus running this Promptly: people, settings and AI models."
             />
           </div>
         </div>

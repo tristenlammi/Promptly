@@ -202,6 +202,79 @@ async def create_user(
 
 
 # --------------------------------------------------------------------
+# Onboarding: email a new member how to sign in
+# --------------------------------------------------------------------
+class WelcomeEmailRequest(BaseModel):
+    """What the "Send them this" card emails. ``address`` is the server
+    address the admin sees in the card; ``password`` is the temporary one
+    they just set (optional: left out when they'd rather say it in person).
+    The password is only put in the email — never stored or logged."""
+
+    address: str = Field(min_length=8, max_length=300, pattern=r"^https?://[^\s/]+/?$")
+    password: str | None = Field(default=None, max_length=200)
+
+
+def welcome_email_text(username: str, address: str, password: str | None, temporary: bool = True) -> str:
+    """The same words as the card in Admin → Users, as plain text."""
+    lines = [
+        f"Hi {username},",
+        "",
+        "You've got an account on our family's Promptly — a private space for "
+        "messages, photos, calendar, notes and an AI helper.",
+        "",
+        f"Address: {address}",
+        f"Username: {username}",
+    ]
+    if password:
+        lines.append(f"{'Temporary password' if temporary else 'Password'}: {password}")
+    lines += [
+        "",
+        "1. Open the address and sign in.",
+        "2. Choose your own password." if temporary else "2. You're in.",
+        "3. On an iPhone, open it in Safari, then tap Share → Add to Home Screen.",
+        "   On Android, tap Install when your phone offers it.",
+    ]
+    return "\n".join(lines)
+
+
+@router.post("/users/{user_id}/welcome-email", status_code=status.HTTP_204_NO_CONTENT)
+async def send_welcome_email(
+    user_id: uuid.UUID,
+    payload: WelcomeEmailRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> Response:
+    """Email a new member their sign-in details through the instance's SMTP."""
+    from app.mfa.smtp import SmtpNotConfiguredError, SmtpSendError, send_message
+
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    try:
+        await send_message(
+            db,
+            to=user.email,
+            subject="Your Promptly account",
+            text_body=welcome_email_text(
+                user.username, payload.address.rstrip("/"), payload.password, bool(user.must_change_password)
+            ),
+        )
+    except SmtpNotConfiguredError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email isn't set up on this Promptly yet. Copy or share the details instead.",
+        ) from e
+    except SmtpSendError as e:
+        # Never echo the cause (server names, TLS errors) or the password.
+        logger.warning("welcome email to user %s not sent", user.id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't send the email. Copy or share the details instead.",
+        ) from e
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------------
 # Bulk export / import (CSV)
 # --------------------------------------------------------------------
 _EXPORT_COLUMNS = [

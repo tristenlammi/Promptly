@@ -21,6 +21,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- New-member onboarding (onboard-fixes) -->
+- Admin → Users: after you create an account, a "Send them this" card shows the address, username and password with the steps to sign in, ready to copy, share, or email to them when email is set up.
+
+### Changed
+<!-- New-member onboarding (onboard-fixes) -->
+- Admin → Users: the create form checks the password against the same rules as the server and shows them, and the role choices are described in plain words.
+
 ### Fixed
 - Files: the "System" row at the bottom of a folder no longer cuts off the list's rounded corners.
 

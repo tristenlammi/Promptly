@@ -17,7 +17,7 @@ from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, or_, select, union
+from sqlalchemy import and_, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -34,6 +34,8 @@ MAX_ROOMS = 12
 MAX_FILES = 12
 MAX_PHOTOS = 12
 MAX_RESULTS = 30
+# A blank picker tops up with everyone on the server, up to this many.
+EVERYONE_LIMIT = 20
 
 
 def _not_found() -> HTTPException:
@@ -441,6 +443,19 @@ async def _known_ids(db: AsyncSession, viewer: User) -> set[uuid.UUID]:
     return {i for i in (await db.execute(q)).scalars().all() if i is not None} - {viewer.id}
 
 
+@router.get("/host")
+async def host(db: AsyncSession = Depends(get_db), viewer: User = Depends(get_current_user)) -> dict:
+    """Who set this Promptly up — the first admin still active — so the
+    welcome can offer a "say hi" message to them. Only their username and
+    picture, like the picker. ``user`` is null when that's you (or nobody)."""
+    u = (
+        await db.execute(
+            select(User).where(User.role == "admin", User.disabled.is_(False)).order_by(User.created_at.asc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    return {"user": _user_out(u) if u is not None and u.id != viewer.id else None}
+
+
 @router.get("/search")
 async def search(
     q: str = Query(default="", max_length=80),
@@ -479,6 +494,20 @@ async def search(
         ids = await _known_ids(db, viewer) - seen
         if ids:
             rows = (await db.execute(select(User).where(User.id.in_(ids), User.disabled.is_(False)).order_by(User.username).limit(MAX_RESULTS))).scalars()
+            for u in rows:
+                take(Person(user=u))
+        # Onboarding: someone new knows nobody yet, so a blank picker was
+        # empty. Fill it with the people on this Promptly, by name — the same
+        # username + picture typing two letters already shows.
+        if len(on) < EVERYONE_LIMIT:
+            rows = (
+                await db.execute(
+                    select(User)
+                    .where(User.disabled.is_(False), User.id.notin_(seen | {viewer.id}))
+                    .order_by(func.lower(User.username))
+                    .limit(EVERYONE_LIMIT - len(on))
+                )
+            ).scalars()
             for u in rows:
                 take(Person(user=u))
     elif len(term) >= 2:
