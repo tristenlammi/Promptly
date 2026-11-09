@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+- Files: the "System" row at the bottom of a folder no longer cuts off the list's rounded corners.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added
