@@ -138,7 +138,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Security
 <!-- Admin privacy, AP3 -->
-- Custom models: an admin can only add files they can open themselves. Before, any person's file could be added by its id, and everyone using the model could then search it. Other people's files already in a custom model are taken out when the server updates (only the number is logged).
+- Custom models: an admin can only add their own files. Before, any person's file could be added by its id, and everyone using the model could then search it. A file someone shared with the admin can't be added either, because it was shared with the admin alone. Other people's files already in a custom model are taken out when the server updates (only the number is logged).
 <!-- Admin privacy, AP4 -->
 - Deleting a user: an admin can no longer take over the person's workspaces. A private workspace is deleted with the account, and a shared one goes to one of its own members who can edit it (the longest-standing workspace admin, then editor; the admin can pick another of them). With nobody else who can edit it, it's deleted.
 - Deleting a user: the confirmation no longer shows the names of their workspaces. Private ones are only counted, and a shared one is named only if you're in it.

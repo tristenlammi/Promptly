@@ -4,8 +4,8 @@ The owner's rule: a server admin can never see another user's data, except
 where that's obviously intended (the social side). These tests pin the
 leaks that were closed:
 
-* AP3 (L1): a custom model only takes files the caller may read, and the
-  0403 migration detaches other people's files already attached.
+* AP3 (L1): a custom model only takes files the caller owns, and the 0403
+  migration detaches other people's files already attached.
 * AP1 (L3-L7, G1): logs and stored errors carry route templates, never raw
   paths, and routine lines carry no user id; 0402 rewrites stored paths.
 * AP2 (L8-L10, G2-G5): no user content in logs, errors or crash reports.
@@ -147,8 +147,9 @@ async def test_creating_a_model_with_a_foreign_file_is_refused(db, client, user,
 
 
 @pytest.mark.asyncio
-async def test_a_file_shared_with_the_admin_can_be_attached(db, client, user, model):
-    """The normal read rule: shared with you means you may read it."""
+async def test_a_file_shared_with_the_admin_cant_be_attached_either(db, client, user, model):
+    """Shared with the admin means shared with them alone: a model would
+    make it searchable by everyone who uses it."""
     from app.files.models import ResourceGrant
 
     other = await _user(db, "other")
@@ -159,8 +160,20 @@ async def test_a_file_shared_with_the_admin_can_be_attached(db, client, user, mo
 
     r = await client.post(f"/api/admin/custom-models/{model.id}/files",
                           json={"file_ids": [str(shared.id)]}, headers=_auth(user))
-    assert r.status_code == 201, r.text
-    assert await _attached(db, model.id) == {shared.id}
+    assert r.status_code == 404, r.text
+    assert await _attached(db, model.id) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_trashed_file_of_ones_own_cant_be_attached(db, client, user, model):
+    from datetime import datetime, timezone
+
+    mine = await _file(db, user, "old.txt")
+    mine.trashed_at = datetime.now(timezone.utc)
+    await db.commit()
+    r = await client.post(f"/api/admin/custom-models/{model.id}/files",
+                          json={"file_ids": [str(mine.id)]}, headers=_auth(user))
+    assert r.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -260,13 +273,33 @@ async def test_migration_detaches_foreign_files_and_their_chunks(db, user, model
     await _run_upgrade(db, "0403_cm_foreign_files")
 
     db.expire_all()
-    assert await _attached(db, cm_id) == {mine_id, shared_id}
+    # Only the creator's own file stays; one shared with them goes too.
+    assert await _attached(db, cm_id) == {mine_id}
     assert await _chunk_count(db, cm_id, theirs_id) == 0
+    assert await _chunk_count(db, cm_id, shared_id) == 0
     assert await _chunk_count(db, cm_id, mine_id) == 1
     logged = "\n".join(r.getMessage() for r in caplog.records)
-    assert "detached 1 file" in logged
+    assert "detached 2 file" in logged
     assert "Biopsy" not in logged and str(theirs_id) not in logged
-    assert await db.scalar(select(func.count()).select_from(CustomModelFile)) == 2
+    assert await db.scalar(select(func.count()).select_from(CustomModelFile)) == 1
+
+
+@pytest.mark.asyncio
+async def test_migration_detaches_everything_when_the_creator_is_gone(db, user, model):
+    from app.custom_models.models import CustomModel, CustomModelFile
+
+    other = await _user(db, "other")
+    theirs = await _file(db, other, "notes.txt")
+    db.add(CustomModelFile(custom_model_id=model.id, user_file_id=theirs.id, indexing_status="ready"))
+    cm = await db.get(CustomModel, model.id)
+    cm.created_by = None
+    await db.commit()
+    cm_id = model.id
+
+    await _run_upgrade(db, "0403_cm_foreign_files")
+
+    db.expire_all()
+    assert await _attached(db, cm_id) == set()
 
 
 # ------------------------------------------------------------- AP1 / L3-L7, G1

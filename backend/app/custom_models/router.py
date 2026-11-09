@@ -712,28 +712,37 @@ async def _attach_files(
 ) -> list[uuid.UUID]:
     """Insert pivot rows + queue ingestion. Skips files already attached.
 
-    Only files the caller may read (the same rule as downloads,
-    :func:`app.files.access.can_read`) can be attached. An admin used to be
-    able to attach any user's file by id, which made it searchable through
-    the model by everyone who can pick it (admin privacy audit L1). A file
-    that doesn't exist and one the caller can't read get the same 404, so
-    the check can't be used to probe for ids.
+    Only files the caller owns (and hasn't trashed) can be attached. An
+    admin used to be able to attach any user's file by id, which made it
+    searchable through the model by everyone who can pick it (admin privacy
+    audit L1). A file shared with the caller doesn't count either: it was
+    shared with them alone, and a model would widen who sees it. A file that
+    doesn't exist and one the caller doesn't own get the same 404, so the
+    check can't be used to probe for ids.
 
     Returns the list of file ids that were *newly* attached so the
     caller can shape the response accordingly.
     """
-    from app.files.access import can_read
-
     requested = list(dict.fromkeys(file_ids))  # de-dupe, keep order
     if not requested:
         return []
 
-    for fid in requested:
-        if not await can_read(db, fid, caller.id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="One of those files wasn't found in your files.",
+    owned = set(
+        (
+            await db.execute(
+                select(UserFile.id).where(
+                    UserFile.id.in_(requested),
+                    UserFile.user_id == caller.id,
+                    UserFile.trashed_at.is_(None),
+                )
             )
+        ).scalars()
+    )
+    if any(fid not in owned for fid in requested):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One of those files wasn't found in your files.",
+        )
 
     # Skip already-attached pairs so the call is idempotent.
     existing_rows = (
