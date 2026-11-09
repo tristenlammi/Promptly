@@ -143,7 +143,7 @@ export function LoginPage() {
           <div>
             <h1 className="text-lg font-semibold tracking-tight">Promptly</h1>
             <p className="text-xs text-[var(--text-muted)]">
-              Sign in to your account
+              Your family&apos;s private space
             </p>
           </div>
         </div>
@@ -216,7 +216,7 @@ export function LoginPage() {
         )}
 
         <p className="mt-4 text-center text-xs text-[var(--text-muted)]">
-          Accounts are created by an administrator from the admin panel.
+          No account yet? Ask the person who set up Promptly for one.
         </p>
       </div>
     </div>

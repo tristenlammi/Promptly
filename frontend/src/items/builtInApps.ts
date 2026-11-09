@@ -11,20 +11,22 @@ export interface NavApp {
   /** The line icon used when the sidebar shows simple icons. */
   glyph: LucideIcon;
   to: string;
+  /** A few plain words under the tile on the Apps page. */
+  blurb?: string;
 }
 
 /** Apps that are part of Promptly itself (not file-backed items). */
 export const BUILT_IN_APPS: NavApp[] = [
-  { id: "rooms", name: "Rooms", icon: "/item-icons/rooms-192.png", glyph: MessageCircle, to: "/rooms" },
-  { id: "calendar", name: "Calendar", icon: "/item-icons/calendar-192.png", glyph: CalendarDays, to: "/calendar" },
-  { id: "maps", name: "Maps", icon: "/item-icons/maps-192.png", glyph: Navigation, to: "/maps" },
-  { id: "mail", name: "Mail", icon: "/item-icons/mail-192.png", glyph: Mail, to: "/mail" },
+  { id: "rooms", name: "Rooms", icon: "/item-icons/rooms-192.png", glyph: MessageCircle, to: "/rooms", blurb: "Family messages" },
+  { id: "calendar", name: "Calendar", icon: "/item-icons/calendar-192.png", glyph: CalendarDays, to: "/calendar", blurb: "Shared calendar" },
+  { id: "maps", name: "Maps", icon: "/item-icons/maps-192.png", glyph: Navigation, to: "/maps", blurb: "Directions" },
+  { id: "mail", name: "Mail", icon: "/item-icons/mail-192.png", glyph: Mail, to: "/mail", blurb: "Your email" },
   // Its own page: the route in App.tsx turns this into a full page load.
-  { id: "passwords", name: "Passwords", icon: "/item-icons/passwords-192.png", glyph: KeyRound, to: "/passwords" },
+  { id: "passwords", name: "Passwords", icon: "/item-icons/passwords-192.png", glyph: KeyRound, to: "/passwords", blurb: "Logins, kept safe" },
   // Forms: a home page of your forms (each form is a file in Files).
-  { id: "forms", name: "Forms", icon: "/item-icons/forms-192.png", glyph: ClipboardList, to: "/forms" },
+  { id: "forms", name: "Forms", icon: "/item-icons/forms-192.png", glyph: ClipboardList, to: "/forms", blurb: "Sign-ups & surveys" },
   // Notes (Keep-style notes and lists).
-  { id: "notes", name: "Notes", icon: "/item-icons/notes-192.png", glyph: Lightbulb, to: "/notes" },
+  { id: "notes", name: "Notes", icon: "/item-icons/notes-192.png", glyph: Lightbulb, to: "/notes", blurb: "Notes & lists" },
   // Porch (shown only to people it's turned on for: useBuiltInApps)
-  { id: "porch", name: "Porch", icon: "/item-icons/porch-192.png", glyph: House, to: "/porch" },
+  { id: "porch", name: "Porch", icon: "/item-icons/porch-192.png", glyph: House, to: "/porch", blurb: "Family news" },
 ];

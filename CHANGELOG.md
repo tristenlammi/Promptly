@@ -31,6 +31,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Install apps starts with one recommended step for the device you're on (iPhone, Android or computer); the separate per-app installs, Android Auto and the passwords extension are under "More".
 - Today shows a small "Install Promptly on this device" link when you're using Promptly in a browser, and iPhone users get an "Add to Home Screen" link in the sidebar.
 - On an iPhone in Safari, Rooms, Porch and Account → Notifications now explain how to get message alerts (add Promptly to the Home Screen) instead of hiding the option.
+- Plainer words for new people: the sign-in page says "Your family's private space" and to ask the person who set up Promptly for an account; "Usage & cost" is now "AI usage"; the chat model button shows just the model's name; new chats suggest everyday things to ask; and the Apps page has a few words under each app.
 - Starting a new message in Rooms now lists the people on your Promptly straight away, instead of an empty search.
 - Admin → Users: the create form checks the password against the same rules as the server and shows them, and the role choices are described in plain words.
 
