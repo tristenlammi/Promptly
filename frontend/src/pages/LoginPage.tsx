@@ -24,6 +24,8 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
     "Couldn't reach the single sign-on provider. Please try again shortly.",
   provider_denied: "Sign-in was cancelled or denied at the provider.",
   sso_disabled: "Single sign-on isn't enabled on this server.",
+  no_public_address:
+    "Single sign-on needs this server's public address. Ask your administrator to set it in Admin → General.",
   linked_elsewhere:
     "This Promptly account is linked to a different sign-in at your identity provider. Ask your administrator.",
 };
