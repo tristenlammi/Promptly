@@ -74,7 +74,7 @@ test.describe("files", () => {
     await alice.getByRole("button", { name: "Share", exact: true }).click();
     const share = alice.getByRole("dialog").filter({ has: alice.getByRole("heading", { name: "Share folder" }) });
     await share.getByRole("combobox", { name: "Search people" }).fill(run.users.bob.username);
-    await share.getByRole("listbox", { name: "People" }).getByRole("button", { name: new RegExp(run.users.bob.username) }).click();
+    await share.getByRole("listbox", { name: "People" }).getByRole("option", { name: new RegExp(run.users.bob.username) }).click();
     await expect(share.getByRole("button", { name: "Revoke access" })).toBeVisible();
     await share.getByRole("button", { name: "Done" }).click();
 
@@ -225,7 +225,7 @@ test.describe("files", () => {
     await alice.getByRole("button", { name: "Share", exact: true }).click();
     const share = alice.getByRole("dialog").filter({ has: alice.getByRole("heading", { name: "Share file" }) });
     await share.getByRole("combobox", { name: "Search people" }).fill(run.users.bob.username);
-    await share.getByRole("listbox", { name: "People" }).getByRole("button", { name: new RegExp(run.users.bob.username) }).click();
+    await share.getByRole("listbox", { name: "People" }).getByRole("option", { name: new RegExp(run.users.bob.username) }).click();
     await expect(share.getByRole("button", { name: "Revoke access" })).toBeVisible();
     await share.getByRole("button", { name: "Done" }).click();
 

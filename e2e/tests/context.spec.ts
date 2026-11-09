@@ -24,8 +24,13 @@ test.describe("context", () => {
     // Calendar and continuity tools (calendar_events/free_times/add/change,
     // my_day, search_apps, find_person), and ~0.6k for maps and the timeline
     // (maps_search/directions/chargers, timeline_day/visits), and ~0.5k for
-    // Forms (draft_form, read_form_responses) — ~6.2k in all.
-    expect(size).toBeLessThan(6400);
+    // Forms (draft_form, read_form_responses), and ~0.6k for Notes
+    // (find_notes, read_note, create_note, add_to_note, tick_note_items) —
+    // ~6.8k. Once the account has app files and rooms (other specs make
+    // them, so it depends on the order they ran in) the item tools
+    // (list_my_items, read_item, use_item, ~0.4k) and the room tools
+    // (read_room, post_to_room, ~0.3k) come too: ~7.6k at most.
+    expect(size).toBeLessThan(8000);
 
     // The meter reads that request and breaks it down.
     const pill = page.getByRole("button", { name: /\d.*\/ 32k/ });

@@ -96,7 +96,7 @@ test("Ctrl+K and Porch search find a post you can see, never one you can't", asy
   await bob.goto("/files");
   await ready(bob);
   await bob.keyboard.press("Control+k");
-  await bob.getByPlaceholder("Search chats, events, people, tasks…").fill(`lighthouse ${stamp}`);
+  await bob.getByPlaceholder(/^Search chats, /).fill(`lighthouse ${stamp}`);
   const row = bob.getByRole("button", { name: new RegExp(`Lighthouse picnic ${stamp}`) });
   await expect(row).toBeVisible({ timeout: 15_000 });
   await shot(bob, "ctrl-k");

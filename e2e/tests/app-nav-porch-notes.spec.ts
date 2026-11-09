@@ -30,6 +30,25 @@ async function aliceWindow(browser: Browser, opts: { installed?: boolean; phone?
   return { ctx, page: await ctx.newPage() };
 }
 
+/** Porch's first-run welcome is a sheet over the page: mark it seen, as
+ *  porch.spec.ts does, so these checks don't depend on the spec order. */
+async function porchWelcomed(browser: Browser) {
+  const { ctx, page } = await aliceWindow(browser);
+  const seen = page.waitForResponse((r) => !!r.request().headers()["authorization"] && r.url().includes("/api/") && r.ok());
+  await page.goto("/files");
+  await ready(page);
+  const headers = { Authorization: (await seen).request().headers()["authorization"] };
+  expect((await page.request.get("/api/porch/bootstrap", { headers })).ok()).toBe(true);
+  expect((await page.request.patch("/api/porch/me/profile", { headers, data: { welcomed: true } })).ok()).toBe(true);
+  await ctx.close();
+}
+
+/** Promptly has loaded in a phone window (no sidebar there: the chat's composer). */
+async function phoneReady(page: Page) {
+  await expect(page.getByText("Loading Promptly...")).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByRole("textbox", { name: "Message Promptly..." })).toBeVisible({ timeout: 20_000 });
+}
+
 async function expectPromptlySidebar(page: Page) {
   await expect(page.getByRole("button", { name: "New chat" }).first()).toBeVisible({ timeout: 20_000 });
 }
@@ -56,13 +75,16 @@ async function menuGoesToFiles(page: Page, app: "porch" | "notes") {
   }
   const drawer = page.getByRole("dialog", { name: "Navigation menu" });
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole("button", { name: "New chat", exact: true })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "New chat", exact: true }).first()).toBeVisible();
   await drawer.getByRole("link", { name: "Files", exact: true }).click();
   await expect(page).toHaveURL(/\/files$/);
 }
 
 test.describe("app navigation: Porch and Notes", () => {
   test.describe.configure({ timeout: 180_000 });
+  test.beforeAll(async ({ browser }) => {
+    await porchWelcomed(browser);
+  });
 
   for (const app of [
     { key: "porch" as const, path: "/porch/", start: "/porch/?source=pwa", seen: /Feed|Porch/ },
@@ -95,7 +117,7 @@ test.describe("app navigation: Porch and Notes", () => {
         const phone = await aliceWindow(browser, { phone: true, installed });
         if (installed) {
           await phone.page.goto("/chat");
-          await ready(phone.page);
+          await phoneReady(phone.page);
         }
         await phone.page.goto(app.path);
         await menuGoesToFiles(phone.page, app.key);

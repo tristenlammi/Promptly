@@ -162,11 +162,31 @@ test("real response headers: stricter CSP only on the vault, nothing weakened el
   expect(h["x-frame-options"]).toBe("DENY");
   expect(await vault.text()).toContain("passwords.webmanifest");
 
+  // The vault keeps its own, stricter policy (nothing from the main app's).
+  expect(h["content-security-policy"]).toContain("default-src 'none'");
+  expect(h["content-security-policy"]).toContain("frame-src 'none'");
+  expect(h["content-security-policy"]).not.toContain("'unsafe-eval'");
+
+  const scriptSrc = (csp: string | undefined) =>
+    (csp ?? "").split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src "));
   for (const path of ["/", "/chat", "/files", "/mail"]) {
     const main = (await request.get(path)).headers();
-    expect(main["content-security-policy"], path).not.toContain("wasm-unsafe-eval");
-    expect(main["permissions-policy"], path).toContain("camera=()");
+    // Since v0.33.0 the main app allows WebAssembly compilation, and only that
+    // ('wasm-unsafe-eval', for Calls' noise suppression in nginx/nginx.conf):
+    // no 'unsafe-eval', no inline script, no other script origins.
+    expect(scriptSrc(main["content-security-policy"]), path).toBe("script-src 'self' 'wasm-unsafe-eval'");
+    expect(main["content-security-policy"], path).not.toContain("'unsafe-eval'");
+    expect(main["content-security-policy"], path).toContain("frame-ancestors 'none'");
+    // Calls (v0.33.0) needs the camera, screen sharing and the microphone
+    // on the main app's own origin; everything else stays off.
+    expect(main["permissions-policy"], path).toBe(
+      "accelerometer=(), camera=(self), display-capture=(self), geolocation=(self), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()",
+    );
   }
+  // The vault's own policy doesn't take the main app's microphone or screen.
+  expect(h["permissions-policy"]).toContain("microphone=()");
+  expect(h["permissions-policy"]).toContain("geolocation=()");
+  expect(h["permissions-policy"]).not.toContain("display-capture");
 });
 
 test("the vault page blocks inline script, frames and off-origin connections", async ({ browser }) => {
