@@ -22,7 +22,8 @@ from app.people import blocks
 
 from . import access, core, deps
 from .models import (
-    PorchComment, PorchGroup, PorchPollOption, PorchPollVote, PorchPost, PorchPostGroup, PorchPostMedia, PorchProfile,
+    PorchComment, PorchGroup, PorchPollOption, PorchPollVote, PorchPost, PorchPostGroup, PorchPostMedia, PorchProfile, PorchStory,
+    PorchStoryGroup,
 )
 
 
@@ -166,8 +167,10 @@ async def porch_json(db: AsyncSession, user: User, arc_of: dict[uuid.UUID, str],
             {"on_post_by": a["name"] if a else None, "post_id": str(c.post_id), "text": c.body, "at": _iso(c.created_at), "edited": _iso(c.edited_at)}
         )
 
+    stories_out = await _stories(db, user, arc_of, root)
+
     return {
-        "about": "Your Porch: your profile, the groups you're in, your posts with their comments, and your comments on other posts.",
+        "about": "Your Porch: your profile, the groups you're in, your posts with their comments, your stories, and your comments on other posts.",
         "profile": {
             "name": core.display_name(user),
             "username": user.username,
@@ -178,7 +181,50 @@ async def porch_json(db: AsyncSession, user: User, arc_of: dict[uuid.UUID, str],
         "groups": groups_out,
         "posts": posts_out,
         "your_comments_on_other_posts": comments_out,
+        "stories": stories_out,
     }
+
+
+async def _stories(db: AsyncSession, user: User, arc_of: dict[uuid.UUID, str], root: str) -> list[dict[str, Any]]:
+    """Your stories (WP-P2.1), live and old: the words, the groups each went
+    to, the stickers' words and places, and which photo."""
+    rows = list(
+        (
+            await db.execute(
+                select(PorchStory).where(PorchStory.author_id == user.id, PorchStory.deleted_at.is_(None)).order_by(PorchStory.created_at)
+            )
+        ).scalars()
+    )
+    if not rows:
+        return []
+    ids = [s.id for s in rows]
+    sent_to: dict[uuid.UUID, list[str]] = {sid: [] for sid in ids}
+    q = (
+        select(PorchStoryGroup.story_id, PorchGroup.name)
+        .join(PorchGroup, PorchGroup.id == PorchStoryGroup.group_id)
+        .where(PorchStoryGroup.story_id.in_(ids))
+        .order_by(PorchGroup.name)
+    )
+    for sid, name in (await db.execute(q)).all():
+        sent_to[sid].append(name)
+    out = []
+    for s in rows:
+        arc = arc_of.get(s.file_id) if s.file_id else None
+        out.append(
+            {
+                "id": str(s.id),
+                "kind": s.kind,
+                "text": s.text,
+                "posted": _iso(s.created_at),
+                "ended": _iso(s.expires_at),
+                "groups": sent_to[s.id],
+                "file": arc[len(root):] if arc else None,
+                "description": s.alt_text or None,
+                "stickers": [o.get("text") for o in s.overlays or [] if o.get("type") == "text"],
+                "places": [o["place"] for o in s.overlays or [] if o.get("type") == "place" and isinstance(o.get("place"), dict)],
+            }
+        )
+    return out
 
 
 __all__ = ["porch_json"]

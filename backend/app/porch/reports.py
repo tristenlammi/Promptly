@@ -4,7 +4,7 @@ The rule: **a server admin sees another person's Porch content only as a
 normal member who can see it.** So a report goes to whoever runs the group
 the reporter saw it in, never to someone outside that group.
 
-* Anyone can **report** a post or comment they can see (not their own) to
+* Anyone can **report** a post, comment or story (WP-P2.1) they can see (not their own) to
   the admins of a group they see it through (their groups ∩ its groups),
   one report per person and group (``porch_reports.group_id``; NULL means
   Everyone, which the server admins run). If the only admin of a group is
@@ -41,7 +41,10 @@ from app.people import blocks
 
 from . import access, core, deps, push
 from .deps import require_porch
-from .models import PorchComment, PorchGroup, PorchGroupMember, PorchPost, PorchPostGroup, PorchReaction, PorchRemoval, PorchReport
+from .models import (
+    PorchComment, PorchGroup, PorchGroupMember, PorchPost, PorchPostGroup, PorchReaction, PorchRemoval, PorchReport, PorchStory,
+    PorchStoryGroup,
+)
 
 router = APIRouter()
 
@@ -81,17 +84,18 @@ async def handles(db: AsyncSession, user: User, g: PorchGroup) -> bool:
     return access.is_admin(user, g, m)
 
 
-async def _live_groups(db: AsyncSession, post_id: uuid.UUID) -> list[PorchGroup]:
-    q = (
-        select(PorchGroup)
-        .join(PorchPostGroup, PorchPostGroup.group_id == PorchGroup.id)
-        .where(PorchPostGroup.post_id == post_id, PorchGroup.deleted_at.is_(None))
-    )
+async def _live_groups(db: AsyncSession, post_id: uuid.UUID, *, story: bool = False) -> list[PorchGroup]:
+    """A post's (or story's) groups that still exist."""
+    link, col = (PorchStoryGroup, PorchStoryGroup.story_id) if story else (PorchPostGroup, PorchPostGroup.post_id)
+    q = select(PorchGroup).join(link, link.group_id == PorchGroup.id).where(col == post_id, PorchGroup.deleted_at.is_(None))
     return list((await db.execute(q)).scalars().all())
 
 
-async def _in(db: AsyncSession, post_id: uuid.UUID, g: PorchGroup) -> bool:
-    q = select(PorchPostGroup.post_id).where(PorchPostGroup.post_id == post_id, PorchPostGroup.group_id == g.id)
+async def _in(db: AsyncSession, post_id: uuid.UUID, g: PorchGroup, *, story: bool = False) -> bool:
+    if story:
+        q = select(PorchStoryGroup.story_id).where(PorchStoryGroup.story_id == post_id, PorchStoryGroup.group_id == g.id)
+    else:
+        q = select(PorchPostGroup.post_id).where(PorchPostGroup.post_id == post_id, PorchPostGroup.group_id == g.id)
     return (await db.execute(q)).first() is not None
 
 
@@ -99,7 +103,7 @@ async def _in(db: AsyncSession, post_id: uuid.UUID, g: PorchGroup) -> bool:
 
 
 class ReportIn(BaseModel):
-    target_type: Literal["post", "comment"]
+    target_type: Literal["post", "comment", "story"]
     target_id: uuid.UUID
     reason: str = Field(default="", max_length=500)
     # The groups to report it in: yours that it's in (Everyone included).
@@ -109,10 +113,18 @@ class ReportIn(BaseModel):
 
 @router.post("/reports", status_code=201)
 async def report(body: ReportIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_porch)) -> dict:
-    """Report a post or comment you can see to the admins of the group (or
-    groups) you see it in. Reporting the same thing again in the same group
-    updates your reason."""
-    if body.target_type == "post":
+    """Report a post, comment or story you can see to the admins of the
+    group (or groups) you see it in. Reporting the same thing again in the
+    same group updates your reason."""
+    story = body.target_type == "story"
+    post: PorchPost | PorchStory
+    if story:
+        # A story you see through one of your groups.
+        post = await access.load_story(db, user, body.target_id, live=False)
+        author_id = post.author_id
+        if author_id == user.id:
+            raise core.bad("This is your own story. You can delete it instead.")
+    elif body.target_type == "post":
         post = await access.load_post(db, user, body.target_id)
         author_id = post.author_id
         if author_id == user.id:
@@ -129,7 +141,7 @@ async def report(body: ReportIn, db: AsyncSession = Depends(get_db), user: User 
             raise core.bad("This is your own comment. You can delete it instead.")
 
     mine = set(await access.my_group_ids(db, user))
-    through = [g for g in await _live_groups(db, post.id) if g.id in mine]
+    through = [g for g in await _live_groups(db, post.id, story=story) if g.id in mine]
     through.sort(key=lambda g: (g.kind == "everyone", g.name.lower()))
     if body.groups is not None:
         want = set(body.groups)
@@ -201,7 +213,8 @@ async def _tell(db: AsyncSession, g: PorchGroup, ids: list[uuid.UUID]) -> None:
 def _author_of_target():  # noqa: ANN202 — SQL
     post_author = select(PorchPost.author_id).where(PorchPost.id == PorchReport.target_id).scalar_subquery()
     comment_author = select(PorchComment.author_id).where(PorchComment.id == PorchReport.target_id).scalar_subquery()
-    return case((PorchReport.target_type == "comment", comment_author), else_=post_author)
+    story_author = select(PorchStory.author_id).where(PorchStory.id == PorchReport.target_id).scalar_subquery()
+    return case((PorchReport.target_type == "comment", comment_author), (PorchReport.target_type == "story", story_author), else_=post_author)
 
 
 async def waiting(db: AsyncSession, user: User, groups: list[PorchGroup] | None = None) -> dict[uuid.UUID, int]:
@@ -254,6 +267,8 @@ async def _target_out(db: AsyncSession, viewer: User, g: PorchGroup, target_type
     deleted or out of ``g``, only that it's gone."""
     from . import media
 
+    if target_type == "story":
+        return await _story_target_out(db, viewer, g, target_id)
     comment: PorchComment | None = None
     if target_type == "comment":
         comment = await db.get(PorchComment, target_id)
@@ -289,6 +304,36 @@ async def _target_out(db: AsyncSession, viewer: User, g: PorchGroup, target_type
         for pm, row, fm in (await media.live_media(db, [post.id])).get(post.id, []):
             m = media.media_out(viewer, pm, row, fm, author=False)
             out["media"].append({"thumb": m.get("thumb") or m.get("poster"), "preview": m.get("preview") or m.get("poster"), "alt": pm.alt_text, "video": media.is_video(row, fm)})
+    return out
+
+
+async def _story_target_out(db: AsyncSession, viewer: User, g: PorchGroup, story_id: uuid.UUID) -> dict[str, Any] | None:
+    """A reported story, for someone who runs ``g``: only while they can see
+    it themselves through one of their groups."""
+    from . import stories
+
+    s = await db.get(PorchStory, story_id)
+    gone = s is None or s.deleted_at is not None or not await _in(db, s.id, g, story=True)
+    out: dict[str, Any] = {"type": "story", "id": str(story_id), "gone": gone}
+    if gone:
+        return out
+    assert s is not None
+    if s.author_id == viewer.id or not await access.can_see_story(db, viewer, s.id, live=False):
+        return None
+    shown = (await stories.stories_out(db, viewer, [s], views=False))[0]
+    out["author"] = shown["author"]
+    out["story_id"] = str(s.id)
+    out["kind"] = s.kind
+    out["created_at"] = shown["created_at"]
+    out["body"] = s.text or " · ".join(str(o.get("text", "")) for o in s.overlays or [] if o.get("type") == "text")
+    labels = shown["groups"]
+    out["groups"] = {"in_everyone": any(x["kind"] == "everyone" for x in labels), "named": labels}
+    m = shown["media"]
+    out["media"] = (
+        [{"thumb": m.get("thumb") or m.get("poster"), "preview": m.get("preview") or m.get("poster"), "alt": s.alt_text, "video": m["kind"] == "video"}]
+        if m else []
+    )
+    out["background"] = s.background
     return out
 
 
@@ -420,6 +465,39 @@ async def remove_comment(db: AsyncSession, by: User, c: PorchComment, reason: st
     return {"closed": closed, "deleted": True}
 
 
+async def remove_story(db: AsyncSession, by: User, s: PorchStory, reason: str, *, group: PorchGroup) -> dict[str, Any]:
+    """Take a story out of one group; with none left, it's gone. The poster
+    is told why. Commits."""
+    audience = await access.story_audience_ids(db, s)
+    everyone = group.kind == "everyone"
+    await db.execute(delete(PorchStoryGroup).where(PorchStoryGroup.story_id == s.id, PorchStoryGroup.group_id == group.id))
+    left = (
+        await db.execute(
+            select(PorchStoryGroup.group_id)
+            .join(PorchGroup, PorchGroup.id == PorchStoryGroup.group_id)
+            .where(PorchStoryGroup.story_id == s.id, PorchGroup.deleted_at.is_(None))
+            .limit(1)
+        )
+    ).first()
+    if left is None:
+        s.deleted_at = core.now()
+    scope = "everyone" if everyone else "group"
+    snippet = _snip(s.text) or {"photo": "A photo story", "video": "A video story"}.get(s.kind, "A story")
+    db.add(
+        PorchRemoval(
+            author_id=s.author_id, target_type="story", target_id=s.id, post_id=None, scope=scope,
+            group_id=None if everyone else group.id, reason=reason, snippet=snippet, removed_by=by.id,
+        )
+    )
+    deleted = s.deleted_at is not None
+    closed = await _close(db, by, "story", s.id, "removed", reason, None if deleted else group)
+    await db.commit()
+    await core.publish(audience, {"type": "story", "user_id": str(s.author_id)})
+    await core.publish([s.author_id], {"type": "activity"})
+    await push.removed(db, s.author_id, what="story", scope=scope, reason=reason, group=group.name)
+    return {"closed": closed, "deleted": deleted}
+
+
 async def decide(db: AsyncSession, by: User, g: PorchGroup, report_id: uuid.UUID, action: str, reason: str) -> dict[str, Any]:
     """Remove or keep what a report in ``g`` is about. Only someone who runs
     ``g``, and only while they can see it; every open report on the same
@@ -439,7 +517,11 @@ async def decide(db: AsyncSession, by: User, g: PorchGroup, report_id: uuid.UUID
         closed = await _close(db, by, r.target_type, r.target_id, "kept", reason, g)
         await db.commit()
         return {"closed": closed, "status": "kept"}
-    if r.target_type == "post":
+    if r.target_type == "story":
+        s = await db.get(PorchStory, r.target_id)
+        assert s is not None
+        out = await remove_story(db, by, s, reason, group=g)
+    elif r.target_type == "post":
         post = await db.get(PorchPost, r.target_id)
         assert post is not None
         out = await remove_post(db, by, post, reason, group=g)
@@ -494,5 +576,5 @@ async def removals_for(db: AsyncSession, user_id: uuid.UUID, since: Any) -> list
 
 
 __all__ = [
-    "DecideIn", "decide", "handled", "handler_ids", "handles", "open_count", "queue", "remove_comment", "remove_post", "removals_for", "router", "waiting",
+    "DecideIn", "decide", "handled", "handler_ids", "handles", "open_count", "queue", "remove_comment", "remove_post", "remove_story", "removals_for", "router", "waiting",
 ]

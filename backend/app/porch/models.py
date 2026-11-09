@@ -257,7 +257,55 @@ class PorchRemoval(UUIDPKMixin, CreatedAtMixin, Base):
     removed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
+# ------------------------------------------------------------------ stories (0393, WP-P2.1)
+
+STORY_KINDS = ("photo", "video", "text")
+
+
+class PorchStory(UUIDPKMixin, CreatedAtMixin, Base):
+    """A photo, video or text story, gone from view 24 hours after it was
+    posted (``expires_at``; read-time, no job). The row stays for your own
+    archive and highlights. Who sees it: :func:`app.porch.access.visible_story`."""
+
+    __tablename__ = "porch_stories"
+
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    # Your own library photo or video; purging it ends the story.
+    file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=True)
+    # Its 9:16 crop for this story only (``photos/edits.py`` ops).
+    edit: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    text: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
+    background: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Stickers: [{type: text|mention|place, x, y, scale, rotate, style, ...}].
+    overlays: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    mentions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    alt_text: Mapped[str] = mapped_column(String(1000), nullable=False, default="", server_default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PorchStoryGroup(Base):
+    """The groups a story went to, fixed when it was posted."""
+
+    __tablename__ = "porch_story_groups"
+
+    story_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_stories.id", ondelete="CASCADE"), primary_key=True)
+    group_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_groups.id", ondelete="CASCADE"), primary_key=True)
+
+
+class PorchStoryView(Base):
+    """Someone saw a story. Only the poster ever sees the list."""
+
+    __tablename__ = "porch_story_views"
+
+    story_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_stories.id", ondelete="CASCADE"), primary_key=True)
+    viewer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 __all__ = [
-    "KINDS", "NOTIFY", "ROLES", "STATUSES", "TAG_STATUSES", "PorchAlert", "PorchComment", "PorchGroup", "PorchGroupMember", "PorchPollOption",
-    "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile", "PorchReaction", "PorchRemoval", "PorchReport", "PorchSave", "PorchTag",
+    "KINDS", "NOTIFY", "ROLES", "STATUSES", "STORY_KINDS", "TAG_STATUSES", "PorchAlert", "PorchComment", "PorchGroup", "PorchGroupMember",
+    "PorchPollOption", "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile", "PorchReaction", "PorchRemoval",
+    "PorchReport", "PorchSave", "PorchStory", "PorchStoryGroup", "PorchStoryView", "PorchTag",
 ]

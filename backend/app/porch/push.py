@@ -371,6 +371,36 @@ async def removed(db: AsyncSession, author_id: uuid.UUID, *, what: str, scope: s
     return await _guarded("removal", go())
 
 
+# ------------------------------------------------------------------ stories (WP-P2.1)
+
+
+async def story_mentioned(db: AsyncSession, story: Any, mentioned: Iterable[str | uuid.UUID]) -> int:
+    """"Sam mentioned you in a story" — the only push a story sends
+    (decision S3: nothing for a new story). Only people who can see it."""
+
+    async def go() -> int:
+        author = await db.get(User, story.author_id)
+        if author is None or story.deleted_at is not None:
+            return 0
+        audience = await access.story_audience_ids(db, story) - {author.id}
+        who = {uuid.UUID(str(m)) for m in mentioned} & audience
+        who &= await _allowed(db, who)
+        if not who:
+            return 0
+        modes = await _modes(db, who)
+        name = core.display_name(author)
+        sent = 0
+        for uid in who:
+            sent += await _send(
+                to=uid, kind="mention", mode=modes[uid]["mention"], title=f"{name} mentioned you in a story",
+                body="See it before it's gone (stories last a day).", url=f"/porch/stories/{author.id}",
+                tag=f"porch:story:{story.id}", actor=author,
+            )
+        return sent
+
+    return await _guarded("story", go())
+
+
 # ------------------------------------------------------------------ reports (WP-P2.0)
 
 
