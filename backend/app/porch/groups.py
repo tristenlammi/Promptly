@@ -71,6 +71,11 @@ async def groups_out(
                 admins[g.id] = server_admins
     inviters = {m.invited_by for _, m, _ in items if m is not None and m.status == "invited" and m.invited_by}
     people = await core.users_map(db, {u for ids in admins.values() for u in ids} | inviters)
+    # What waits in the Reports tab of the groups the viewer runs.
+    from .reports import waiting
+
+    run = [g for g, m, _ in items if access.is_admin(viewer, g, m)]
+    reported = await waiting(db, viewer, run) if run else {}
     out = []
     for g, m, view in items:
         is_admin = access.is_admin(viewer, g, m)
@@ -96,6 +101,8 @@ async def groups_out(
             d["in_feed"] = m.in_feed if m is not None else True
             d["notify"] = m.notify if m is not None else "none"
             d["role"] = ("admin" if viewer.is_admin else "member") if g.kind == "everyone" else (m.role if m else "member")
+            if is_admin:
+                d["open_reports"] = reported.get(g.id, 0)
         if m is not None and m.status == "invited":
             d["invited_by"] = people.get(str(m.invited_by)) if m.invited_by and m.invited_by not in hidden else None
             d["invited_at"] = m.joined_at.isoformat() if m.joined_at else None

@@ -17,7 +17,10 @@ Who gets what, each person at most one push per thing:
 * **invite** — to a group (Join / Not now);
 * **birthday** — someone in one of your groups (or someone you turned on)
   has a birthday today, at the Today summary time;
-* **removed** — a server admin took down your post or comment (always on).
+* **removed** — an admin took down your post or comment, or took your post
+  out of a group (always on);
+* **report** — something in a group you run was reported (always on; the
+  group's owner and admins, Everyone's server admins; WP-P2.0).
 
 Each kind is On / Daily summary / Off for each person
 (``porch_profiles.push``); "Daily summary" passes ``summary=True`` so the
@@ -346,18 +349,46 @@ async def _invited(db: AsyncSession, inviter: User, group: PorchGroup, user_ids:
 # ------------------------------------------------------------------ removals
 
 
-async def removed(db: AsyncSession, author_id: uuid.UUID, *, what: str, scope: str, reason: str) -> int:
-    """A server admin took down your post or comment: you're told why
-    (always — it isn't one of the kinds you choose)."""
+async def removed(db: AsyncSession, author_id: uuid.UUID, *, what: str, scope: str, reason: str, group: str | None = None) -> int:
+    """An admin took down your post or comment: you're told why (always —
+    it isn't one of the kinds you choose). ``scope``: ``everyone`` (a
+    server admin, out of Everyone), ``group`` (a group's admin, out of
+    ``group`` only) or ``all`` (a comment)."""
 
     async def go() -> int:
         if not await _allowed(db, [author_id]):
             return 0
-        title = f"Your {what} was removed from Everyone" if scope == "everyone" else f"Your {what} was removed"
-        body = f"The reason given: {_snippet(reason)}" if reason.strip() else "By the person who runs this Promptly."
+        if scope == "everyone":
+            title = f"Your {what} was removed from Everyone"
+        elif scope == "group" and group:
+            title = f"Your {what} was removed from {group}"
+        else:
+            title = f"Your {what} was removed"
+        by = "By the person who runs this Promptly." if scope == "everyone" or not group else f"By an admin of {group}."
+        body = f"The reason given: {_snippet(reason)}" if reason.strip() else by
         return int(await _send(to=author_id, kind="removed", mode="on", title=title, body=body, url="/porch/activity", tag=f"porch:removed:{uuid.uuid4()}", actor=None))
 
     return await _guarded("removal", go())
+
+
+# ------------------------------------------------------------------ reports (WP-P2.0)
+
+
+async def reported(db: AsyncSession, group: PorchGroup, admin_ids: Iterable[uuid.UUID]) -> int:
+    """Something in a group you run was reported: which group, never who
+    reported it or what it says (always on; quiet hours may hold it)."""
+
+    async def go() -> int:
+        sent = 0
+        for uid in await _allowed(db, admin_ids):
+            sent += await _send(
+                to=uid, kind="report", mode="on", title=f"Something in {group.name} was reported",
+                body=f"Open {group.name}'s Reports to look at it.", url=f"/porch/g/{group.id}?tab=reports",
+                tag=f"porch:report:{group.id}", actor=None,
+            )
+        return sent
+
+    return await _guarded("report", go())
 
 
 # ------------------------------------------------------------------ birthdays

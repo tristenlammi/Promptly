@@ -1,8 +1,8 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { Check, Crown, ImageIcon, LogOut, MoreHorizontal, PenSquare, Pencil, Shield, ShieldOff, Trash2, UserMinus, UserPlus, UserRound } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useMemo, useState, type ReactNode } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { porchApi, type Member, type PorchGroup } from "@/api/porch";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -14,6 +14,7 @@ import { cn } from "@/utils/cn";
 import { useGroupActions } from "../actions";
 import { groupKey, groupPostsKey, groupsChanged, listPosts, membersKey, pendingKey } from "../cache";
 import { EditGroupSheet, InviteSheet } from "../components/GroupSheets";
+import { GroupReports } from "../components/GroupReports";
 import { PostCard, PostList } from "../components/PostCard";
 import { ActionSheet, Column, GroupTile, LoadError, PageHeader, PorchAvatar, PostSkeleton, VisibilityTag, peopleCount, shortAgo, type MenuAction } from "../components/ui";
 import { usePorch } from "../context";
@@ -21,7 +22,7 @@ import { GroupBell } from "../notify";
 import { useSentinel } from "../scroll";
 import { Unavailable } from "./PostPage";
 
-type Tab = "posts" | "photos" | "people" | "invites";
+type Tab = "posts" | "photos" | "people" | "invites" | "reports";
 const ROLE_WORD = { owner: "Owner", admin: "Admin", member: "" } as const;
 
 /** ``/porch/g/:id``: a group — its posts, photos, people and invites. */
@@ -160,7 +161,18 @@ function MemberView({ g }: { g: PorchGroup }) {
   const { b } = usePorch();
   const navigate = useNavigate();
   const { setTicks, leave, remove } = useGroupActions();
-  const [tab, setTab] = useState<Tab>("posts");
+  const [params, setParams] = useSearchParams();
+  const showReports = g.is_admin;
+  // ``?tab=reports`` (a report push, Activity) opens straight on it.
+  const [tab, setTab_] = useState<Tab>(() => (params.get("tab") === "reports" && showReports ? "reports" : "posts"));
+  const setTab = (t: Tab) => {
+    setTab_(t);
+    if (params.has("tab")) {
+      const next = new URLSearchParams(params);
+      next.delete("tab");
+      setParams(next, { replace: true });
+    }
+  };
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const [inviting, setInviting] = useState(false);
@@ -175,12 +187,29 @@ function MemberView({ g }: { g: PorchGroup }) {
     actions.push({ label: "Delete group", icon: Trash2, danger: true, onClick: () => void remove(g) });
   }
 
-  const tabs: { value: Tab; label: string }[] = [
+  const tabs: { value: Tab; label: ReactNode }[] = [
     { value: "posts", label: "Posts" },
     { value: "photos", label: "Photos" },
     { value: "people", label: "People" },
   ];
   if (showInvites) tabs.push({ value: "invites", label: "Invites" });
+  if (showReports) {
+    const n = g.open_reports ?? 0;
+    tabs.push({
+      value: "reports",
+      label: (
+        <span className="inline-flex items-center gap-1.5">
+          Reports
+          {n > 0 && (
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--item-accent)] px-1.5 text-[11px] font-semibold text-white">
+              {n}
+              <span className="sr-only"> waiting</span>
+            </span>
+          )}
+        </span>
+      ),
+    });
+  }
 
   return (
     <Column>
@@ -228,13 +257,16 @@ function MemberView({ g }: { g: PorchGroup }) {
         </ItemButton>
       </div>
       <div className="px-4 pt-4 md:px-0">
-        <Segmented className="w-full" value={tab} onChange={setTab} options={tabs} />
+        <div className="-mx-1 overflow-x-auto px-1">
+          <Segmented className="w-full min-w-max" value={tab} onChange={setTab} options={tabs} />
+        </div>
       </div>
       <div className="pt-3">
         {tab === "posts" && <GroupPosts g={g} />}
         {tab === "photos" && <GroupPhotos g={g} />}
         {tab === "people" && <People g={g} members={members.data} loading={members.isPending} error={members.isError} retry={() => void members.refetch()} />}
         {tab === "invites" && showInvites && <PendingList g={g} onInvite={() => setInviting(true)} />}
+        {tab === "reports" && showReports && <GroupReports g={g} />}
       </div>
 
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={g.name} actions={actions} />

@@ -322,12 +322,10 @@ async def serve(db: AsyncSession, claim: media_urls.MediaClaim, user: User, requ
     pm = await db.get(PorchPostMedia, claim.file_id)
     if pm is None:
         raise _not_found()
+    # The one rule, for everyone (server admins too: a reported post's
+    # photos load only for someone who can see the post).
     if not await access.can_see_post(db, user, pm.post_id):
-        # A server admin looking at a reported post in Admin → Porch.
-        from .reports import admin_may_review
-
-        if not await admin_may_review(db, user, pm.post_id):
-            raise _not_found()
+        raise _not_found()
     row = await db.get(UserFile, pm.file_id)
     if row is None or row.trashed_at is not None or not row.storage_path:
         raise _not_found()

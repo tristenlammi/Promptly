@@ -55,7 +55,7 @@ export function PorchPanel() {
     <div className="flex flex-col gap-5">
       <AccessCard data={data} save={(b) => patch.mutate(b)} busy={patch.isPending} />
       <EveryoneCard data={data} save={(b) => patch.mutate(b)} busy={patch.isPending} />
-      <ReportsCard />
+      <ReportsCard everyone={data.everyone_name} />
     </div>
   );
 }
@@ -212,7 +212,7 @@ function EveryoneCard({ data, save, busy }: { data: PorchAdminSettings; save: Sa
   );
 }
 
-function ReportsCard() {
+function ReportsCard({ everyone }: { everyone: string }) {
   const qc = useQueryClient();
   const open = useQuery({ queryKey: REPORTS_KEY, queryFn: porchAdminApi.reports });
   const handled = useQuery({ queryKey: HANDLED_KEY, queryFn: porchAdminApi.handled });
@@ -225,8 +225,12 @@ function ReportsCard() {
     <SettingsCard title="Reports" icon={<Flag className="h-4 w-4" />} headerExtra={open.data && open.data.length > 0 ? <span className="text-xs text-[var(--text-muted)]">{open.data.length} waiting</span> : undefined}>
       <div className="flex flex-col gap-4">
         <p className="text-xs text-[var(--text-muted)]">
-          Posts and comments people reported. Remove takes it down for everyone and tells the person who posted it the reason you give. Keep leaves it up. Nobody is told who
-          reported it.
+          Posts and comments people reported in {everyone}, the group everyone is in. You see why, never who reported it. Remove from {everyone} takes a post out of{" "}
+          {everyone} only (it stays in the poster's other groups, and is deleted if {everyone} was its only one) and tells the person who posted it the reason you give. Keep
+          leaves it up.
+        </p>
+        <p className="text-xs text-[var(--text-muted)]">
+          Reports made in other groups go to those groups' own admins. They never show here, and you only see what's in a group you're in yourself.
         </p>
         {open.isPending ? (
           <p className="text-sm text-[var(--text-muted)]">Loading…</p>
@@ -237,7 +241,7 @@ function ReportsCard() {
         ) : (
           <ul className="flex flex-col gap-3" aria-label="Waiting reports">
             {open.data.map((r) => (
-              <ReportRow key={r.id} r={r} onDone={done} />
+              <ReportRow key={r.id} r={r} everyone={everyone} onDone={done} />
             ))}
           </ul>
         )}
@@ -260,7 +264,7 @@ function ReportsCard() {
   );
 }
 
-function ReportRow({ r, onDone }: { r: ReportItem; onDone: () => void }) {
+function ReportRow({ r, everyone, onDone }: { r: ReportItem; everyone: string; onDone: () => void }) {
   const t = r.target;
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -272,8 +276,13 @@ function ReportRow({ r, onDone }: { r: ReportItem; onDone: () => void }) {
     }
     setBusy(true);
     try {
-      await porchAdminApi.decide(r.id, action, reason.trim());
-      toast.success(action === "remove" ? (t.gone ? "Report closed." : `Removed. ${t.author?.name ?? "They"} have been told why.`) : "Kept. The report is closed.");
+      const out = await porchAdminApi.decide(r.id, action, reason.trim());
+      const who = t.author?.name ?? "They";
+      if (t.gone) toast.success("Report closed.");
+      else if (action === "keep") toast.success("Kept. The report is closed.");
+      else if (t.type === "comment") toast.success(`Comment removed. ${who} has been told why.`);
+      else if (out.deleted) toast.success(`Removed. It was only in ${everyone}, so it's gone. ${who} has been told why.`);
+      else toast.success(`Removed from ${everyone}. It stays in ${who}'s other groups, and ${who} has been told why.`);
       onDone();
     } catch (err) {
       toast.error(apiErrorMessage(err, "Couldn't do that. Try again."));
@@ -281,11 +290,8 @@ function ReportRow({ r, onDone }: { r: ReportItem; onDone: () => void }) {
       setBusy(false);
     }
   };
-  const where = t.groups
-    ? [t.groups.in_everyone ? "Everyone" : null, ...t.groups.named.filter((g) => g.kind !== "everyone").map((g) => g.name), t.groups.others ? `${t.groups.others} other group${t.groups.others === 1 ? "" : "s"}` : null]
-        .filter(Boolean)
-        .join(", ")
-    : "";
+  // Only the admin's own groups are ever named.
+  const where = t.groups ? t.groups.named.map((g) => g.name).join(", ") : "";
   return (
     <li data-report={r.id} className="flex flex-col gap-3 rounded-xl border border-[var(--border)] p-3">
       <div className="flex items-start gap-3">
@@ -294,12 +300,12 @@ function ReportRow({ r, onDone }: { r: ReportItem; onDone: () => void }) {
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm text-[var(--text)]">
-            <b className="font-semibold">{t.author?.name ?? "Someone"}</b>'s {t.type}
+            {t.gone ? <>A reported {t.type}</> : <><b className="font-semibold">{t.author?.name ?? "Someone"}</b>'s {t.type}</>}
             {where && <span className="text-[var(--text-muted)]"> · in {where}</span>}
             {t.created_at && <span className="text-[var(--text-muted)]"> · {when(t.created_at)}</span>}
           </p>
           {t.gone ? (
-            <p className="mt-1 text-sm italic text-[var(--text-muted)]">It's already been deleted.</p>
+            <p className="mt-1 text-sm italic text-[var(--text-muted)]">It's been deleted, or it isn't in {everyone} any more. Close the report.</p>
           ) : (
             <>
               {t.post_body && <p className="mt-1 truncate text-xs text-[var(--text-muted)]">On the post: {t.post_body}</p>}
@@ -321,8 +327,7 @@ function ReportRow({ r, onDone }: { r: ReportItem; onDone: () => void }) {
             {r.reports.map((x) => (
               <li key={x.id} className="text-xs text-[var(--text-muted)]">
                 Reported {when(x.created_at)}
-                {x.reporter ? ` by ${x.reporter.name}` : ""}
-                {x.reason ? `: “${x.reason}”` : ""}
+                {x.reason ? `: “${x.reason}”` : " (no reason given)"}
               </li>
             ))}
           </ul>
@@ -335,12 +340,20 @@ function ReportRow({ r, onDone }: { r: ReportItem; onDone: () => void }) {
         </label>
       )}
       <div className="flex flex-wrap justify-end gap-2">
-        <button type="button" className={cn(btn, "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]")} disabled={busy} onClick={() => void decide("keep")}>
-          Keep it
-        </button>
-        <button type="button" className={cn(btn, "bg-[var(--danger)] text-white hover:brightness-95")} disabled={busy} onClick={() => void decide("remove")}>
-          {t.gone ? "Close" : "Remove"}
-        </button>
+        {t.gone ? (
+          <button type="button" className={cn(btn, "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]")} disabled={busy} onClick={() => void decide("keep")}>
+            Close report
+          </button>
+        ) : (
+          <>
+            <button type="button" className={cn(btn, "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]")} disabled={busy} onClick={() => void decide("keep")}>
+              Keep it
+            </button>
+            <button type="button" className={cn(btn, "bg-[var(--danger)] text-white hover:brightness-95")} disabled={busy} onClick={() => void decide("remove")}>
+              {t.type === "comment" ? "Remove comment" : `Remove from ${everyone}`}
+            </button>
+          </>
+        )}
       </div>
     </li>
   );

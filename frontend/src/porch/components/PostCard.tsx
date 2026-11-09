@@ -239,7 +239,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
     actions.push({ label: `Remove from ${b.everyone.name}`, icon: ShieldMinus, hint: "Asks for a reason, which they'll see", danger: true, onClick: () => setUnEveryone(true) });
   }
   if (!post.mine && author) actions.push({ label: `Block ${who}`, icon: UserX, danger: true, onClick: () => void block(author) });
-  if (!post.mine) actions.push({ label: "Report", icon: TriangleAlert, hint: "Tell the person who runs this Promptly", danger: true, onClick: () => setReporting(true) });
+  if (!post.mine) actions.push({ label: "Report", icon: TriangleAlert, hint: "Tell the admins of a group it's in", danger: true, onClick: () => setReporting(true) });
   if (post.can_delete) {
     actions.push({
       label: "Delete post",
@@ -343,7 +343,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
       {!full && isPhone && <CommentsSheet post={post} open={!!talk} onClose={() => setTalk(null)} />}
 
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
-      {!post.mine && <ReportSheet open={reporting} onClose={() => setReporting(false)} target="post" id={post.id} who={who} />}
+      {!post.mine && <ReportSheet open={reporting} onClose={() => setReporting(false)} target="post" id={post.id} who={who} authorId={author?.id} groups={post.groups} />}
       {!post.mine && b?.me?.is_admin && inEveryone && (
         <RemoveFromEveryoneSheet
           open={unEveryone}

@@ -121,6 +121,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Promptly for Android 1.6.0 brings this release's phone parts: calls that ring like phone calls, Talk on the phone, the Notes widgets and quick capture, and sharing to Porch from other apps.
 
 ### Fixed
+<!-- Porch: reports go to the group's admins (WP-P2.0) -->
+- Porch: a report now goes to the admins of the group you saw the post in, and you choose which group when you see it in more than one. Only reports made in Everyone go to the people who run this Promptly. Before, every report went to the server admins, who could read the post and see its photos even in a private group they weren't in.
+- Porch: server admins no longer see how many other groups a reported post is in, and can no longer remove posts or comments from groups they aren't in.
+- Porch: whoever looks at a report sees the reason given, not who reported it.
+- Porch: group admins have a Reports tab on the group page (and a line in Activity when something's waiting). "Remove from Family" takes a post out of that group only; it stays in its other groups, and the person who posted it is told why. The poster can still delete it everywhere.
+- Porch: you can't report someone to a group they run on their own; the report sheet tells you to leave the group or block them instead.
 <!-- Calls (DM calls), WP-D5 -->
 - Calls: a 1:1 call no longer ends when one side's connection drops for a moment and comes back (for example moving from Wi-Fi to mobile data). A connection now has 15 seconds to come back before it counts as hanging up.
 <!-- Calls (DM calls), WP-D2 -->

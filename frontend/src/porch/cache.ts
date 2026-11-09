@@ -20,6 +20,8 @@ export const postKey = (id: string) => ["porch", "post", id] as const;
 export const groupKey = (id: string) => ["porch", "group", id] as const;
 export const membersKey = (id: string) => ["porch", "members", id] as const;
 export const pendingKey = (id: string) => ["porch", "pending", id] as const;
+/** A group's Reports tab (its admins), open and handled. */
+export const reportsKey = (id: string, status: "open" | "handled" = "open") => ["porch", "reports", id, status] as const;
 export const discoverKey = (q: string) => ["porch", "discover", q] as const;
 export const profileKey = (id: string) => ["porch", "profile", id] as const;
 export const savedKey = ["porch", "list", "saved"] as const;

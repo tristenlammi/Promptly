@@ -56,6 +56,8 @@ export interface PorchGroup {
   in_feed?: boolean;
   notify?: "all" | "none";
   role?: GroupRole;
+  /** Admins only: things reported in this group, waiting in its Reports tab. */
+  open_reports?: number;
   /** A pending invite. */
   invited_by?: PorchUser | null;
   invited_at?: string | null;
@@ -194,10 +196,11 @@ export interface ActivityItem {
   target: "post" | "comment";
   comment_id: string | null;
   unseen: boolean;
-  /** ``removed``: a server admin took your post or comment down (``all``)
-   *  or out of Everyone (``everyone``), and why. ``post`` is then null when
-   *  nothing is left to open. */
-  removed?: { scope: "all" | "everyone"; reason: string } | null;
+  /** ``removed``: an admin took your comment down (``all``), or your post
+   *  out of Everyone (``everyone``) or one of your groups (``group``, named
+   *  in ``group``), and why. ``post`` is then null when nothing is left to
+   *  open. ``group`` on a comment: the group whose admin removed it. */
+  removed?: { scope: "all" | "everyone" | "group"; reason: string; group?: string | null } | null;
 }
 
 export interface TagRequest {
@@ -211,6 +214,8 @@ export interface TagRequest {
 export interface Activity {
   invites: PorchGroup[];
   tag_requests: TagRequest[];
+  /** Groups you run with something reported, waiting in their Reports tab. */
+  reports: { group: GroupLabel; count: number }[];
   items: ActivityItem[];
   seen_at: string | null;
   unseen: number;
@@ -657,9 +662,24 @@ export const porchApi = {
     if (on) await apiClient.put(`/porch/alerts/${userId}`);
     else await apiClient.delete(`/porch/alerts/${userId}`);
   },
-  /** Report a post or comment to the people who run this Promptly. */
-  async report(targetType: "post" | "comment", targetId: string, reason: string): Promise<void> {
-    await apiClient.post("/porch/reports", { target_type: targetType, target_id: targetId, reason });
+  /** Report a post or comment to the admins of the groups picked (yours
+   *  that it's in; Everyone's admins are the people who run this Promptly). */
+  async report(targetType: "post" | "comment", targetId: string, reason: string, groups: string[]): Promise<{ id: string; groups: GroupLabel[] }> {
+    const { data } = await apiClient.post<{ id: string; groups: GroupLabel[] }>("/porch/reports", { target_type: targetType, target_id: targetId, reason, groups });
+    return data;
+  },
+  /** A group's Reports tab (its owner and admins). */
+  async groupReports(groupId: string): Promise<ReportItem[]> {
+    const { data } = await apiClient.get<ReportItem[]>(`/porch/groups/${groupId}/reports`, { params: { status: "open" } });
+    return data;
+  },
+  async groupHandled(groupId: string): Promise<HandledReport[]> {
+    const { data } = await apiClient.get<HandledReport[]>(`/porch/groups/${groupId}/reports`, { params: { status: "handled" } });
+    return data;
+  },
+  async decideGroupReport(groupId: string, reportId: string, action: "remove" | "keep", reason: string): Promise<{ deleted?: boolean; already_gone?: boolean }> {
+    const { data } = await apiClient.post<{ deleted?: boolean; already_gone?: boolean }>(`/porch/groups/${groupId}/reports/${reportId}`, { action, reason });
+    return data;
   },
 };
 
@@ -704,24 +724,28 @@ export interface PorchAdminSettings {
 export interface ReportTarget {
   type: "post" | "comment";
   id: string;
-  /** Already deleted, by its author or someone else. */
+  /** Deleted, or no longer in this group: nothing more is shown. */
   gone: boolean;
-  author: PorchUser | null;
+  author?: PorchUser | null;
   post_id?: string;
   kind?: PostKind;
   created_at?: string;
   body?: string;
   /** A comment's post, a few words of it. */
   post_body?: string;
-  groups?: { in_everyone: boolean; named: GroupLabel[]; others: number };
+  /** Where it is: only your own groups are named. */
+  groups?: { in_everyone: boolean; named: GroupLabel[] };
   media?: { thumb: string | null; preview: string | null; alt: string; video: boolean }[];
 }
 
 export interface ReportItem {
-  /** The report to answer (every open report on the same thing goes with it). */
+  /** The report to answer (every open report on the same thing in this group goes with it). */
   id: string;
+  /** The group it was reported in. */
+  group: GroupLabel;
   target: ReportTarget;
-  reports: { id: string; reporter: PorchUser | null; reason: string; created_at: string }[];
+  /** The reasons given. Never who gave them. */
+  reports: { id: string; reason: string; created_at: string }[];
   first_at: string;
 }
 
@@ -751,8 +775,9 @@ export const porchAdminApi = {
     const { data } = await apiClient.get<HandledReport[]>("/admin/porch/reports", { params: { status: "handled" } });
     return data;
   },
-  async decide(reportId: string, action: "remove" | "keep", reason: string): Promise<void> {
-    await apiClient.post(`/admin/porch/reports/${reportId}`, { action, reason });
+  async decide(reportId: string, action: "remove" | "keep", reason: string): Promise<{ deleted?: boolean; already_gone?: boolean }> {
+    const { data } = await apiClient.post<{ deleted?: boolean; already_gone?: boolean }>(`/admin/porch/reports/${reportId}`, { action, reason });
+    return data;
   },
   async removeFromEveryone(postId: string, reason: string): Promise<void> {
     await apiClient.post(`/admin/porch/posts/${postId}/remove-from-everyone`, { reason });
