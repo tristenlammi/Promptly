@@ -256,6 +256,8 @@ async def _page(db: AsyncSession, viewer: User, p: Person) -> dict[str, Any]:
         # Only whether *you* blocked them — never whether they blocked you.
         "blocked": False,
         "can_call": False,
+        # Other apps' sections ("On Porch", WP-P3.3; app/people/sections.py).
+        "sections": [],
     }
     if p.user is not None and not is_me:
         from .blocks import has_blocked
@@ -269,6 +271,9 @@ async def _page(db: AsyncSession, viewer: User, p: Person) -> dict[str, Any]:
         out["events"] = await _events(db, viewer, p.user)
         out["dm_room_id"], out["rooms"] = await _rooms(db, viewer, p.user)
         out["files"] = await _files(db, viewer, p.user)
+        from . import sections
+
+        out["sections"] = await sections.collect(db, viewer, p.user)
     return out
 
 

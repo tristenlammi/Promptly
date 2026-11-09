@@ -12,6 +12,7 @@ import {
   Folder,
   Hash,
   Heart,
+  House,
   Images,
   Link2,
   Mail,
@@ -25,7 +26,7 @@ import {
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { peopleHubApi, type PersonPage, type PersonRef } from "@/api/peopleHub";
+import { peopleHubApi, type PersonPage, type PersonRef, type PersonSection } from "@/api/peopleHub";
 import { roomsApi } from "@/api/rooms";
 import { PersonAvatar } from "@/components/people/PeoplePicker";
 import { LinkedSection } from "@/components/links/LinkedSection";
@@ -378,6 +379,11 @@ function PersonBody({ p }: { p: PersonPage }) {
               <Empty text={`You and ${first} haven't shared any files with each other.`} />
             )}
           </Section>
+
+          {/* Other apps' sections ("On Porch"), as you're allowed to see them. */}
+          {(p.sections ?? []).map((s) => (
+            <AppSection key={s.key} s={s} />
+          ))}
         </>
       )}
 
@@ -417,6 +423,64 @@ function Section({ title, icon, extra, children }: { title: string; icon: ReactN
       </div>
       {children}
     </section>
+  );
+}
+
+const SECTION_ICONS: Record<string, ReactNode> = { porch: <House className="h-4 w-4" /> };
+
+/** One app's section: a grid of pictures (a line of words when there's no
+ *  picture) or a list, a note, and "See all". */
+function AppSection({ s }: { s: PersonSection }) {
+  return (
+    <Section
+      title={s.title}
+      icon={SECTION_ICONS[s.key] ?? <ExternalLink className="h-4 w-4" />}
+      extra={
+        s.more_url ? (
+          <Link to={s.more_url} className="text-xs font-medium text-[var(--accent-text)] hover:underline">
+            {s.more_label || "See all"}
+          </Link>
+        ) : undefined
+      }
+    >
+      {s.items.length > 0 &&
+        (s.kind === "grid" ? (
+          <ul className="grid grid-cols-3 gap-1.5">
+            {s.items.map((it) => (
+              <li key={it.id}>
+                <Link
+                  to={it.href || s.more_url || "#"}
+                  className="relative block aspect-square overflow-hidden rounded-lg bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  aria-label={it.title}
+                >
+                  {it.image ? (
+                    <img src={it.image} alt="" loading="lazy" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center p-2 text-xs font-medium leading-snug text-[var(--text)]">
+                      <span className="line-clamp-4">{it.title}</span>
+                    </span>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <ul className="flex flex-col">
+            {s.items.map((it) => (
+              <li key={it.id}>
+                <Link to={it.href || s.more_url || "#"} className="flex min-h-12 items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-[var(--text)]">{it.title}</span>
+                    {it.subtitle && <span className="block truncate text-xs text-[var(--text-muted)]">{it.subtitle}</span>}
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ))}
+      {s.note && <p className={s.items.length ? "mt-2 px-1 text-xs text-[var(--text-muted)]" : "px-1 text-sm text-[var(--text-muted)]"}>{s.note}</p>}
+    </Section>
   );
 }
 

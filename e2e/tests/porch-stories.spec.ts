@@ -160,7 +160,7 @@ test("a text story reaches only its group, and its poster sees who watched", asy
 test("plan a BBQ in a group: everyone's invited, a member answers from the card and it's in their calendar; pin it", async ({ alice, bob, dana }) => {
   test.setTimeout(180_000);
   const [aAuth, bAuth, dAuth] = [await bearer(alice), await bearer(bob), await bearer(dana)];
-  const [, bobId] = [await porchReady(alice, aAuth), await porchReady(bob, bAuth), await porchReady(dana, dAuth)];
+  const [aliceId, bobId] = [await porchReady(alice, aAuth), await porchReady(bob, bAuth), await porchReady(dana, dAuth)];
   const fam = `Events ${stamp}`;
   const famId = await groupWith(alice, aAuth, fam, [[bob, bAuth, bobId]]);
   const title = `BBQ Saturday ${stamp}`;
@@ -214,4 +214,11 @@ test("plan a BBQ in a group: everyone's invited, a member answers from the card 
   const pinned = alice.getByRole("region", { name: `Pinned in ${fam}` });
   await expect(pinned).toBeVisible();
   await shot(alice, "group-pinned");
+
+  // Alice's person page, as Bob sees it (WP-P3.3): On Porch, with the BBQ.
+  await bob.goto(`/people/u/${aliceId}`);
+  await expect(bob.getByRole("heading", { name: "On Porch" })).toBeVisible();
+  await expect(bob.getByRole("link", { name: title, exact: true })).toBeVisible();
+  await expect(bob.getByText(/^Groups you're both in: /)).toBeVisible();
+  await shot(bob, "person-page-on-porch");
 });
