@@ -24,6 +24,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 <!-- Talk phase 2 (WP-T8) -->
 - Talk in the car: press the microphone on the car screen (or "Ask Promptly" on the P Maps driving screen) and ask one thing. A short tone opens the microphone, it closes again while Promptly answers, and the answer plays on the car speakers with the music turned down. It never listens on its own: after it asks you something ("Send it?") the microphone opens once for 6 seconds for your answer, and Yes and No show on the car screen. Press while it is talking to stop it. The answer waits until a direction has been said or a close turn is done. The conversation remembers what you just asked for two minutes, then ends.
+<!-- Talk phase 2 (WP-T9 to T14) -->
+- Driving by voice: on a trip, ask "how long to go?", "will I make it by five?", "is the way clear?", "add a stop for fuel" or "stop navigating". Promptly answers from the real trip and never sees where you are. In the car answers are kept to two short sentences, emails and messages are given as a one-line gist, and nothing that needs the phone screen is offered.
+- Message people on Promptly by voice: "tell Sam I'm ten minutes away" reads the whole message back and sends it as a Rooms direct message only when you say yes. In the car (and after Promptly has read an email or web page) it only sends your own words, and on a trip "tell Mum when I'll get there" puts in your real arrival time. There is no texting: for people not on Promptly it suggests Hey Google.
+- "Any messages?" by voice: who has written in Rooms and how many, with the latest message where Promptly is allowed to read that room.
+- Your notes and lists by voice. "Add milk to the shopping list" happens straight away ("Say undo to take it off"), and "undo" within two minutes takes it back. After Promptly has read an email or web page it asks first, starting with where the request came from ("From that email: ...").
+- "Send that to my phone": Talk sends the email, place, note or event you were talking about to your phone as a notification, titled "From Talk". In the car, when an answer had to be cut short, the details go to your phone by themselves (at most three a drive). Account → Notifications has a "Sent from Talk" switch.
+- Read me my day: a button on Today, or say "read me my day" or "brief me" in Talk. About 45 seconds: the weather, today's events and when to leave for the first one, tasks due, bills due, birthdays, and unread email (left out in the car). Choose what it reads in Account → Voice. The weather comes from Open-Meteo using your Home place rounded to about 10 km; admins can turn it off in Admin → Talk.
+- Headsets and Bluetooth on Android: Talk uses your earbuds' microphone when they're connected, moves to the phone if they disconnect without ending the conversation, works with older Android 10 and 11 Bluetooth headsets, says so when your earbuds have no microphone, and never uses the car's Bluetooth while Android Auto is connected. A headset's or car's voice button opens Talk; Account → Voice can let it start on a locked phone (off by default; email, files, photos and your timeline still need an unlock).
+
+### Changed
+<!-- Talk phase 2 (WP-T14) -->
+- The Android assistant is always a Talk conversation now. The "Hands-free conversations" switch in Phone assistant settings becomes "Tap to talk", and the one-question-at-a-time mode is only used when your server doesn't have Talk.
 
 ## [0.34.0] - 2026-11-09
 
