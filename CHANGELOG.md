@@ -40,6 +40,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Admin → Forms lists reported forms and a count of link forms, not every link form's title and owner.
 <!-- Admin privacy, AP8 -->
 - The thumbs-down note box in chat says who reads it: "Your server admin sees this note, not the chat."
+<!-- Admin privacy, AP10 -->
+- A new admin screen can't ship without a privacy check: the tests list every admin route with what it shows, and fail on one nobody has looked at. They also check that file ids an admin could see open nothing.
 
 ## [0.34.0] - 2026-11-09
 
