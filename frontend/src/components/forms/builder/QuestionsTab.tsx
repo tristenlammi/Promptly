@@ -42,11 +42,14 @@ export function QuestionsTab({
   readOnly,
   onOpenLook,
   aside,
+  quiz = false,
 }: {
   doc: FormDoc;
   fileId: string;
   readOnly: boolean;
   onOpenLook: () => void;
+  /** The form is a quiz: each question gets its Answer key. */
+  quiz?: boolean;
   /** The preview pane, beside the cards on a computer. */
   aside?: ReactNode;
 }) {
@@ -227,6 +230,7 @@ export function QuestionsTab({
             addAssetUrl={doc.addAssetUrl}
             error={invalidId === item.id && doc.status.kind === "invalid" ? doc.status.message : null}
             readOnly={readOnly}
+            quiz={quiz}
           />
         )}
       />

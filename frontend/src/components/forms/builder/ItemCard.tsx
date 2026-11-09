@@ -7,6 +7,7 @@ import {
   GripVertical,
   Image as ImageIcon,
   ImagePlus,
+  KeyRound,
   Loader2,
   MoreVertical,
   Plus,
@@ -45,6 +46,7 @@ import { cn } from "@/utils/cn";
 
 import { fileHint } from "../FormRenderer";
 import { BRANCHING_KINDS, CHOICE_KINDS, KIND_META, changeKind, isQuestion, newOption, type SectionInfo } from "../model";
+import { AnswerKey, MARKABLE, emptyQuiz, keySet, keyWords } from "./AnswerKey";
 import { GridEditor } from "./GridEditor";
 import { PicturePicker } from "./PicturePicker";
 import { AutoTextarea, Menu, MenuItem, NumberBox, Switch, fieldCls, iconBtnCls } from "./ui";
@@ -75,6 +77,8 @@ export interface ItemCardProps {
   /** The save's complaint about this item, shown on it. */
   error?: string | null;
   readOnly?: boolean;
+  /** The form is a quiz: questions a quiz can mark get an Answer key. */
+  quiz?: boolean;
   // dnd-kit
   handle?: { attributes: DraggableAttributes; listeners: DraggableSyntheticListeners; setActivatorNodeRef: (el: HTMLElement | null) => void };
   style?: CSSProperties;
@@ -99,6 +103,8 @@ export const ItemCard = forwardRef<HTMLDivElement, ItemCardProps>(function ItemC
   const [showValidation, setShowValidation] = useState(false);
   const [limitsOn, setLimitsOn] = useState(false);
   const [picker, setPicker] = useState<null | { target: "item" } | { target: "option"; optionId: string }>(null);
+  const [keyOpen, setKeyOpen] = useState(false);
+  const markable = !!p.quiz && MARKABLE.includes(item.kind);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (item.description) setShowDesc(true);
@@ -171,6 +177,7 @@ export const ItemCard = forwardRef<HTMLDivElement, ItemCardProps>(function ItemC
             className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-default"
           >
             <Summary item={item} label={label} assetUrls={p.assetUrls} />
+            {markable && <KeyLine item={item} />}
           </button>
         </div>
       ) : (
@@ -238,9 +245,35 @@ export const ItemCard = forwardRef<HTMLDivElement, ItemCardProps>(function ItemC
                   {p.error}
                 </p>
               )}
+              {markable && keyOpen && (
+                <AnswerKey
+                  item={item}
+                  onChange={(fn, coalesce) => p.onChange((it) => ({ ...it, quiz: fn(it.quiz ?? emptyQuiz(it)) }), coalesce)}
+                  onDone={() => setKeyOpen(false)}
+                />
+              )}
             </div>
           </div>
           <Footer
+            keyButton={
+              markable ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!item.quiz) p.onChange((it) => ({ ...it, quiz: emptyQuiz(it) }));
+                    setKeyOpen((o) => !o);
+                  }}
+                  aria-expanded={keyOpen}
+                  className={cn(
+                    "mr-auto inline-flex min-h-[40px] items-center gap-1.5 rounded-md px-2 text-sm font-medium hover:bg-[var(--hover)]",
+                    item.quiz?.suggested ? "text-amber-700 dark:text-amber-400" : "text-[var(--accent-text)]"
+                  )}
+                >
+                  <KeyRound className="h-4 w-4" aria-hidden="true" /> Answer key
+                  <span className="font-normal text-[var(--text-muted)]">· {keyWords(item)}</span>
+                </button>
+              ) : undefined
+            }
             {...p}
             showDesc={showDesc}
             onToggleDesc={() => {
@@ -366,6 +399,22 @@ function Summary({ item, label, assetUrls }: { item: FormItem; label: string; as
   );
 }
 
+/** "2 points · key set" / "No answer key yet" / "AI suggested — check it" on a collapsed quiz question. */
+function KeyLine({ item }: { item: FormItem }) {
+  const set = keySet(item);
+  return (
+    <span
+      className={cn(
+        "mt-1 inline-flex items-center gap-1 text-xs",
+        item.quiz?.suggested ? "font-medium text-amber-700 dark:text-amber-400" : set ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"
+      )}
+    >
+      {item.quiz?.suggested ? <Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> : <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+      {item.quiz?.suggested ? "AI suggested this answer — check it" : keyWords(item)}
+    </span>
+  );
+}
+
 function GridSummary({ item }: { item: FormItem }) {
   const c = item.config as { rows: { id: string; label: string }[]; columns: { id: string; label: string }[] };
   const rows = c.rows.map((r, i) => r.label || `Row ${i + 1}`);
@@ -411,6 +460,7 @@ function ItemPicture({ url, onRemove, onReplace }: { url?: string; onRemove: () 
 
 function Footer(
   p: ItemCardProps & {
+    keyButton?: ReactNode;
     showDesc: boolean;
     onToggleDesc: () => void;
     onAddImage: () => void;
@@ -435,6 +485,7 @@ function Footer(
     });
   return (
     <div className="flex flex-wrap items-center justify-end gap-1 border-t border-[var(--border)] pl-3 pt-2">
+      {p.keyButton}
       <button type="button" className={iconBtnCls} onClick={p.onDuplicate} title="Duplicate" aria-label="Duplicate">
         <Copy className="h-4 w-4" />
       </button>

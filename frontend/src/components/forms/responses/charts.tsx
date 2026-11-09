@@ -66,7 +66,7 @@ export function ChoiceBars({ rows, of, narrow }: { rows: ChoiceRow[]; of: number
   );
 }
 
-function ColumnTip({ active, payload, of }: { active?: boolean; payload?: { payload: { value: number; count: number } }[]; of: number }) {
+function ColumnTip({ active, payload, of }: { active?: boolean; payload?: { payload: { value: number | string; count: number } }[]; of: number }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   return (
@@ -86,6 +86,26 @@ export function ScaleColumns({ bins, of }: { bins: { value: number; count: numbe
     <div aria-hidden="true" className="h-44 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart accessibilityLayer={false} data={bins} margin={{ top: 18, right: 4, bottom: 0, left: 4 }} barCategoryGap="18%">
+          <XAxis dataKey="value" tick={tick} tickLine={false} axisLine={{ stroke: "var(--border)" }} interval={0} />
+          <YAxis hide domain={[0, max]} allowDecimals={false} />
+          <Tooltip content={<ColumnTip of={of} />} cursor={{ fill: "var(--hover)" }} />
+          <Bar dataKey="count" fill="var(--accent)" radius={[4, 4, 0, 0]} minPointSize={2} isAnimationActive={false}>
+            <LabelList dataKey="count" position="top" style={{ fill: "var(--text)", fontSize: 12 }} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** A quiz's histogram: one column per score (or range of scores). */
+export function HistogramColumns({ bins, of }: { bins: { label: string; count: number }[]; of: number }) {
+  const max = Math.max(1, ...bins.map((b) => b.count));
+  const data = bins.map((b) => ({ value: b.label, count: b.count }));
+  return (
+    <div aria-hidden="true" className="mt-2 h-36 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart accessibilityLayer={false} data={data} margin={{ top: 18, right: 4, bottom: 0, left: 4 }} barCategoryGap="14%">
           <XAxis dataKey="value" tick={tick} tickLine={false} axisLine={{ stroke: "var(--border)" }} interval={0} />
           <YAxis hide domain={[0, max]} allowDecimals={false} />
           <Tooltip content={<ColumnTip of={of} />} cursor={{ fill: "var(--hover)" }} />

@@ -203,11 +203,13 @@ def table(
     who: dict[Any, str] | None = None,
     tz: tzinfo | None = None,
     typed: bool = False,
+    quiz: bool = False,
 ) -> list[list[Any]]:
     """Header row + one row per response: Response #, Submitted, Edited,
-    Email (typed, if any), Account (if any), then every question in order
-    — deleted ones last, marked "(deleted question)". Times are in ``tz``
-    (UTC when not given). Text is neutralised. ``typed``: Response # and
+    Score, Max and Still to mark (a quiz, WP-F2.3: numbers), Email (typed,
+    if any), Account (if any), then every question in order — deleted ones
+    last, marked "(deleted question)". Times are in ``tz`` (UTC when not
+    given). Text is neutralised. ``typed``: Response #, scores and
     scale/rating answers stay numbers (for xlsx)."""
     qs = questions(definition, include_deleted=True)
     qs = [q for q in qs if not q.get("deleted")] + [q for q in qs if q.get("deleted")]
@@ -215,6 +217,8 @@ def table(
     has_email = any(getattr(r, "email", None) for r in rows)
     has_account = any(getattr(r, "respondent_id", None) for r in rows)
     header = ["Response #", "Submitted", "Edited"]
+    if quiz:
+        header += ["Score", "Max", "Still to mark"]
     if has_email:
         header.append("Email (typed, not checked)")
     if has_account:
@@ -225,6 +229,10 @@ def table(
     out: list[list[Any]] = [[neutralise(h) for h in header]]
     for r in rows:
         line: list[Any] = [r.number if typed else str(r.number), when(r.submitted_at, tz), when(r.edited_at, tz)]
+        if quiz:
+            g = getattr(r, "grading", None) or {}
+            nums = [int(g.get("auto") or 0) + int(g.get("manual") or 0), int(g.get("max") or 0), int(g.get("pending") or 0)] if g else None
+            line += [(n if typed else str(n)) for n in nums] if nums else ["", "", ""]
         if has_email:
             line.append(neutralise(r.email or ""))
         if has_account:
@@ -241,11 +249,16 @@ def table(
 
 
 def responses_csv(
-    definition: dict[str, Any], responses: Iterable[Any], *, who: dict[Any, str] | None = None, tz: tzinfo | None = None
+    definition: dict[str, Any],
+    responses: Iterable[Any],
+    *,
+    who: dict[Any, str] | None = None,
+    tz: tzinfo | None = None,
+    quiz: bool = False,
 ) -> bytes:
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\r\n")
-    writer.writerows(table(definition, responses, who=who, tz=tz))
+    writer.writerows(table(definition, responses, who=who, tz=tz, quiz=quiz))
     # A BOM so Excel opens it as UTF-8.
     return ("﻿" + buf.getvalue()).encode("utf-8")
 
@@ -257,6 +270,7 @@ def responses_xlsx(
     who: dict[Any, str] | None = None,
     tz: tzinfo | None = None,
     sheet_title: str = "Responses",
+    quiz: bool = False,
 ) -> bytes:
     """An Excel workbook: a bold, frozen header row and one row per answer.
     Every text cell is stored as text (``data_type="s"``), so even a value
@@ -266,7 +280,7 @@ def responses_xlsx(
     from openpyxl.styles import Alignment, Font
     from openpyxl.utils import get_column_letter
 
-    rows = table(definition, responses, who=who, tz=tz, typed=True)
+    rows = table(definition, responses, who=who, tz=tz, typed=True, quiz=quiz)
     wb = Workbook()
     ws = wb.active
     name = (sheet_title or "Responses")[:31]

@@ -1,5 +1,5 @@
 import { Heart, MapPin, MoreHorizontal, Star, ThumbsUp, Upload } from "lucide-react";
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Fragment, Suspense, lazy, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import type {
   CheckboxesConfig,
@@ -18,7 +18,6 @@ import type {
   ShortTextConfig,
   TimeConfig,
 } from "@/api/forms";
-import { LocationInput } from "@/components/maps/LocationInput";
 import { locationText, type SearchRowLike } from "@/lib/locationSuggest";
 import { cn } from "@/utils/cn";
 
@@ -966,6 +965,9 @@ function Choices(p: QuestionProps & { multi: boolean; describedBy?: string }) {
   );
 }
 
+// Loaded only by a form that has a Location question (the answer page stays light).
+const LocationInput = lazy(() => import("@/components/maps/LocationInput").then((m) => ({ default: m.LocationInput })));
+
 const ASK_PLACEHOLDER: Record<LocationConfig["ask"], string> = {
   address: "Start typing an address",
   town: "Start typing a suburb or town",
@@ -990,8 +992,23 @@ function LocationControl(p: QuestionProps & { fieldProps: FieldProps }) {
     [places, item.id]
   );
   const fp = p.fieldProps as { id: string; "aria-invalid"?: true; "aria-describedby"?: string; "aria-required"?: boolean };
+  const plain = (
+    <input
+      id={fp.id}
+      className="pf-input"
+      value={v?.text ?? ""}
+      maxLength={300}
+      placeholder={ASK_PLACEHOLDER[cfg.ask] ?? ASK_PLACEHOLDER.any}
+      aria-invalid={fp["aria-invalid"]}
+      aria-describedby={fp["aria-describedby"]}
+      aria-required={fp["aria-required"]}
+      autoComplete="off"
+      onChange={(e) => onChange(e.target.value.trim() ? { text: e.target.value, picked: false } : undefined)}
+    />
+  );
   return (
     <div className="flex flex-col gap-2">
+      <Suspense fallback={plain}>
       <LocationInput
         id={fp.id}
         unstyled
@@ -1012,6 +1029,7 @@ function LocationControl(p: QuestionProps & { fieldProps: FieldProps }) {
           onChange(s.lat != null && s.lon != null ? { text, lat: s.lat, lon: s.lon, picked: true } : { text, picked: false });
         }}
       />
+      </Suspense>
       {v?.picked && (
         <span className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-sm" style={{ background: "var(--pf-selected)" }}>
           <MapPin className="h-4 w-4 shrink-0" style={{ color: "var(--pf-accent)" }} aria-hidden="true" />

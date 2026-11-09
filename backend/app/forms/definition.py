@@ -403,6 +403,10 @@ class Item(_Strict):
     required: bool = False
     config: dict[str, Any] = Field(default_factory=dict)
     deleted: bool = False
+    # Quizzes (WP-F2.3): ``{points, key, feedback_right, feedback_wrong,
+    # suggested?}`` or null. Never sent to the answer page
+    # (``answering.respondent_definition`` drops it).
+    quiz: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _config(self) -> Item:
@@ -414,6 +418,10 @@ class Item(_Strict):
         if self.kind in BLOCK_KINDS:
             # Blocks aren't questions: nothing to answer, so nothing to require.
             self.required = False
+        if self.quiz is not None:
+            from app.forms.quiz import clean_item_quiz
+
+            self.quiz = clean_item_quiz(self.kind, self.config, self.quiz)
         return self
 
     @property
@@ -532,6 +540,10 @@ def validate_definition(raw: Any) -> dict[str, Any]:
     except ValueError as exc:  # pragma: no cover — validators raise inside ValidationError
         raise DefinitionError(str(exc)) from None
     out = model.model_dump(mode="json")
+    for it in out.get("items") or []:
+        # Only quiz questions carry a ``quiz`` (a plain form's JSON is as it was).
+        if it.get("quiz") is None:
+            it.pop("quiz", None)
     if json_size(out) > MAX_JSON_BYTES:
         raise DefinitionError("This form is too big to save (256 KB at most). Remove some questions or text.")
     return out

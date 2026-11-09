@@ -504,7 +504,11 @@ async def one(db: AsyncSession, form: Form, number: int, user: User | None = Non
             item["files"] = _files_of(answers.get(qid), cards, outside=r.source == "link")
         items.append(item)
     items = [i for i in items if not i["deleted"]] + [i for i in items if i["deleted"]]
+    from app.forms.scores import marks_view
+
     return {
+        # A quiz (WP-F2.3/4): this answer's marks.
+        "quiz": marks_view(r) if form.quiz is not None else None,
         "number": r.number,
         "position": position,
         "total": total,
@@ -609,10 +613,11 @@ async def export(db: AsyncSession, shell: UserFile, form: Form, user: User, fmt:
     safe = "".join(ch for ch in title if ch not in '\\/:*?"<>|\r\n\t').strip()[:120] or "Form"
     base = f"{safe} (Responses)"
     defn = form.definition or {}
+    is_quiz = form.quiz is not None
     if fmt == "xlsx":
-        data = await asyncio.to_thread(responses_xlsx, defn, rows, who=names, tz=tz)
+        data = await asyncio.to_thread(responses_xlsx, defn, rows, who=names, tz=tz, quiz=is_quiz)
         return data, f"{base}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    data = await asyncio.to_thread(responses_csv, defn, rows, who=names, tz=tz)
+    data = await asyncio.to_thread(responses_csv, defn, rows, who=names, tz=tz, quiz=is_quiz)
     return data, f"{base}.csv", "text/csv; charset=utf-8"
 
 

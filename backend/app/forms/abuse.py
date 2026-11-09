@@ -38,6 +38,7 @@ _HOUR = 3600
 
 _START_INFO = b"promptly-forms-start-v1"
 _EDIT_INFO = b"promptly-forms-edit-v1"
+_RESULT_INFO = b"promptly-forms-result-v1"
 
 
 def _hkdf(secret: str, info: bytes) -> bytes:
@@ -101,6 +102,38 @@ def edit_token(form_id: uuid.UUID, submit_id: uuid.UUID) -> str:
 def hash_edit_token(token: str) -> str:
     # 32 random-looking bytes: a plain SHA-256 is enough (no bcrypt).
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+# --------------------------------------------------------------------
+# Results tokens (quizzes, WP-F2.3)
+# --------------------------------------------------------------------
+def result_token(form_id: uuid.UUID, number: int, submit_id: uuid.UUID) -> str:
+    """"Save this link to see your score later": ``<number>.<key>``, the key
+    derived from the answer's submit id under its own label (like the edit
+    token), so nothing new is stored and it opens that one answer's marks
+    only — never anyone else's, and never a way to change it."""
+    sig = _b64(hmac.new(_keys(_RESULT_INFO)[0], f"{form_id.hex}.{submit_id.hex}".encode("ascii"), hashlib.sha256).digest())
+    return f"{number}.{sig}"
+
+
+def result_number(token: str | None) -> int | None:
+    """The answer number a results token claims (checked afterwards with
+    :func:`result_token_ok`)."""
+    if not token or len(token) > 120 or "." not in token:
+        return None
+    n, _sig = token.split(".", 1)
+    return int(n) if n.isdigit() and 0 < len(n) <= 9 else None
+
+
+def result_token_ok(token: str, form_id: uuid.UUID, number: int, submit_id: uuid.UUID) -> bool:
+    """Compared as SHA-256 digests, in constant time, against every key
+    still in use (a rotated secret keeps old links working)."""
+    want = hashlib.sha256(token.encode("utf-8")).digest()
+    for key in _keys(_RESULT_INFO):
+        sig = _b64(hmac.new(key, f"{form_id.hex}.{submit_id.hex}".encode("ascii"), hashlib.sha256).digest())
+        if hmac.compare_digest(hashlib.sha256(f"{number}.{sig}".encode("utf-8")).digest(), want):
+            return True
+    return False
 
 
 # --------------------------------------------------------------------
@@ -183,5 +216,8 @@ __all__ = [
     "note_answer",
     "person_key",
     "person_over",
+    "result_number",
+    "result_token",
+    "result_token_ok",
     "start_token",
 ]

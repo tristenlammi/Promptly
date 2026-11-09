@@ -51,6 +51,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.forms.definition import questions
 from app.forms.export import question_columns, when
+from app.forms.quiz import score_text
 from app.forms.models import Form, FormResponse
 
 logger = logging.getLogger("promptly.forms.sheet")
@@ -142,6 +143,7 @@ BASE_COLUMNS: list[tuple[str, str]] = [
 ]
 EMAIL_TITLE = "Email (typed, not checked)"
 ACCOUNT_TITLE = "Account"
+SCORE_TITLE = "Score"
 
 
 def wanted_columns(
@@ -150,12 +152,16 @@ def wanted_columns(
     email: bool,
     account: bool,
     layout: list[dict[str, Any]] | None = None,
+    quiz: bool = False,
 ) -> list[tuple[str, str]]:
     """The columns the tab should have, in order: Response #, Submitted,
-    Edited, Email and Account (when answers can have them, and kept once
-    they're there), then every question — deleted ones last."""
+    Edited, Score (a quiz, WP-F2.3; kept once there), Email and Account
+    (when answers can have them, and kept once they're there), then every
+    question — deleted ones last."""
     have = {e.get("key") for e in layout or []}
     out = list(BASE_COLUMNS)
+    if quiz or "score" in have:
+        out.append(("score", SCORE_TITLE))
     if email or "email" in have:
         out.append(("email", EMAIL_TITLE))
     if account or "account" in have:
@@ -204,6 +210,8 @@ def row_values(
         "edited": when(r.edited_at, tz),
         "email": r.email or "",
         "account": (who or {}).get(r.respondent_id, "") if r.respondent_id else "",
+        # "7 / 10" or "7 / 10 (2 to mark)" (text, like every cell here).
+        "score": score_text(getattr(r, "grading", None)),
     }
     answers = r.answers or {}
     for q in questions(definition or {}, include_deleted=True):
@@ -476,7 +484,7 @@ async def link_new(db: AsyncSession, form_shell: Any, form: Form, user: Any, *, 
     folder_id = form_shell.folder_id if form_shell.user_id == user.id else None
     email, account = await _flags(db, form)
     tab_id = _new_tab_id()
-    tab, layout = header_tab(tab_id, wanted_columns(form.definition or {}, email=email, account=account))
+    tab, layout = header_tab(tab_id, wanted_columns(form.definition or {}, email=email, account=account, quiz=form.quiz is not None))
     data = [tab]
     shell, sheet = await create_office_file(
         db, kind="sheet", owner=user, title=title, folder_id=folder_id, data=data, content_text=flatten_text(data)
@@ -512,7 +520,7 @@ async def link_existing(db: AsyncSession, form: Form, user: Any, sheet_file_id: 
         raise SheetLinkError("Pick a spreadsheet you can edit.")
     room = f"sheet:{sheet.id}"
     email, account = await _flags(db, form)
-    wanted = wanted_columns(form.definition or {}, email=email, account=account)
+    wanted = wanted_columns(form.definition or {}, email=email, account=account, quiz=form.quiz is not None)
     tab_id = _new_tab_id()
     live = await live_state(room)
     # What's there now: the room when it holds the sheet, else the workbook.
@@ -752,7 +760,7 @@ async def sync_once(
     who = await names_of(db, {r.respondent_id for r in rows if r.respondent_id})
     defn = form.definition or {}
     email, account = await _flags(db, form)
-    wanted = wanted_columns(defn, email=email, account=account, layout=form.sheet_columns)
+    wanted = wanted_columns(defn, email=email, account=account, layout=form.sheet_columns, quiz=form.quiz is not None)
     from app.calendars.reach import site_origin
 
     origin = await site_origin(db)

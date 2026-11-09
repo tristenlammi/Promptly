@@ -200,6 +200,8 @@ async def page(db: AsyncSession, ctx: AnswerCtx, user: User | None, token: str) 
             "definition": top,
             "asset_urls": _asset_urls(token, top),
             "closed_message": form.closed_message or "",
+            # A quiz: people can still look up their own score (WP-F2.3).
+            "quiz": form.quiz is not None,
         }
     from app.forms.uploads import page_rules
 
@@ -231,7 +233,23 @@ async def page(db: AsyncSession, ctx: AnswerCtx, user: User | None, token: str) 
         # "Add to my calendar" after sending (WP-F1.7): the linked event's
         # title, time and place only, as a one-event .ics.
         "event": await _event_brief(db, form),
+        # A quiz (WP-F2.3): when scores come, and your own (signed in, once
+        # released). Never a key, never anyone else's.
+        "quiz": _quiz_brief(form),
+        "my_result": _own_result(form, previous) if previous is not None and form.quiz is not None else None,
     }
+
+
+def _quiz_brief(form: Form) -> dict[str, Any] | None:
+    if form.quiz is None:
+        return None
+    return {"release": (form.quiz or {}).get("release", "now")}
+
+
+def _own_result(form: Form, r: FormResponse) -> dict[str, Any]:
+    from app.forms.quiz import respondent_result
+
+    return {"number": r.number, **respondent_result(form.definition or {}, form.quiz, r.grading, r.released_at is not None)}
 
 
 async def _event_brief(db: AsyncSession, form: Form) -> dict[str, Any] | None:
@@ -379,7 +397,32 @@ def _result(token: str, form: Form, r: FormResponse, *, user: User | None) -> di
     out: dict[str, Any] = {"number": r.number, "edit_token": None}
     if user is None and form.allow_edit and r.respondent_id is None:
         out["edit_token"] = abuse.edit_token(form.id, r.submit_id)
+    if form.quiz is not None:
+        out.update(_quiz_reply(token, form, r))
     return out
+
+
+def _quiz_reply(token: str, form: Form, r: FormResponse) -> dict[str, Any]:
+    """A quiz answer's reply: your marks (as far as the owner shows them,
+    once released), and for an answer by link the results link to keep."""
+    out: dict[str, Any] = {"result": _own_result(form, r)}
+    if r.respondent_id is None:
+        out["result_token"] = abuse.result_token(form.id, r.number, r.submit_id)
+    return out
+
+
+def _mark(form: Form, r: FormResponse, clean: dict[str, Any], *, before: dict[str, Any] | None = None,
+          now: datetime | None = None) -> None:
+    """Mark a quiz answer (under the form lock): automatic parts afresh, the
+    owner's marks kept only for answers that didn't change."""
+    from app.forms import quiz
+
+    if form.quiz is None:
+        return
+    r.grading = quiz.mark(form.definition or {}, clean, r.grading, before)
+    r.score = quiz.score_of(r.grading)
+    if (form.quiz or {}).get("release", "now") == "now" and r.released_at is None:
+        r.released_at = now or datetime.now(timezone.utc)
 
 
 async def submit(
@@ -457,6 +500,7 @@ async def submit(
     )
     if user is None:
         r.edit_token_hash = abuse.hash_edit_token(abuse.edit_token(form.id, body.submit_id))
+    _mark(form, r, clean, now=now)
     db.add(r)
     form.next_number = (form.next_number or 1) + 1
     form.response_count = (form.response_count or 0) + 1
@@ -561,6 +605,8 @@ async def edit(db: AsyncSession, token: str, body: Incoming, user: User | None) 
     old = dict(r.answers or {})
     await _take_places(db, form, ans.picks(defn, clean), ans.picks(defn, old))
     delta = _size(clean) - _size(old)
+    # A quiz answer is marked again (WP-F2.3).
+    _mark(form, r, clean, before=old)
     r.answers = clean
     r.path = path
     r.email = email
@@ -575,7 +621,44 @@ async def edit(db: AsyncSession, token: str, body: Incoming, user: User | None) 
     from app.forms.sheet import sync_soon
 
     sync_soon(form)
-    return {"number": r.number}
+    out: dict[str, Any] = {"number": r.number}
+    if form.quiz is not None:
+        out.update(_quiz_reply(token, form, r))
+    return out
+
+
+async def result(db: AsyncSession, token: str, user: User | None, r_token: str | None) -> dict[str, Any]:
+    """``GET /api/f/{token}/result``: your own quiz marks — by the results
+    link kept on your device, or (signed in) by your account. The same 404
+    rules as ``mine``; a closed form still shows them. Never anyone else's
+    answer: a wrong or someone else's results link is a 404."""
+    ctx = await load(db, token, user)
+    if ctx.state in ("gone", "sign_in"):
+        raise gone()
+    form = ctx.form
+    assert form is not None
+    if form.quiz is None:
+        raise gone()
+    r: FormResponse | None = None
+    if r_token:
+        number = abuse.result_number(r_token)
+        if number is not None:
+            r = (
+                await db.execute(
+                    select(FormResponse).where(
+                        FormResponse.form_id == form.id,
+                        FormResponse.number == number,
+                        FormResponse.deleted_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if r is not None and not abuse.result_token_ok(r_token, form.id, r.number, r.submit_id):
+                r = None
+    elif user is not None:
+        r = await latest_by(db, form, user)
+    if r is None:
+        raise gone()
+    return _own_result(form, r)
 
 
 # --------------------------------------------------------------------
@@ -648,6 +731,7 @@ __all__ = [
     "page",
     "remove_file",
     "report",
+    "result",
     "submit",
     "verify_asset",
 ]

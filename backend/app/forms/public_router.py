@@ -22,6 +22,8 @@ need it.
 * ``POST /{token}/uploads`` (multipart: ``file``, ``question_id``,
   ``draft_key``) — stage a file for a file question (WP-F1.6);
   ``DELETE /{token}/uploads/{id}?draft_key=`` takes it back.
+* ``GET  /{token}/result?r=`` — your own quiz marks (WP-F2.3), by the
+  results link from your confirmation, or signed in by your account.
 * ``GET  /{token}/places?q=&question=&lat=&lon=`` — place suggestions for
   a Location question (WP-F2.2, :mod:`app.forms.places`): Photon only,
   never anyone's saved places; the same 404 unless the form is open to you
@@ -194,6 +196,21 @@ async def get_mine(
     user = await _who(request, db)
     try:
         return await responses.mine(db, token, user, edit)
+    except Refusal as exc:
+        raise _raise(exc) from None
+
+
+@router.get("/{token}/result")
+async def get_result(
+    token: str,
+    request: Request,
+    r: str | None = Query(default=None, max_length=120),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Your score, once it's released, as far as the owner shows it."""
+    user = await _who(request, db)
+    try:
+        return await responses.result(db, token, user, r)
     except Refusal as exc:
         raise _raise(exc) from None
 

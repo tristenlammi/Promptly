@@ -182,15 +182,17 @@ def answerable(item: dict[str, Any], files: FileMode = "all") -> bool:
 
 
 def respondent_definition(defn: dict[str, Any], files: FileMode = "all") -> dict[str, Any]:
-    """The definition as someone answering sees it: no deleted items, and
-    file questions only when this person may send files (with only the
-    kinds they may send). Sections and branching are untouched, so the
-    walk is the same on both sides."""
+    """The definition as someone answering sees it: no deleted items, no
+    quiz answer keys or points (WP-F2.3: the answer page never sees a key),
+    and file questions only when this person may send files (with only the
+    kinds they may send). Sections and branching are untouched, so the walk
+    is the same on both sides."""
     out = copy.deepcopy(defn)
     items = []
     for i in out.get("items") or []:
         if i.get("deleted"):
             continue
+        i.pop("quiz", None)
         if i.get("kind") == "file_upload":
             kinds = file_kinds(i, files)
             if not kinds:
