@@ -36,6 +36,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - A person's page has a Notes section: the notes you both have (shared between you, or shared with you both), in their colours, with See all, which opens Notes showing just those. Never a note only they can open.
 <!-- Notes phase 2, N2.6 -->
 - Notes ⋯ → Copy to a workspace… (on a computer): makes a Page with the note's words and pictures in a workspace you can add pages to, at the top or in a notebook. The dialog says who will see the copy; the note itself stays as it is, private.
+<!-- Notes phase 2, N2.7 -->
+- Android: the home-screen widgets refresh a few seconds after any Promptly notification arrives (a reminder, an invite, a shared note), and every 15 minutes while the phone is charging. With no widgets, nothing extra runs.
 
 ## [0.34.0] - 2026-11-09
 

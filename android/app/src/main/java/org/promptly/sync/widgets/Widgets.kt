@@ -206,13 +206,19 @@ object Boundaries {
 }
 
 /**
- * Boot, the clock or time zone changing, our own boundary alarm, and a
- * Promptly app being opened (SuiteLauncher sends [ACTION_LAUNCHED]).
+ * Boot, the clock or time zone changing, our own boundary alarm, a Promptly
+ * app being opened (SuiteLauncher sends [ACTION_LAUNCHED]) and a Promptly
+ * notification arriving (Delegation sends [ACTION_NOTIFIED]).
  */
 class WidgetEvents : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val ctx = context.applicationContext
         if (!Widgets.placed(ctx)) return
+        if (intent.action == ACTION_NOTIFIED) {
+            // Only a refresh in a few seconds; nothing to redraw yet.
+            WidgetSync.notified(ctx)
+            return
+        }
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> {
                 WidgetSync.periodic(ctx)
@@ -234,5 +240,6 @@ class WidgetEvents : BroadcastReceiver() {
     companion object {
         const val ACTION_TICK = "org.promptly.sync.widgets.TICK"
         const val ACTION_LAUNCHED = "org.promptly.app.action.LAUNCHED"
+        const val ACTION_NOTIFIED = "org.promptly.app.action.NOTIFIED"
     }
 }
