@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-09
+
 ### Added
 <!-- Calls (DM calls), WP-D1 -->
 - Calls in DMs, the server side (the call screen comes next): voice and video calls in 1:1 and group conversations. A call rings everyone else on every device for 45 seconds, even during quiet hours; answer on one device and the others stop ringing. Decline from the notification, or let it ring out: the conversation then shows "Missed call" and you get a "Missed call" notification. A finished call leaves "Call · 12 min" in the conversation. Anyone in a group conversation can join its call while it is on, and a group call can ring someone again. You are only ever in one call or voice channel at a time. Blocking someone refuses calls both ways and ends a call with them.
