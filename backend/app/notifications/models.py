@@ -157,6 +157,11 @@ class PushPreferences(Base):
     notes: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Porch (0272): the app's switch; which kinds (posts, comments…) and
+    # how (on / daily summary / off) are chosen in Porch → Settings.
+    porch: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     # Quiet hours (0320), in the person's own time zone. One setting for all
     # of Promptly; ``dispatch.RULES`` says which categories they may hold.
     # The weekend pair, when set, is used for quiet periods that end on a

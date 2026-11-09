@@ -278,6 +278,25 @@ function RoomsGate() {
   return <AppLayout />;
 }
 
+const PorchApp = lazyWithRetry(
+  () => import("@/porch/PorchApp").then((m) => ({ default: m.PorchApp })),
+  "PorchApp"
+);
+
+/** Porch is its own app on a phone and when launched as the installed
+ *  Porch app; in a desktop browser it sits inside Promptly's layout. */
+function PorchGate() {
+  const isMobile = useIsMobile();
+  if (isMobile || isOwnAppWindow("porch")) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <PorchApp />
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
+
 const CalendarApp = lazyWithRetry(
   () => import("@/calendar/CalendarApp").then((m) => ({ default: m.CalendarApp })),
   "CalendarApp"
@@ -781,6 +800,12 @@ export default function App() {
           </Suspense>
         }
       />
+      {/* Porch: photos and news shared through groups. Its own app on a
+          phone and when installed; inside Promptly in a desktop browser. */}
+      <Route path="/porch" element={<PorchGate />}>
+        <Route index element={<PorchApp embedded />} />
+        <Route path="*" element={<PorchApp embedded />} />
+      </Route>
       {/* An emailed invitation's answer page (no Promptly chrome) — beats /calendar/*. */}
       <Route
         path="/calendar/answer/:token"

@@ -123,6 +123,10 @@ async def lifespan(_: FastAPI):
     from app.observability.metrics import start_loop_lag_sampler
 
     loop_lag_task = start_loop_lag_sampler()
+    # Porch: today's birthday pushes, once a day per person (app/porch/push.py).
+    from app.porch.push import start_porch_loops
+
+    porch_loops_task = start_porch_loops()
     # Voice Phase 2 — the Wyoming listener, so Home Assistant satellites
     # can run this instance's commands. Off unless explicitly enabled;
     # start_wyoming() logs its own reason when it declines. Imported here
@@ -173,6 +177,7 @@ async def lifespan(_: FastAPI):
             chat_upload_sweeper_task,
             stale_run_reaper_task,
             loop_lag_task,
+            porch_loops_task,
         ):
             bg.cancel()
             try:
@@ -837,3 +842,12 @@ app.include_router(notes_router, prefix="/api/notes", tags=["notes"])
 from app.widgets.router import router as widgets_router  # noqa: E402
 
 app.include_router(widgets_router, prefix="/api/widgets", tags=["widgets"])
+
+# Porch: posts shared through groups, between the people on this Promptly (app/porch).
+from app.porch.router import router as porch_router  # noqa: E402
+
+app.include_router(porch_router, prefix="/api/porch", tags=["porch"])
+# Admin → Porch: the switch, who can use it, limits, Everyone's name, reports (WP-P1.7).
+from app.porch.admin_router import router as porch_admin_router  # noqa: E402
+
+app.include_router(porch_admin_router, prefix="/api/admin/porch", tags=["porch"])

@@ -8,6 +8,8 @@ import { humanSize } from "@/components/files/helpers";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { Button } from "@/components/shared/Button";
+import { porchTrashWarning } from "@/api/porch";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -67,6 +69,8 @@ export function PhotoCleanupPage() {
 
   const trash = async () => {
     const ids = chosen.map((p) => p.id);
+    const warn = await porchTrashWarning(ids);
+    if (warn && !(await confirm({ title: ids.length === 1 ? "Move this photo to the trash?" : `Move ${ids.length} photos to the trash?`, message: warn, confirmLabel: "Move to trash", danger: true }))) return;
     setBusy(true);
     try {
       await filesApi.bulkTrash({ file_ids: ids, folder_ids: [] });

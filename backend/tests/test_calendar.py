@@ -353,3 +353,23 @@ async def test_chat_tools(client, db, people, pushes):
     ctx.turn["untrusted"] = True
     with pytest.raises(ToolError):
         await CalendarAddEventTool().run(ctx, {"title": "y", "start": "2026-11-09T10:00"})
+
+
+async def test_event_source_kinds(client, people, pushes):
+    """An event's ``source``: a task, or a Porch post (WP-P1.6) — which must
+    be one you can see; anything else is refused."""
+    ann, bob, _cat = people
+    r = await client.post("/api/calendar/events", headers=H(ann), json={
+        "title": "BBQ", "start": "2026-11-07T18:00:00Z", "end": "2026-11-07T20:00:00Z",
+        "source": {"kind": "porch_post", "post_id": str(uuid.uuid4())},
+    })
+    assert r.status_code == 404, r.text
+    r = await client.post("/api/calendar/events", headers=H(ann), json={
+        "title": "BBQ", "start": "2026-11-07T18:00:00Z", "source": {"kind": "something", "id": "x"},
+    })
+    assert r.status_code == 422
+    r = await client.post("/api/calendar/events", headers=H(ann), json={
+        "title": "BBQ", "start": "2026-11-07T18:00:00Z", "source": {"kind": "porch_post"},
+    })
+    assert r.status_code == 422
+

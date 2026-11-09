@@ -29,6 +29,8 @@ export interface NotificationPreferences {
   /** "Don't ring me during quiet hours": calls then become missed calls, told when quiet hours end (off: calls always ring). */
   call_quiet_hold?: boolean;
   notes: boolean;
+  /** Porch: which kinds, and how, are chosen in Porch → Settings. */
+  porch?: boolean;
   /** Quiet hours, "HH:MM" in your own time zone (one setting for all of Promptly). */
   quiet_enabled: boolean;
   quiet_start: string;
@@ -67,7 +69,8 @@ export type NotificationSwitch =
   | "form_response"
   | "call"
   | "call_quiet_hold"
-  | "notes";
+  | "notes"
+  | "porch";
 
 export interface NotificationRow {
   id: string;

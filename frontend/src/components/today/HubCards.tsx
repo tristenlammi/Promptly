@@ -15,6 +15,7 @@ import {
   Dumbbell,
   GraduationCap,
   HeartPulse,
+  House,
   Layers,
   ListChecks,
   MessageCircle,
@@ -811,6 +812,51 @@ export function FormsCard({ f }: { f: NonNullable<Sections["forms"]> }) {
           <span className="shrink-0 text-xs text-[var(--text-muted)]">closes {timeLabel(new Date(x.closes_at))}</span>
         </Link>
       ))}
+    </HubCard>
+  );
+}
+
+// -------------------------------------------------------------------- porch
+
+/** Porch: new posts in your ticked groups since you last looked (a few
+ *  thumbnails and who posted), and today's birthdays with "Post for Sam". */
+export function PorchCard({ p }: { p: NonNullable<Sections["porch"]> }) {
+  const n = p.new_posts;
+  const who = n ? [...n.from, ...(n.more_people ? [`${n.more_people} more`] : [])] : [];
+  const whoText = who.length > 1 ? `${who.slice(0, -1).join(", ")} and ${who[who.length - 1]}` : who[0] ?? "";
+  return (
+    <HubCard icon={House} title="Porch" to={p.url} open="Open Porch">
+      {n && (
+        <Link to={p.url} className="flex items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-[var(--text)]">{n.count === 1 ? "1 new post" : `${n.count > 99 ? "99+" : n.count} new posts`}</span>
+            {whoText && <span className="block truncate text-xs text-[var(--text-muted)]">from {whoText}</span>}
+          </span>
+          {n.thumbs.length > 0 && (
+            <span className="flex shrink-0 -space-x-2">
+              {n.thumbs.map((t) => (
+                <img key={t.post_id} src={t.thumb ?? undefined} alt="" loading="lazy" className="h-10 w-10 rounded-lg border-2 border-[var(--surface)] object-cover" />
+              ))}
+            </span>
+          )}
+        </Link>
+      )}
+      {p.birthdays.length > 0 && (
+        <ul className={cn(n && "mt-1 border-t border-[var(--border)] pt-1")}>
+          {p.birthdays.map((b) => (
+            <li key={b.user.id} className="flex items-center gap-2 px-1 py-1.5">
+              <Cake className="h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-hidden />
+              <Link to={b.profile_url} className="min-w-0 flex-1 hover:underline">
+                <span className="block truncate text-sm text-[var(--text)]">{b.user.name}</span>
+                <span className="block text-xs text-[var(--text-muted)]">Birthday today</span>
+              </Link>
+              <Link to={b.post_url} className="shrink-0 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90">
+                Post for {b.user.name.split(" ")[0]}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </HubCard>
   );
 }

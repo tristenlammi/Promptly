@@ -24,6 +24,7 @@ final class Apps {
         {"trip", "P Trips", "org.promptly.app.TripLauncher"},
         {"tasks", "P Tasks", "org.promptly.app.TasksLauncher"},
         {"notes", "P Notes", "org.promptly.app.NotesLauncher"},
+        {"porch", "P Porch", "org.promptly.app.PorchLauncher"},
         {"passwords", "P Passwords", "org.promptly.app.PasswordsLauncher"},
     };
 }

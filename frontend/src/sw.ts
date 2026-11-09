@@ -83,6 +83,7 @@ function manifestFor(path: string): string {
   if (/^\/mail(\/|$)/.test(path)) return "/mail.webmanifest";
   if (/^\/photos(\/|$)/.test(path)) return "/photos.webmanifest";
   if (/^\/notes(\/|$)/.test(path)) return "/notes.webmanifest";
+  if (/^\/porch(\/|$)/.test(path)) return "/porch.webmanifest";
   const app = /^\/app\/([0-9a-fA-F-]{36})/.exec(path);
   if (app) return `/api/items/app-manifest/${app[1]}.webmanifest`;
   return "/manifest.webmanifest";
@@ -113,23 +114,35 @@ registerRoute(
   })
 );
 
-// ----- Share target: "Share → Promptly Files" (R-211) -----
-// The installed Files app is a share target; the OS POSTs the shared files
-// here. Stash them and send the app to Files, which uploads them (the
-// upload needs the signed-in page — the worker has no token).
+// ----- Share targets: "Share → Promptly Files" (R-211), "Share → Porch" (WP-P1.4) -----
+// The installed Files and Porch apps are share targets; the OS POSTs what
+// was shared here. Stash it under that app's key and send the app there:
+// Files uploads the files, Porch opens the composer with them (the upload
+// needs the signed-in page — the worker has no token).
 self.addEventListener("fetch", (event: FetchEvent) => {
   const url = new URL(event.request.url);
-  if (event.request.method !== "POST" || url.pathname !== "/files/share-target") return;
+  if (event.request.method !== "POST") return;
+  const app = url.pathname === "/files/share-target" ? "files" : url.pathname === "/porch/share-target" ? "porch" : null;
+  if (!app) return;
   event.respondWith(
     (async () => {
       try {
         const form = await event.request.formData();
-        const files = form.getAll("files").filter((v): v is File => v instanceof File);
-        await stashSharedFiles(files);
+        const files = form.getAll(app === "porch" ? "media" : "files").filter((v): v is File => v instanceof File);
+        // Porch keeps the shared words and link as the caption.
+        const words =
+          app === "porch"
+            ? ["title", "text", "url"]
+                .map((k) => form.get(k))
+                .filter((v): v is string => typeof v === "string" && !!v.trim())
+                .filter((v, i, all) => all.indexOf(v) === i)
+                .join("\n")
+            : "";
+        await stashSharedFiles(files, app, words);
       } catch {
-        // Nothing usable arrived — still land the user in Files.
+        // Nothing usable arrived — still land the user in the app.
       }
-      return Response.redirect("/files/?shared=1", 303);
+      return Response.redirect(app === "porch" ? "/porch/new?shared=1" : "/files/?shared=1", 303);
     })()
   );
 });
@@ -482,16 +495,16 @@ self.addEventListener("notificationclick", (event) => {
         type: "window",
         includeUncontrolled: true,
       });
-      // Rooms, Calendar and Photos install as their own apps: a push for one goes to
+      // Rooms, Calendar, Photos and Porch install as their own apps: a push for one goes to
       // a window already in that app, else opens fresh (so the installed
       // app, which owns that scope, handles it) — never hijacks Promptly.
       const target0 = new URL(url, self.location.origin);
-      const scope = ["/rooms/", "/calendar/", "/photos/", "/passwords/", "/notes/"].find((s) => target0.pathname.startsWith(s) || target0.pathname === s.slice(0, -1)) ?? null;
+      const scope = ["/rooms/", "/calendar/", "/photos/", "/passwords/", "/notes/", "/porch/"].find((s) => target0.pathname.startsWith(s) || target0.pathname === s.slice(0, -1)) ?? null;
       // "/calendar?event=…" → "/calendar/?event=…", inside the installed app's scope.
       if (scope && target0.pathname === scope.slice(0, -1)) url = scope + target0.search + target0.hash;
       const inScope = (w: WindowClient | Client) => {
         const p = new URL(w.url).pathname;
-        return scope ? p.startsWith(scope) : !p.startsWith("/rooms/") && !p.startsWith("/calendar/") && !p.startsWith("/photos/") && !p.startsWith("/passwords") && !p.startsWith("/notes/");
+        return scope ? p.startsWith(scope) : !p.startsWith("/rooms/") && !p.startsWith("/calendar/") && !p.startsWith("/photos/") && !p.startsWith("/passwords") && !p.startsWith("/notes/") && !p.startsWith("/porch/");
       };
       const target = wins.find((w) => new URL(w.url).origin === self.location.origin && inScope(w));
       if (target) {

@@ -149,6 +149,9 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
 
   // Planned in a room: everyone there is invited, and a card is posted in it.
   const room = target.mode === "new" ? target.prefill?.room ?? null : null;
+  // Made from something (a Porch post): saved with it, and guests only from its pool.
+  const source = target.mode === "new" ? target.prefill?.source ?? null : null;
+  const pool = target.mode === "new" ? target.prefill?.guestPool ?? null : null;
 
   // Who's free then (timed events with guests). Only ever "Not available" —
   // never what anyone's doing. Saving is never blocked by it.
@@ -232,6 +235,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
           guests: guestIds,
           guests_can_edit: guestIds.length ? d.guestsCanEdit : false,
           room_id: room?.id ?? null,
+          ...(source ? { source } : {}),
         });
         addUsers(r.users);
         toast.success(room ? `Event posted in ${room.name}` : guestIds.length ? "Event saved — guests invited" : "Event saved");
@@ -406,7 +410,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
           {room ? (
             <RoomGuests roomName={room.name} me={b.me} guests={d.guests} busyAt={busyAt} />
           ) : d.guests.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)]">Invite people on this Promptly — they'll be notified and can answer.</p>
+            <p className="text-xs text-[var(--text-muted)]">{pool ? pool.note : "Invite people on this Promptly — they'll be notified and can answer."}</p>
           ) : (
             <ul className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)]">
               {d.guests.map((g) => (
@@ -427,7 +431,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
               ))}
             </ul>
           )}
-          {!room && (!ev || ev.can_edit) && (
+          {!room && !pool && (!ev || ev.can_edit) && (
             <EmailGuestsField
               guests={emailGuests}
               onChange={setEmailGuests}
@@ -498,9 +502,54 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
       </form>
       <FindTime open={finding} onClose={() => setFinding(false)} me={b.me} people={d.guests} start={start} end={end} ignore={editSpan} onPick={pickTime} />
       <Sheet open={picking} onClose={() => setPicking(false)} title="Add guests" size="md" footer={<ItemButton block variant="primary" onClick={() => setPicking(false)}>Done</ItemButton>}>
-        <PeoplePicker selected={d.guests} onChange={(next) => set({ guests: next })} exclude={[b.me.id, organiserId]} />
+        {pool ? (
+          <PoolPicker pool={pool} selected={d.guests} onChange={(next) => set({ guests: next })} />
+        ) : (
+          <PeoplePicker selected={d.guests} onChange={(next) => set({ guests: next })} exclude={[b.me.id, organiserId]} />
+        )}
       </Sheet>
     </Sheet>
+  );
+}
+
+/** Guests from a fixed set of people (an event made from a Porch post:
+ *  only the people who can see it), each a tick box. */
+function PoolPicker({ pool, selected, onChange }: { pool: { people: CalUser[]; note: string }; selected: CalUser[]; onChange: (next: CalUser[]) => void }) {
+  const picked = new Set(selected.map((g) => g.id));
+  const all = pool.people.length > 0 && pool.people.every((p) => picked.has(p.id));
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs text-[var(--text-muted)]">{pool.note}</p>
+      {pool.people.length === 0 ? (
+        <p className="py-4 text-center text-sm text-[var(--text-muted)]">Nobody else can see it yet.</p>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => onChange(all ? [] : [...pool.people])}
+            className="self-start rounded-lg px-2 py-1 text-xs font-semibold text-[var(--item-accent)] hover:bg-[var(--hover)]"
+          >
+            {all ? "Untick everyone" : "Tick everyone"}
+          </button>
+          <ul className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+            {pool.people.map((u) => (
+              <li key={u.id}>
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 px-3 py-1.5">
+                  <input
+                    type="checkbox"
+                    checked={picked.has(u.id)}
+                    onChange={(e) => onChange(e.target.checked ? [...selected, u] : selected.filter((g) => g.id !== u.id))}
+                    className="h-4 w-4 accent-[var(--accent)]"
+                  />
+                  <UserAvatar user={u} size={26} />
+                  <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{u.username}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }
 

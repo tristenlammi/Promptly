@@ -29,7 +29,7 @@ import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { itemsApi, type LauncherApp } from "./api";
-import { BUILT_IN_APPS, useNavApps, type NavApp } from "./navApps";
+import { useBuiltInApps, useNavApps, type NavApp } from "./navApps";
 import "./ui/items.css";
 
 /**
@@ -47,6 +47,7 @@ export function AppsPage() {
   const [order, setOrder] = useState<LauncherApp[]>([]);
   const [editing, setEditing] = useState(false);
   const nav = useNavApps();
+  const builtIn = useBuiltInApps();
   const pinProps = (id: string) => ({ editing, pinned: nav.pinned.includes(id), onTogglePin: () => void nav.toggle(id) });
 
   useEffect(() => {
@@ -130,7 +131,7 @@ export function AppsPage() {
       ) : order.length === 0 ? (
         <>
         <ul className="grid grid-cols-4 gap-x-2 gap-y-6 sm:grid-cols-5 md:grid-cols-6" aria-label="Built-in apps">
-          {BUILT_IN_APPS.map((app) => (
+          {builtIn.map((app) => (
             <BuiltInTile key={app.id} name={app.name} icon={app.icon} onOpen={() => navigate(`${app.to}/`)} onLongPress={() => setEditing(true)} {...pinProps(app.id)} />
           ))}
         </ul>
@@ -158,7 +159,7 @@ export function AppsPage() {
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={order.map((a) => a.kind)} strategy={rectSortingStrategy}>
             <ul className="grid grid-cols-4 gap-x-2 gap-y-6 sm:grid-cols-5 md:grid-cols-6" aria-label="Your apps">
-              {BUILT_IN_APPS.map((app) => (
+              {builtIn.map((app) => (
                 <BuiltInTile key={app.id} name={app.name} icon={app.icon} onOpen={() => navigate(`${app.to}/`)} onLongPress={() => setEditing(true)} {...pinProps(app.id)} />
               ))}
               {order.map((app) => (

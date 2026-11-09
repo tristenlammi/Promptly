@@ -348,16 +348,20 @@ b = io.BytesIO(); im.save(b, "JPEG", exif=exif); print(base64.b64encode(b.getval
 }
 
 /** A picture of a word, big and black on white — what a search by what's
- *  in a photo can find without any real photos. */
-export function wordPhoto(name: string, word: string): string {
+ *  in a photo can find without any real photos. Each run's is its own file
+ *  (uploads dedupe): the name is drawn faintly in a corner, or with
+ *  ``clean`` kept in the JPEG's comment instead, so screenshots show only
+ *  the word. */
+export function wordPhoto(name: string, word: string, { clean = false }: { clean?: boolean } = {}): string {
   const py = `
 import io, base64
 from PIL import Image, ImageDraw, ImageFont
 im = Image.new("RGB", (400, 300), (255, 255, 255))
 d = ImageDraw.Draw(im)
 d.text((20, 100), ${JSON.stringify(word)}, fill=(0, 0, 0), font=ImageFont.load_default(size=72))
-d.text((4, 286), ${JSON.stringify(name)}, fill=(235, 235, 235))  # each run its own photo (uploads dedupe)
-b = io.BytesIO(); im.save(b, "JPEG", quality=90); print(base64.b64encode(b.getvalue()).decode())
+if not ${clean ? "True" : "False"}:
+    d.text((4, 286), ${JSON.stringify(name)}, fill=(235, 235, 235))
+b = io.BytesIO(); im.save(b, "JPEG", quality=90${clean ? `, comment=${JSON.stringify(name)}.encode()` : ""}); print(base64.b64encode(b.getvalue()).decode())
 `;
   const out = execFileSync("docker", ["exec", "-i", BACKEND, "python", "-"], { input: py });
   return write(name, Buffer.from(out.toString().trim(), "base64"));

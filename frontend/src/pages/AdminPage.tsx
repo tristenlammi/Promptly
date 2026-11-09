@@ -11,7 +11,7 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2, KeyRound, ClipboardList, PhoneCall } from "lucide-react";
+  Users2, KeyRound, ClipboardList, PhoneCall, House } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
@@ -20,6 +20,7 @@ import { BackupsPanel } from "@/components/admin/BackupsPanel";
 import { FormsAdminPanel } from "@/components/admin/FormsAdminPanel";
 import { CallsPanel } from "@/components/admin/CallsPanel";
 import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
+import { PorchPanel } from "@/components/admin/PorchPanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
 import { TalkAdminPanel } from "@/components/admin/TalkAdminPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
@@ -40,6 +41,7 @@ type TabId =
   | "settings"
   | "backups"
   | "passwords"
+  | "porch"
   | "storage"
   | "talk"
   | "models"
@@ -118,6 +120,12 @@ const TABS: TabDef[] = [
     label: "Forms",
     icon: <ClipboardList className="h-3.5 w-3.5" />,
     subtitle: "Answers from people without an account, link forms and reports.",
+  },
+  {
+    id: "porch",
+    label: "Porch",
+    icon: <House className="h-3.5 w-3.5" />,
+    subtitle: "Who can use Porch, video limits, the Everyone group, and reports.",
   },
   {
     id: "storage",
@@ -209,6 +217,7 @@ export function AdminPage() {
             {tab === "audit" && <AuditLogPanel />}
             {tab === "backups" && <BackupsPanel />}
             {tab === "passwords" && <PasswordsPanel />}
+            {tab === "porch" && <PorchPanel />}
             {tab === "storage" && <StoragePanel />}
             {tab === "forms" && <FormsAdminPanel />}
             {tab === "calls" && <CallsPanel />}

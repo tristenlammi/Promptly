@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookImage, MoreHorizontal, Play } from "lucide-react";
+import { ArrowLeft, BookImage, MoreHorizontal, Play, Send } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { usePhotosPath } from "@/components/photos/photosPath";
 import { memoriesApi } from "@/api/memories";
+import { porchApi } from "@/api/porch";
 import type { PhotoItem } from "@/api/photos";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
@@ -37,6 +38,8 @@ export function MemoryPage() {
   const [viewing, setViewing] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [menu, setMenu] = useState(false);
+  // "Share this memory" to Porch, for people Porch is on for (WP-P1.4).
+  const { data: porch } = useQuery({ queryKey: ["porch", "available"], queryFn: porchApi.available, staleTime: 5 * 60_000 });
 
   const away = async (act: () => Promise<void>, done: string) => {
     setMenu(false);
@@ -69,6 +72,12 @@ export function MemoryPage() {
         }}>
           Play
         </Button>
+        {porch && items.some((p) => p.mine !== false) && (
+          <Button size="sm" variant="ghost" leftIcon={<Send className="h-3.5 w-3.5" />} onClick={() => navigate(`/porch/new?memory=${encodeURIComponent(memoryId)}`)}
+            aria-label="Share to Porch">
+            <span className="hidden sm:inline">Share to Porch</span>
+          </Button>
+        )}
         <Button size="sm" variant="ghost" leftIcon={<BookImage className="h-3.5 w-3.5" />} onClick={async () => {
           try {
             const a = await memoriesApi.saveAsAlbum(memoryId);

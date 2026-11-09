@@ -89,6 +89,9 @@ Category = Literal[
     # Notes: someone shared a note with you (app/notes/push.py). Nothing
     # time-critical — a note's reminders arrive as ``item_reminder``.
     "notes",
+    # Porch (0272): posts, comments, mentions, tags, invites, reactions,
+    # birthdays — one switch here; per kind in Porch → Settings.
+    "porch",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -115,6 +118,7 @@ CATEGORIES: tuple[str, ...] = (
     "form_response",
     "call",
     "notes",
+    "porch",
     "test",
 )
 
@@ -188,6 +192,21 @@ RULES: dict[str, Rule] = {
     # Notes: someone shared a note with you. Nothing urgent (reminders
     # come as ``item_reminder``), so quiet hours may hold it.
     "notes": Rule(True, app="Notes", one="shared note", many="shared notes", url="/notes"),
+    # Porch (WP-P1.7): holdable, summary-capable, counted per kind.
+    "porch": Rule(
+        True, app="Porch", one="update", many="updates", url="/porch/", summary=True,
+        kinds=(
+            ("post", "new post", "new posts"),
+            ("comment", "comment", "comments"),
+            ("reply", "reply", "replies"),
+            ("mention", "mention", "mentions"),
+            ("reaction", "reaction", "reactions"),
+            ("tag", "tag request", "tag requests"),
+            ("invite", "group invite", "group invites"),
+            ("birthday", "birthday", "birthdays"),
+            ("removed", "note from the admin", "notes from the admin"),
+        ),
+    ),
 }
 _missing = set(CATEGORIES) - set(RULES)
 assert not _missing, f"notification categories without a quiet-hours rule: {_missing}"

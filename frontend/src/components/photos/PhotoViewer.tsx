@@ -24,11 +24,13 @@ import { thumbHashToDataURL } from "thumbhash";
 import { filesApi, type SignedUrls } from "@/api/files";
 import { mediaApi } from "@/api/files";
 import { photosApi, type PhotoItem } from "@/api/photos";
+import { porchTrashWarning } from "@/api/porch";
 import { MediaDetails } from "@/components/files/MediaDetails";
 import { LinkedSection } from "@/components/links/LinkedSection";
 import { PeopleInPhoto } from "@/components/photos/PeopleInPhoto";
 import { PhotoEditor } from "@/components/photos/PhotoEditor";
 import { SendToSheet } from "@/components/share/SendToSheet";
+import { ItemButton, Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -118,6 +120,7 @@ export function PhotoViewer({
   const [playing, setPlaying] = useState(slideshow);
   const [editing, setEditing] = useState(false);
   const [sending, setSending] = useState(false);
+  const [trashWarn, setTrashWarn] = useState<string | null>(null);
   useEffect(() => {
     const p = items[index];
     if (!playing || !p) return;
@@ -133,7 +136,7 @@ export function PhotoViewer({
   // Keys: ← → to move, Esc to close, i for info.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editing || sending || (e.target as HTMLElement)?.closest("input, textarea, select, [contenteditable]")) return;
+      if (editing || sending || trashWarn || (e.target as HTMLElement)?.closest("input, textarea, select, [contenteditable]")) return;
       if (e.key === "ArrowRight") void go(1);
       else if (e.key === "ArrowLeft") void go(-1);
       else if (e.key === "Escape") onClose();
@@ -145,7 +148,7 @@ export function PhotoViewer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [go, onClose, slideshow, editing, sending]);
+  }, [go, onClose, slideshow, editing, sending, trashWarn]);
 
   // The next and previous photos load while you look at this one.
   useEffect(() => {
@@ -179,7 +182,7 @@ export function PhotoViewer({
     onChanged();
   };
 
-  const act = async (what: "favorite" | "archive" | "trash") => {
+  const act = async (what: "favorite" | "archive" | "trash", sure = false) => {
     try {
       if (what === "favorite") {
         await (photo.favorite ? filesApi.unstarFile(photo.id) : filesApi.starFile(photo.id));
@@ -190,6 +193,12 @@ export function PhotoViewer({
         toast.success(photo.archived ? "Back in Photos." : "Archived — it's under Archive.");
         remove();
       } else {
+        // In Porch posts: say so first (the viewer sits above dialogs, so a sheet).
+        const warn = sure ? null : await porchTrashWarning([photo.id]);
+        if (warn) {
+          setTrashWarn(warn);
+          return;
+        }
         await filesApi.bulkTrash({ file_ids: [photo.id], folder_ids: [] });
         toast.success("Moved to the trash.");
         remove();
@@ -272,6 +281,30 @@ export function PhotoViewer({
       </div>
 
       {info && <InfoPanel photo={photo} onClose={() => setInfo(false)} />}
+      <Sheet
+        open={!!trashWarn}
+        onClose={() => setTrashWarn(null)}
+        title="Move this photo to the trash?"
+        size="sm"
+        footer={
+          <>
+            <ItemButton variant="secondary" data-autofocus onClick={() => setTrashWarn(null)}>
+              Cancel
+            </ItemButton>
+            <ItemButton
+              variant="danger"
+              onClick={() => {
+                setTrashWarn(null);
+                void act("trash", true);
+              }}
+            >
+              Move to trash
+            </ItemButton>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--text)]">{trashWarn}</p>
+      </Sheet>
       <SendToSheet
         open={sending}
         onClose={() => setSending(false)}

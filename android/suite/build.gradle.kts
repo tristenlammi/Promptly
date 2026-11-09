@@ -26,4 +26,6 @@ android {
 dependencies {
     api("com.google.androidbrowserhelper:androidbrowserhelper:2.7.4")
     api("com.google.androidbrowserhelper:locationdelegation:1.1.2")
+    // JVM checks of what gen_suite.py writes (the Porch share target, WP-P1.7).
+    testImplementation("junit:junit:4.13.2")
 }

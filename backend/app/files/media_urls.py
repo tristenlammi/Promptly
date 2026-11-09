@@ -68,6 +68,13 @@ _CODE = {name: i + 1 for i, name in enumerate((
 # which rendition (original, tile, preview, playback copy) rides in the low
 # bits of ``ver``.
 _CODE["note"] = 16
+# Porch (app/porch/media.py): a post's photo or video — the "file" is the
+# ``porch_post_media`` row, so the link names the post — and a group's cover
+# (the "file" is the group). Served only while the viewer can see them.
+PORCH_RENDITIONS = ("porch_thumb", "porch_preview", "porch_poster", "porch_video", "porch_full", "porch_cover")
+# Codes 17-22, after Notes' 16 (fixed at the v0.34.0 merge; they never move).
+_CODE.update(zip(PORCH_RENDITIONS, range(17, 23)))
+assert len(set(_CODE.values())) == len(_CODE), "media_urls._CODE: two renditions share a code"
 _NAME = {v: k for k, v in _CODE.items()}
 # What each rendition is on disk under derived/<file_id>/.
 RENDITION_FILE = {
@@ -229,6 +236,6 @@ def verify(token: str, *, now: float | None = None) -> MediaClaim | None:
 
 
 __all__ = [
-    "MediaClaim", "OFFLINE_KINDS", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "offline_expiry", "offline_file", "rendition_tag",
-    "shown", "sign", "sign_basemap", "sign_offline", "sign_shown", "verify", "version_tag",
+    "MediaClaim", "OFFLINE_KINDS", "PORCH_RENDITIONS", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "offline_expiry",
+    "offline_file", "rendition_tag", "shown", "sign", "sign_basemap", "sign_offline", "sign_shown", "verify", "version_tag",
 ]

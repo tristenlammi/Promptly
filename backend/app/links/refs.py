@@ -23,6 +23,7 @@ witem       workspace item id                      workspace member (private dra
 room_msg    room message id                        people in the room
 chat_msg    chat message id                        the chat's owner (or workspace, if shared)
 note        Notes note id                          owner or member, not trashed (app/notes)
+porch_post  Porch post id                           who can see it in Porch (``porch.access``)
 ==========  =====================================  =========================
 
 :func:`resolve` answers the thing as ``user`` sees it, or None when they
@@ -53,6 +54,8 @@ IN_ITEM: dict[str, str] = {
 UUID_KINDS = ("file", "folder", "photo", "album", "event", "person", "user", "witem", "room_msg", "chat_msg")
 # Notes (app/notes).
 UUID_KINDS = (*UUID_KINDS, "note")
+# Porch (WP-P1.6): a post, as the people who can see it see it.
+UUID_KINDS = (*UUID_KINDS, "porch_post")
 KINDS: tuple[str, ...] = (*UUID_KINDS, *IN_ITEM)
 # Kinds whose text can mention things (the "Mentioned in" side).
 SOURCE_KINDS = ("file", "room_msg", "chat_msg", "journal")
@@ -62,6 +65,7 @@ LABELS = {
     "file": "File", "folder": "Folder", "photo": "Photo", "album": "Album", "task": "Task", "recipe": "Recipe",
     "trip": "Trip", "contact": "Contact", "txn": "Transaction", "journal": "Journal entry", "event": "Event",
     "person": "Person", "user": "Person", "witem": "Workspace item", "room_msg": "Message", "chat_msg": "Chat",
+    "porch_post": "Porch post",
 }
 LABELS["note"] = "Note"  # Notes
 
@@ -307,6 +311,10 @@ async def resolve(db: AsyncSession, user: User, kind: str, id_: str) -> dict | N
                 out = await _room_msg(db, user, oid)
             elif kind == "note":
                 out = await _note(db, user, oid)
+            elif kind == "porch_post":
+                from app.porch.handoffs import card as porch_card
+
+                out = await porch_card(db, user, oid)
             else:
                 out = await _chat_msg(db, user, oid)
     except HTTPException:

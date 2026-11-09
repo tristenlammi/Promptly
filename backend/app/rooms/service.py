@@ -42,6 +42,47 @@ async def dm_refusal(db: AsyncSession, room: Room, user_id: uuid.UUID) -> str | 
     return None
 
 
+async def open_dm(db: AsyncSession, user: User, other_ids: list[uuid.UUID]) -> Room:
+    """Make or reuse a conversation with ``other_ids`` (one person: the same
+    1:1 every time). The others see it once there's a message in it. A block
+    either way refuses a *new* 1:1 conversation (decision D7); an existing
+    one opens, read-only (:func:`dm_refusal` stops new messages). Commits.
+
+    Used by ``POST /api/rooms/dms`` and by other apps' "Message" buttons
+    (Porch's "Reply privately")."""
+    others = set(other_ids) - {user.id}
+    if not others:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pick someone to message")
+    found = set((await db.execute(select(User.id).where(User.id.in_(others), User.disabled.is_(False)))).scalars().all())
+    if found != others:
+        raise core.not_found("Person")
+    if len(others) == 1:
+        other = next(iter(others))
+        mine = select(RoomMember.room_id).where(RoomMember.user_id == user.id)
+        theirs = select(RoomMember.room_id).where(RoomMember.user_id == other)
+        existing = (
+            await db.execute(select(Room).where(Room.space_id.is_(None), Room.kind == "dm", Room.id.in_(mine), Room.id.in_(theirs)))
+        ).scalars().first()
+        if existing is not None:
+            st = await core.my_state(db, existing.id, user.id)
+            st.hidden = False
+            await db.commit()
+            return existing
+        # The blocked person's wording never mentions the block.
+        from app.people.blocks import dm_refusal as refusal
+
+        why = await refusal(db, user.id, other)
+        if why:
+            raise core.forbidden(why)
+    room = Room(space_id=None, kind="dm" if len(others) == 1 else "group", created_by=user.id)
+    db.add(room)
+    await db.flush()
+    for uid in others | {user.id}:
+        db.add(RoomMember(room_id=room.id, user_id=uid, hidden=uid != user.id))
+    await db.commit()
+    return room
+
+
 def next_seq(room: Room) -> int:
     """The room's next message number (the room row must be locked)."""
     room.last_seq = (room.last_seq or 0) + 1

@@ -124,11 +124,20 @@ export interface CalendarPrefs {
 }
 
 /** A task planned into a time slot (an event's ``source``). */
-export interface EventSource {
+export interface TaskEventSource {
   kind: "task";
   file_id: string;
   task_id: string;
 }
+
+/** "Make this an event" on a Porch post. */
+export interface PorchEventSource {
+  kind: "porch_post";
+  post_id: string;
+}
+
+/** What an event was made from. */
+export type EventSource = TaskEventSource | PorchEventSource;
 
 /** An open task with a due day, from the Tasks app. Tick it off with
  * ``itemsApi`` action ``complete_tasks`` on ``file_id``. */

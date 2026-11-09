@@ -363,6 +363,14 @@ class AppSettings(Base):
         String(8), nullable=False, default="1080p60", server_default="1080p60"
     )
 
+    # ----- Porch (0270, app/porch) -----
+    # On for the server, and who may use it: NULL = everyone, else the ids
+    # of the admin's user groups whose members may. Video limits per post.
+    porch_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    porch_user_group_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    porch_video_max_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300, server_default="300")
+    porch_video_max_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=1024, server_default="1024")
+
     # ----- Bookkeeping -----
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
