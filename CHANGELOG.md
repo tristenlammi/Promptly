@@ -31,6 +31,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Porch group events: plan an event in a group (the group's Event button, or Event when posting to one group) and it goes in Calendar with everyone in the group invited (not for Everyone, unless you choose), on a post with a card showing who's going and Going · Maybe · Can't go. Anyone in the group can answer from the card, someone who joins later too, and it lands in their calendar. A group's Events tab lists what's coming up. Make this an event on your own post now puts the card on the post, and can invite everyone who sees it. Deleting the event leaves "Cancelled" on the post; deleting the post can cancel the event too.
 - People pages show what you share with someone in other apps, starting with Porch: "On Porch" has their latest posts you can see, the groups you're both in, and See all on Porch. Nothing shows from a group you're not in.
 
+### Changed
+- Install apps: the Passwords browser extension for Chrome, Edge and Brave now comes from the Chrome Web Store with one "Add to Chrome" button, and keeps itself up to date. Installing it by hand from a zip is still there as a fallback.
+
 ## [0.34.0] - 2026-11-09
 
 ### Added

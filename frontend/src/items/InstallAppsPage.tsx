@@ -260,7 +260,9 @@ function WindowsPasswordsCard() {
 
 type ExtensionInfo = { version: string; chrome: { size_bytes: number }; firefox: { size_bytes: number }; firefox_signed?: { size_bytes: number } };
 
-/** The browser extension, until it's in the stores: loaded by hand from a zip. */
+const CHROME_STORE_URL = "https://chromewebstore.google.com/detail/promptly-passwords/ipiljpicohcmkpnblgblpgdekjoemghj";
+
+/** The browser extension: the Chrome Web Store for Chromium browsers (a zip by hand as a fallback); Firefox from here. */
 function BrowserExtensionCard() {
   const info = useDownloadInfo<ExtensionInfo>("PromptlyPasswordsExtension.json");
   if (!info) return null;
@@ -273,11 +275,9 @@ function BrowserExtensionCard() {
             <KeyRound className="h-4 w-4 text-[var(--accent-text)]" /> Promptly Passwords browser extension
           </h2>
           <p className="text-xs text-[var(--text-muted)]">
-            Fills your logins, 2FA codes and passkeys on websites. It isn't in the browser stores yet.{" "}
-            {info.firefox_signed
-              ? "On Firefox it installs from here and updates itself; on the others it's installed by hand and doesn't."
-              : "It's installed by hand, and doesn't update itself."}{" "}
-            Version {info.version}.
+            Fills your logins, 2FA codes and passkeys on websites. On Chrome, Edge and Brave it comes from the Chrome Web Store and
+            keeps itself up to date.{" "}
+            {info.firefox_signed ? "On Firefox it installs from here and updates itself too." : "On Firefox it's installed by hand for now."}
           </p>
         </div>
       </div>
@@ -286,19 +286,34 @@ function BrowserExtensionCard() {
         <ol className="flex flex-col gap-2">
           <li className="flex flex-wrap items-center gap-2">
             <span>1.</span>
-            <a href="/downloads/promptly-passwords-chrome.zip" download className={DOWNLOAD_BUTTON}>
-              <Download className="h-4 w-4" /> Download ({megabytes(info.chrome.size_bytes)})
+            <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className={DOWNLOAD_BUTTON} data-testid="chrome-store">
+              <Download className="h-4 w-4" /> Add to Chrome
             </a>
           </li>
-          <li>2. Unzip it to a folder you'll keep. The browser goes on using that folder.</li>
           <li>
-            3. Go to <code className="font-mono text-xs">chrome://extensions</code> (in Edge, <code className="font-mono text-xs">edge://extensions</code>) and turn
-            on <b>Developer mode</b>.
+            2. Choose <b>Add to Chrome</b> on the store page. In Edge, choose <b>Allow extensions from other stores</b> first, then <b>Get</b>.
           </li>
-          <li>
-            4. Choose <b>Load unpacked</b> and pick the folder.
-          </li>
+          <li>3. Open it from the puzzle-piece menu and enter this address: <code className="font-mono text-xs">{location.origin}</code></li>
         </ol>
+        <details className="text-xs text-[var(--text-muted)]">
+          <summary className="cursor-pointer">Can't use the store? Install it by hand (version {info.version})</summary>
+          <ol className="mt-2 flex flex-col gap-2">
+            <li className="flex flex-wrap items-center gap-2">
+              <span>1.</span>
+              <a href="/downloads/promptly-passwords-chrome.zip" download className={DOWNLOAD_BUTTON}>
+                <Download className="h-4 w-4" /> Download ({megabytes(info.chrome.size_bytes)})
+              </a>
+            </li>
+            <li>2. Unzip it to a folder you'll keep. The browser goes on using that folder, and it won't update itself.</li>
+            <li>
+              3. Go to <code className="font-mono">chrome://extensions</code> (in Edge, <code className="font-mono">edge://extensions</code>) and turn on{" "}
+              <b>Developer mode</b>.
+            </li>
+            <li>
+              4. Choose <b>Load unpacked</b> and pick the folder.
+            </li>
+          </ol>
+        </details>
         <h3 className="mt-1 font-semibold">Firefox</h3>
         {info.firefox_signed ? (
           <ol className="flex flex-col gap-2">
