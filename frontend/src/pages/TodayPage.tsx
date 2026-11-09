@@ -32,6 +32,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { RecentStrip } from "@/components/today/RecentStrip";
+import { ReadMyDayButton } from "@/components/today/ReadMyDay";
 import {
   AttentionStrip,
   AutomationsCard,
@@ -100,6 +101,8 @@ export function TodayPage() {
               <AudioLines className="h-3.5 w-3.5" />
               Talk
             </Link>
+            {/* Talk phase 2: a spoken briefing, only when pressed. */}
+            <ReadMyDayButton />
             <CustomiseToday />
           </div>
         }

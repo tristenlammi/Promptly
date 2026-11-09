@@ -284,6 +284,13 @@ export interface JournalDay {
   photo_count: number;
 }
 
+/** "Read me my day" (Talk phase 2): the script and its parts, for captions. */
+export interface Briefing {
+  script: string;
+  greeting: string;
+  sections: { key: "weather" | "events" | "tasks" | "bills" | "birthdays" | "mail"; text: string }[];
+}
+
 export const todayApi = {
   async get(): Promise<TodayData> {
     const { data } = await apiClient.get<TodayData>("/today");
@@ -291,6 +298,10 @@ export const todayApi = {
   },
   async setMorning(on: boolean, time: string): Promise<MorningSummary> {
     const { data } = await apiClient.put<MorningSummary>("/today/morning", { on, time });
+    return data;
+  },
+  async briefing(): Promise<Briefing> {
+    const { data } = await apiClient.get<Briefing>("/today/briefing");
     return data;
   },
   async search(q: string, signal?: AbortSignal): Promise<EverydaySearch> {

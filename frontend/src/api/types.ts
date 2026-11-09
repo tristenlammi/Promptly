@@ -27,6 +27,9 @@ export type WebSearchMode = "off" | "auto" | "always";
  *  value for every non-DeepSeek conversation. */
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
 
+/** What "Read me my day" can read (Talk phase 2). */
+export type BriefingSection = "weather" | "events" | "tasks" | "bills" | "birthdays" | "mail";
+
 export interface UserSettings {
   /** Initial state of the per-chat Tools toggle. Defaults to ON. */
   default_tools_enabled?: boolean;
@@ -99,6 +102,10 @@ export interface UserSettings {
   talk_interrupt?: "talk" | "tap";
   talk_captions?: boolean;
   talk_save?: "chat" | "temporary";
+  /** Talk phase 2: what "Read me my day" reads (unset = everything), and
+   *  whether a Bluetooth button may start Talk on a locked phone. */
+  briefing_sections?: BriefingSection[];
+  talk_bluetooth_locked?: boolean;
   /** Preferred display currency (ISO 4217 code, e.g. ``"AUD"``). Surfaces in
    *  the ambient personal-context block and overrides locale inference.
    *  Absent / ``""`` = infer from location. */
@@ -169,6 +176,8 @@ export interface UserPreferencesUpdate {
   talk_interrupt?: "talk" | "tap";
   talk_captions?: boolean;
   talk_save?: "chat" | "temporary";
+  briefing_sections?: BriefingSection[];
+  talk_bluetooth_locked?: boolean;
   /** Preferred display currency (ISO 4217). Pass an empty string to clear
    *  (fall back to locale inference). */
   currency?: string;
