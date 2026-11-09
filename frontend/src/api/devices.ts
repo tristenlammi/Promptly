@@ -20,8 +20,9 @@ export const devicesApi = {
     const { data } = await apiClient.post<PairStart>("/devices/pair", { origin: window.location.origin });
     return data;
   },
+  /** The code goes in the body, never the URL, so no log can show it. */
   async status(code: string): Promise<PairStatus> {
-    const { data } = await apiClient.get<PairStatus>(`/devices/pair/${encodeURIComponent(code)}`);
+    const { data } = await apiClient.post<PairStatus>("/devices/pair/status", { code });
     return data;
   },
 };

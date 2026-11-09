@@ -33,6 +33,7 @@ from app.auth.audit import request_meta as _request_meta
 from app.auth.models import User
 from app.config import get_settings
 from app.database import SessionLocal
+from app.logging_setup import route_label, route_path
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
@@ -133,9 +134,9 @@ async def blanket_rate_limit(request: HTTPConnection) -> None:
         return
     await _record_rate_limit_audit(request, bucket=bucket)
     logger.warning(
-        "Blanket rate limit exceeded: ip=%s path=%s",
+        "Blanket rate limit exceeded: ip=%s route=%s",
         key,
-        request.url.path,
+        route_label(request),
     )
     if request.scope.get("type") == "websocket":
         from fastapi import WebSocketException
@@ -163,7 +164,9 @@ async def _record_rate_limit_audit(
                 db,
                 request=request,
                 event_type=EVENT_RATE_LIMITED,
-                detail=f"path={request.url.path} bucket={bucket}",
+                # The route template, never the raw path: some paths hold
+                # a secret (admin privacy AP1).
+                detail=f"path={route_path(request)} bucket={bucket}",
             )
             await db.commit()
     except Exception:  # noqa: BLE001 — audit must never break the response
@@ -220,9 +223,9 @@ def rate_limit(
         if not allowed:
             await _record_rate_limit_audit(request, bucket=bucket)
             logger.warning(
-                "Rate limit exceeded: ip=%s path=%s bucket=%s limit=%s",
+                "Rate limit exceeded: ip=%s route=%s bucket=%s limit=%s",
                 key,
-                request.url.path,
+                route_label(request),
                 bucket,
                 item,
             )

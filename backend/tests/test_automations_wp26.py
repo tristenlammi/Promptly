@@ -247,9 +247,10 @@ async def test_webhooks_rotate_check_signatures_and_pass_headers(client, db, use
     assert r.status_code == 200
     assert (await client.post(url, content=body, headers={"X-Hub-Signature-256": sig})).status_code == 404
 
-    from app.logging_setup import _redact_path
+    # Logs carry the route template, never the secret (admin privacy AP1).
+    from app.logging_setup import redact_unmatched_path
 
-    assert _redact_path(f"/api/hooks/{task.id}/abc123") == f"/api/hooks/{task.id}/[secret]"
+    assert redact_unmatched_path(f"/api/hooks/{task.id}/abc123") == "/api/hooks/…"
 
 
 # ---------------------------------------------------------------- R-149

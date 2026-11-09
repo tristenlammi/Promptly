@@ -117,6 +117,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Promptly for Android 1.6.0 brings this release's phone parts: calls that ring like phone calls, Talk on the phone, the Notes widgets and quick capture, and sharing to Porch from other apps.
 <!-- Admin privacy, AP4 -->
 - Admin → Users → Delete: shared workspaces no longer need a new owner picked by hand; each says who it goes to, and private ones come with a reminder to ask the person to use Export my library first.
+
 ### Fixed
 <!-- Calls (DM calls), WP-D5 -->
 - Calls: a 1:1 call no longer ends when one side's connection drops for a moment and comes back (for example moving from Wi-Fi to mobile data). A connection now has 15 seconds to come back before it counts as hanging up.
@@ -132,6 +133,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes: a label's page opened while the label was new on the device stopped working once it was saved; it now keeps working.
 <!-- Admin privacy, AP3 -->
 - Custom models: taking a file out of a custom model now also stops the model from finding what was in it.
+<!-- Admin privacy, AP1 -->
+- Admin → Errors: a request that crashed now shows whose request it was; the person was always left blank.
 
 ### Security
 <!-- Admin privacy, AP3 -->
@@ -139,6 +142,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Admin privacy, AP4 -->
 - Deleting a user: an admin can no longer take over the person's workspaces. A private workspace is deleted with the account, and a shared one goes to one of its own members who can edit it (the longest-standing workspace admin, then editor; the admin can pick another of them). With nobody else who can edit it, it's deleted.
 - Deleting a user: the confirmation no longer shows the names of their workspaces. Private ones are only counted, and a shared one is named only if you're in it.
+<!-- Admin privacy, AP1 -->
+- Admin → Console and Admin → Errors no longer show the addresses people open. Each request is shown by its route, like GET /api/calendar/feed/{token}.ics, so calendar feed links, signed photo and file links, share, album and form links, phone pairing codes, WebDAV file names and map positions stay out of them. Everyday request lines no longer say who made them; errors still do. Errors and rate-limit records saved before the update are rewritten the same way, and old errors whose address can't be matched to a route are removed.
+- Pairing a phone: the page now checks the pairing code in the body of the request rather than in its address, so the code can't show up in a log.
 
 ## [0.33.0] - 2026-11-09
 

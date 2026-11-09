@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import time
 import uuid
@@ -53,7 +54,86 @@ from starlette.types import ASGIApp
 # to accept a parameter.
 _request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 _user_id_ctx: ContextVar[str | None] = ContextVar("user_id", default=None)
-_route_ctx: ContextVar[str | None] = ContextVar("route", default=None)
+_route_ctx: "ContextVar[_RouteSlot | str | None]" = ContextVar("route", default=None)
+
+
+# ---------------------------------------------------------------------
+# Route labels: the route's template, never the raw path (admin privacy, AP1)
+# ---------------------------------------------------------------------
+# Several URLs carry a secret or a person's content in the path: the device
+# pairing code, calendar feed tokens, signed media links, share / album /
+# form links, webhook secrets, WebDAV file names, map tile coordinates. Logs
+# and stored errors used to record the raw path, so an admin reading the live
+# tail or the error list could use the secret or read the names (audit
+# L3-L7, G1). They now record the route the request matched, e.g.
+# ``GET /api/calendar/feed/{token}.ics``; a path that matched no route keeps
+# at most its first two plain-word segments (``GET /api/calendar/…``).
+
+_WORD = re.compile(r"[a-z][a-z_-]{0,23}")
+
+
+def redact_unmatched_path(path: str) -> str:
+    """A label for a path that matched no route: the first one or two
+    segments when they're plain lowercase words, then ``…``."""
+    segs = [s for s in path.split("/") if s]
+    keep: list[str] = []
+    for seg in segs[:2]:
+        if not _WORD.fullmatch(seg):
+            break
+        keep.append(seg)
+    label = "/" + "/".join(keep)
+    if len(keep) < len(segs):
+        label = label.rstrip("/") + "/…"
+    return label
+
+
+def route_template(scope: Any) -> str | None:
+    """The path template of the route ``scope`` matched, if routing ran.
+
+    FastAPI puts the matched route on ``scope["route"]`` (the scope dict is
+    shared down the middleware stack, so it's visible here once the router
+    has run). ``path_format`` drops converters: ``/dav/{path:path}`` →
+    ``/dav/{path}``.
+    """
+    try:
+        route = scope.get("route")
+    except Exception:  # noqa: BLE001
+        return None
+    if route is None:
+        return None
+    path = getattr(route, "path_format", None) or getattr(route, "path", None)
+    if not isinstance(path, str) or not path:
+        return None
+    return path
+
+
+def route_path(request_or_scope: Any) -> str:
+    """The matched route's template (or the redacted fallback), no method."""
+    scope = getattr(request_or_scope, "scope", request_or_scope)
+    return route_template(scope) or redact_unmatched_path(scope.get("path") or "/")
+
+
+def route_label(request_or_scope: Any) -> str:
+    """``METHOD /template`` for a request (or its ASGI scope)."""
+    scope = getattr(request_or_scope, "scope", request_or_scope)
+    method = scope.get("method") or ("WS" if scope.get("type") == "websocket" else "")
+    return f"{method} {route_path(scope)}".strip()
+
+
+class _RouteSlot:
+    """What ``_route_ctx`` holds during a request: the request's scope,
+    read when a line is logged. Routing happens after the middleware sets
+    the context, so the template is only known later; reading it lazily
+    means every line logged after routing (nearly all of them) carries the
+    template, and lines before it carry the redacted fallback."""
+
+    __slots__ = ("scope",)
+
+    def __init__(self, scope: Any) -> None:
+        self.scope = scope
+
+    def label(self) -> str:
+        return route_label(self.scope)
 
 
 def get_request_id() -> str | None:
@@ -66,7 +146,11 @@ def get_user_id() -> str | None:
 
 
 def get_route() -> str | None:
-    return _route_ctx.get()
+    """The current request's route label (a template, never a raw path)."""
+    v = _route_ctx.get()
+    if isinstance(v, _RouteSlot):
+        return v.label()
+    return v
 
 
 def bind_user(user_id: str | uuid.UUID | None) -> None:
@@ -116,16 +200,6 @@ _STANDARD_LOGRECORD_KEYS: frozenset[str] = frozenset(
 
 
 
-def _redact_path(path: str) -> str:
-    """Webhook URLs carry their secret in the path — keep it out of logs
-    (R-195)."""
-    if path.startswith("/api/hooks/"):
-        parts = path.split("/")
-        if len(parts) >= 5:
-            parts[4] = "[secret]"
-            return "/".join(parts)
-    return path
-
 class JsonFormatter(logging.Formatter):
     """One-line JSON formatter with stable field ordering."""
 
@@ -148,10 +222,14 @@ class JsonFormatter(logging.Formatter):
         rid = _request_id_ctx.get()
         if rid:
             payload["request_id"] = rid
+        # The user id only on warnings and errors, where support needs to
+        # know whose request went wrong. Routine lines (every request's
+        # access line among them) would otherwise show the admin which app
+        # each person is using, minute by minute (admin privacy audit G1).
         uid = _user_id_ctx.get()
-        if uid:
+        if uid and record.levelno >= logging.WARNING:
             payload["user_id"] = uid
-        route = _route_ctx.get()
+        route = get_route()
         if route:
             payload["route"] = route
 
@@ -287,9 +365,11 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         else:
             request_id = uuid.uuid4().hex
 
-        # Compose a "method path" route label that's stable (no ids in
-        # the path). Full path is fine for our log volume.
-        route = f"{request.method} {_redact_path(request.url.path)}"
+        # The route label is read from the scope when something logs: the
+        # matched route's template once routing has run, a redacted
+        # fallback before (and for paths no route matches). Never the raw
+        # path, which can hold a secret or a file name.
+        slot = _RouteSlot(request.scope)
 
         # For cookie-setting code (auth/cookies.py): the host decides
         # whether a plain-HTTP LAN install gets a non-Secure session cookie.
@@ -301,7 +381,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         )
         rid_token = _request_id_ctx.set(request_id)
         uid_token = _user_id_ctx.set(None)
-        route_token = _route_ctx.set(route)
+        route_token = _route_ctx.set(slot)
         request.state.request_id = request_id
 
         started = time.perf_counter()
@@ -318,6 +398,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             # now". Skip the noisy /api/health probe so a 1-second
             # healthcheck doesn't drown out real traffic.
             if request.url.path != "/api/health":
+                route = slot.label()
                 # Feed the runtime metrics window from the timing we just
                 # computed — no second middleware, no extra clock reads.
                 # Imported lazily so logging setup stays importable during

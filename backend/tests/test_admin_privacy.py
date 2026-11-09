@@ -6,6 +6,10 @@ leaks that were closed:
 
 * AP3 (L1): a custom model only takes files the caller may read, and the
   0403 migration detaches other people's files already attached.
+* AP1 (L3-L7, G1): logs and stored errors carry route templates, never raw
+  paths, and routine lines carry no user id; 0402 rewrites stored paths.
+
+(AP4, deleting a user, is in test_user_deletion.py.)
 """
 from __future__ import annotations
 
@@ -262,3 +266,183 @@ async def test_migration_detaches_foreign_files_and_their_chunks(db, user, model
     assert "detached 1 file" in logged
     assert "Biopsy" not in logged and str(theirs_id) not in logged
     assert await db.scalar(select(func.count()).select_from(CustomModelFile)) == 2
+
+
+# ------------------------------------------------------------- AP1 / L3-L7, G1
+
+
+@pytest.fixture
+def log_lines():
+    """Every log line written during the test, as the live tail sees it."""
+    import logging
+
+    from app.logging_setup import JsonFormatter
+
+    lines: list[str] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            lines.append(self.format(record))
+
+    h = Collect(level=logging.INFO)
+    h.setFormatter(JsonFormatter())
+    root = logging.getLogger()
+    old = root.level
+    root.setLevel(logging.INFO)
+    root.addHandler(h)
+    try:
+        yield lines
+    finally:
+        root.removeHandler(h)
+        root.setLevel(old)
+
+
+def _access(lines, needle):
+    import json
+
+    out = [json.loads(line) for line in lines if '"promptly.access"' in line]
+    return [r for r in out if needle in r["message"]]
+
+
+SECRET = "Zq9-SecretToken_abcdefghijklmnop"
+
+
+@pytest.mark.asyncio
+async def test_access_lines_carry_templates_and_no_user_id(db, client, user, log_lines):
+    h = _auth(user)
+    await client.get(f"/api/calendar/feed/{SECRET}.ics")
+    await client.get(f"/api/m/{SECRET}")
+    await client.request("PROPFIND", "/dav/Medical%20Records/biopsy.pdf")
+    await client.get(f"/api/s/{SECRET}")
+    await client.get(f"/api/nothing-here/{SECRET}/x")
+    # Phone pairing: the page now asks with a POST, the code in the body;
+    # an old page's GET still works and is logged as its template.
+    start = (await client.post("/api/devices/pair", headers=h, json={"origin": "https://p.example.org"})).json()
+    code = start["code"]
+    assert (await client.post("/api/devices/pair/status", headers=h, json={"code": code})).json() == {"state": "waiting"}
+    assert (await client.get(f"/api/devices/pair/{code}", headers=h)).json() == {"state": "waiting"}
+
+    blob = "\n".join(log_lines)
+    for secret in (SECRET, code, "biopsy", "Medical"):
+        assert secret not in blob
+    assert _access(log_lines, "GET /api/calendar/feed/{token}.ics")
+    assert _access(log_lines, "GET /api/m/{token}")
+    assert _access(log_lines, "PROPFIND /dav/{path}")
+    assert _access(log_lines, "GET /api/nothing-here/…")
+    assert _access(log_lines, "POST /api/devices/pair/status")
+    assert _access(log_lines, "GET /api/devices/pair/{code}")
+    # Routine lines carry no user id; the route field is the template too.
+    signed_in = _access(log_lines, "/api/devices/pair")
+    assert signed_in and all("user_id" not in r for r in signed_in)
+    assert str(user.id) not in blob
+
+
+@pytest.mark.asyncio
+async def test_a_failing_request_stores_its_template_and_keeps_the_user(db, user, log_lines):
+    """Errors keep the user id (support needs it) but never the raw path."""
+    import asyncio
+
+    from app.main import app
+    from app.observability.models import ErrorEvent
+    from app.background import pending_count
+
+    from fastapi import Depends
+
+    from app.auth.deps import get_current_user
+
+    async def boom(token: str, who: User = Depends(get_current_user)):
+        raise RuntimeError("kaboom")
+
+    app.add_api_route("/api/test-privacy-boom/{token}", boom, methods=["GET"])
+    route = app.router.routes[-1]
+    try:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            r = await c.get(f"/api/test-privacy-boom/{SECRET}", headers=_auth(user))
+        assert r.status_code == 500
+        for _ in range(50):
+            if pending_count() == 0 and await db.scalar(select(func.count()).select_from(ErrorEvent)):
+                break
+            await asyncio.sleep(0.05)
+    finally:
+        app.router.routes.remove(route)
+
+    rows = (await db.execute(select(ErrorEvent))).scalars().all()
+    assert rows
+    for row in rows:
+        assert SECRET not in (row.route or "") + row.message + (row.stack or "")
+    assert any(row.route == "GET /api/test-privacy-boom/{token}" for row in rows)
+    assert any(row.user_id == user.id for row in rows)
+    assert SECRET not in "\n".join(log_lines)
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limited_request_is_audited_by_template(db):
+    from starlette.requests import Request
+
+    from app.auth.audit import EVENT_RATE_LIMITED
+    from app.auth.events import AuthEvent
+    from app.main import app
+    from app.rate_limit import _record_rate_limit_audit
+
+    media = next(r for r in app.routes if getattr(r, "path", "") == "/api/m/{token}")
+    req = Request({"type": "http", "method": "GET", "path": f"/api/m/{SECRET}", "headers": [],
+                   "client": ("1.2.3.4", 1), "route": media})
+    await _record_rate_limit_audit(req, bucket="media")
+    stray = Request({"type": "http", "method": "GET", "path": f"/api/nope/{SECRET}", "headers": [],
+                     "client": ("1.2.3.4", 1)})
+    await _record_rate_limit_audit(stray, bucket="default")
+
+    details = sorted(
+        (await db.execute(select(AuthEvent.detail).where(AuthEvent.event_type == EVENT_RATE_LIMITED))).scalars()
+    )
+    assert details == ["path=/api/m/{token} bucket=media", "path=/api/nope/… bucket=default"]
+
+
+@pytest.mark.asyncio
+async def test_migration_rewrites_stored_paths_to_templates(db, user, caplog):
+    from app.auth.events import AuthEvent
+    from app.observability.models import ErrorEvent
+
+    def err(route):
+        return ErrorEvent(fingerprint="f", level="ERROR", logger="promptly.x", message="m", route=route)
+
+    db.add_all([
+        err(f"GET /api/calendar/feed/{SECRET}.ics"),
+        err("PROPFIND /dav/Medical Records/biopsy.pdf"),
+        err(f"GET /api/devices/pair/{SECRET}"),
+        err(f"POST /api/hooks/{uuid.uuid4()}/[secret]"),
+        err("GET /api/m/{token}"),
+        err(f"GET /api/gone-in-0-34/{SECRET}"),
+        err(None),
+        AuthEvent(event_type="rate_limited", detail=f"path=/api/m/{SECRET} bucket=media"),
+        AuthEvent(event_type="rate_limited", detail="path=/dav/My Taxes/2025.pdf bucket=dav"),
+        AuthEvent(event_type="rate_limited", detail=f"path=/api/gone-in-0-34/{SECRET} bucket=default"),
+        AuthEvent(event_type="login_fail", detail="path=/api/auth/login stays"),
+    ])
+    await db.commit()
+
+    caplog.set_level("INFO", logger="alembic.runtime.migration")
+    await _run_upgrade(db, "0402_scrub_error_routes")
+    await _run_upgrade(db, "0402_scrub_error_routes")  # idempotent
+
+    db.expire_all()
+    routes = sorted((r or "") for r in (await db.execute(select(ErrorEvent.route))).scalars())
+    assert routes == sorted([
+        "",
+        "GET /api/calendar/feed/{token}.ics",
+        "GET /api/devices/pair/{code}",
+        "GET /api/m/{token}",
+        "POST /api/hooks/{task_id}/{secret}",
+        "PROPFIND /dav/{path}",
+    ])
+    details = sorted((await db.execute(select(AuthEvent.detail))).scalars())
+    assert details == sorted([
+        "path=/api/m/{token} bucket=media",
+        "path=/dav/{path} bucket=dav",
+        "path=[removed] bucket=default",
+        "path=/api/auth/login stays",
+    ])
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "4 error route(s) rewritten, 1 deleted, 3 audit detail(s) rewritten" in logged
+    assert SECRET not in logged

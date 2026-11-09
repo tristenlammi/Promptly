@@ -1,7 +1,11 @@
 """PromptlySync: pairing a phone by QR code, and its "do you have these?".
 
     POST /api/devices/pair            start: a one-time code (10 min) + its QR
-    GET  /api/devices/pair/{code}     has the phone claimed it yet? (for the page)
+    POST /api/devices/pair/status     has the phone claimed it yet? (for the page;
+                                      the code goes in the body, so it's never in
+                                      a URL that a log could show)
+    GET  /api/devices/pair/{code}     the same, kept for pages loaded before
+                                      0.34 (logged only as its route template)
     POST /api/devices/pair/claim      the phone, with the code: an app password
     POST /api/devices/have            the phone (app password): which of these
                                       files (SHA-256) are already in Photos, and
@@ -81,9 +85,29 @@ async def pair_start(body: PairStart, request: Request, user: User = Depends(get
     }
 
 
+class PairStatusBody(BaseModel):
+    code: str = Field(min_length=8, max_length=64)
+
+
+@router.post("/pair/status")
+async def pair_status_post(body: PairStatusBody, user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """Waiting, paired (with the device's name), or expired.
+
+    A POST with the code in the body: while someone pairs a phone the page
+    asks every two seconds, and the code in a URL path used to show in the
+    admin's live log, where it could be claimed for an app password to
+    that person's files (admin privacy audit L3)."""
+    return await _pair_state(body.code, user)
+
+
 @router.get("/pair/{code}")
 async def pair_status(code: str, user: User = Depends(get_current_user)) -> dict[str, Any]:
-    """Waiting, paired (with the device's name), or expired."""
+    """The old GET form of :func:`pair_status_post`, for a page loaded
+    before the POST existed. Logs show only ``/api/devices/pair/{code}``."""
+    return await _pair_state(code, user)
+
+
+async def _pair_state(code: str, user: User) -> dict[str, Any]:
     from app.redis_client import redis
 
     for key, state in ((_done(code), "paired"), (_key(code), "waiting")):
