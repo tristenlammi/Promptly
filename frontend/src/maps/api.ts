@@ -190,9 +190,9 @@ export const mapsApi = {
   async config() {
     return (await apiClient.get<MapsConfig>("/maps/config")).data;
   },
-  async search(q: string, near?: { lat: number; lon: number } | null) {
+  async search(q: string, near?: { lat: number; lon: number } | null, signal?: AbortSignal) {
     const params = near ? { q, lat: near.lat, lon: near.lon } : { q };
-    return (await apiClient.get<{ results: SearchResult[] }>("/maps/search", { params })).data.results;
+    return (await apiClient.get<{ results: SearchResult[] }>("/maps/search", { params, signal })).data.results;
   },
   async reverse(lat: number, lon: number) {
     return (await apiClient.get<SearchResult>("/maps/reverse", { params: { lat, lon } })).data;

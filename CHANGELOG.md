@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Calendar: the Location box fills in as you type, from your saved P Maps places (Home, Work, favourites), contacts with an address, and P Maps search (addresses and the businesses OpenStreetMap knows), nearest to you first; anything you type still works as it is. The same box is in Mail's Add to calendar, and an event's place opens in P Maps only when Maps is set up.
+
 ## [0.33.0] - 2026-11-09
 
 ### Added

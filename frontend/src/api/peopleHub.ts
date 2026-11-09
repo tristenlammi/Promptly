@@ -117,8 +117,8 @@ export const peopleHubApi = {
   async get(ref: PersonRef): Promise<PersonPage> {
     return (await apiClient.get<PersonPage>(`/people/${refPath(ref)}`)).data;
   },
-  async search(q: string, opts: { details?: boolean } = {}): Promise<PickerPerson[]> {
-    const { data } = await apiClient.get<{ people: PickerPerson[] }>("/people/search", { params: { q, details: opts.details || undefined } });
+  async search(q: string, opts: { details?: boolean; signal?: AbortSignal } = {}): Promise<PickerPerson[]> {
+    const { data } = await apiClient.get<{ people: PickerPerson[] }>("/people/search", { params: { q, details: opts.details || undefined }, signal: opts.signal });
     return data.people;
   },
   /** The people you've blocked, newest first. */

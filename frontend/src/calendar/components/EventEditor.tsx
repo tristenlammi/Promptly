@@ -1,10 +1,11 @@
-import { CalendarSearch, Loader2, MapPin, Plus, Users, X } from "lucide-react";
+import { CalendarSearch, Loader2, Plus, Users, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { calendarReachApi } from "@/api/calendarReach";
 import { calendarApi, type CalEvent, type CalendarBootstrap, type CalUser, type EditScope, type EventPatch, type Repeat, type RsvpStatus } from "@/api/calendar";
 import { extractError } from "@/components/files/helpers";
+import { LocationInput } from "@/components/maps/LocationInput";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, Toggle } from "@/items/ui";
 import { PeoplePicker } from "@/rooms/components/PeoplePicker";
 import { UserAvatar } from "@/rooms/components/ui";
@@ -465,10 +466,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         </div>
 
         <Field label="Location">
-          <div className="relative">
-            <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
-            <TextInput value={d.location} onChange={(e) => set({ location: e.target.value })} placeholder="Add a place" maxLength={300} className="pl-9" />
-          </div>
+          <LocationInput value={d.location} onChange={(location) => set({ location })} placeholder="Add a place" maxLength={300} aria-label="Location" />
         </Field>
 
         <Field label="Notes">
