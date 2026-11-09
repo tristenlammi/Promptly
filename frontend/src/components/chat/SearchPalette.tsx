@@ -24,6 +24,7 @@ import { TagSearchHits } from "@/components/tags/TagSearchHits";
 import type { ConversationSearchHit } from "@/api/types";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+import { sanitizeSnippet } from "@/lib/sanitizeSnippet";
 import { SearchDateFilter, type DateRange } from "./SearchDateFilter";
 import { ActionRows, usePaletteActions, type PaletteAction } from "./usePaletteActions";
 import { itemKindWord } from "@/components/workspaces/itemKindWord";
@@ -446,8 +447,8 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
                         {h.snippet && (
                           <span
                             className="search-snippet mt-0.5 line-clamp-1 block text-xs text-[var(--text-muted)]"
-                            // ts_headline output: text + <mark> only.
-                            dangerouslySetInnerHTML={{ __html: h.snippet }}
+                            // ts_headline output: escaped, <mark> kept.
+                            dangerouslySetInnerHTML={{ __html: sanitizeSnippet(h.snippet) }}
                           />
                         )}
                       </span>
