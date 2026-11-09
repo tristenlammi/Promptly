@@ -31,7 +31,7 @@ from app.chat.sandbox_exec import (
     SandboxNotConfigured,
     run_python_in_sandbox,
 )
-from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
+from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult, guard_outbound
 from app.files.models import UserFile
 from app.files.storage import absolute_path
 
@@ -139,6 +139,10 @@ class CodeInterpreterTool(Tool):
             raise ToolError("`code` is required and must be a non-empty string")
         if len(code) > _MAX_CODE_CHARS:
             raise ToolError(f"`code` exceeds {_MAX_CODE_CHARS:,}-char limit")
+        # After the turn read outside content (beyond your own attachments
+        # and this tool's own output), running code waits for your yes: it
+        # can load any of your files (security review H2).
+        guard_outbound(ctx, "running code")
 
         # ---- Resolve input files (explicit ∪ auto-attached) → (name, bytes) ----
         files = await self._gather_input_files(ctx, args.get("input_file_ids"))

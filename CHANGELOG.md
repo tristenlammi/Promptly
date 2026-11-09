@@ -29,6 +29,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Password-reset emails, single sign-on and feedback emails no longer take this server's address from the request. A forged Host header could make a real reset email link to someone else's site. Links now always use the public address set in Admin, or the one you're using when it's one of those.
 - Workspace search results in the Ctrl+K palette show their highlighted snippet as text, so words in a shared note can't turn into page markup.
 - Updated python-jose to 3.4.0 and cryptography to 44.0.1 for their security fixes.
+- After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"), and before it runs code. A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
 
 ## [0.35.0] - 2026-11-09
 

