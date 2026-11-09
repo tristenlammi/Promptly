@@ -188,7 +188,7 @@ export function NotificationsPanel() {
       )}
 
       {/* -- iPhone/iPad in Safari: push only reaches the Home Screen app -- */}
-      {push.supported === false && push.serverConfigured !== false && <IosPushNote what="notifications" />}
+      {push.serverConfigured !== false && <IosPushNote what="notifications" />}
 
       {/* -- Browser unsupported -- */}
       {push.supported === false && push.serverConfigured !== false && !(isIosDevice() && !isStandaloneDisplay()) && (

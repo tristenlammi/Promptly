@@ -110,9 +110,10 @@ export function WelcomeDialog() {
     }
   };
 
-  const finish = async (to = "/today") => {
+  /** Done: save that, then go to ``to`` (closing with × stays put). */
+  const finish = async (to?: string) => {
     setBusy("finish");
-    if (await markDone()) navigate(to);
+    if ((await markDone()) && to) navigate(to);
     setBusy(null);
   };
 
@@ -159,7 +160,7 @@ export function WelcomeDialog() {
             </Button>
           )}
           {last ? (
-            <Button variant="primary" size="sm" onClick={() => void finish()} loading={busy === "finish"} disabled={busy !== null}>
+            <Button variant="primary" size="sm" onClick={() => void finish("/today")} loading={busy === "finish"} disabled={busy !== null}>
               Start using Promptly
             </Button>
           ) : (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { apiErrorMessage, cleanValidationMessage, normalizeApiDetail } from "./apiError";
+import { apiErrorMessage, cleanValidationMessage, normalizeApiDetail } from "@/utils/apiError";
 
 describe("validation messages read plainly", () => {
   it("drops the field prefix and Pydantic's 'Value error, '", () => {

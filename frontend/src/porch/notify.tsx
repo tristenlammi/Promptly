@@ -27,7 +27,7 @@ export function useAskForPush() {
   return async (why: string) => {
     // iPhone in Safari: no push until Porch is on the Home Screen. Say so
     // instead of saying nothing.
-    if (!push.loading && !push.supported && install.ios && !install.standalone) {
+    if (install.ios && !install.standalone && push.serverConfigured !== false) {
       toast.info("To get these on your iPhone, add Porch to your Home Screen: Share → Add to Home Screen. Porch → Settings shows how.", { duration: 10_000 });
       return;
     }
