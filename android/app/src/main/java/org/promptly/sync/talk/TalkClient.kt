@@ -76,6 +76,9 @@ class TalkClient(
     private var lastError: TalkEvent.Error? = null
     private var weak = false
     var handsFree = true
+    /** The car: you pressed the microphone before the socket was open, so what you
+     *  said while it opened is your turn even though it's tap to talk. */
+    var sendEarly = false
 
     val live: Boolean get() = !ended
 
@@ -129,7 +132,7 @@ class TalkClient(
                 listener.onEvent(event)
                 listener.onLink(Link.LIVE)
                 // What you said while it connected (not after a drop: that's stale).
-                if (!fromDrop && handsFree) early.forEach { sendFrame(it) }
+                if (!fromDrop && (handsFree || sendEarly)) early.forEach { sendFrame(it) }
                 early.clear()
                 startPings()
             }

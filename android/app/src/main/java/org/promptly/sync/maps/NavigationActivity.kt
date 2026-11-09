@@ -253,8 +253,11 @@ class NavigationActivity : ComponentActivity() {
         val source by Nav.routeSource.collectAsState()
         val offRoute by Nav.offRoute.collectAsState()
         var addingStop by remember { mutableStateOf(false) }
+        val asking by org.promptly.sync.talk.CarTalk.question.collectAsState()
+        // The same one press, one turn as the car's screen (Talk, WP-T8).
+        val askTalk = { org.promptly.sync.talk.CarTalk.press(applicationContext, null) { Voice.press(applicationContext) }?.let { Voice.showReply(it) } }
         val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-            if (ok) Voice.press(applicationContext)
+            if (ok) askTalk()
         }
         LaunchedEffect(said) {
             if (said != null) {
@@ -327,9 +330,17 @@ class NavigationActivity : ComponentActivity() {
                     Modifier.clickable {
                         // With no signal it answers straight away (it needs your server), so no mic.
                         if (!Voice.allowed(context) && org.promptly.sync.maps.offline.Offline.online(context)) askMic.launch(Manifest.permission.RECORD_AUDIO)
-                        else Voice.press(context)
+                        else askTalk()
                     },
                 )
+                // Talk asked something: Yes and No, as well as saying it.
+                asking?.let { q ->
+                    Pill(q.text.take(90), MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Yes", Color(0xFFD97757), Color.White, Modifier.clickable { org.promptly.sync.talk.CarTalk.confirm(true) })
+                        Pill("No", MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface, Modifier.clickable { org.promptly.sync.talk.CarTalk.confirm(false) })
+                    }
+                }
                 if (kmh != null) {
                     val over = limit != null && kmh > limit + 2
                     Pill("$kmh km/h", if (over) Color(0xFFB3261E) else MaterialTheme.colorScheme.surface, if (over) Color.White else MaterialTheme.colorScheme.onSurface)

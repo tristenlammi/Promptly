@@ -297,4 +297,9 @@ object Voice {
     fun clearReply() {
         _reply.value = null
     }
+
+    /** What Talk said in the car or on the driving screen, for the screens to show. */
+    fun showReply(text: String) {
+        _reply.value = text
+    }
 }

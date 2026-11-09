@@ -44,6 +44,10 @@ object TalkProtocol {
         return seq to message.copyOfRange(4, message.size)
     }
 
+    /** What the car (or the phone on the dash during a trip) can do: nothing that
+     *  needs the phone's screen. */
+    val CAR_CAPS = listOf("timer", "alarm", "navigate")
+
     fun hello(caps: List<String>, tz: String?, lang: String?, play: String = "pcm16", codec: String = "pcm16"): JSONObject =
         JSONObject()
             .put("type", "hello")
@@ -56,6 +60,19 @@ object TalkProtocol {
                 tz?.let { put("tz", it) }
                 lang?.let { put("lang", it) }
             }
+
+    /** The car's hello (WP-T8): one press, one turn, and no talking over it (road
+     *  noise, and the car's speakers give the phone no echo reference). */
+    fun carHello(tz: String?, lang: String?, trip: JSONObject?): JSONObject =
+        hello(CAR_CAPS, tz, lang)
+            .put("device", "car")
+            .put("turn_mode", "tap")
+            .put("interrupt_mode", "tap")
+            .apply { trip?.let { put("trip", it) } }
+
+    /** The trip as it is now, sent before each turn (the latest wins). Your position
+     *  is for the server's own look-ups; the model never sees it. */
+    fun trip(trip: JSONObject): JSONObject = JSONObject(trip.toString()).put("type", "trip")
 
     fun parse(text: String): TalkEvent = runCatching { parse(JSONObject(text)) }.getOrDefault(TalkEvent.Unknown("?"))
 
@@ -83,7 +100,7 @@ object TalkProtocol {
             "spoken" -> TalkEvent.Spoken(o.optInt("chars"))
             "tool" -> TalkEvent.Tool(o.optString("label"), str("name"))
             "card" -> TalkEvent.Card(o.optString("kind"), o.optJSONObject("meta") ?: JSONObject())
-            "ask" -> TalkEvent.Ask(o.optString("question"), o.optString("approval_id"), o.optInt("expires_in", 20))
+            "ask" -> TalkEvent.Ask(o.optString("question"), o.optString("approval_id"), o.optInt("expires_in", 20), o.optInt("listen_s", 0))
             "ask_done" -> TalkEvent.AskDone(o.optString("approval_id"), o.optString("outcome"))
             // The server nests the device action: {type: "action", action: {type: "set_timer", ...}}.
             "action" -> o.optJSONObject("action")?.let { TalkEvent.Action(it) } ?: TalkEvent.Unknown(type)
@@ -115,7 +132,9 @@ sealed interface TalkEvent {
     data class Spoken(val chars: Int) : TalkEvent
     data class Tool(val label: String, val name: String?) : TalkEvent
     data class Card(val kind: String, val meta: JSONObject) : TalkEvent
-    data class Ask(val question: String, val approvalId: String, val expiresIn: Int) : TalkEvent
+    /** [listenS]: in the car, how long the microphone may open again for the answer
+     *  once the question has been said (0: it doesn't). */
+    data class Ask(val question: String, val approvalId: String, val expiresIn: Int, val listenS: Int = 0) : TalkEvent
     data class AskDone(val approvalId: String, val outcome: String) : TalkEvent
     data class Action(val action: JSONObject) : TalkEvent
     data object StopAudio : TalkEvent

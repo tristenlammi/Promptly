@@ -26,8 +26,11 @@ import kotlin.math.sqrt
  *  audio: often louder, and through Bluetooth music headphones, but the canceller may
  *  not hear it, so on the speaker it can hear itself (the server's self-echo filter
  *  catches most of that). Switchable in the assistant's settings until real phones
- *  say which should be the default (the WP-T0 owner check). */
-enum class PlaybackRoute { CALL, ASSISTANT }
+ *  say which should be the default (the WP-T0 owner check). [GUIDANCE] is the car's
+ *  (WP-T8): navigation apps speak as `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE`, which
+ *  Android Auto plays on the car's speakers over the music, as the car library's
+ *  navigation guide says; never call mode in the car. */
+enum class PlaybackRoute { CALL, ASSISTANT, GUIDANCE }
 
 /** A source of microphone audio: the phone's microphone, or (debug builds) a file. */
 interface MicSource {
@@ -124,15 +127,28 @@ class PhoneTrack(route: PlaybackRoute) : Track {
     companion object {
         fun attributes(route: PlaybackRoute): AudioAttributes = AudioAttributes.Builder()
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-            .setUsage(if (route == PlaybackRoute.CALL) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_ASSISTANT)
+            .setUsage(
+                when (route) {
+                    PlaybackRoute.CALL -> AudioAttributes.USAGE_VOICE_COMMUNICATION
+                    PlaybackRoute.ASSISTANT -> AudioAttributes.USAGE_ASSISTANT
+                    PlaybackRoute.GUIDANCE -> AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+                },
+            )
             .build()
     }
 }
 
 /** The speaker side for [TalkCore]: [Playback] fed by its own writer thread. */
-class PhoneSpeaker(route: PlaybackRoute, private val onPlaying: (Boolean) -> Unit) : Speaker {
+class PhoneSpeaker(route: PlaybackRoute, private val tones: Boolean = true, private val onPlaying: (Boolean) -> Unit) : Speaker {
     private val track = PhoneTrack(route)
     private val playback = Playback(track)
+
+    /** See [Playback.hold]: the car waits for directions and close turns. */
+    var hold: (() -> Boolean)?
+        get() = playback.hold
+        set(value) {
+            playback.hold = value
+        }
     @Volatile private var open = true
     private val writer: Thread
 
@@ -161,6 +177,8 @@ class PhoneSpeaker(route: PlaybackRoute, private val onPlaying: (Boolean) -> Uni
     override val ducked: Boolean get() = playback.ducked
 
     override fun endTone() {
+        // In the car the conversation just lapses after two quiet minutes: no tone.
+        if (!tones) return
         runCatching {
             val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 50)
             tone.startTone(ToneGenerator.TONE_PROP_ACK, 150)

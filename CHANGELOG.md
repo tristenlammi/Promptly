@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- Talk phase 2 (WP-T8) -->
+- Talk in the car: press the microphone on the car screen (or "Ask Promptly" on the P Maps driving screen) and ask one thing. A short tone opens the microphone, it closes again while Promptly answers, and the answer plays on the car speakers with the music turned down. It never listens on its own: after it asks you something ("Send it?") the microphone opens once for 6 seconds for your answer, and Yes and No show on the car screen. Press while it is talking to stop it. The answer waits until a direction has been said or a close turn is done. The conversation remembers what you just asked for two minutes, then ends.
+
 ## [0.34.0] - 2026-11-09
 
 ### Added

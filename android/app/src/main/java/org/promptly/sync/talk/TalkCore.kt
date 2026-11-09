@@ -78,6 +78,22 @@ fun interface Trail {
     fun note(state: String, since: Long)
 }
 
+/** Told about the turn as it goes, for a driver of the microphone that isn't always
+ *  open: the car's one press, one turn ([CarTurn]). Called on the [Ticker]'s thread. */
+interface TurnWatcher {
+    /** The server's state: listening, thinking, speaking or muted. */
+    fun state(state: String) {}
+    /** Words of yours are coming through. */
+    fun words() {}
+    /** It asked something; [listenS] is how long the microphone may open for the answer. */
+    fun asked(listenS: Int) {}
+    /** The question was answered, expired or dropped. */
+    fun askDone() {}
+    /** Its speech started or ran out on the speaker. */
+    fun playing(now: Boolean) {}
+    fun finished() {}
+}
+
 /** A Talk conversation on the phone, without the Android parts: the screen's state,
  *  the microphone's level meter (instant duck while you talk over it), interrupts,
  *  the yes/no card, device actions, yielding to calls, and the breadcrumb. Every
@@ -96,6 +112,9 @@ class TalkCore(
 
     /** Told when the conversation is over (to stop the service, drop the audio route). */
     var onFinished: (() -> Unit)? = null
+
+    /** The car's turn driver, when there is one. */
+    var watcher: TurnWatcher? = null
 
     private var keys = 0
     private var loudFrames = 0
@@ -130,8 +149,11 @@ class TalkCore(
 
     val live: Boolean get() = _ui.value.phase.let { it != Phase.OFF && it != Phase.ENDED }
 
-    fun start(captions: Boolean = true) = ticker.run {
-        _ui.value = TalkUi(phase = Phase.STARTING, captions = captions, startedAt = ticker.now())
+    /** [tapped]: the car's way, one press per turn. What you say while the socket
+     *  opens is kept for the turn you pressed for. */
+    fun start(captions: Boolean = true, tapped: Boolean = false) = ticker.run {
+        _ui.value = TalkUi(phase = Phase.STARTING, captions = captions, startedAt = ticker.now(), turnMode = if (tapped) "tap" else "hands_free")
+        client.sendEarly = tapped
         noteTrail()
         client.start()
     }
@@ -159,11 +181,15 @@ class TalkCore(
                 if (ev.state == "thinking" && was != "thinking") replyComing()
                 if (ev.state == "listening") awaitingSound = false
                 noteTrail()
+                watcher?.state(ev.state)
             }
-            is TalkEvent.Partial -> set {
-                val last = exchanges.lastOrNull()
-                if (last != null && !last.youFinal) copy(exchanges = exchanges.dropLast(1) + last.copy(you = ev.text))
-                else copy(exchanges = (exchanges + Exchange(++keys, you = ev.text)).takeLast(MAX_EXCHANGES))
+            is TalkEvent.Partial -> {
+                set {
+                    val last = exchanges.lastOrNull()
+                    if (last != null && !last.youFinal) copy(exchanges = exchanges.dropLast(1) + last.copy(you = ev.text))
+                    else copy(exchanges = (exchanges + Exchange(++keys, you = ev.text)).takeLast(MAX_EXCHANGES))
+                }
+                if (ev.text.isNotBlank()) watcher?.words()
             }
             is TalkEvent.Heard -> {
                 replyComing()
@@ -213,8 +239,12 @@ class TalkCore(
                 cancelAskTimer = ticker.after(ttl + 3000) {
                     set { if (this.ask?.approvalId == ask.approvalId) copy(ask = null) else this }
                 }
+                watcher?.asked(ev.listenS)
             }
-            is TalkEvent.AskDone -> set { copy(ask = if (ask?.approvalId == ev.approvalId) null else ask) }
+            is TalkEvent.AskDone -> {
+                set { copy(ask = if (ask?.approvalId == ev.approvalId) null else ask) }
+                watcher?.askDone()
+            }
             is TalkEvent.Action -> {
                 val problem = runCatching { actions.carry(ev.action) }.getOrElse { "This phone couldn't do that." }
                 if (problem != null) set { copy(notice = problem) }
@@ -258,6 +288,7 @@ class TalkCore(
         speaker.stop()
         set { copy(phase = Phase.ENDED, problem = problem, ask = null, tool = null, talking = false, hearing = false, endReason = reason ?: if (problem != null) "error" else "bye") }
         trail.note("ended", _ui.value.startedAt)
+        watcher?.finished()
         onFinished?.invoke()
     }
 
@@ -310,7 +341,29 @@ class TalkCore(
             speaker.unduck()
             duckedAt = null
         }
+        watcher?.playing(now)
     }
+
+    /** The car's microphone opened ([on]) or closed. Closing it with [flush] tells the
+     *  server you've finished, so whatever you said is answered now. Works while the
+     *  socket is still opening: those words are kept for this turn. */
+    fun listen(on: Boolean, flush: Boolean = false) = ticker.run {
+        val s = _ui.value
+        if (s.phase == Phase.ENDED || s.phase == Phase.OFF) return@run
+        if (on) {
+            if (s.muted) unmute()
+            set { copy(talking = true) }
+        } else {
+            set { copy(talking = false, hearing = false) }
+            if (flush) {
+                replyComing()
+                client.send(JSONObject().put("type", "end_turn"))
+            }
+        }
+    }
+
+    /** Where the trip is now (the car, before each turn). */
+    fun trip(trip: JSONObject) = ticker.run { client.send(TalkProtocol.trip(trip)) }
 
     // ------------------------------------------------------------ buttons
     /** Stop it talking (what you heard stays in the conversation). */
