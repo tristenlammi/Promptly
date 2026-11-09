@@ -77,7 +77,8 @@ test.describe("notes: one thing called a note", () => {
     await expect(dlg).toBeVisible({ timeout: 20_000 });
     await expect(dlg.getByText("Bread", { exact: true })).toBeVisible();
     await dlg.getByRole("button", { name: "Close", exact: true }).click();
-    await expect(page.locator("article[data-note-card]").filter({ hasText: milk })).toBeVisible({ timeout: 20_000 });
+    // By its own name: a Shopping list elsewhere can have a "Milk …" item too.
+    await expect(page.getByRole("article", { name: milk, exact: true })).toBeVisible({ timeout: 20_000 });
 
     // The plain Create rows.
     await palette(page, "new note");
