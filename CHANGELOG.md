@@ -36,6 +36,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Admin → Storage lists damaged or missing files by kind, size and owner, without their names. Each owner gets a notification naming their own files, and the admins' alert gives a count only.
 - Admin → Connectors only lists and attaches to workspaces you're in. For someone else's workspace, give its owner the connector and they turn it on in the workspace's settings. A workspace's owner and admins can now turn off a connector an admin turned on there.
 - Admin → Forms lists reported forms and a count of link forms, not every link form's title and owner.
+<!-- Admin privacy, AP8 -->
+- The thumbs-down note box in chat says who reads it: "Your server admin sees this note, not the chat."
 
 ## [0.34.0] - 2026-11-09
 

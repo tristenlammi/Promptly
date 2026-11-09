@@ -1429,10 +1429,15 @@ function MessageBubbleImpl({
                         reasonFlipUp ? "bottom-full mb-1" : "top-full mt-1"
                       )}
                     >
-                      <label className="mb-1 block text-[11px] font-medium text-[var(--text-muted)]">
+                      <label
+                        htmlFor={`fb-note-${messageId ?? "x"}`}
+                        className="mb-1 block text-[11px] font-medium text-[var(--text-muted)]"
+                      >
                         What went wrong? (optional)
                       </label>
                       <textarea
+                        id={`fb-note-${messageId ?? "x"}`}
+                        aria-describedby={`fb-note-who-${messageId ?? "x"}`}
                         value={reasonDraft}
                         onChange={(e) => setReasonDraft(e.target.value)}
                         rows={3}
@@ -1444,6 +1449,12 @@ function MessageBubbleImpl({
                           "outline-none focus:border-[var(--accent)]"
                         )}
                       />
+                      <p
+                        id={`fb-note-who-${messageId ?? "x"}`}
+                        className="mt-1 text-[10.5px] leading-snug text-[var(--text-muted)]"
+                      >
+                        Your server admin sees this note, not the chat.
+                      </p>
                       <div className="mt-1.5 flex items-center justify-end gap-1.5">
                         <button
                           type="button"
