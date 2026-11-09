@@ -30,6 +30,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes lists by aisle: ⋯ → Sort by aisle puts a shopping list in store order (Meal Plan's food list and your own store order from its Kitchen view; no AI), and Keep sorted by aisle makes everything added later, from chat, the widget, the phone or a family member, land in its aisle instead of at the bottom. Thin aisle lines show where each aisle starts; drag an item across one to move it there.
 <!-- Notes phase 2, N2.3 -->
 - Meal Plan → Groceries: "Send to Tasks" is now "Send to list". It goes to your Shopping note by default (by aisle; everyone on the note sees the items arrive), or another list in Notes, or Tasks as before. With no Shopping note it makes a "Groceries" list. Sending again updates amounts, ticks what you ticked in Meal Plan and never touches things people typed themselves; the message has Open and Undo. Chat can do it too.
+<!-- Notes phase 2, N2.4 -->
+- Notes by voice: Talking to Promptly and the phone assistant can read your notes ("what's on the shopping list?"), add to one ("add eggs to the shopping list" asks "Add eggs to your Shopping note?" and adds only on yes) and make one ("make a note called gate code"). Nothing is ticked off or deleted by voice.
 
 ## [0.34.0] - 2026-11-09
 
