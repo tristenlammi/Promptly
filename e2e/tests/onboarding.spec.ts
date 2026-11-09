@@ -93,7 +93,8 @@ test("an admin adds someone, and their first sign-in is easy", async ({ dana: ad
 
   // Answered once: signing in again goes to the usual place, no welcome.
   await page.goto("/chat");
-  await ready(page);
+  await expect(page.getByText("Loading Promptly...")).toHaveCount(0, { timeout: 20_000 });
+  await page.waitForTimeout(1500);
   await expect(page.getByTestId("welcome-dialog")).toHaveCount(0);
   await expect(page).toHaveURL(/\/chat/);
 
@@ -113,7 +114,7 @@ test("Install apps leads with one step for this device and folds the rest under 
   await expect(lead.getByRole("button", { name: "Install Promptly" })).toBeVisible();
   const more = alice.getByTestId("install-more");
   await expect(more.getByText("Promptly Photos")).toBeHidden();
-  await more.locator("summary").click();
+  await more.locator(":scope > summary").click();
   await expect(more.getByText("Promptly Photos")).toBeVisible();
   await expect(more.getByRole("heading", { name: /Android Auto/ })).toBeVisible();
 });
@@ -131,7 +132,7 @@ test("on an iPhone in Safari, Install apps shows Add to Home Screen first", asyn
   await page.getByLabel("Email or username").fill(run.users.alice.username);
   await page.getByLabel("Password").fill(run.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await ready(page);
+  await expect(page).not.toHaveURL(/\/login/, { timeout: 20_000 });
   await page.goto("/apps/install");
   const lead = page.getByTestId("install-this-device");
   await expect(lead.getByRole("heading", { name: "Install Promptly on this iPhone" })).toBeVisible();
