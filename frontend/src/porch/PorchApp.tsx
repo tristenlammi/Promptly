@@ -25,6 +25,7 @@ import { WelcomeSheet } from "./components/WelcomeSheet";
 import { PorchContext } from "./context";
 import { usePorchEvents } from "./live";
 import { ActivityPage } from "./pages/ActivityPage";
+import { ArchivePage } from "./pages/ArchivePage";
 import { FeedPage } from "./pages/FeedPage";
 import { GroupPage } from "./pages/GroupPage";
 import { DiscoverRow, GroupsPage, InviteRow } from "./pages/GroupsPage";
@@ -49,6 +50,7 @@ type Route =
   | { page: "user"; id: string }
   | { page: "stories"; id: string }
   | { page: "newStory" }
+  | { page: "archive" }
   | { page: "unknown" };
 
 const ID = "([0-9a-fA-F-]{36})";
@@ -62,6 +64,7 @@ function parse(path: string): Route {
   if (p === "/porch/settings") return { page: "settings" };
   if (p === "/porch/new") return { page: "new" };
   if (p === "/porch/story/new") return { page: "newStory" };
+  if (p === "/porch/archive") return { page: "archive" };
   let m = new RegExp(`^/porch/p/${ID}$`).exec(p);
   if (m) return { page: "post", id: m[1] };
   m = new RegExp(`^/porch/p/${ID}/edit$`).exec(p);
@@ -207,6 +210,9 @@ export function PorchApp({ embedded = false, promptlyNav = false }: { embedded?:
       break;
     case "settings":
       page = <SettingsPage />;
+      break;
+    case "archive":
+      page = <ArchivePage />;
       break;
     case "new":
       page = <NewPostPage key={location.search} />;

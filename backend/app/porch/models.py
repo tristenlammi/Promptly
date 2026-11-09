@@ -306,8 +306,31 @@ class PorchStoryView(Base):
     seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+# ------------------------------------------------------------------ highlights (0394, WP-P2.4)
+
+
+class PorchHighlight(UUIDPKMixin, CreatedAtMixin, Base):
+    """Stories you keep on your profile, under a name and a cover. Each
+    story in it still shows only to the people in its groups."""
+
+    __tablename__ = "porch_highlights"
+
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    cover_story_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("porch_stories.id", ondelete="SET NULL"), nullable=True)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+
+
+class PorchHighlightItem(Base):
+    __tablename__ = "porch_highlight_items"
+
+    highlight_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_highlights.id", ondelete="CASCADE"), primary_key=True)
+    story_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_stories.id", ondelete="CASCADE"), primary_key=True)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+
+
 __all__ = [
     "KINDS", "NOTIFY", "ROLES", "STATUSES", "STORY_KINDS", "TAG_STATUSES", "PorchAlert", "PorchComment", "PorchGroup", "PorchGroupMember",
-    "PorchPollOption", "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile", "PorchReaction", "PorchRemoval",
-    "PorchReport", "PorchSave", "PorchStory", "PorchStoryGroup", "PorchStoryView", "PorchTag",
+    "PorchHighlight", "PorchHighlightItem", "PorchPollOption", "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile",
+    "PorchReaction", "PorchRemoval", "PorchReport", "PorchSave", "PorchStory", "PorchStoryGroup", "PorchStoryView", "PorchTag",
 ]

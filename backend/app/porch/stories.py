@@ -440,9 +440,12 @@ async def _own(db: AsyncSession, user: User, story_id: uuid.UUID) -> PorchStory:
 async def delete_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_porch)) -> None:
     """Delete your story (from the row, your archive and any highlight).
     The photo stays in your Photos library."""
+    from . import highlights
+
     s = await _own(db, user, story_id)
     audience = await access.story_audience_ids(db, s)
     s.deleted_at = core.now()
+    await highlights.story_gone(db, s.id)
     await db.commit()
     if s.file_id:
         forget_renders(s.file_id, s.id)
@@ -611,8 +614,13 @@ async def _ensure_render(s: PorchStory, row: UserFile, fm: FileMedia | None, whi
 
 
 async def reachable(db: AsyncSession, user: User, story: PorchStory) -> bool:
-    """May ``user`` load this story's bytes now: it's live for them."""
-    return await access.can_see_story(db, user, story.id)
+    """May ``user`` load this story's bytes now: it's live for them, or an
+    old one a highlight still shows them (WP-P2.4)."""
+    if await access.can_see_story(db, user, story.id):
+        return True
+    from . import highlights
+
+    return await highlights.shows_story(db, user, story)
 
 
 async def serve(db: AsyncSession, claim: media_urls.MediaClaim, user: User, request: Request) -> Response:

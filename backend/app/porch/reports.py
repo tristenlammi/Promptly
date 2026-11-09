@@ -480,7 +480,10 @@ async def remove_story(db: AsyncSession, by: User, s: PorchStory, reason: str, *
         )
     ).first()
     if left is None:
+        from .highlights import story_gone
+
         s.deleted_at = core.now()
+        await story_gone(db, s.id)
     scope = "everyone" if everyone else "group"
     snippet = _snip(s.text) or {"photo": "A photo story", "video": "A video story"}.get(s.kind, "A story")
     db.add(

@@ -488,6 +488,17 @@ export interface StoryViewer {
   seen_at: string;
 }
 
+/** A highlight (WP-P2.4): stories kept on a profile, each only for the people in its groups. */
+export interface Highlight {
+  id: string;
+  name: string;
+  cover: { story_id: string; image: string | null; background: StoryBackground | null; kind: PorchStory["kind"] } | null;
+  count: number;
+  /** Only the stories you may see (yours: all of them). */
+  stories: PorchStory[];
+  mine: boolean;
+}
+
 export interface NewGroup {
   name: string;
   visibility: Visibility;
@@ -818,6 +829,35 @@ export const porchApi = {
   /** Reply or react to someone's story: a message in your 1:1 Rooms conversation, with the story attached. */
   async replyStory(id: string, body: { text?: string; emoji?: string }): Promise<{ room_id: string; url: string; message_id: string }> {
     const { data } = await apiClient.post<{ room_id: string; url: string; message_id: string }>(`/porch/stories/${id}/reply`, body);
+    return data;
+  },
+  // ---- highlights (WP-P2.4)
+  async myHighlights(): Promise<Highlight[]> {
+    const { data } = await apiClient.get<Highlight[]>("/porch/me/highlights");
+    return data;
+  },
+  /** Someone's highlights, each with only the stories you may see. */
+  async userHighlights(userId: string): Promise<Highlight[]> {
+    const { data } = await apiClient.get<Highlight[]>(`/porch/users/${userId}/highlights`);
+    return data;
+  },
+  async createHighlight(body: { name: string; story_ids: string[]; cover_story_id?: string | null }): Promise<Highlight> {
+    const { data } = await apiClient.post<Highlight>("/porch/me/highlights", body);
+    return data;
+  },
+  async updateHighlight(id: string, body: { name?: string; story_ids?: string[]; cover_story_id?: string | null }): Promise<Highlight> {
+    const { data } = await apiClient.patch<Highlight>(`/porch/me/highlights/${id}`, body);
+    return data;
+  },
+  async deleteHighlight(id: string): Promise<void> {
+    await apiClient.delete(`/porch/me/highlights/${id}`);
+  },
+  async addToHighlight(id: string, storyId: string): Promise<Highlight> {
+    const { data } = await apiClient.post<Highlight>(`/porch/me/highlights/${id}/stories`, { story_id: storyId });
+    return data;
+  },
+  async removeFromHighlight(id: string, storyId: string): Promise<{ deleted: boolean; highlight?: Highlight }> {
+    const { data } = await apiClient.delete<{ deleted: boolean; highlight?: Highlight }>(`/porch/me/highlights/${id}/stories/${storyId}`);
     return data;
   },
   /** Every story you've posted, newest first (private to you). */

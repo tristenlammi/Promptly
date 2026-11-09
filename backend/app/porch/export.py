@@ -182,6 +182,7 @@ async def porch_json(db: AsyncSession, user: User, arc_of: dict[uuid.UUID, str],
         "posts": posts_out,
         "your_comments_on_other_posts": comments_out,
         "stories": stories_out,
+        "highlights": await _highlights(db, user),
     }
 
 
@@ -224,6 +225,26 @@ async def _stories(db: AsyncSession, user: User, arc_of: dict[uuid.UUID, str], r
                 "places": [o["place"] for o in s.overlays or [] if o.get("type") == "place" and isinstance(o.get("place"), dict)],
             }
         )
+    return out
+
+
+async def _highlights(db: AsyncSession, user: User) -> list[dict[str, Any]]:
+    """Your highlights (WP-P2.4): each name and which of your stories (by
+    the ids in ``stories``) it keeps, in order."""
+    from .models import PorchHighlight, PorchHighlightItem
+
+    rows = list(
+        (await db.execute(select(PorchHighlight).where(PorchHighlight.owner_id == user.id).order_by(PorchHighlight.position))).scalars()
+    )
+    out = []
+    for h in rows:
+        q = (
+            select(PorchHighlightItem.story_id)
+            .join(PorchStory, PorchStory.id == PorchHighlightItem.story_id)
+            .where(PorchHighlightItem.highlight_id == h.id, PorchStory.deleted_at.is_(None))
+            .order_by(PorchHighlightItem.position)
+        )
+        out.append({"name": h.name, "stories": [str(s) for s in (await db.execute(q)).scalars()]})
     return out
 
 

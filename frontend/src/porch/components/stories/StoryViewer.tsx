@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Eye, Loader2, Trash2, TriangleAlert, UserX, X } from "lucide-react";
+import { Bookmark, Eye, Loader2, Trash2, TriangleAlert, UserX, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -14,6 +14,7 @@ import { useBlock } from "../../actions";
 import { STORIES_KEY, STORIES_ROW_KEY, userStoriesKey } from "../../cache";
 import { ReportSheet } from "../ReportSheet";
 import { ActionSheet, type MenuAction } from "../ui";
+import { AddToHighlightSheet } from "./HighlightSheets";
 import { StoryPlayer } from "./StoryPlayer";
 import { StoryReplyBar } from "./StoryReplyBar";
 import { ViewersSheet } from "./ViewersSheet";
@@ -53,6 +54,7 @@ export function StoryViewer({ userId }: { userId: string }) {
   const [viewers, setViewers] = useState<string | null>(null);
   const [reporting, setReporting] = useState<PorchStory | null>(null);
   const [sending, setSending] = useState(false);
+  const [highlighting, setHighlighting] = useState<PorchStory | null>(null);
 
   // Who comes next: the row as it was when you opened it (carried along
   // from person to person, so seeing someone doesn't reshuffle it).
@@ -112,6 +114,7 @@ export function StoryViewer({ userId }: { userId: string }) {
       await porchApi.deleteStory(s.id);
       toast.success("Story deleted.");
       void qc.invalidateQueries({ queryKey: STORIES_KEY });
+      void qc.invalidateQueries({ queryKey: ["porch", "highlights"] });
       if (stories.length <= 1) leave();
     } catch (err) {
       toast.error(apiErrorMessage(err, "Couldn't delete the story. Try again."));
@@ -122,6 +125,7 @@ export function StoryViewer({ userId }: { userId: string }) {
     if (s.mine) {
       return [
         { label: "Who's seen it", icon: Eye, onClick: () => setViewers(s.id) },
+        { label: "Add to highlight", icon: Bookmark, hint: "Keep it on your profile after today", onClick: () => setHighlighting(s) },
         { label: "Delete story", icon: Trash2, danger: true, onClick: () => void remove(s) },
       ];
     }
@@ -160,7 +164,7 @@ export function StoryViewer({ userId }: { userId: string }) {
         onDone={() => goPerson(nextPerson)}
         onBeforeFirst={prevPerson ? () => goPerson(prevPerson) : undefined}
         onShown={markSeen}
-        hold={!!menu || !!viewers || !!reporting || sending}
+        hold={!!menu || !!viewers || !!reporting || sending || !!highlighting}
         label={stories[0]?.mine ? "Your story" : `${name}'s story`}
         menu={(s) => () => setMenu(s)}
         footer={(s) =>
@@ -180,6 +184,7 @@ export function StoryViewer({ userId }: { userId: string }) {
       />
       {menu && <ActionSheet open onClose={() => setMenu(null)} title={menu.mine ? "Your story" : `${menu.author?.name ?? "Someone"}'s story`} actions={actions(menu)} />}
       {viewers && <ViewersSheet storyId={viewers} open onClose={() => setViewers(null)} />}
+      <AddToHighlightSheet story={highlighting} open={!!highlighting} onClose={() => setHighlighting(null)} />
       {reporting && (
         <ReportSheet
           open

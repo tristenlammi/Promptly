@@ -34,6 +34,9 @@ export const STORIES_ROW_KEY = ["porch", "stories", "row"] as const;
 export const userStoriesKey = (id: string, feed: boolean) => ["porch", "stories", "u", id, feed] as const;
 export const storyViewersKey = (id: string) => ["porch", "stories", "viewers", id] as const;
 export const STORY_ARCHIVE_KEY = ["porch", "stories", "archive"] as const;
+/** Highlights (WP-P2.4): yours, and someone's as you see them. */
+export const HIGHLIGHTS_KEY = ["porch", "highlights", "me"] as const;
+export const userHighlightsKey = (id: string) => ["porch", "highlights", "u", id] as const;
 export const ALERTS_KEY = ["porch", "alerts"] as const;
 
 /** Change one post wherever it's cached (lists and its own query). */
