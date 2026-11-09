@@ -1,36 +1,66 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
+import { NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { VoicePanel } from "@/rtc/ui/VoicePanel";
 import {
   Archive,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  Clock,
-  Folder,
   FolderPlus,
+  Inbox,
   LogOut,
   MessageSquare,
-  Search,
   MoreHorizontal,
   Pencil,
   Pin,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Settings,
   ShieldCheck,
-  Star,
   Trash2,
 } from "lucide-react";
 
 import { useUIStore } from "@/store/uiStore";
 
+import { RAIL_MORE_ITEMS, visibleNavItems as pickNavItems } from "./navItems";
 import {
-  NAV_ITEMS,
-  OPT_IN_NAV_KEYS,
-  type NavItem as NavItemConfig,
-} from "./navItems";
+  ACCOUNT_BUTTON_CLASS,
+  ACCOUNT_MENU_CLASS,
+  ACCOUNT_MENU_ICON_CLASS,
+  ACCOUNT_MENU_ITEM_CLASS,
+  AccountButtonContent,
+  AppIcon,
+  AppVersionLine,
+  byPinnedThenRecent,
+  CHAT_LIST_CLASS,
+  ChatListNote,
+  ChatListSkeleton,
+  ChatRowContent,
+  chatRowClass,
+  ExpandSidebarButton,
+  FOLDER_ACTION_CLASS,
+  FOLDER_CHATS_CLASS,
+  FOLDER_NOTE_CLASS,
+  FOLDER_ROW_CLASS,
+  FOLDER_TOGGLE_CLASS,
+  FolderToggleContent,
+  FoldersLabel,
+  FOOTER_CLASS,
+  INBOX_BUTTON_CLASS,
+  InboxButtonContent,
+  InviteCount,
+  LoadMoreChats,
+  NavRowContent,
+  rowName,
+  navRowClass,
+  NO_CHATS_TEXT,
+  PinnedHeader,
+  RAIL_CLASS,
+  railIconClass,
+  SEARCH_BOX_CLASS,
+  SearchBoxContent,
+  SectionHeader,
+  SIDEBAR_CLASS,
+  SidebarHeader,
+  SMALL_ACTION_ROW_CLASS,
+  THEME_ROW_CLASS,
+} from "./sidebarParts";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
@@ -46,14 +76,11 @@ import { BUCKET_ORDER, groupByBucket } from "@/utils/dateGroups";
 import { cn } from "@/utils/cn";
 import { ThemeToggle, useThemeSync } from "@/components/shared/ThemeToggle";
 import { FeedbackModal } from "@/components/feedback/FeedbackModal";
-import { Skeleton } from "@/components/shared/Skeleton";
-import { UserAvatar } from "@/components/shared/UserAvatar";
 import { ShareInvitesPanel } from "@/components/chat/ShareInvitesPanel";
 import { InboxPanel } from "./InboxPanel";
 import { useInbox } from "@/hooks/useInbox";
 import { logout } from "@/lib/session";
 import type { ConversationSummary } from "@/api/types";
-import { Bell, Inbox } from "lucide-react";
 
 import { ConversationRowContextMenu } from "./ConversationRowContextMenu";
 import { InstallAppButton } from "./InstallAppButton";
@@ -61,7 +88,8 @@ import { NewChatButton } from "./NewChatButton";
 import { FolderEditModal } from "./FolderEditModal";
 import { useChatFoldersQuery, useDeleteFolder } from "@/hooks/useChatFolders";
 import { useFolderUiStore } from "@/store/folderUiStore";
-import { useNavApps, type NavApp } from "@/items/navApps";
+import { useNavApps } from "@/items/navApps";
+import { useNavBadges } from "@/hooks/useNavBadges";
 import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import type { ChatFolder } from "@/api/folders";
@@ -84,6 +112,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const isMobile = useIsMobile();
   // Apps the user pinned to their sidebar (from Apps → Edit).
   const { apps: navApps, iconStyle } = useNavApps();
+  // Count badges on the pinned apps' rows (Tasks due, unread Mail and
+  // Rooms, new on Porch).
+  const navAppIds = useMemo(() => navApps.map((a) => a.id), [navApps]);
+  const badges = useNavBadges(navAppIds);
   const { pathname } = useLocation();
   // While a pinned app is open, its own row lights up — not "Apps" too.
   const inNavApp = navApps.some((a) => pathname === a.to || pathname.startsWith(`${a.to}/`));
@@ -129,12 +161,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       list.push(c);
       byFolder.set(c.folder_id, list);
     }
-    for (const list of byFolder.values()) {
-      list.sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-        return b.updated_at.localeCompare(a.updated_at);
-      });
-    }
+    for (const list of byFolder.values()) list.sort(byPinnedThenRecent);
     return byFolder;
   }, [personalConversations]);
 
@@ -156,44 +183,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Stage-3 prep: drive nav rendering from the shared ``NAV_ITEMS``
   // config so the future Promptly Drive PWA layout can filter the
   // same list to ``section === "drive"`` without touching markup.
-  const hiddenSet = useMemo(
-    () => new Set(hiddenNav ?? []),
-    [hiddenNav]
-  );
-  const enabledSet = useMemo(
-    () => new Set(enabledNav ?? []),
-    [enabledNav]
-  );
-  const visibleNavItems: NavItemConfig[] = NAV_ITEMS.filter((it) => {
-    if (it.desktopOnly && isMobile) return false;
-    if (it.adminOnly && !isAdmin) return false;
-    if (it.optionalKey === "tasks" && !canAutomate) return false;
-    if (it.optionalKey) {
-      // Opt-in surfaces: shown only when explicitly enabled.
-      // Opt-out surfaces: shown unless the user hid them.
-      if (OPT_IN_NAV_KEYS.has(it.optionalKey))
-        return enabledSet.has(it.optionalKey);
-      if (hiddenSet.has(it.optionalKey)) return false;
-    }
-    return true;
-  });
+  const visibleNavItems = pickNavItems({ hidden: hiddenNav, enabled: enabledNav, isAdmin, canAutomate, isMobile });
 
   if (collapsed) {
     return (
-      <aside
-        className={cn(
-          "flex h-full w-14 shrink-0 flex-col items-center border-r py-3",
-          "border-[var(--border)] bg-[var(--surface)]"
-        )}
-      >
-        <button
-          onClick={onToggle}
-          className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)]"
-          aria-label="Expand sidebar"
-          title="Expand sidebar"
-        >
-          <PanelLeftOpen className="h-4 w-4" />
-        </button>
+      <aside className={RAIL_CLASS}>
+        <ExpandSidebarButton onToggle={onToggle} />
         <div className="mb-3">
           <NewChatButton compact />
         </div>
@@ -211,17 +206,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             );
           })}
           {navApps.map((app) => (
-            <SideIcon key={app.id} to={app.to} icon={<AppIcon app={app} style={iconStyle} />} label={app.name} />
+            <SideIcon
+              key={app.id}
+              to={app.to}
+              icon={<AppIcon app={app} style={iconStyle} />}
+              label={app.name}
+              badge={{ app: app.id, n: badges[app.id] ?? 0 }}
+            />
           ))}
-          <SideIcon
-            to="/archive"
-            icon={<Archive className="h-4 w-4" />}
-            label="Archive"
-          />
-          <SideIcon to="/trash" icon={<Trash2 className="h-4 w-4" />} label="Trash" />
-          {isAdmin && (
-            <SideIcon to="/admin" icon={<Settings className="h-4 w-4" />} label="Settings" />
-          )}
+          {RAIL_MORE_ITEMS.filter((it) => !it.adminOnly || isAdmin).map((item) => {
+            const Icon = item.icon;
+            return <SideIcon key={item.to} to={item.to} icon={<Icon className="h-4 w-4" />} label={item.label} />;
+          })}
         </nav>
         {voiceHere && <VoicePanel variant="collapsed" />}
       </aside>
@@ -229,29 +225,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   }
 
   return (
-    <aside
-      className={cn(
-        "flex h-full w-72 shrink-0 flex-col border-r",
-        "border-[var(--border)] bg-[var(--surface)]"
-      )}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pb-3 pt-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent)] text-white">
-            <span className="text-sm font-bold">P</span>
-          </div>
-          <span className="text-sm font-semibold tracking-tight">Promptly</span>
-        </div>
-        <button
-          onClick={onToggle}
-          className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          aria-label="Collapse sidebar"
-          title="Collapse sidebar"
-        >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
-      </div>
+    <aside className={SIDEBAR_CLASS}>
+      <SidebarHeader onToggle={onToggle} />
 
       {/* New chat — split button: main click starts a normal chat,
           chevron opens a popover with two temporary chat options
@@ -259,15 +234,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <div className="px-3">
         <NewChatButton />
         {/* The one search: chats, messages, mail, events, tasks and more (Ctrl+K). */}
-        <button
-          type="button"
-          onClick={openSearch}
-          aria-keyshortcuts="Control+K Meta+K"
-          className="mt-2 flex h-8 w-full items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--hover)] px-2.5 text-left text-xs text-[var(--text-muted)] transition hover:text-[var(--text)]"
-        >
-          <Search className="h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">Search</span>
-          <kbd className="hidden shrink-0 font-sans text-[10px] opacity-70 md:inline">Ctrl K</kbd>
+        <button type="button" onClick={openSearch} aria-keyshortcuts="Control+K Meta+K" className={SEARCH_BOX_CLASS}>
+          <SearchBoxContent />
         </button>
       </div>
 
@@ -291,23 +259,27 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           );
         })}
         {navApps.map((app) => (
-          <NavItem key={app.id} to={app.to} icon={<AppIcon app={app} style={iconStyle} />} label={app.name} />
+          <NavItem
+            key={app.id}
+            to={app.to}
+            icon={<AppIcon app={app} style={iconStyle} />}
+            label={app.name}
+            badge={{ app: app.id, n: badges[app.id] ?? 0 }}
+          />
         ))}
       </nav>
 
       {/* Conversation list */}
-      <div className="promptly-scroll mt-3 flex-1 overflow-y-auto px-2 pb-2">
+      <div className={CHAT_LIST_CLASS}>
         {/* Folders (0148) — always at the very top, above Pinned. Each is
             collapsed by default; the header row toggles it. The + on the row
             starts a new chat inside the folder. */}
         <div className="mb-1 mt-1 flex items-center justify-between gap-1 px-2">
-          <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-            <Folder className="h-3 w-3" /> Folders
-          </span>
+          <FoldersLabel />
           <button
             type="button"
             onClick={() => setFolderModal("new")}
-            className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover-strong)] hover:text-[var(--text)]"
+            className={FOLDER_ACTION_CLASS}
             title="New folder"
             aria-label="New folder"
           >
@@ -318,7 +290,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           <button
             type="button"
             onClick={() => setFolderModal("new")}
-            className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            className={cn("mb-1", SMALL_ACTION_ROW_CLASS)}
           >
             <FolderPlus className="h-3.5 w-3.5" /> New folder
           </button>
@@ -334,11 +306,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           ))
         )}
 
-        {pinned.length > 0 && (
-          <SectionHeader>
-            <Pin className="h-3 w-3 fill-current" /> Pinned
-          </SectionHeader>
-        )}
+        {pinned.length > 0 && <PinnedHeader />}
         {pinned.map((c) => (
           <ConversationRow key={c.id} conv={c} activeId={activeId} />
         ))}
@@ -368,16 +336,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
 
         {!convLoading && personalConversations.length === 0 && folders.length === 0 && (
-          <div className="mt-6 px-2 text-xs text-[var(--text-muted)]">
-            No personal chats yet. Start a new chat or open a workspace.
-          </div>
+          <ChatListNote>{NO_CHATS_TEXT}</ChatListNote>
         )}
       </div>
 
       {/* Calls: you're in voice — Mute, Deafen, Disconnect wherever you are. */}
       {voiceHere && <VoicePanel variant="sidebar" />}
       {/* Footer */}
-      <UserFooter />
+      <UserFooter onNewFolder={() => setFolderModal("new")} />
 
       <FolderEditModal
         open={folderModal !== null}
@@ -388,121 +354,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   );
 }
 
-/** Loads the next page of chats when it scrolls into view — older chats
- *  used to be unreachable past the first 50 (R-047). Also a plain button,
- *  for keyboards and for when the observer can't fire. */
-function LoadMoreChats({ loading, onLoad }: { loading: boolean; onLoad: () => void }) {
-  const ref = useRef<HTMLButtonElement | null>(null);
-  const onLoadRef = useRef(onLoad);
-  onLoadRef.current = onLoad;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || loading || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) onLoadRef.current();
-    });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [loading]);
-  return (
-    <button
-      ref={ref}
-      type="button"
-      onClick={onLoad}
-      disabled={loading}
-      className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-70"
-    >
-      {loading ? "Loading…" : "Load older chats"}
-    </button>
-  );
-}
-
-/** Placeholder list shown while the first conversations load — mocks a
- *  couple of date-bucketed groups so the sidebar doesn't flash empty. */
-function ChatListSkeleton() {
-  return (
-    <div className="mt-2 space-y-4" aria-hidden>
-      {[4, 3].map((count, gi) => (
-        <div key={gi} className="space-y-1.5">
-          <Skeleton className="ml-2 h-3 w-16" />
-          {Array.from({ length: count }).map((_, i) => (
-            <Skeleton key={i} className="h-7 w-full" />
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SectionHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--accent-text)]">
-      {children}
-    </div>
-  );
-}
-
-/**
- * Phase Z1 — clock pill rendered next to the title of a 1-hour
- * temporary chat in the sidebar. Reads ``expires_at`` from the
- * conversation row and re-renders once a minute so the displayed
- * countdown drifts at most ~30 s. Cheap to leave running for every
- * temporary chat in the list because we only schedule a single
- * shared interval per badge.
- */
-function TemporaryCountdownBadge({ expiresAt }: { expiresAt: string | null }) {
-  const [, force] = useState(0);
-  useEffect(() => {
-    const t = window.setInterval(() => force((n) => n + 1), 30_000);
-    return () => window.clearInterval(t);
-  }, []);
-  if (!expiresAt) {
-    return (
-      <Clock
-        className="h-3 w-3 shrink-0 text-[var(--text-muted)]"
-        aria-label="Temporary chat"
-      />
-    );
-  }
-  const deltaMs = new Date(expiresAt).getTime() - Date.now();
-  let label: string;
-  if (deltaMs <= 0) {
-    label = "0m";
-  } else {
-    const mins = Math.max(1, Math.round(deltaMs / 60_000));
-    label = mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h`;
-  }
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1 py-px",
-        "text-[9px] font-semibold tabular-nums",
-        // Informational, not a warning — temporary chats are a feature the
-        // user chose, and amber read as "something's wrong".
-        "bg-[var(--hover-strong)] text-[var(--text-muted)]"
-      )}
-      title={`Temporary chat — auto-deletes in ${label}`}
-    >
-      <Clock className="h-2.5 w-2.5" />
-      {label}
-    </span>
-  );
-}
-
-/** A pinned app's icon: a line icon like the rest of the sidebar, or —
- *  if the person chose colour — the app's own icon, shrunk to fit. */
-function AppIcon({ app, style }: { app: NavApp; style: "line" | "color" }) {
-  if (style === "color") return <img src={app.icon} alt="" className="h-4 w-4 rounded-[4px]" draggable={false} />;
-  const Glyph = app.glyph;
-  return <Glyph className="h-4 w-4" />;
-}
-
 function NavItem({
   to,
   icon,
   label,
   end,
   inactive,
+  badge,
 }: {
   to: string;
   icon: React.ReactNode;
@@ -510,22 +368,16 @@ function NavItem({
   end?: boolean;
   /** Never show as the current page (another row owns this path). */
   inactive?: boolean;
+  /** A count badge at the end of the row (hidden at 0). */
+  badge?: { app: string; n: number };
 }) {
   return (
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) =>
-        cn(
-          "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition",
-          isActive && !inactive
-            ? "bg-[var(--accent)]/10 text-[var(--text)] font-medium"
-            : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        )
-      }
+      className={({ isActive }) => navRowClass(isActive && !inactive)}
     >
-      {icon}
-      <span>{label}</span>
+      <NavRowContent icon={icon} label={label} count={badge} />
     </NavLink>
   );
 }
@@ -535,27 +387,24 @@ function SideIcon({
   icon,
   label,
   inactive,
+  badge,
 }: {
   to: string;
   icon: React.ReactNode;
   label: string;
   inactive?: boolean;
+  /** A count badge on the icon's corner (hidden at 0). */
+  badge?: { app: string; n: number };
 }) {
+  const name = rowName(label, badge);
   return (
     <NavLink
       to={to}
-      title={label}
-      aria-label={label}
-      className={({ isActive }) =>
-        cn(
-          "inline-flex h-9 w-9 items-center justify-center rounded-md transition",
-          isActive && !inactive
-            ? "bg-[var(--accent)]/10 text-[var(--text)]"
-            : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        )
-      }
+      title={name}
+      aria-label={name}
+      className={({ isActive }) => railIconClass(isActive && !inactive)}
     >
-      {icon}
+      <NavRowContent icon={icon} label={label} count={badge} rail />
     </NavLink>
   );
 }
@@ -572,7 +421,6 @@ function ConversationRow({
   const archive = useArchiveConversation();
   const isMobile = useIsMobile();
   const isActive = activeId === conv.id;
-  const title = conv.title?.trim() || "New chat";
   // Position is in *viewport* coordinates because the menu is rendered
   // through a portal with ``position: fixed``.
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(
@@ -639,12 +487,7 @@ function ConversationRow({
   return (
     <>
       <div
-        className={cn(
-          "group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition",
-          isActive
-            ? "bg-[var(--hover-strong)] text-[var(--text)]"
-            : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
-        )}
+        className={chatRowClass(isActive)}
         onContextMenu={(e) => {
           e.preventDefault();
           setMenuPos({ x: e.clientX, y: e.clientY });
@@ -667,19 +510,7 @@ function ConversationRow({
             navigate(`/chat/${conv.id}`);
           }}
         >
-          {conv.starred && <Star className="h-3 w-3 shrink-0 fill-current text-yellow-500" />}
-          {/* Persistent pinned indicator — a small filled pin glyph in
-              the accent colour. Survives the active-row highlight since
-              the icon colour is independent of the row's text colour.
-              The temporary-chat badge takes precedence in the rare
-              overlap so we don't stack two leading glyphs. */}
-          {conv.pinned && conv.temporary_mode !== "one_hour" && (
-            <Pin className="h-3 w-3 shrink-0 fill-current text-[var(--accent-text)]" />
-          )}
-          {conv.temporary_mode === "one_hour" && (
-            <TemporaryCountdownBadge expiresAt={conv.expires_at ?? null} />
-          )}
-          <span className="truncate">{title}</span>
+          <ChatRowContent chat={conv} />
         </button>
         {isMobile ? (
           // Touch: a single always-visible ⋯ opens the full action menu
@@ -783,13 +614,7 @@ function FolderRow({
     for (const c of chats) byId.set(c.id, c);
     return [...byId.values()]
       .filter((c) => c.folder_id === folder.id && !c.archived_at)
-      .sort((a, b) =>
-        a.pinned !== b.pinned
-          ? a.pinned
-            ? -1
-            : 1
-          : b.updated_at.localeCompare(a.updated_at)
-      );
+      .sort(byPinnedThenRecent);
   }, [folderQuery.data, chats, folder.id]);
   const toggle = useFolderUiStore((s) => s.toggle);
   const expand = useFolderUiStore((s) => s.expand);
@@ -834,39 +659,22 @@ function FolderRow({
 
   return (
     <div className="mb-0.5">
-      <div
-        className={cn(
-          "group relative flex items-center gap-1 rounded-md px-1.5 py-1.5 text-sm transition",
-          "text-[var(--text)] hover:bg-[var(--hover)]"
-        )}
-      >
+      <div className={FOLDER_ROW_CLASS}>
         <button
           type="button"
           onClick={() => toggle(folder.id)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          className={FOLDER_TOGGLE_CLASS}
           aria-expanded={expanded}
           title={expanded ? "Collapse folder" : "Expand folder"}
         >
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
-          )}
-          <Folder className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
-          <span className="truncate font-medium">{folder.name}</span>
-          {/* The server's count — the loaded chats are only a page. */}
-          {(folder.chat_count ?? folderChats.length) > 0 && (
-            <span className="shrink-0 text-[11px] tabular-nums text-[var(--text-muted)]">
-              {folder.chat_count ?? folderChats.length}
-            </span>
-          )}
+          <FolderToggleContent name={folder.name} count={folder.chat_count ?? folderChats.length} expanded={expanded} />
         </button>
 
         {/* Always-visible + (core action) */}
         <button
           type="button"
           onClick={newChatInFolder}
-          className="shrink-0 rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover-strong)] hover:text-[var(--text)]"
+          className={FOLDER_ACTION_CLASS}
           title="New chat in this folder"
           aria-label="New chat in this folder"
         >
@@ -921,14 +729,14 @@ function FolderRow({
       </div>
 
       {expanded && (
-        <div className="ml-3 border-l border-[var(--border)] pl-1.5">
+        <div className={FOLDER_CHATS_CLASS}>
           {folderChats.length === 0 && folderQuery.isLoading ? (
-            <div className="px-2 py-1.5 text-xs text-[var(--text-muted)]">Loading…</div>
+            <div className={FOLDER_NOTE_CLASS}>Loading…</div>
           ) : folderChats.length === 0 ? (
             <button
               type="button"
               onClick={newChatInFolder}
-              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              className={SMALL_ACTION_ROW_CLASS}
             >
               <Plus className="h-3 w-3" /> New chat
             </button>
@@ -949,7 +757,19 @@ function FolderRow({
   );
 }
 
-function UserFooter() {
+/** The Passwords page asked, from this tab, in the last minute, to sign out
+ *  (passwords/ui/PromptlyNav.tsx). Used once. */
+function takeSignOutRequest(): boolean {
+  try {
+    const at = Number(sessionStorage.getItem("promptly:sign-out"));
+    sessionStorage.removeItem("promptly:sign-out");
+    return at > 0 && Date.now() - at < 60_000;
+  } catch {
+    return false;
+  }
+}
+
+function UserFooter({ onNewFolder }: { onNewFolder: () => void }) {
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
@@ -1007,35 +827,56 @@ function UserFooter() {
   // browser — cached data, drafts, push notifications (R-030).
   const onLogout = () => void logout();
 
-  const itemClass =
-    "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)] focus:bg-[var(--hover)] focus:outline-none";
+  // The Passwords page draws its own copy of this sidebar (it can't run this
+  // app's code), so its inbox, invites, feedback, New folder and Log out link
+  // here with ``?sidebar=…`` and this footer does it on arrival. Log out also needs the
+  // note that page leaves in this tab, so a link from elsewhere can't sign
+  // anyone out.
+  const [params, setParams] = useSearchParams();
+  const newFolderRef = useRef(onNewFolder);
+  newFolderRef.current = onNewFolder;
+  useEffect(() => {
+    const what = params.get("sidebar");
+    if (!what) return;
+    const next = new URLSearchParams(params);
+    next.delete("sidebar");
+    setParams(next, { replace: true });
+    if (what === "inbox") setInboxOpen(true);
+    else if (what === "invites") setInvitesOpen(true);
+    else if (what === "feedback") setFeedbackOpen(true);
+    else if (what === "newfolder") newFolderRef.current();
+    else if (what === "signout" && takeSignOutRequest()) void logout();
+  }, [params, setParams]);
+
+  const itemClass = ACCOUNT_MENU_ITEM_CLASS;
+  const iconClass = ACCOUNT_MENU_ICON_CLASS;
 
   return (
-    <div className="relative border-t border-[var(--border)] p-3 pb-safe">
+    <div className={FOOTER_CLASS}>
       <InstallAppButton />
       {menuOpen && (
         <div
           ref={menuRef}
           role="menu"
           aria-label="Account"
-          className="absolute bottom-full left-3 right-3 z-30 mb-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl"
+          className={ACCOUNT_MENU_CLASS}
         >
           <button role="menuitem" className={itemClass} onClick={() => go("/account")}>
-            <ShieldCheck className="h-4 w-4 text-[var(--text-muted)]" />
+            <ShieldCheck className={iconClass} />
             Account
           </button>
           {isAdmin && (
             <button role="menuitem" className={itemClass} onClick={() => go("/admin")}>
-              <Settings className="h-4 w-4 text-[var(--text-muted)]" />
+              <Settings className={iconClass} />
               Admin
             </button>
           )}
           <button role="menuitem" className={itemClass} onClick={() => go("/archive")}>
-            <Archive className="h-4 w-4 text-[var(--text-muted)]" />
+            <Archive className={iconClass} />
             Archived chats
           </button>
           <button role="menuitem" className={itemClass} onClick={() => go("/trash")}>
-            <Trash2 className="h-4 w-4 text-[var(--text-muted)]" />
+            <Trash2 className={iconClass} />
             Trash
           </button>
           {inviteCount > 0 && (
@@ -1047,11 +888,9 @@ function UserFooter() {
                 setInvitesOpen(true);
               }}
             >
-              <Inbox className="h-4 w-4 text-[var(--text-muted)]" />
+              <Inbox className={iconClass} />
               Workspace invites
-              <span className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
-                {inviteCount}
-              </span>
+              <InviteCount count={inviteCount} />
             </button>
           )}
           <button
@@ -1062,23 +901,18 @@ function UserFooter() {
               setFeedbackOpen(true);
             }}
           >
-            <MessageSquare className="h-4 w-4 text-[var(--text-muted)]" />
+            <MessageSquare className={iconClass} />
             Send feedback
           </button>
-          <div className="my-1 flex items-center justify-between border-y border-[var(--border)] px-2 py-1.5">
+          <div className={THEME_ROW_CLASS}>
             <span className="text-sm text-[var(--text)]">Theme</span>
             <ThemeToggle />
           </div>
           <button role="menuitem" className={itemClass} onClick={onLogout}>
-            <LogOut className="h-4 w-4 text-[var(--text-muted)]" />
+            <LogOut className={iconClass} />
             Log out
           </button>
-          <div
-            className="px-2 pb-0.5 pt-1 text-[10px] font-medium tracking-wide text-[var(--text-muted)]"
-            title={`Promptly v${__APP_VERSION__}`}
-          >
-            Promptly v{__APP_VERSION__}
-          </div>
+          <AppVersionLine />
         </div>
       )}
       <div className="flex items-center gap-1">
@@ -1089,61 +923,17 @@ function UserFooter() {
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           aria-label="Account menu"
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition hover:bg-[var(--hover)]"
+          className={ACCOUNT_BUTTON_CLASS}
         >
-          <span className="relative shrink-0">
-            <UserAvatar
-              name={user?.username ?? "?"}
-              userId={user?.id}
-              avatarUrl={user?.avatar_url}
-              color={user?.avatar_color}
-              size={32}
-              initialsCount={2}
-            />
-            {inviteCount > 0 && (
-              <span
-                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--bg)]"
-                title={`${inviteCount} pending workspace invite${inviteCount === 1 ? "" : "s"}`}
-              />
-            )}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5">
-              <span className="truncate text-sm font-medium">
-                {user?.username ?? "Guest"}
-              </span>
-              {isAdmin && (
-                <span
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent-text)] ring-1 ring-[var(--accent)]/40"
-                  title="Administrator"
-                >
-                  Admin
-                </span>
-              )}
-            </span>
-            <span className="block truncate text-xs text-[var(--text-muted)]">
-              {user?.email ?? ""}
-            </span>
-          </span>
-          <ChevronUp
-            className={cn(
-              "h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform",
-              !menuOpen && "rotate-180",
-            )}
-          />
+          <AccountButtonContent user={user} isAdmin={isAdmin} inviteCount={inviteCount} open={menuOpen} />
         </button>
         <button
           onClick={() => setInboxOpen(true)}
-          className="relative shrink-0 rounded-md p-2 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          className={INBOX_BUTTON_CLASS}
           title="Notifications"
           aria-label="Open notification inbox"
         >
-          <Bell className="h-4 w-4" />
-          {unreadCount > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
-              {unreadCount}
-            </span>
-          )}
+          <InboxButtonContent unread={unreadCount} />
         </button>
       </div>
       <ShareInvitesPanel

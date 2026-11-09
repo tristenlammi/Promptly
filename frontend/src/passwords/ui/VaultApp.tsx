@@ -48,7 +48,7 @@ import { CREATABLE, ItemEditor, KIND_LABEL } from "./ItemEditor";
 import { ItemView } from "./ItemView";
 import { Button, Callout, type Ctx, DEFAULT_SETTINGS, IconButton, inputClass, Modal, type Settings, Spinner, useVault, VaultContext } from "./kit";
 import { Onboarding } from "./Onboarding";
-import { PromptlyMenuSlot } from "./PromptlyNav";
+import { PromptlyMenuSlot } from "./PromptlyMenu";
 import type { Platform } from "./platform";
 import { QrCameraHost } from "./qr";
 import { ActivityScreen, CodesScreen, ConnectScreen, DevicesScreen, GeneratorScreen, SettingsScreen, TrashScreen } from "./Screens";

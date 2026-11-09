@@ -396,8 +396,14 @@ async def viewing(user_ids: list[uuid.UUID]) -> dict[str, str]:
 
 
 async def unread_total(db: AsyncSession, user_id: uuid.UUID) -> int:
-    """Unread messages across everything you can see, except rooms you've
-    muted — the number on the app icon."""
+    """The Rooms number: the app icon's badge (push ``app_badge``), the
+    sidebar's Rooms badge and the Rooms tab title all show this one count.
+
+    It is exactly ``totals(b).total`` in ``frontend/src/rooms/cache.ts``:
+    a space room you hear everything from counts its unread messages, one
+    set to mentions counts only its unread mentions of you, muted ones
+    count nothing; a DM (not hidden, not muted) counts its unread messages.
+    Keep the two in step."""
     levels = {
         sm.space_id: sm.notify
         for sm in (await db.execute(select(RoomSpaceMember).where(RoomSpaceMember.user_id == user_id))).scalars()
@@ -407,10 +413,31 @@ async def unread_total(db: AsyncSession, user_id: uuid.UUID) -> int:
         Room.space_id.in_(list(levels)) | (Room.space_id.is_(None) & Room.id.in_([rid for rid, m in states.items() if not m.hidden]))
     )
     total = 0
+    mentions_only: list[uuid.UUID] = []
     for rid, sid, last in (await db.execute(q)).all():
         st = states.get(rid)
         level = (st.notify if st and st.notify else None) or (levels.get(sid) if sid else None) or "all"
         if level == "none":
             continue
-        total += max(0, last - (st.last_read_seq if st else 0))
+        unread = max(0, last - (st.last_read_seq if st else 0))
+        if sid is not None and level == "mentions":
+            if unread:
+                mentions_only.append(rid)
+            continue
+        total += unread
+    if mentions_only:
+        # Unread mentions of you (not your own messages), as rooms_out counts them.
+        mq = (
+            select(func.count())
+            .select_from(RoomMessage)
+            .outerjoin(RoomMember, (RoomMember.room_id == RoomMessage.room_id) & (RoomMember.user_id == user_id))
+            .where(
+                RoomMessage.room_id.in_(mentions_only),
+                RoomMessage.seq > func.coalesce(RoomMember.last_read_seq, 0),
+                RoomMessage.deleted_at.is_(None),
+                (RoomMessage.author_id.is_(None)) | (RoomMessage.author_id != user_id),
+                RoomMessage.mentions.op("?|")(_mention_keys(user_id)),
+            )
+        )
+        total += int(await db.scalar(mq) or 0)
     return total

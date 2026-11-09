@@ -1,5 +1,7 @@
 import {
+  Archive,
   Blocks,
+  Settings,
   LayoutGrid,
   FolderOpen,
   MapPin,
@@ -136,6 +138,42 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Apps",
     section: "chat",
   },
+];
+
+/** Which of ``NAV_ITEMS`` this person's sidebar shows, in order. Shared by
+ *  the main sidebar and the Passwords page's copy of it
+ *  (passwords/ui/PromptlyNav.tsx), so they can't drift apart. */
+export function visibleNavItems(opts: {
+  /** ``settings.hidden_nav``: opt-out pages they hid. */
+  hidden?: readonly string[] | null;
+  /** ``settings.enabled_nav``: opt-in pages they turned on. */
+  enabled?: readonly string[] | null;
+  isAdmin: boolean;
+  canAutomate: boolean;
+  isMobile: boolean;
+}): NavItem[] {
+  const hidden = new Set(opts.hidden ?? []);
+  const enabled = new Set(opts.enabled ?? []);
+  return NAV_ITEMS.filter((it) => {
+    if (it.desktopOnly && opts.isMobile) return false;
+    if (it.adminOnly && !opts.isAdmin) return false;
+    if (it.optionalKey === "tasks" && !opts.canAutomate) return false;
+    if (it.optionalKey) {
+      // Opt-in surfaces: shown only when explicitly enabled.
+      // Opt-out surfaces: shown unless the user hid them.
+      if (OPT_IN_NAV_KEYS.has(it.optionalKey)) return enabled.has(it.optionalKey);
+      if (hidden.has(it.optionalKey)) return false;
+    }
+    return true;
+  });
+}
+
+/** The collapsed sidebar's last icons, after the pages and pinned apps (the
+ *  expanded one keeps these in the account menu). */
+export const RAIL_MORE_ITEMS: NavItem[] = [
+  { to: "/archive", icon: Archive, label: "Archive", section: "chat" },
+  { to: "/trash", icon: Trash2, label: "Trash", section: "chat" },
+  { to: "/admin", icon: Settings, label: "Settings", section: "admin", adminOnly: true },
 ];
 
 /** Sub-nav surfaces inside the Drive section. These are not part of

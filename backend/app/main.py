@@ -851,3 +851,8 @@ app.include_router(porch_router, prefix="/api/porch", tags=["porch"])
 from app.porch.admin_router import router as porch_admin_router  # noqa: E402
 
 app.include_router(porch_admin_router, prefix="/api/admin/porch", tags=["porch"])
+
+# --- Sidebar count badges (app/badges): Tasks, Mail, Rooms, Porch ---
+from app.badges.router import router as badges_router  # noqa: E402
+
+app.include_router(badges_router, prefix="/api/badges", tags=["badges"])

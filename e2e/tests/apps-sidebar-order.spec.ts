@@ -8,10 +8,16 @@ import { expect, test } from "../fixtures";
 const NAMES = ["Rooms", "Calendar", "Maps"];
 const sidebarOrder = (page: Page) =>
   page.evaluate((names) => {
+    // A row's name without its count badge (unread Rooms, say).
+    const name = (a: HTMLAnchorElement) => {
+      const copy = a.cloneNode(true) as HTMLAnchorElement;
+      copy.querySelectorAll("[data-badge]").forEach((b) => b.remove());
+      return copy.textContent?.trim() ?? "";
+    };
     const links = [...document.querySelectorAll<HTMLAnchorElement>("a[href]")].filter(
-      (a) => a.getBoundingClientRect().width > 0 && names.includes(a.textContent?.trim() ?? ""),
+      (a) => a.getBoundingClientRect().width > 0 && names.includes(name(a)),
     );
-    return links.map((a) => a.textContent!.trim());
+    return links.map(name);
   }, NAMES);
 
 test("the sidebar's apps can be put in order from Edit", async ({ alice: page }) => {

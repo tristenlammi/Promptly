@@ -329,7 +329,9 @@ async def test_push_rules(client, db, people, monkeypatch):
     # Stacked in the tray with the sender's picture; the badge is cat's unread total.
     extra = push["extra"]
     assert extra["stack"] is True and extra["line"] == push["body"] and extra["icon"] == "/item-icons/rooms-192.png"
-    assert extra["app_badge"] == 2
+    # cat hears only mentions here: two unread, one of them a mention of her,
+    # so her badge is 1 (the same number the Rooms app shows).
+    assert extra["app_badge"] == 1
     sent.clear()
     reply = await say(client, bob, room, "sure", reply_to_id=m["id"])
     await fan_out(uuid.UUID(reply["id"]))
