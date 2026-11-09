@@ -129,6 +129,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes: list tick boxes were plain white squares in dark mode; they now match the cards in both themes.
 - People picker (sharing in Notes, Files, Calendar, Rooms): each person in the list was a button inside a list option, which screen readers announce badly; the option itself is now what you pick.
 - Notes: a label's page opened while the label was new on the device stopped working once it was saved; it now keeps working.
+<!-- Admin privacy, AP3 -->
+- Custom models: taking a file out of a custom model now also stops the model from finding what was in it.
+
+### Security
+<!-- Admin privacy, AP3 -->
+- Custom models: an admin can only add files they can open themselves. Before, any person's file could be added by its id, and everyone using the model could then search it. Other people's files already in a custom model are taken out when the server updates (only the number is logged).
 
 ## [0.33.0] - 2026-11-09
 
