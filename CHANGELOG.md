@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Security
+<!-- Security review fixes (sec-fixes) -->
+- The code sandbox no longer gets the server's main secret. Code the AI ran could read SECRET_KEY (which signs every login and encrypts stored keys) from the sandbox's own process. The sandbox now has its own secret, CODE_SANDBOX_SECRET, which ./update.sh and the installer create, and the AI's code runs as a separate, powerless user that can't see the sandbox server at all. Without the secret the code tool is off and says how to fix it.
+- A placeholder TUS_HOOK_SECRET or CODE_SANDBOX_SECRET (copied from .env.example) now stops Promptly starting on a public address, like a placeholder SECRET_KEY does. ./update.sh fills in both before it restarts anything.
+- After a SECRET_KEY change, mail account passwords, saved secrets, the breach-check key and the traffic key are also moved onto the new key at start-up (with SECRET_KEY_PREVIOUS set), not only MFA, provider and connector secrets.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added

@@ -155,6 +155,8 @@ def write_env(path: Path) -> dict[str, str]:
         # Calls: the LiveKit key pair (the backend and livekit-desktop read it).
         "LIVEKIT_API_KEY": "API" + secrets.token_hex(8),
         "LIVEKIT_API_SECRET": secrets.token_hex(32),
+        # The code sandbox's own job secret (never SECRET_KEY).
+        "CODE_SANDBOX_SECRET": secrets.token_hex(32),
     }
     add = {k: v for k, v in later.items() if not env.get(k)}
     if add:
@@ -271,7 +273,7 @@ def transform(cfg: dict, opts, env: dict[str, str]) -> dict:
             dead = "http://127.0.0.1:9"
             e.update({
                 "SECRET_KEY": env["SECRET_KEY"],
-                "CODE_SANDBOX_SECRET": env["SECRET_KEY"],
+                "CODE_SANDBOX_SECRET": env["CODE_SANDBOX_SECRET"],
                 "SEARXNG_ENABLED": "true" if "search" in extras else "false",
                 "OLLAMA_URL": "http://ollama:11434" if "ollama" in extras else dead,
                 "WHISPER_URL": "http://whisper:8000" if "voice" in extras else dead,

@@ -133,6 +133,37 @@ setup_calls() {
   green "  UDP 7882 and TCP 7881 on your router to this machine."
 }
 
+# Shared secrets that later versions need and older .env files lack (or
+# still hold the .env.example placeholder for): make them once. Lines with
+# a real value are left alone. Runs before anything is rebuilt, so the new
+# containers start with them and the backend's boot check never trips.
+#   TUS_HOOK_SECRET      backend <-> tusd upload hooks
+#   CODE_SANDBOX_SECRET  backend <-> code sandbox (its own value: never
+#                        SECRET_KEY, which code in the sandbox could read)
+ensure_secret() {
+  local key="$1"
+  if grep -qE "^${key}=." .env && ! grep -qE "^${key}=change-me" .env; then
+    return 0
+  fi
+  command -v openssl >/dev/null 2>&1 || { yellow "  ${key}: openssl isn't installed, so it wasn't generated (see .env.example)"; return 0; }
+  local value
+  value="$(openssl rand -hex 32)"
+  if grep -qE "^${key}=" .env; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" .env
+    rm -f .env.bak
+  else
+    [[ -n "$(tail -c1 .env)" ]] && printf '\n' >> .env
+    printf '%s=%s\n' "$key" "$value" >> .env
+  fi
+  green "  ${key} generated in .env"
+}
+
+ensure_secrets() {
+  [[ -f .env ]] || return 0
+  ensure_secret TUS_HOOK_SECRET
+  ensure_secret CODE_SANDBOX_SECRET
+}
+
 reload_nginx() {
   # Recreated, not reloaded: nginx.conf is a single-file bind mount, and
   # git replaces the file on update — a running container keeps the old
@@ -224,6 +255,7 @@ else
   git checkout --quiet "$TARGET"
 fi
 setup_calls
+ensure_secrets
 # Refresh third-party images (nginx, postgres, redis…) and the base images
 # ours build FROM, so security fixes in them actually arrive.
 docker compose pull --ignore-buildable --quiet || yellow "  Couldn't pull some images; continuing with what's here."

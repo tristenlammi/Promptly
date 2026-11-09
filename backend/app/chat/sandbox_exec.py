@@ -131,15 +131,14 @@ async def run_python_in_sandbox(
         raise SandboxNotConfigured(
             "The code sandbox isn't configured on this server."
         )
-    # The sandbox fails closed without a shared secret, so an empty value
-    # here can only ever produce a confusing 503 from it — surface the
-    # misconfiguration clearly instead. (Config mirrors SECRET_KEY into this
-    # at boot, so this should never fire on a healthy install.)
-    sandbox_secret = (settings.CODE_SANDBOX_SECRET or "").strip()
-    if not sandbox_secret:
-        raise SandboxNotConfigured(
-            "The code sandbox is disabled: no sandbox secret is configured."
-        )
+    # Its own secret, never SECRET_KEY (code in the sandbox could read it).
+    # No fallback: missing, placeholder or equal to SECRET_KEY turns the
+    # tool off with a message that tells the admin what to do.
+    problem = settings.code_sandbox_secret_problem()
+    if problem:
+        logger.warning("code sandbox refused: %s", problem)
+        raise SandboxNotConfigured(problem)
+    sandbox_secret = settings.CODE_SANDBOX_SECRET.strip()
 
     payload_files: list[dict[str, str]] = []
     # Files that never made it into the sandbox. Previously the loop simply

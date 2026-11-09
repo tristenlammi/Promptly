@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -409,18 +409,34 @@ class Settings(BaseSettings):
             return False
         return self.DOMAIN.strip().lower() not in {"", "localhost", "127.0.0.1"}
 
-    @model_validator(mode="after")
-    def _mirror_sandbox_secret(self) -> "Settings":
-        """The code-sandbox bearer reuses ``SECRET_KEY`` by default.
+    def code_sandbox_secret_problem(self) -> str | None:
+        """Why the code sandbox's job secret can't be used, or ``None``.
 
-        Compose already passes it through explicitly, but this keeps a
-        bare ``uvicorn``/non-compose launch (``.env`` sets ``SECRET_KEY``
-        only) working the same way, rather than backend and sandbox
-        landing on mismatched — or empty — bearers.
+        It must be its own value. It used to fall back to ``SECRET_KEY``,
+        and code running in the sandbox could read it there, which gave
+        away the key that signs every login and encrypts stored secrets.
+        There's deliberately no fallback any more: missing means the code
+        tool is off, with this message for the admin.
         """
-        if not self.CODE_SANDBOX_SECRET:
-            self.CODE_SANDBOX_SECRET = self.SECRET_KEY
-        return self
+        secret = (self.CODE_SANDBOX_SECRET or "").strip()
+        fix = (
+            "Run ./update.sh (or update.ps1) to generate one, or add "
+            "CODE_SANDBOX_SECRET=<output of: openssl rand -hex 32> to .env "
+            "and restart Promptly."
+        )
+        if not secret:
+            return "The code sandbox is turned off: CODE_SANDBOX_SECRET isn't set. " + fix
+        lowered = secret.lower()
+        if "change-me" in lowered or "changeme" in lowered:
+            return "The code sandbox is turned off: CODE_SANDBOX_SECRET is still a placeholder. " + fix
+        if secret == (self.SECRET_KEY or "").strip():
+            return (
+                "The code sandbox is turned off: CODE_SANDBOX_SECRET must not be "
+                "the same as SECRET_KEY. " + fix
+            )
+        if len(secret) < 32:
+            return "The code sandbox is turned off: CODE_SANDBOX_SECRET is too short (32+ characters). " + fix
+        return None
 
     def validate_boot_safety(self) -> list[str]:
         """Return a list of fatal-config errors that prevent boot.
@@ -486,6 +502,18 @@ class Settings(BaseSettings):
                     "REDIS_URL contains a 'change-me' placeholder password. "
                     "Set a real REDIS_PASSWORD in .env."
                 )
+            # The other shared secrets: a placeholder copied from
+            # .env.example is a publicly known value. Unset is fine here
+            # (the tus hook then refuses every call, the code tool is off);
+            # ./update.sh and the installer generate both.
+            for name in ("TUS_HOOK_SECRET", "CODE_SANDBOX_SECRET"):
+                value = (getattr(self, name, None) or "").lower()
+                if "change-me" in value or "changeme" in value:
+                    errors.append(
+                        f"{name} is still the 'change-me' placeholder on a "
+                        "public DOMAIN. Run ./update.sh to generate it, or set "
+                        "it in .env (openssl rand -hex 32)."
+                    )
         # SINGLE_USER_MODE returns the admin user with NO token check, so
         # it must never run on a network-reachable host. Allow it only for
         # localhost / private-LAN / dev. ``getattr`` keeps this resilient

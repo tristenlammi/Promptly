@@ -27,13 +27,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py ./
 
-# Run as an unprivileged user. The scratch dir is a tmpfs mounted at
-# runtime and chowned via the tmpfs uid option in compose; we create
-# the mountpoint here so a read-only rootfs still has the path.
+# Two users. The server runs as root but with almost every capability
+# dropped (compose keeps only setuid/setgid/chown/dac_override/fowner/kill),
+# and starts each job as ``sandboxjob`` (uid 10002), which has no
+# capabilities and a different uid, so the model's code can't read the
+# server's /proc/<pid>/environ (the job secret) or signal it.
+# ``sandboxer`` (10001) is kept for anyone running the image without the
+# compose caps; the server then warns that jobs share its uid.
 RUN useradd --create-home --uid 10001 sandboxer \
+    && useradd --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --uid 10002 sandboxjob \
     && mkdir -p /sandbox/run \
-    && chown -R sandboxer:sandboxer /sandbox
-USER sandboxer
+    && chmod 0711 /sandbox/run
+ENV SANDBOX_JOB_UID=10002 \
+    SANDBOX_JOB_GID=10002
 
 EXPOSE 8000
 

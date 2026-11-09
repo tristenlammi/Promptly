@@ -31,6 +31,7 @@ import os
 import resource
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,27 @@ SCRATCH_ROOT = Path(os.environ.get("SANDBOX_SCRATCH", "/sandbox/run"))
 
 
 SECRET = os.environ.get("SANDBOX_SECRET", "").strip()
+# Out of this process's environment once read. Jobs get their own minimal
+# env anyway; the real protection is the separate job uid below, because
+# /proc/<pid>/environ keeps the environment the process started with.
+os.environ.pop("SANDBOX_SECRET", None)
+
+# ---- Job user --------------------------------------------------------
+# Every job runs as this unprivileged user, never as the server's own uid,
+# so the model's code can't read the server's /proc/<pid>/environ (the
+# secret above) or its memory, or signal it. Switching needs the server to
+# run as root with CAP_SETUID/SETGID (compose keeps those, and drops the
+# rest); the job loses every capability when it becomes this user.
+JOB_UID = int(os.environ.get("SANDBOX_JOB_UID", "10002"))
+JOB_GID = int(os.environ.get("SANDBOX_JOB_GID", str(JOB_UID)))
+DROP_TO_JOB_USER = os.geteuid() == 0 and JOB_UID != 0
+if not DROP_TO_JOB_USER:
+    print(
+        "[sandbox] WARNING: not running as root, so jobs run as the server's "
+        "own user and could read its environment. Use the compose service.",
+        file=sys.stderr,
+        flush=True,
+    )
 
 # ---- Persistent sessions -------------------------------------------
 # When a job carries a ``session_id``, its working directory survives
@@ -178,6 +200,71 @@ def _set_limits() -> None:
     os.setsid()
 
 
+def _give_to_job(path: Path) -> None:
+    """Hand a file or folder the server made to the job user."""
+    if DROP_TO_JOB_USER:
+        os.chown(path, JOB_UID, JOB_GID, follow_symlinks=False)
+
+
+def _private_root(path: Path) -> None:
+    """A folder of job folders: the job user can enter a folder it knows
+    the name of, but can't list or add to this one."""
+    path.mkdir(parents=True, exist_ok=True)
+    if DROP_TO_JOB_USER:
+        os.chmod(path, 0o711)
+
+
+def _job_dir(path: Path) -> None:
+    """A job's own working folder, owned by the job user and private to it."""
+    _give_to_job(path)
+    os.chmod(path, 0o700)
+
+
+def _write_for_job(path: Path, data: bytes) -> None:
+    """Write a file into a job's folder without following anything the job
+    left at that name (a link to a file only the server may read, say)."""
+    try:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+    except OSError:
+        raise HTTPException(status_code=400, detail=f"can't write {path.name!r}")
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    except OSError:
+        raise HTTPException(status_code=400, detail=f"can't write {path.name!r}")
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    _give_to_job(path)
+
+
+def _read_job_file(path: Path, limit: int) -> bytes | None:
+    """A regular file the job wrote, read without following links (the server
+    can read more than the job can, so a link to /proc/1/environ must not
+    come back as a "chart"). ``None`` for anything else."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            return f.read(limit + 1)
+    except OSError:
+        return None
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
+def _is_regular(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
 def _truncate(text: str) -> tuple[str, bool]:
     if len(text) <= MAX_STREAM_CHARS:
         return text, False
@@ -237,9 +324,9 @@ def _snapshot(workdir: Path) -> dict[str, tuple[int, int]]:
     state: dict[str, tuple[int, int]] = {}
     try:
         for p in workdir.iterdir():
-            if p.is_file():
+            if _is_regular(p):
                 try:
-                    st = p.stat()
+                    st = p.lstat()
                     state[p.name] = (st.st_mtime_ns, st.st_size)
                 except OSError:
                     pass
@@ -250,7 +337,9 @@ def _snapshot(workdir: Path) -> dict[str, tuple[int, int]]:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    # ``jobs`` says whether jobs run as their own user (the backend's
+    # isolation test checks it before probing).
+    return {"status": "ok", "jobs": "separate-user" if DROP_TO_JOB_USER else "server-user"}
 
 
 @app.post("/execute", response_model=ExecuteResponse)
@@ -273,7 +362,7 @@ def execute(
     timeout = req.timeout_s or DEFAULT_TIMEOUT_S
     timeout = max(1, min(timeout, MAX_TIMEOUT_S))
 
-    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    _private_root(SCRATCH_ROOT)
 
     # Persistent session vs throwaway job. Persistent dirs survive across
     # calls so the model can build a file in one run and read it in the
@@ -281,9 +370,10 @@ def execute(
     persistent = bool(req.session_id)
     if persistent:
         _prune_sessions()
-        SESSIONS_ROOT.mkdir(parents=True, exist_ok=True)
+        _private_root(SESSIONS_ROOT)
         workdir = SESSIONS_ROOT / _safe_session_id(req.session_id or "")
         workdir.mkdir(parents=True, exist_ok=True)
+        _job_dir(workdir)
         # Bump mtime so idle-TTL pruning treats this as recently used.
         try:
             os.utime(workdir, None)
@@ -291,6 +381,7 @@ def execute(
             pass
     else:
         workdir = Path(tempfile.mkdtemp(prefix="job-", dir=str(SCRATCH_ROOT)))
+        _job_dir(workdir)
 
     # Snapshot pre-existing files so we only return what THIS run created
     # or changed (a persistent session may already hold files from earlier
@@ -318,7 +409,7 @@ def execute(
             if total_in > MAX_INPUT_TOTAL_BYTES:
                 raise HTTPException(status_code=400, detail="input files too large")
             safe = _safe_name(f.name)
-            (workdir / safe).write_bytes(raw)
+            _write_for_job(workdir / safe, raw)
             input_names.add(safe)
 
         # ---- Write the script ----
@@ -326,9 +417,9 @@ def execute(
         # can't clobber each other's source mid-flight.
         script_name = f"_promptly_main_{uuid.uuid4().hex}.py"
         input_names.add(script_name)
-        (workdir / script_name).write_text(
-            req.code + (_AUTOSAVE_EPILOGUE_TMPL % (pre_images,)),
-            encoding="utf-8",
+        _write_for_job(
+            workdir / script_name,
+            (req.code + (_AUTOSAVE_EPILOGUE_TMPL % (pre_images,))).encode("utf-8"),
         )
 
         # ---- Run it ----
@@ -360,6 +451,14 @@ def execute(
             stderr=subprocess.PIPE,
             text=True,
             preexec_fn=_set_limits,
+            # The job's own unprivileged user (see JOB_UID): applied before
+            # ``_set_limits`` runs, so the code never holds the server's uid
+            # or any capability.
+            **(
+                {"user": JOB_UID, "group": JOB_GID, "extra_groups": []}
+                if DROP_TO_JOB_USER
+                else {}
+            ),
         )
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
@@ -388,7 +487,7 @@ def execute(
         outputs: list[OutputFile] = []
         total_out = 0
         for path in sorted(workdir.iterdir()):
-            if not path.is_file():
+            if not _is_regular(path):
                 continue
             if path.name in input_names:
                 continue
@@ -400,15 +499,12 @@ def execute(
             # earlier call (reading a CSV must not re-attach it).
             if persistent:
                 try:
-                    st = path.stat()
+                    st = path.lstat()
                 except OSError:
                     continue
                 if pre_state.get(path.name) == (st.st_mtime_ns, st.st_size):
                     continue
-            try:
-                data = path.read_bytes()
-            except OSError:
-                continue
+            data = _read_job_file(path, MAX_OUTPUT_TOTAL_BYTES)
             if not data:
                 continue
             total_out += len(data)

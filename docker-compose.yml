@@ -173,10 +173,11 @@ services:
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
       # Code-interpreter sandbox (Phase 4). The backend submits
       # model-written Python here over the internal-only ``sandbox-net``
-      # network. The shared secret (reusing SECRET_KEY) gates job
-      # submission as defense-in-depth on top of the network boundary.
+      # network. Its own shared secret (never SECRET_KEY: code runs in the
+      # sandbox) gates job submission on top of the network boundary. The
+      # installer and update scripts make one; unset, the code tool is off.
       - CODE_SANDBOX_URL=http://sandbox:8000
-      - CODE_SANDBOX_SECRET=${SECRET_KEY:-}
+      - CODE_SANDBOX_SECRET=${CODE_SANDBOX_SECRET:-}
       # Speech-to-text worker (Voice Phase 1). Internal-only faster-whisper
       # service the backend POSTs dictation clips to. STT_BACKEND=local
       # uses it; set STT_BACKEND=openai (+ an OpenAI key) to route to the
@@ -811,21 +812,36 @@ services:
     #     per-conversation session dirs persist there across calls (build
     #     a file, read it next call) and are reaped by idle-TTL + a count
     #     cap. Cleared on restart. No host or user data volumes mounted.
-    #   * All Linux capabilities dropped, no privilege escalation, PID
-    #     and memory caps. The worker process itself runs as non-root.
+    #   * No privilege escalation, PID and memory caps, and every Linux
+    #     capability dropped except the few the server needs to hand each
+    #     job its own unprivileged user (uid 10002). The model's code runs
+    #     as that user with no capabilities at all, so it can't read the
+    #     server's environment (the job secret) or touch the server.
     build:
       context: ./sandbox
       dockerfile: Dockerfile
     container_name: Promptly-Sandbox
     logging: *default-logging
     environment:
-      - SANDBOX_SECRET=${SECRET_KEY:-}
+      # Its own secret, never SECRET_KEY (see the backend's CODE_SANDBOX_SECRET).
+      - SANDBOX_SECRET=${CODE_SANDBOX_SECRET:-}
     read_only: true
     tmpfs:
-      - /sandbox/run:size=512m,uid=10001,gid=10001,mode=0700
+      - /sandbox/run:size=512m,uid=0,gid=0,mode=0711
       - /tmp:size=64m
     cap_drop:
       - ALL
+    cap_add:
+      # Start each job as the unprivileged job user (setuid/setgid), give it
+      # its scratch folder (chown), read back and clear up what it wrote
+      # (dac_override/fowner), and stop it on timeout (kill). The job itself
+      # loses all of these the moment it becomes that user.
+      - SETUID
+      - SETGID
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - KILL
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
