@@ -36,6 +36,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - New optional NGINX_BIND in .env picks which address ports 8087/8488 open on (usually the server's LAN address). By default they now open on IPv4 only. The README has a new "Exposure" section: what should be reachable, and how to check from outside on IPv4 and IPv6.
 - The server, its workers, the upload service and the Office converter run with almost all Linux privileges removed and can't gain new ones.
 - Signing out now ends that session's access straight away, instead of up to 15 minutes later.
+- Once a public address is set, pages on this machine's localhost are no longer allowed to make signed-in requests to Promptly (unless DEBUG is on).
 
 ## [0.35.0] - 2026-11-09
 
