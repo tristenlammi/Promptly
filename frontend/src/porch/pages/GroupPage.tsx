@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Check, Crown, ImageIcon, LogOut, MoreHorizontal, PenSquare, Pencil, Shield, ShieldOff, Trash2, UserMinus, UserPlus, UserRound } from "lucide-react";
+import { Check, Crown, ImageIcon, LogOut, MoreHorizontal, PenSquare, Pencil, Pin as PinIcon, Shield, ShieldOff, Trash2, UserMinus, UserPlus, UserRound } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -12,7 +12,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { useGroupActions } from "../actions";
-import { groupKey, groupPostsKey, groupsChanged, listPosts, membersKey, pendingKey } from "../cache";
+import { groupKey, groupPinsKey, groupPostsKey, groupsChanged, listPosts, membersKey, pendingKey } from "../cache";
 import { EditGroupSheet, InviteSheet } from "../components/GroupSheets";
 import { GroupReports } from "../components/GroupReports";
 import { PostCard, PostList } from "../components/PostCard";
@@ -307,6 +307,7 @@ function GroupPosts({ g }: { g: PorchGroup }) {
   }
   return (
     <>
+      <Pinned g={g} />
       <PostList>
         {posts.map((p) => (
           <PostCard key={p.id} post={p} />
@@ -320,6 +321,50 @@ function GroupPosts({ g }: { g: PorchGroup }) {
         ) : null}
       </div>
     </>
+  );
+}
+
+/** Up to three posts the group's admins pinned (WP-P3.1), above its posts.
+ *  Never in the feed. */
+function Pinned({ g }: { g: PorchGroup }) {
+  const q = useQuery({ queryKey: groupPinsKey(g.id), queryFn: () => porchApi.groupPins(g.id), staleTime: 30_000 });
+  const pins = q.data ?? [];
+  if (!pins.length) return null;
+  return (
+    <section aria-label={`Pinned in ${g.name}`} className="mb-3 px-4 md:px-0">
+      <ul className="flex flex-col gap-2">
+        {pins.map((p) => {
+          const m = p.media[0];
+          const pic = m ? (m.thumb ?? m.poster) : null;
+          const words = p.body.split(/\r?\n/).find((l) => l.trim())?.trim() || p.life_event?.title || p.event?.title || (p.media.length ? "Photos" : "A post");
+          return (
+            <li key={p.id}>
+              <Link
+                to={`/porch/p/${p.id}`}
+                className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+              >
+                {pic ? (
+                  <img src={pic} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                ) : (
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--item-accent)_12%,var(--surface))] text-lg" aria-hidden>
+                    {p.event ? "📅" : "📝"}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1 text-xs font-medium text-[var(--accent-text)]">
+                    <PinIcon className="h-3 w-3" aria-hidden /> Pinned
+                  </span>
+                  <span className="block truncate text-sm font-medium text-[var(--text)]">{words}</span>
+                  <span className="block truncate text-xs text-[var(--text-muted)]">
+                    {p.author?.name ?? "Someone"} · {shortAgo(p.created_at)}
+                  </span>
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

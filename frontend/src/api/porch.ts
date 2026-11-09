@@ -308,6 +308,8 @@ export interface PorchPost {
   poll: Poll | null;
   /** In your saved posts. */
   saved: boolean;
+  /** The groups you run that it's in, and whether it's pinned there (WP-P3.1). */
+  pin_groups?: (GroupLabel & { pinned: boolean })[];
 }
 
 export interface MyProfile {
@@ -831,6 +833,16 @@ export const porchApi = {
     const { data } = await apiClient.post<{ room_id: string; url: string; message_id: string }>(`/porch/stories/${id}/reply`, body);
     return data;
   },
+  // ---- pins (WP-P3.1)
+  async groupPins(groupId: string): Promise<PorchPost[]> {
+    const { data } = await apiClient.get<PorchPost[]>(`/porch/groups/${groupId}/pins`);
+    return data;
+  },
+  async setPin(groupId: string, postId: string, pinned: boolean): Promise<void> {
+    if (pinned) await apiClient.put(`/porch/groups/${groupId}/pins/${postId}`);
+    else await apiClient.delete(`/porch/groups/${groupId}/pins/${postId}`);
+  },
+
   // ---- highlights (WP-P2.4)
   async myHighlights(): Promise<Highlight[]> {
     const { data } = await apiClient.get<Highlight[]>("/porch/me/highlights");

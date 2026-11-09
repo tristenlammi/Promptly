@@ -168,6 +168,8 @@ export async function applyPorchEvent(qc: QueryClient, ev: PorchEvent): Promise<
       return;
     }
     case "post_change": {
+      // A group's pinned posts hold posts too.
+      void qc.invalidateQueries({ queryKey: ["porch", "pins"] });
       try {
         putPost(qc, ev.post_id, await porchApi.post(ev.post_id));
       } catch (err) {

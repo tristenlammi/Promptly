@@ -16,6 +16,8 @@ import {
   MessagesSquare,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   ShieldMinus,
   Sparkles,
   Trash2,
@@ -214,6 +216,24 @@ export function PostCard({ post, full = false, media = true, className }: { post
       );
     },
   });
+  // Pins (WP-P3.1): one entry per group you run that it's in.
+  for (const g of post.pin_groups ?? []) {
+    actions.push({
+      label: g.pinned ? `Unpin from ${g.name}` : `Pin to ${g.name}`,
+      icon: g.pinned ? PinOff : Pin,
+      hint: g.pinned ? undefined : `At the top of ${g.name}'s page (up to 3)`,
+      onClick: async () => {
+        try {
+          await porchApi.setPin(g.id, post.id, !g.pinned);
+          putPost(qc, post.id, await porchApi.post(post.id));
+          void qc.invalidateQueries({ queryKey: ["porch", "pins", g.id] });
+          toast.success(g.pinned ? `Unpinned from ${g.name}.` : `Pinned to ${g.name}.`);
+        } catch (err) {
+          toast.error(apiErrorMessage(err, "Couldn't change the pin. Try again."));
+        }
+      },
+    });
+  }
   if (post.media.some((m) => m.full)) {
     actions.push({ label: post.media.length > 1 ? "Save photos" : post.media[0]?.kind === "video" ? "Save video" : "Save photo", icon: Download, onClick: () => setSaving(true) });
   }

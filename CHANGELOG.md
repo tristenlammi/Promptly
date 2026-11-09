@@ -27,6 +27,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Porch stories on screen: a row of stories under the group chips (new ones ringed in terracotta, with the group's emoji when they went to one group), a full-screen viewer (tap for the next or last one, hold to pause, swipe down or Esc to close), "Seen by" on your own, and a story maker with the phone's camera, your Photos library or words on a colour, plus stickers you drag, pinch and style. ＋ now offers Post or Story, and long-pressing P Porch on Android offers New story and New post. A video over a minute offers to become a post instead.
 - Replying to a Porch story: send a message or one of six quick reactions from under someone's story, and it goes to your one-to-one conversation with them in Rooms, with the story attached while it's up ("This story has ended" after).
 - Porch highlights and your story archive: every story you post is kept privately for you (Profile → Story archive), and you can keep some on your profile as named highlights with a cover. Each story in a highlight still shows only to the people in the groups it went to, so Mum sees the family ones and your mates theirs. Profiles also show a ring round the picture while someone has a story up.
+- Pinned posts in Porch groups: a group's admins can pin up to three posts to the top of the group's page (never the feed), from a post's "…" menu.
 
 ## [0.34.0] - 2026-11-09
 

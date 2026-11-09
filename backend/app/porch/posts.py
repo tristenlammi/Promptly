@@ -95,6 +95,12 @@ async def posts_out(db: AsyncSession, viewer: User, posts: list[PorchPost]) -> l
     # Comments, reactions, the poll and "saved" (talk.py); photo tags (tags.py).
     await talk.decorate(db, viewer, posts, out)
     await tags.decorate(db, viewer, posts, out)
+    # Pins (WP-P3.1): the groups you run that it's in, pinned there or not.
+    from . import pins
+
+    pinned = await pins.pin_groups(db, viewer, posts)
+    for p, d in zip(posts, out):
+        d["pin_groups"] = pinned.get(p.id, [])
     return out
 
 
