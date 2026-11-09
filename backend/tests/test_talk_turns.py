@@ -141,7 +141,14 @@ async def test_a_turn_walks_the_latency_path_in_order(db, user, conversation, si
     assert done["message_id"] == str(rows[1].id)
     assert model.calls and "What's on today?" in model.last_user_text()
 
-    metric = (await db.execute(select(TalkMetric))).scalar_one()
+    # The timings are saved just after "listening" goes out: wait for them.
+    metric = None
+    for _ in range(100):
+        metric = (await db.execute(select(TalkMetric))).scalar_one_or_none()
+        if metric is not None:
+            break
+        await asyncio.sleep(0.05)
+    assert metric is not None
     assert metric.device == "web" and metric.transport == "ws" and metric.conversation_id == ident(conversation)
     assert metric.endpoint_ms == 280 and metric.first_audio_ms is not None and metric.ttft_ms is not None
     assert metric.barge_ins == 0

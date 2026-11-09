@@ -99,7 +99,7 @@ async def search(
 
     term = q.strip().lower()
     if len(term) < 2:
-        return {"events": [], "contacts": [], "tasks": [], "mail": [], "notes": []}
+        return {"events": [], "contacts": [], "tasks": [], "tags": [], "mail": [], "notes": [], "porch": []}
     events = [
         {"id": e["id"], "event_id": e["event_id"], "title": e["title"], "start": e["start"], "all_day": e["all_day"],
          "location": e.get("location") or "", "url": f"/calendar?event={e['event_id']}"}
