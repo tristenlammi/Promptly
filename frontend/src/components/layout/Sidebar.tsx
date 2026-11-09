@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate, useParams, useSearchParams } from "r
 import { VoicePanel } from "@/rtc/ui/VoicePanel";
 import {
   Archive,
+  EyeOff,
   FolderPlus,
   Inbox,
   LogOut,
@@ -893,6 +894,10 @@ function UserFooter({ onNewFolder }: { onNewFolder: () => void }) {
               <InviteCount count={inviteCount} />
             </button>
           )}
+          <button role="menuitem" className={itemClass} onClick={() => go("/account/privacy")}>
+            <EyeOff className={iconClass} />
+            What your admin can see
+          </button>
           <button
             role="menuitem"
             className={itemClass}

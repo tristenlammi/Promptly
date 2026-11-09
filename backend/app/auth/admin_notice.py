@@ -15,7 +15,7 @@ The first SSO link is told the same way but without a banner: the person
 just signed in themselves, and the email is what reaches the real owner.
 
 Every one of these is also an ``auth_events`` row, which the person sees
-under Account → Security → Recent activity.
+under Account → Privacy & activity → Recent activity.
 
 Nothing here logs what changed beyond the kind, and the message never
 includes a password.
@@ -40,7 +40,7 @@ SSO_LINKED = "sso_linked"
 
 KINDS = (PASSWORD_RESET, EMAIL_CHANGED, ROLE_CHANGED, MFA_RESET, SSO_LINKED)
 
-_SECURITY_URL = "/account/security"
+_SECURITY_URL = "/account/privacy"
 
 
 def _when(user: User, at: datetime) -> str:
@@ -105,8 +105,8 @@ async def _email(db: AsyncSession, to: str, user: User, subject: str, para: str)
 
     body = (
         f"Hi {user.username},\n\n{para}\n\n"
-        "You can see every change to your account under Account → Security → "
-        "Recent activity. If you didn't expect this, talk to your administrator."
+        "You can see every change to your account under Account → Privacy & "
+        "activity → Recent activity. If you didn't expect this, talk to your administrator."
     )
     try:
         await send_message(db, to=to, subject=f"Promptly: {subject[0].lower()}{subject[1:]}", text_body=body)

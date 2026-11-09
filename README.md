@@ -127,6 +127,29 @@ answers come from.
 
 The full tour — live demos included — is at **[chatpromptly.com](https://chatpromptly.com)**.
 
+## What the server admin can and can't see
+
+Every account sees the same statement under Account → Privacy & activity:
+
+> In Promptly, your admin manages accounts, storage and the server. The app
+> never shows them your chats, mail, files, photos, notes, tasks, calendar,
+> health, location, messages or voice. They see your account, sign-ins, how
+> much space and AI you use, and errors without their contents. They see
+> shared things only if they're in them, like anyone else.
+>
+> Two honest limits: anyone who runs the machine itself (shell or database
+> access) can read what isn't end-to-end encrypted. Only Passwords is. And AI
+> features send what you ask to the AI services your admin set up. Each model
+> shows whether it's local or hosted.
+>
+> If your admin resets your password or changes your email, you'll be told,
+> and it shows under Recent activity.
+
+If you run a server for other people, that's the promise you're making. The
+app keeps it: admin screens show counts and account details, never content,
+and logs carry route templates, not addresses or anything typed. Docker's own
+stdout logs on the host may still hold raw request lines from before v0.34.0.
+
 ## Updating
 
 ```bash

@@ -23,9 +23,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 <!-- Admin privacy, AP5 -->
-- Account → Security → Recent activity: your sign-ins, password and two-step changes, and every change an administrator made to your account, marked "By your administrator".
+- Account → Privacy & activity → Recent activity: your sign-ins, password and two-step changes, and every change an administrator made to your account, marked "By your administrator".
 - When an administrator resets your password, changes your email or role, or turns off your two-step verification, you're told: an email (an email change also goes to the old address), a notification, and a banner the next time you open Promptly on any device. Linking single sign-on to your account for the first time emails you too.
 - Admin → Users → Reset password can email the person a reset link instead of setting a temporary password, so the admin never knows their password. It's the default when email is set up.
+<!-- Admin privacy, AP9 -->
+- Account → Privacy & activity: one plain statement of what your server admin can and can't see, with your Recent activity under it. It's also shown at first sign-in (the choose-your-password screen and the Welcome dialog), linked from the account menu ("What your admin can see"), and in the README.
 
 ### Changed
 <!-- Admin privacy, AP6 -->

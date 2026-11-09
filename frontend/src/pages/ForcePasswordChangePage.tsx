@@ -1,6 +1,7 @@
 import { KeyRound } from "lucide-react";
 
 import { ChangePasswordPanel } from "@/components/account/ChangePasswordPanel";
+import { PrivacyStatement } from "@/components/account/PrivacyStatementPanel";
 import { useAuthStore } from "@/store/authStore";
 
 /** First sign-in with a password an admin chose: pick your own before
@@ -28,6 +29,16 @@ export function ForcePasswordChangePage() {
           </p>
         )}
         <ChangePasswordPanel />
+        {/* The app-wide promise, at first sign-in (admin privacy AP9). */}
+        <details className="mt-4 rounded-card border border-[var(--border)] px-3 py-2 text-sm">
+          <summary className="cursor-pointer font-medium text-[var(--text)]">
+            What your server admin can and can&apos;t see
+          </summary>
+          <PrivacyStatement className="mt-2 text-[13px] leading-relaxed text-[var(--text-muted)]" />
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
+            It&apos;s also under Account → Privacy &amp; activity.
+          </p>
+        </details>
       </div>
     </div>
   );

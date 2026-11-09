@@ -252,6 +252,8 @@ Promptly is single-tenant, **invite-only** (no public registration), self-hosted
 
 Append-only `auth_events` (`user_id` = `ON DELETE SET NULL` so the trail survives deletion). Event types are module constants (not a DB enum): login/logout/lockout/unlock/disable/enable, password changes, `token_refresh`/`refresh_rejected`, the full `mfa_*` set, `app_settings_changed`, `rate_limited`, `file_upload_rejected`, `budget_exceeded`, `ssrf_blocked`, `tool_invoked/failed`, secret CRUD, and a workspace-lifecycle set. **Spoof-resistant client IP**: forwarded headers (`CF-Connecting-IP`/`X-Real-IP`/`X-Forwarded-For`) are honored only when the socket peer is in `TRUSTED_PROXY_IPS`. Surfaced to admins at `GET /admin/auth-events`.
 
+**Admin privacy (AP6):** `detail` holds ids, kinds and counts, never titles, file names, device or credential names (`ext_of()` keeps a file's extension only). Tool rows are written only for `AUDITED_TOOLS` (native tools that change something or reach someone) and connector (`mcp__…`) tools, plus approved holds; read-only tool calls get no row. A `login_fail` / `app_password_failed` that matches no account stores `mask_identifier()` (`jo… (12)`). Migration `0405_scrub_audit_details` rewrote older rows. Each person sees their own account rows at `GET /auth/security-events` (Account → Privacy & activity → Recent activity; `SECURITY_EVENT_TYPES` in `auth/router.py`).
+
 ### 5.4 MFA (`mfa/`)
 
 Enrollment status is denormalized onto the `users` row so the login hot path needs no join. Decision order after a password check: valid trusted-device cookie → **allow**; enrolled → **challenge**; `mfa_required` but not enrolled → **force enrollment**; else **allow**.
@@ -281,6 +283,8 @@ Optional, **off by default**, config in `app_settings` (client secret Fernet-enc
 - **Analytics** (`admin/analytics.py`) — read off the `usage_daily` rollup (cost stored as integer **micros**): summary, timeseries, per-user, by-model, drill-down.
 - **Observability** — an SSE **live log tail** off an in-memory ring buffer, and **error groups** (grouped by fingerprint) with resolve/reopen.
 - **App settings** — SMTP, OIDC, embedding provider/model/dim, default model roles, budgets, VAPID, public origins.
+
+- **What an admin can see (admin privacy, `docs/admin-privacy-audit.md`).** The rule: a server admin never sees another person's data, except what's obviously shared (the social side). Admin screens show accounts, counts, config and health, never content: Storage problems show a file's kind, size and owner (the owner is notified by name), Admin → Forms lists reported forms plus a total, the MCP workspace picker lists only workspaces the admin is in (`admin_workspace_ids`; a workspace's owner or admins turn a connector on, and can turn off one an admin attached). Admin changes to an account are never silent (`auth/admin_notice.py::tell`): an admin password reset or password set, email change (old address emailed too), role change and MFA reset email and notify the person and set `users.admin_notice_at/kind` (0404), a banner until dismissed (`POST /auth/me/admin-notice/dismiss`); a first SSO link emails them. `POST /admin/users/{id}/send-reset-link` emails a reset link so the admin never knows the password. `tests/test_admin_route_guardrails.py::ADMIN_ROUTES` classifies every admin route: a new one fails until it's added. The one user-facing statement of all this is `PrivacyStatement` (Account → Privacy & activity, first sign-in, the Welcome dialog), mirrored in README.md: keep the three in step.
 
 ### 5.8 Secrets & billing
 

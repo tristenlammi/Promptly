@@ -48,7 +48,7 @@ export function AdminNoticeBanner() {
       <p className="min-w-0 flex-1">
         Your administrator {what} on {date}.{" "}
         <Link
-          to="/account/security"
+          to="/account/privacy"
           className="font-medium underline underline-offset-2 hover:no-underline"
         >
           See recent activity

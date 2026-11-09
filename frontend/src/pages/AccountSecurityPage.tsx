@@ -5,6 +5,7 @@ import {
   Bell,
   Bookmark,
   Brain,
+  EyeOff,
   FolderInput,
   LayoutGrid,
   ShieldCheck,
@@ -26,6 +27,7 @@ import { PersonalContextPanel } from "@/components/account/PersonalContextPanel"
 import { BodyProfilePanel } from "@/components/account/BodyProfilePanel";
 import { UnitsPanel } from "@/components/account/UnitsPanel";
 import { ProfilePanel } from "@/components/account/ProfilePanel";
+import { PrivacyStatementPanel } from "@/components/account/PrivacyStatementPanel";
 import { RecentActivityPanel } from "@/components/account/RecentActivityPanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
 import { SignOutEverywherePanel } from "@/components/account/SignOutEverywherePanel";
@@ -95,6 +97,18 @@ export function AccountSecurityPage() {
           <ChangePasswordPanel />
           <MfaSettingsPanel defaultEmail={user?.email} />
           <SignOutEverywherePanel />
+        </div>
+      ),
+    },
+    {
+      // What the server admin can and can't see, and this account's own
+      // history, admin changes included (admin privacy AP5, AP9).
+      id: "privacy",
+      label: "Privacy & activity",
+      icon: EyeOff,
+      node: (
+        <div className="space-y-6">
+          <PrivacyStatementPanel />
           <RecentActivityPanel />
         </div>
       ),

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { authApi } from "@/api/auth";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
+import { PrivacyStatement } from "@/components/account/PrivacyStatementPanel";
 import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
@@ -88,6 +89,16 @@ export function WelcomeAppsDialog() {
           );
         })}
       </ul>
+      {/* The app-wide promise, at first sign-in (admin privacy AP9). */}
+      <details className="mt-3 rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
+        <summary className="cursor-pointer font-medium text-[var(--text)]">
+          What your server admin can and can&apos;t see
+        </summary>
+        <PrivacyStatement className="mt-2 text-[13px] leading-relaxed text-[var(--text-muted)]" />
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
+          It&apos;s also under Account → Privacy &amp; activity.
+        </p>
+      </details>
     </Modal>
   );
 }

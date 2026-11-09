@@ -92,7 +92,7 @@ async def test_an_admin_password_reset_is_told_three_ways(db, client, user, outb
     assert len(outbox["push"]) == 1
     push = outbox["push"][0]
     assert push["user_id"] == member.id and push["category"] == "system_alert"
-    assert push["url"] == "/account/security"
+    assert push["url"] == "/account/privacy"
 
     # The banner reaches them (they may only use account endpoints until
     # they choose a new password), and closing it is for every device.
