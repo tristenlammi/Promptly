@@ -35,8 +35,10 @@ from app.auth.audit import (
     EVENT_BUDGET_EXCEEDED,
     EVENT_TOOL_FAILED,
     EVENT_TOOL_INVOKED,
+    ext_of,
     record_event,
     safe_dict,
+    tool_is_audited,
 )
 from app.auth.deps import get_current_user
 from app.auth.models import User
@@ -3550,6 +3552,11 @@ async def _audit_tool_event(
     the assistant message lands — keeps the trail intact even if the
     surrounding turn errors out partway through.
     """
+    if not tool_is_audited(tool_name):
+        # A read-only native tool: no row. One per call told the admin
+        # what someone was doing and when (admin privacy G10); the
+        # person's own chat still shows every call.
+        return
     try:
         payload: dict[str, Any] = {"tool": tool_name}
         if detail:
@@ -7902,7 +7909,7 @@ async def import_conversations(
                     "failed": len(failed),
                     "total_messages": total_messages,
                     "workspace_id": str(workspace_db_id) if workspace_db_id else None,
-                    "filename": file.filename,
+                    "ext": ext_of(file.filename),
                 }
             ),
         )

@@ -56,6 +56,7 @@ from app.auth.audit import (
     EVENT_FILE_UPLOAD_REJECTED,
     EVENT_GENERATED_RERENDER_FAILED,
     EVENT_GENERATED_SOURCE_EDITED,
+    ext_of,
     record_event,
     safe_dict,
 )
@@ -1244,10 +1245,9 @@ async def _audit_upload_rejection(
             detail=safe_dict(
                 {
                     "code": code,
-                    # Only the *trailing* component, since the full
-                    # name might be PII-rich (real names, addresses)
-                    # and the audit log is meant to be reviewable.
-                    "filename": (declared_filename or "")[:120],
+                    # The extension only: a file's name is the person's
+                    # content, and the admin reads this log (G9).
+                    "ext": ext_of(declared_filename),
                 }
             ),
         )

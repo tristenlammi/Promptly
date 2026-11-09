@@ -759,7 +759,7 @@ async def create_workspace(
         event_type=EVENT_WORKSPACE_CREATED,
         request=request,
         user_id=user.id,
-        detail=f'"{ws.title}" (ws={ws.id})',
+        detail=f"ws={ws.id}",
     )
     await db.commit()
     await db.refresh(ws)
@@ -1003,12 +1003,12 @@ async def delete_workspace(
                 detail="Move the workspace to the trash before deleting it for good.",
             )
         ws.trashed_at = datetime.now(timezone.utc)
-        detail = f'"{title}" (ws={workspace_id}) moved to trash'
+        detail = f"ws={workspace_id} moved to trash"
     else:
         if not permanent:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         await db.delete(ws)
-        detail = f'"{title}" (ws={workspace_id}) deleted permanently'
+        detail = f"ws={workspace_id} deleted permanently"
     await record_event(
         db,
         event_type=EVENT_WORKSPACE_DELETED,
@@ -1085,7 +1085,7 @@ async def duplicate_workspace(
         event_type=EVENT_WORKSPACE_CREATED,
         request=request,
         user_id=user.id,
-        detail=f'"{ws.title}" (ws={ws.id}) duplicated from ws={src.id}',
+        detail=f"ws={ws.id} duplicated from ws={src.id}",
     )
     await db.commit()
     await db.refresh(ws)
@@ -1110,7 +1110,7 @@ async def restore_workspace(
             event_type=EVENT_WORKSPACE_UNARCHIVED,
             request=request,
             user_id=user.id,
-            detail=f'"{ws.title}" (ws={ws.id}) restored from trash',
+            detail=f"ws={ws.id} restored from trash",
         )
         await db.commit()
         await db.refresh(ws)
@@ -1178,7 +1178,7 @@ async def transfer_workspace_ownership(
         event_type=EVENT_WORKSPACE_SHARE_CREATED,
         request=request,
         user_id=user.id,
-        detail=f'"{ws.title}" (ws={ws.id}) ownership → {new_owner.username}',
+        detail=f"ws={ws.id} ownership → {new_owner.username}",
     )
     await db.commit()
     await db.refresh(ws)
@@ -1206,7 +1206,7 @@ async def archive_workspace(
             event_type=EVENT_WORKSPACE_ARCHIVED,
             request=request,
             user_id=user.id,
-            detail=f'"{ws.title}" (ws={ws.id})',
+            detail=f"ws={ws.id}",
         )
         await db.commit()
         await db.refresh(ws)
@@ -1229,7 +1229,7 @@ async def unarchive_workspace(
             event_type=EVENT_WORKSPACE_UNARCHIVED,
             request=request,
             user_id=user.id,
-            detail=f'"{ws.title}" (ws={ws.id})',
+            detail=f"ws={ws.id}",
         )
         await db.commit()
         await db.refresh(ws)

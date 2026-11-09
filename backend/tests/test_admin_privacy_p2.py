@@ -289,3 +289,182 @@ async def test_a_first_sso_link_is_told_without_a_banner(db, outbox):
         await db.execute(select(AuthEvent).where(AuthEvent.user_id == member.id, AuthEvent.event_type == "sso_linked"))
     ).scalar_one()
     assert ev.detail == "issuer_host=idp.example.org"
+
+
+# ------------------------------------------------------------------ AP6
+
+
+async def _events(db, user_id=None, kind=None):
+    from app.auth.events import AuthEvent
+
+    q = select(AuthEvent).order_by(AuthEvent.created_at)
+    if user_id is not None:
+        q = q.where(AuthEvent.user_id == user_id)
+    if kind is not None:
+        q = q.where(AuthEvent.event_type == kind)
+    return (await db.execute(q)).scalars().all()
+
+
+def test_masks_and_extensions():
+    from app.auth.audit import ext_of, mask_identifier
+
+    assert mask_identifier("hunter2-is-my-password") == "hu… (22)"
+    assert mask_identifier("") == ""
+    assert ext_of("Biopsy results.PDF") == ".pdf"
+    assert ext_of("C:\\Users\\me\\tax 2026.xlsx") == ".xlsx"
+    assert ext_of(".bashrc") == "" and ext_of("README") == "" and ext_of(None) == ""
+    assert ext_of("x.not an extension") == ""
+
+
+async def test_workspace_rows_carry_ids_not_titles(db, client, outbox):
+    member = await _user(db, "ora")
+    r = await client.post("/api/workspaces", headers=_auth(member), json={"title": "Biopsy results"})
+    assert r.status_code in (200, 201), r.text
+    ws_id = r.json()["id"]
+    rows = await _events(db, member.id, "workspace_created")
+    assert rows and rows[-1].detail == f"ws={ws_id}"
+    assert all("Biopsy" not in (e.detail or "") for e in await _events(db, member.id))
+
+
+async def test_a_refused_upload_keeps_only_the_extension(db, user):
+    from starlette.requests import Request
+
+    from app.files.router import _audit_upload_rejection
+
+    req = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("1.2.3.4", 1)})
+    await _audit_upload_rejection(db, request=req, user=user, code="bad_type", declared_filename="Divorce papers.exe")
+    row = (await _events(db, user.id, "file_upload_rejected"))[-1]
+    assert "Divorce" not in row.detail and "ext='.exe'" in row.detail
+
+
+async def test_only_tools_that_change_something_are_audited(db, user):
+    from starlette.requests import Request
+
+    from app.chat.router import _audit_tool_event
+
+    req = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("1.2.3.4", 1)})
+    for name in ("search_photos", "mail_read", "timeline_day", "remember", "mcp__github__open_issue"):
+        await _audit_tool_event(db, request=req, user=user, event_type="tool_invoked", tool_name=name)
+    await _audit_tool_event(db, request=req, user=user, event_type="tool_failed", tool_name="web_search",
+                            detail={"error": "timeout"})
+    tools = sorted(re.search(r"tool='([^']*)'", e.detail).group(1) for e in await _events(db, user.id))
+    assert tools == ["mcp__github__open_issue", "remember"]
+
+
+async def test_a_login_for_no_account_is_masked(db, client, user):  # an admin exists: set up
+    from app.auth.utils import hash_password
+
+    r = await client.post("/api/auth/login", json={"email": "my-Secret-pass!", "password": "whatever-1"})
+    assert r.status_code in (400, 401)
+    from app.auth.events import AuthEvent
+
+    row = (
+        await db.execute(
+            select(AuthEvent).where(AuthEvent.event_type == "login_fail").order_by(AuthEvent.created_at.desc())
+        )
+    ).scalars().first()
+    assert row.user_id is None and row.identifier == "my… (15)"
+
+    # A real account's failures still name it: that's how a spray is spotted.
+    real = await _user(db, "pia")
+    real.password_hash = hash_password("right-password-1!")
+    await db.commit()
+    r = await client.post("/api/auth/login", json={"email": real.email, "password": "wrong-password-1!"})
+    assert r.status_code in (400, 401)
+    rows = await _events(db, real.id, "login_fail")
+    assert rows and rows[-1].identifier.lower() == real.email.lower()
+
+
+async def test_credentials_are_audited_by_id(db, client):
+    member = await _user(db, "quin")
+    r = await client.post(
+        "/api/secrets", headers=_auth(member), json={"name": "BANK_LOGIN", "value": "s3cret", "allowed_hosts": ["example.com"]},
+    )
+    assert r.status_code in (200, 201), r.text
+    rows = await _events(db, member.id, "secret_created")
+    assert rows[-1].detail == f"credential id={r.json()['id']}"
+
+
+async def test_migration_scrubs_stored_audit_rows(db, user, caplog):
+    from app.auth.audit import record_event
+
+    ws = uuid.uuid4()
+    old = [
+        ("workspace_created", f'"Biopsy results" (ws={ws})', user.id, ""),
+        ("workspace_item_deleted", f'note "Lump" (+2 nested item(s)) in "Family" (ws={ws})', user.id, ""),
+        ("workspace_share_created", f'"Family" (ws={ws}) → bob as editor', user.id, ""),
+        ("workspace_exported", f'"Family" (ws={ws}) — 3 notes', user.id, ""),
+        ("file_upload_rejected", "code='bad_type', filename='Divorce papers.exe'", user.id, ""),
+        ("conversations.imported", "count=3, filename=\"Tom's chats.json\"", user.id, ""),
+        ("app_password_created", "device=\"Tristen's phone\"", user.id, ""),
+        ("secret_created", "credential BANK_LOGIN", user.id, ""),
+        ("tool_invoked", "tool='search_photos'", user.id, ""),
+        ("tool_failed", "tool='mail_read', error='timeout'", user.id, ""),
+        ("tool_invoked", "tool='remember'", user.id, ""),
+        ("tool_invoked", "tool='mcp__gh__x', mcp=True", user.id, ""),
+        ("tool_invoked", "tool='unlock', mcp=True, approved_by_user=True, connector='HA', spoken=False", user.id, ""),
+        ("login_fail", "unknown_user", None, "my-Secret-pass!"),
+        ("login_fail", "bad_password", user.id, user.email),
+    ]
+    for kind, detail, uid, ident in old:
+        await record_event(db, event_type=kind, detail=detail, user_id=uid, identifier=ident)
+    await db.commit()
+
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="alembic.runtime.migration"):
+        await _run_upgrade("0405_scrub_audit_details")
+        await _run_upgrade("0405_scrub_audit_details")  # twice: no change the second time
+
+    from app.auth.events import AuthEvent
+
+    rows = (await db.execute(select(AuthEvent))).scalars().all()
+    by = {}
+    for e in rows:
+        by.setdefault(e.event_type, []).append(e)
+    assert by["workspace_created"][0].detail == f"ws={ws}"
+    assert by["workspace_item_deleted"][0].detail == f"note (+2 nested item(s)) in ws={ws}"
+    assert by["workspace_share_created"][0].detail == f"ws={ws} → bob as editor"
+    assert by["workspace_exported"][0].detail == f"ws={ws} — 3 notes"
+    assert by["file_upload_rejected"][0].detail == "code='bad_type', ext='.exe'"
+    assert by["conversations.imported"][0].detail == "count=3, ext='.json'"
+    assert by["app_password_created"][0].detail == "device=[name]"
+    assert by["secret_created"][0].detail == "credential [name]"
+    tools = sorted(re.search(r"tool='([^']*)'", e.detail).group(1) for e in by["tool_invoked"] + by.get("tool_failed", []))
+    assert tools == ["mcp__gh__x", "remember", "unlock"]
+    fails = {e.user_id: e.identifier for e in by["login_fail"]}
+    assert fails[None] == "my… (15)" and fails[user.id] == user.email
+    everything = " ".join((e.detail or "") + e.identifier for e in rows)
+    for secret in ("Biopsy", "Lump", "Family", "Divorce", "Tom's", "Tristen", "BANK_LOGIN", "Secret-pass"):
+        assert secret not in everything
+    assert "0405_scrub_audit_details: 8 details rewritten, 2 tool rows removed, 1 identifiers masked" in caplog.text
+
+
+def _migration(name: str):
+    import importlib.util
+    from pathlib import Path
+
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    path = next(versions.glob(f"*_{name}.py"))
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+async def _run_upgrade(name):
+    """Run one migration's ``upgrade()`` again against the test database."""
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    from app.database import engine
+
+    mod = _migration(name)
+
+    def go(sync_conn):
+        ctx = MigrationContext.configure(sync_conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+
+    async with engine.begin() as conn:
+        await conn.run_sync(go)

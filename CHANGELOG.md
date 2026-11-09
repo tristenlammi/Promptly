@@ -27,6 +27,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - When an administrator resets your password, changes your email or role, or turns off your two-step verification, you're told: an email (an email change also goes to the old address), a notification, and a banner the next time you open Promptly on any device. Linking single sign-on to your account for the first time emails you too.
 - Admin → Users → Reset password can email the person a reset link instead of setting a temporary password, so the admin never knows their password. It's the default when email is set up.
 
+### Changed
+<!-- Admin privacy, AP6 -->
+- Admin → Audit no longer shows other people's workspace, note or item titles, file names, device names or credential names: rows keep ids, kinds and counts. Older rows were cleaned up the same way.
+- Admin → Audit no longer lists every AI tool call: only calls that change something or reach someone (adding an event, sending mail, saving to memory, making a file, connector tools, anything you approved). Your own chat still shows every call.
+- A sign-in for an account that doesn't exist is logged as the first two characters and the length of what was typed, in case it was a password.
+
 ## [0.34.0] - 2026-11-09
 
 ### Added

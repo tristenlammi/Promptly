@@ -76,12 +76,12 @@ def _out(row: AppPassword) -> AppPasswordOut:
     )
 
 
-async def _audit(db: AsyncSession, request: Request, user: User, event: str, name: str) -> None:
+async def _audit(db: AsyncSession, request: Request, user: User, event: str, row_id: object) -> None:
     from app.auth.audit import record_event, safe_dict
 
     try:
         await record_event(db, request=request, event_type=event, user_id=user.id, identifier=user.username,
-                           detail=safe_dict({"device": name[:80]}))
+                           detail=safe_dict({"app_password_id": str(row_id)}))
         await db.commit()
     except Exception:  # noqa: BLE001 — the audit row must never break this
         pass
@@ -128,7 +128,7 @@ async def create_app_password(
     await ensure_camera_uploads(db, user)
     await db.commit()
     await db.refresh(row)
-    await _audit(db, request, user, EVENT_APP_PASSWORD_CREATED, row.name)
+    await _audit(db, request, user, EVENT_APP_PASSWORD_CREATED, row.id)
     return AppPasswordCreated(**_out(row).model_dump(), password=token, username=user.username)
 
 
@@ -163,7 +163,7 @@ async def revoke_app_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such device.")
     row.revoked_at = _dt.datetime.now(_dt.timezone.utc)
     await db.commit()
-    await _audit(db, request, user, EVENT_APP_PASSWORD_REVOKED, row.name)
+    await _audit(db, request, user, EVENT_APP_PASSWORD_REVOKED, row.id)
 
 
 __all__ = ["router"]

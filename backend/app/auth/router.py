@@ -58,6 +58,7 @@ from app.auth.audit import (
     EVENT_REFRESH_REJECTED,
     EVENT_TOKEN_REFRESH,
     EVENT_UNLOCK,
+    mask_identifier,
     record_event,
     request_meta,
 )
@@ -707,7 +708,10 @@ async def _record_login_failure(
         request=request,
         event_type=EVENT_LOGIN_FAIL,
         user_id=user.id if user is not None else None,
-        identifier=identifier,
+        # No account matched: people sometimes type their password in
+        # the name box, and the admin reads this log (G11). A mask is
+        # enough to spot a spray against one name.
+        identifier=identifier if user is not None else mask_identifier(identifier),
         detail=reason,
     )
 
