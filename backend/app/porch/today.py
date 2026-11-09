@@ -36,14 +36,31 @@ def _is_birthday(b: date, today: date) -> bool:
     return False
 
 
-async def _new_posts(db: AsyncSession, user: User, now: datetime) -> dict[str, Any] | None:
+async def _new_where(db: AsyncSession, user: User, now: datetime) -> list | None:
+    """Other people's posts in the groups you've ticked since you last had
+    the top of your feed on screen (``feed_seen_at``), as WHERE clauses."""
     ticked = await access.ticked_group_ids(db, user)
     if not ticked:
         return None
     prof = await db.get(PorchProfile, user.id)
     since = prof.feed_seen_at if prof is not None and prof.feed_seen_at else now - FIRST_LOOK
     in_ticked = exists().where(PorchPostGroup.post_id == PorchPost.id, PorchPostGroup.group_id.in_(ticked))
-    where = [access.visible_post(user.id), in_ticked, PorchPost.created_at > since, PorchPost.author_id != user.id]
+    return [access.visible_post(user.id), in_ticked, PorchPost.created_at > since, PorchPost.author_id != user.id]
+
+
+async def new_post_count(db: AsyncSession, user: User, now: datetime | None = None) -> int:
+    """How many new posts are waiting in your feed (Today's card, the
+    sidebar's Porch badge)."""
+    where = await _new_where(db, user, now or core.now())
+    if where is None:
+        return 0
+    return int((await db.execute(select(func.count()).select_from(PorchPost).where(*where))).scalar() or 0)
+
+
+async def _new_posts(db: AsyncSession, user: User, now: datetime) -> dict[str, Any] | None:
+    where = await _new_where(db, user, now)
+    if where is None:
+        return None
     n = int((await db.execute(select(func.count()).select_from(PorchPost).where(*where))).scalar() or 0)
     if not n:
         return None

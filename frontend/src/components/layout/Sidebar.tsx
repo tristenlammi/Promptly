@@ -62,6 +62,9 @@ import { FolderEditModal } from "./FolderEditModal";
 import { useChatFoldersQuery, useDeleteFolder } from "@/hooks/useChatFolders";
 import { useFolderUiStore } from "@/store/folderUiStore";
 import { useNavApps, type NavApp } from "@/items/navApps";
+import { useNavBadges } from "@/hooks/useNavBadges";
+import { badgeLabel } from "@/lib/countBadge";
+import { CountBadge } from "./CountBadge";
 import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import type { ChatFolder } from "@/api/folders";
@@ -84,6 +87,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const isMobile = useIsMobile();
   // Apps the user pinned to their sidebar (from Apps → Edit).
   const { apps: navApps, iconStyle } = useNavApps();
+  // Count badges on the pinned apps' rows (Tasks due, unread Mail and
+  // Rooms, new on Porch).
+  const navAppIds = useMemo(() => navApps.map((a) => a.id), [navApps]);
+  const badges = useNavBadges(navAppIds);
   const { pathname } = useLocation();
   // While a pinned app is open, its own row lights up — not "Apps" too.
   const inNavApp = navApps.some((a) => pathname === a.to || pathname.startsWith(`${a.to}/`));
@@ -211,7 +218,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             );
           })}
           {navApps.map((app) => (
-            <SideIcon key={app.id} to={app.to} icon={<AppIcon app={app} style={iconStyle} />} label={app.name} />
+            <SideIcon
+              key={app.id}
+              to={app.to}
+              icon={<AppIcon app={app} style={iconStyle} />}
+              label={app.name}
+              badge={{ app: app.id, n: badges[app.id] ?? 0 }}
+            />
           ))}
           <SideIcon
             to="/archive"
@@ -291,7 +304,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           );
         })}
         {navApps.map((app) => (
-          <NavItem key={app.id} to={app.to} icon={<AppIcon app={app} style={iconStyle} />} label={app.name} />
+          <NavItem
+            key={app.id}
+            to={app.to}
+            icon={<AppIcon app={app} style={iconStyle} />}
+            label={app.name}
+            badge={{ app: app.id, n: badges[app.id] ?? 0 }}
+          />
         ))}
       </nav>
 
@@ -503,6 +522,7 @@ function NavItem({
   label,
   end,
   inactive,
+  badge,
 }: {
   to: string;
   icon: React.ReactNode;
@@ -510,6 +530,8 @@ function NavItem({
   end?: boolean;
   /** Never show as the current page (another row owns this path). */
   inactive?: boolean;
+  /** A count badge at the end of the row (hidden at 0). */
+  badge?: { app: string; n: number };
 }) {
   return (
     <NavLink
@@ -525,7 +547,8 @@ function NavItem({
       }
     >
       {icon}
-      <span>{label}</span>
+      <span className="min-w-0 truncate">{label}</span>
+      {badge && <CountBadge app={badge.app} n={badge.n} />}
     </NavLink>
   );
 }
@@ -535,20 +558,25 @@ function SideIcon({
   icon,
   label,
   inactive,
+  badge,
 }: {
   to: string;
   icon: React.ReactNode;
   label: string;
   inactive?: boolean;
+  /** A count badge on the icon's corner (hidden at 0). */
+  badge?: { app: string; n: number };
 }) {
+  const said = badge ? badgeLabel(badge.app, badge.n) : "";
+  const name = said ? `${label}, ${said}` : label;
   return (
     <NavLink
       to={to}
-      title={label}
-      aria-label={label}
+      title={name}
+      aria-label={name}
       className={({ isActive }) =>
         cn(
-          "inline-flex h-9 w-9 items-center justify-center rounded-md transition",
+          "relative inline-flex h-9 w-9 items-center justify-center rounded-md transition",
           isActive && !inactive
             ? "bg-[var(--accent)]/10 text-[var(--text)]"
             : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
@@ -556,6 +584,7 @@ function SideIcon({
       }
     >
       {icon}
+      {badge && <CountBadge app={badge.app} n={badge.n} corner />}
     </NavLink>
   );
 }

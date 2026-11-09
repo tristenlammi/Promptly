@@ -15,6 +15,7 @@ import { useEffect } from "react";
 
 import { API_BASE_URL, authHeader, refreshAccessToken } from "@/api/client";
 import { PORCH_EVENTS_PATH, porchApi, type Bootstrap, type PorchEvent, type PostPage } from "@/api/porch";
+import { badgesStale } from "@/hooks/useNavBadges";
 
 import { ACTIVITY_KEY, BOOTSTRAP_KEY, commentsKey, feedKey, groupsChanged, listPosts, putPost, refreshPost } from "./cache";
 import { usePorchStore } from "./store";
@@ -143,6 +144,8 @@ function inFeed(qc: QueryClient, id: string): boolean {
 }
 
 export async function applyPorchEvent(qc: QueryClient, ev: PorchEvent): Promise<void> {
+  // New posts, invites and Activity are what the sidebar's Porch badge counts.
+  if (ev.type === "post" || ev.type === "invite" || ev.type === "activity") badgesStale();
   switch (ev.type) {
     case "post": {
       // Other lists (a group's page, a profile) refresh next time they're opened.

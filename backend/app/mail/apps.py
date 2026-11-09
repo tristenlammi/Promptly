@@ -206,16 +206,27 @@ async def people_matching(db: AsyncSession, user: User, typed: str) -> list[dict
 # ---- Today and Ctrl+K
 
 
+async def inbox_unread(db: AsyncSession, accounts: list[uuid.UUID]) -> int:
+    """Unread conversations in the Inbox across these accounts (snoozed and
+    labelled ones are out of the Inbox): Today's number and the sidebar's
+    Mail badge."""
+    from .router import _NOT_SNOOZED_M
+
+    if not accounts:
+        return 0
+    return int(await db.scalar(text(
+        f"SELECT count(DISTINCT (m.account_id, m.thread_key)) FROM mail_messages m JOIN mail_folders f ON f.id = m.folder_id "
+        f"WHERE m.account_id = ANY(:accounts) AND f.role = 'inbox' AND NOT m.seen AND {_NOT_SNOOZED_M}"
+    ), {"accounts": accounts}) or 0)
+
+
 async def today_section(db: AsyncSession, user: User) -> dict[str, Any] | None:
     from .router import _NEEDS_REPLY, _NOT_SNOOZED_M, _my_account_ids
 
     accounts = await _my_account_ids(db, user)
     if not accounts:
         return None
-    unread = await db.scalar(text(
-        f"SELECT count(DISTINCT (m.account_id, m.thread_key)) FROM mail_messages m JOIN mail_folders f ON f.id = m.folder_id "
-        f"WHERE m.account_id = ANY(:accounts) AND f.role = 'inbox' AND NOT m.seen AND {_NOT_SNOOZED_M}"
-    ), {"accounts": accounts}) or 0
+    unread = await inbox_unread(db, accounts)
     waiting = (await db.execute(text(
         f"SELECT DISTINCT ON (m.account_id, m.thread_key) m.account_id, m.thread_key, m.subject, m.from_name, m.from_addr, m.summary, m.sent_at "
         f"FROM mail_messages m JOIN mail_folders f ON f.id = m.folder_id WHERE m.account_id = ANY(:accounts) AND f.role = 'inbox' "
