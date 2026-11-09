@@ -73,6 +73,10 @@ class PorchPost(UUIDPKMixin, CreatedAtMixin, Base):
     uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # A poll's closing time (0271); NULL: never closes, or not a poll.
     poll_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A Calendar event the post carries (0396, WP-P3.2), and its name, kept
+    # for "Cancelled: Family BBQ" once the event's deleted.
+    event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("cal_events.id", ondelete="SET NULL"), nullable=True)
+    event_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # body_tsv: a generated column, searched with raw SQL (not mapped).
 
 

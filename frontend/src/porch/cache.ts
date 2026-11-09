@@ -36,8 +36,9 @@ export const storyViewersKey = (id: string) => ["porch", "stories", "viewers", i
 export const STORY_ARCHIVE_KEY = ["porch", "stories", "archive"] as const;
 /** Highlights (WP-P2.4): yours, and someone's as you see them. */
 export const HIGHLIGHTS_KEY = ["porch", "highlights", "me"] as const;
-/** A group's pinned posts (WP-P3.1). */
+/** A group's pinned posts (WP-P3.1) and its events (WP-P3.2). */
 export const groupPinsKey = (id: string) => ["porch", "pins", id] as const;
+export const groupEventsKey = (id: string) => ["porch", "group-events", id] as const;
 export const userHighlightsKey = (id: string) => ["porch", "highlights", "u", id] as const;
 export const ALERTS_KEY = ["porch", "alerts"] as const;
 
@@ -126,5 +127,6 @@ export function groupsChanged(qc: QueryClient, groupId?: string): void {
     void qc.invalidateQueries({ queryKey: membersKey(groupId) });
     void qc.invalidateQueries({ queryKey: pendingKey(groupId) });
     void qc.invalidateQueries({ queryKey: ["porch", "pins", groupId] });
+    void qc.invalidateQueries({ queryKey: ["porch", "group-events", groupId] });
   }
 }

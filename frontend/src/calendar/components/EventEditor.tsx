@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { calendarReachApi } from "@/api/calendarReach";
+import { porchApi } from "@/api/porch";
 import { calendarApi, type CalEvent, type CalendarBootstrap, type CalUser, type EditScope, type EventPatch, type Repeat, type RsvpStatus } from "@/api/calendar";
 import { extractError } from "@/components/files/helpers";
 import { LocationInput } from "@/components/maps/LocationInput";
@@ -150,6 +151,10 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
 
   // Planned in a room: everyone there is invited, and a card is posted in it.
   const room = target.mode === "new" ? target.prefill?.room ?? null : null;
+  // Porch (WP-P3.2): planned in a group, a post there carries it.
+  const porchGroup = target.mode === "new" ? target.prefill?.porchGroup ?? null : null;
+  const [inviteAll, setInviteAll] = useState(porchGroup?.inviteAll ?? false);
+  const planned = room ?? porchGroup;
   // Made from something (a Porch post): saved with it, and guests only from its pool.
   const source = target.mode === "new" ? target.prefill?.source ?? null : null;
   const pool = target.mode === "new" ? target.prefill?.guestPool ?? null : null;
@@ -222,6 +227,27 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
     const guestIds = d.guests.map((g) => g.id);
     setSaving(true);
     try {
+      if (!ev && porchGroup) {
+        const r = await porchApi.planGroupEvent(porchGroup.id, {
+          title: d.title.trim(),
+          description: d.description,
+          location: d.location.trim(),
+          all_day: d.allDay,
+          ...wireTimes(start, end, d.allDay),
+          tz: localZone(),
+          calendar_id: d.calendarId || null,
+          repeat: d.repeat,
+          reminders: d.reminders,
+          invite_all: inviteAll,
+          body: porchGroup.body ?? "",
+        });
+        addUsers(r.users);
+        toast.success(`Event posted in ${porchGroup.name}`);
+        refresh();
+        porchGroup.onPosted?.(r.post.id);
+        onSaved(r.event);
+        return;
+      }
       if (!ev) {
         const r = await calendarApi.create({
           title: d.title.trim(),
@@ -326,7 +352,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
     <Sheet
       open
       onClose={onClose}
-      title={ev ? "Edit event" : room ? `Plan an event in ${room.name}` : "New event"}
+      title={ev ? "Edit event" : planned ? `Plan an event in ${planned.name}` : "New event"}
       size="lg"
       footer={
         <>
@@ -334,7 +360,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
             Cancel
           </ItemButton>
           <ItemButton block variant="primary" type="submit" form="cal-event-form" disabled={saving || invalid || !d.title.trim()}>
-            {saving ? "Saving…" : room ? "Post" : "Save"}
+            {saving ? "Saving…" : planned ? "Post" : "Save"}
           </ItemButton>
         </>
       }
@@ -402,13 +428,23 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[var(--text-muted)]">Guests</span>
-            {!room && (
-              <ItemButton size="sm" variant="ghost" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setPicking(true)}>
-                Add guests
-              </ItemButton>
+            {!planned && (
+              <span className="flex items-center gap-1">
+                {/* "Make this an event" on a Porch post: everyone who can see it, at once (WP-P3.2). */}
+                {pool && pool.people.length > 1 && pool.people.some((p) => !d.guests.some((g) => g.id === p.id)) && (
+                  <ItemButton size="sm" variant="ghost" icon={<Users className="h-3.5 w-3.5" />} onClick={() => set({ guests: pool.people })}>
+                    Invite everyone ({pool.people.length})
+                  </ItemButton>
+                )}
+                <ItemButton size="sm" variant="ghost" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setPicking(true)}>
+                  Add guests
+                </ItemButton>
+              </span>
             )}
           </div>
-          {room ? (
+          {porchGroup ? (
+            <PorchGroupGuests name={porchGroup.name} members={porchGroup.members} count={porchGroup.count} me={b.me} on={inviteAll} onChange={setInviteAll} />
+          ) : room ? (
             <RoomGuests roomName={room.name} me={b.me} guests={d.guests} busyAt={busyAt} />
           ) : d.guests.length === 0 ? (
             <p className="text-xs text-[var(--text-muted)]">{pool ? pool.note : "Invite people on this Promptly — they'll be notified and can answer."}</p>
@@ -432,7 +468,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
               ))}
             </ul>
           )}
-          {!room && !pool && (!ev || ev.can_edit) && (
+          {!planned && !pool && (!ev || ev.can_edit) && (
             <EmailGuestsField
               guests={emailGuests}
               onChange={setEmailGuests}
@@ -547,6 +583,37 @@ function PoolPicker({ pool, selected, onChange }: { pool: { people: CalUser[]; n
           </ul>
         </>
       )}
+    </div>
+  );
+}
+
+/** Porch group mode (WP-P3.2): invite the whole group, or not — anyone in
+ *  it can still answer from the post's card. */
+function PorchGroupGuests({ name, members, count, me, on, onChange }: { name: string; members: CalUser[]; count: number; me: CalUser; on: boolean; onChange: (v: boolean) => void }) {
+  const people = [me, ...members.filter((m) => m.id !== me.id)];
+  const shown = people.slice(0, 8);
+  const more = people.length - shown.length;
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-[var(--text)]">
+          Invite everyone in <b className="font-semibold">{name}</b> ({Math.max(count, people.length)})
+        </span>
+        <Toggle checked={on} onChange={onChange} label={`Invite everyone in ${name}`} />
+      </div>
+      <div className="flex items-center">
+        <div className="flex -space-x-2">
+          {shown.map((u) => (
+            <span key={u.id} className="rounded-full ring-2 ring-[var(--surface)]" title={u.id === me.id ? "You" : u.username}>
+              <UserAvatar user={u} size={28} />
+            </span>
+          ))}
+        </div>
+        {more > 0 && <span className="ml-2 text-xs font-medium text-[var(--text-muted)]">+{more}</span>}
+      </div>
+      <p className="text-xs text-[var(--text-muted)]">
+        {on ? "It goes on everyone's calendar, and they can answer Going, Maybe or Can't go." : `Nobody's invited, but anyone in ${name} can answer from the post and it goes on their calendar.`}
+      </p>
     </div>
   );
 }

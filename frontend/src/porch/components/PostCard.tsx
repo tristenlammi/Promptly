@@ -40,6 +40,7 @@ import { profileKey, putPost } from "../cache";
 import { usePorch } from "../context";
 import { usePostTalk } from "../talkActions";
 import { CommentsSheet, InlineComments } from "./Comments";
+import { EventCard } from "./EventCard";
 import { MakeEventSheet } from "./MakeEventSheet";
 import { MediaCarousel } from "./MediaCarousel";
 import { PollCard } from "./PollCard";
@@ -275,10 +276,22 @@ export function PostCard({ post, full = false, media = true, className }: { post
           danger: true,
         });
         if (!ok) return;
+        // It carries your event: cancel that too, or keep it in calendars.
+        const ev = post.event && !post.event.cancelled && post.event.organiser ? post.event : null;
+        const cancelEvent = ev
+          ? await confirm({
+              title: `Cancel “${ev.title}” too?`,
+              message: "Cancelling takes it out of everyone's calendar and tells the people going. Keep it, and it stays in calendars without this post.",
+              confirmLabel: "Cancel the event",
+              cancelLabel: "Keep the event",
+              danger: true,
+            })
+          : false;
         try {
-          await porchApi.deletePost(post.id);
+          await porchApi.deletePost(post.id, cancelEvent);
           putPost(qc, post.id, null);
-          toast.success("Post deleted.");
+          if (cancelEvent) void qc.invalidateQueries({ queryKey: ["calendar"] });
+          toast.success(cancelEvent ? "Post deleted and the event cancelled." : "Post deleted.");
         } catch (err) {
           toast.error(apiErrorMessage(err, "Couldn't delete the post. Try again."));
         }
@@ -347,6 +360,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
       {hasMedia && actions_}
       {post.body && <Caption text={post.body} big={big && !post.poll} full={full} mentions={post.mentions} />}
       {post.poll && <PollCard post={post} />}
+      {post.event && <EventCard post={post} />}
       {post.link && <LinkCard link={post.link} />}
       {post.place && (
         <Link

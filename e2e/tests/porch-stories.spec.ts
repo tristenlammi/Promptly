@@ -156,3 +156,62 @@ test("a text story reaches only its group, and its poster sees who watched", asy
   await expect(bob.getByRole("dialog", { name: "New story" }).getByRole("button", { name: "Camera" })).toBeVisible();
   await shot(bob, "story-composer-phone");
 });
+
+test("plan a BBQ in a group: everyone's invited, a member answers from the card and it's in their calendar; pin it", async ({ alice, bob, dana }) => {
+  test.setTimeout(180_000);
+  const [aAuth, bAuth, dAuth] = [await bearer(alice), await bearer(bob), await bearer(dana)];
+  const [, bobId] = [await porchReady(alice, aAuth), await porchReady(bob, bAuth), await porchReady(dana, dAuth)];
+  const fam = `Events ${stamp}`;
+  const famId = await groupWith(alice, aAuth, fam, [[bob, bAuth, bobId]]);
+  const title = `BBQ Saturday ${stamp}`;
+
+  // Alice: the group's ＋ Event, the Calendar's own editor in group mode.
+  await alice.goto(`/porch/g/${famId}`);
+  await alice.getByRole("button", { name: "Event", exact: true }).click();
+  const editor = alice.getByRole("dialog", { name: `Plan an event in ${fam}` });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByRole("switch", { name: `Invite everyone in ${fam}` })).toHaveAttribute("aria-checked", "true");
+  await editor.getByRole("textbox", { name: "Title" }).fill(title);
+  await shot(alice, "group-event-editor");
+  const planned = alice.waitForResponse((r) => r.url().endsWith(`/porch/groups/${famId}/events`) && r.request().method() === "POST");
+  await editor.getByRole("button", { name: /^Post/ }).click();
+  const res = await planned;
+  expect(res.status(), await res.text()).toBe(201);
+  const got = await res.json();
+  expect(got.event.attendees.map((a: { user_id: string }) => a.user_id)).toEqual([bobId]);
+  await expect(alice.getByText(`Event posted in ${fam}`)).toBeVisible();
+
+  // Bob: the card in the group's Events tab; Going.
+  await bob.goto(`/porch/g/${famId}`);
+  await bob.getByRole("radio", { name: "Events" }).click();
+  const card = bob.locator(`[data-event-card="${got.event.event_id}"]`);
+  await expect(card).toBeVisible();
+  await expect(card.getByText(title)).toBeVisible();
+  const answered = bob.waitForResponse((r) => r.url().includes(`/calendar/events/${got.event.event_id}/rsvp`));
+  await card.getByRole("button", { name: "Going" }).click();
+  expect((await answered).ok()).toBe(true);
+  await expect(card.getByRole("button", { name: "Going" })).toHaveAttribute("aria-pressed", "true");
+  await expect(card.getByText(/are going/)).toBeVisible();
+  await shot(bob, "group-event-card");
+
+  // It's in Bob's calendar, answered.
+  const from = new Date().toISOString().slice(0, 10);
+  const to = new Date(Date.now() + 40 * 86400_000).toISOString().slice(0, 10);
+  const cal = await (await api(bob, bAuth).get(`/calendar/events?start=${from}&end=${to}`)).json();
+  const mine = cal.events.find((e: { event_id: string }) => e.event_id === got.event.event_id);
+  expect(mine?.my_status).toBe("going");
+
+  // Dana isn't in the group: no card, and Calendar won't open it for her.
+  expect((await api(dana, dAuth).get(`/porch/posts/${got.post.id}`)).status()).toBe(404);
+  expect((await api(dana, dAuth).get(`/calendar/events/${got.event.event_id}`)).status()).toBe(404);
+
+  // Alice pins it: the Pinned strip on the group page (never the feed).
+  await alice.goto(`/porch/p/${got.post.id}`);
+  await alice.getByRole("button", { name: "More for this post" }).first().click();
+  await alice.getByRole("button", { name: new RegExp(`^Pin to ${fam}`) }).click();
+  await expect(alice.getByText(`Pinned to ${fam}.`)).toBeVisible();
+  await alice.goto(`/porch/g/${famId}`);
+  const pinned = alice.getByRole("region", { name: `Pinned in ${fam}` });
+  await expect(pinned).toBeVisible();
+  await shot(alice, "group-pinned");
+});

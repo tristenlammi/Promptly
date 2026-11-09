@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Check, Crown, ImageIcon, LogOut, MoreHorizontal, PenSquare, Pencil, Pin as PinIcon, Shield, ShieldOff, Trash2, UserMinus, UserPlus, UserRound } from "lucide-react";
+import { CalendarPlus, Check, Crown, ImageIcon, LogOut, MoreHorizontal, PenSquare, Pencil, Pin as PinIcon, Shield, ShieldOff, Trash2, UserMinus, UserPlus, UserRound } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -12,9 +12,10 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { useGroupActions } from "../actions";
-import { groupKey, groupPinsKey, groupPostsKey, groupsChanged, listPosts, membersKey, pendingKey } from "../cache";
+import { groupEventsKey, groupKey, groupPinsKey, groupPostsKey, groupsChanged, listPosts, membersKey, pendingKey } from "../cache";
 import { EditGroupSheet, InviteSheet } from "../components/GroupSheets";
 import { GroupReports } from "../components/GroupReports";
+import { PlanGroupEventSheet } from "../components/PlanGroupEventSheet";
 import { PostCard, PostList } from "../components/PostCard";
 import { ActionSheet, Column, GroupTile, LoadError, PageHeader, PorchAvatar, PostSkeleton, VisibilityTag, peopleCount, shortAgo, type MenuAction } from "../components/ui";
 import { usePorch } from "../context";
@@ -22,7 +23,7 @@ import { GroupBell } from "../notify";
 import { useSentinel } from "../scroll";
 import { Unavailable } from "./PostPage";
 
-type Tab = "posts" | "photos" | "people" | "invites" | "reports";
+type Tab = "posts" | "photos" | "events" | "people" | "invites" | "reports";
 const ROLE_WORD = { owner: "Owner", admin: "Admin", member: "" } as const;
 
 /** ``/porch/g/:id``: a group — its posts, photos, people and invites. */
@@ -176,6 +177,7 @@ function MemberView({ g }: { g: PorchGroup }) {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const members = useQuery({ queryKey: membersKey(g.id), queryFn: () => porchApi.members(g.id), staleTime: 30_000 });
   const showInvites = g.kind === "custom" && g.is_admin;
 
@@ -190,6 +192,7 @@ function MemberView({ g }: { g: PorchGroup }) {
   const tabs: { value: Tab; label: ReactNode }[] = [
     { value: "posts", label: "Posts" },
     { value: "photos", label: "Photos" },
+    { value: "events", label: "Events" },
     { value: "people", label: "People" },
   ];
   if (showInvites) tabs.push({ value: "invites", label: "Invites" });
@@ -255,6 +258,9 @@ function MemberView({ g }: { g: PorchGroup }) {
         <ItemButton variant="secondary" icon={<PenSquare className="h-4 w-4" />} onClick={() => navigate(`/porch/new?group=${g.id}`)}>
           Post to {g.name}
         </ItemButton>
+        <ItemButton variant="secondary" icon={<CalendarPlus className="h-4 w-4" />} onClick={() => setPlanning(true)}>
+          Event
+        </ItemButton>
       </div>
       <div className="px-4 pt-4 md:px-0">
         <div className="-mx-1 overflow-x-auto px-1">
@@ -264,6 +270,7 @@ function MemberView({ g }: { g: PorchGroup }) {
       <div className="pt-3">
         {tab === "posts" && <GroupPosts g={g} />}
         {tab === "photos" && <GroupPhotos g={g} />}
+        {tab === "events" && <GroupEvents g={g} onPlan={() => setPlanning(true)} />}
         {tab === "people" && <People g={g} members={members.data} loading={members.isPending} error={members.isError} retry={() => void members.refetch()} />}
         {tab === "invites" && showInvites && <PendingList g={g} onInvite={() => setInviting(true)} />}
         {tab === "reports" && showReports && <GroupReports g={g} />}
@@ -272,6 +279,7 @@ function MemberView({ g }: { g: PorchGroup }) {
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={g.name} actions={actions} />
       <EditGroupSheet group={g} open={editing} onClose={() => setEditing(false)} />
       <InviteSheet group={g} open={inviting} onClose={() => setInviting(false)} exclude={(members.data ?? []).map((m) => m.id)} />
+      <PlanGroupEventSheet group={g} open={planning} onClose={() => setPlanning(false)} onPosted={() => setTab("events")} />
     </Column>
   );
 }
@@ -365,6 +373,52 @@ function Pinned({ g }: { g: PorchGroup }) {
         })}
       </ul>
     </section>
+  );
+}
+
+/** The group's events (WP-P3.2): coming up first, soonest first; then past ones. */
+function GroupEvents({ g, onPlan }: { g: PorchGroup; onPlan: () => void }) {
+  const q = useQuery({ queryKey: groupEventsKey(g.id), queryFn: () => porchApi.groupEvents(g.id), staleTime: 30_000 });
+  if (q.isPending) return <PostSkeleton />;
+  if (q.isError) return <LoadError what="Couldn't load the events." onRetry={() => void q.refetch()} />;
+  const { upcoming, past } = q.data;
+  if (!upcoming.length && !past.length) {
+    return (
+      <EmptyState
+        className="mx-4 md:mx-0"
+        icon={CalendarPlus}
+        title={`Nothing planned in ${g.name} yet`}
+        text={g.kind === "everyone" ? "Plan something and it's posted here. Anyone can answer from the post." : `Plan something and everyone in ${g.name} gets it on their calendar, with Going, Maybe or Can't go.`}
+        action={
+          <ItemButton variant="primary" icon={<CalendarPlus className="h-4 w-4" />} onClick={onPlan}>
+            Plan an event
+          </ItemButton>
+        }
+      />
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {upcoming.length > 0 ? (
+        <PostList>
+          {upcoming.map((p) => (
+            <PostCard key={p.id} post={p} />
+          ))}
+        </PostList>
+      ) : (
+        <p className="px-4 text-sm text-[var(--text-muted)] md:px-0">Nothing coming up.</p>
+      )}
+      {past.length > 0 && (
+        <>
+          <h3 className="px-4 pt-3 text-sm font-semibold text-[var(--text)] md:px-0">Past events</h3>
+          <PostList>
+            {past.map((p) => (
+              <PostCard key={p.id} post={p} />
+            ))}
+          </PostList>
+        </>
+      )}
+    </div>
   );
 }
 

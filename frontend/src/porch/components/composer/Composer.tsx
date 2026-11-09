@@ -26,6 +26,7 @@ import {
   EMPTY, clearDraft, firstLink, hasContent, loadDraft, newKey, pollProblem, saveDraft, videoLimitWords, videoSeconds,
   type Audience, type Draft, type Pick, type Step,
 } from "./model";
+import { PlanGroupEventSheet } from "../PlanGroupEventSheet";
 import { PickImage } from "./PickImage";
 import { PickStep } from "./PickStep";
 import { PlaceSheet } from "./PlaceSheet";
@@ -118,7 +119,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   const [draft, setDraft] = useState<Draft>(initial.draft);
   const [restored, setRestored] = useState(initial.restored);
   const [active, setActive] = useState(0);
-  const [sheet, setSheet] = useState<null | "audience" | "place" | "life" | "poll">(null);
+  const [sheet, setSheet] = useState<null | "audience" | "place" | "life" | "poll" | "event">(null);
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -349,6 +350,9 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
     }
     return out;
   }, [info.data]);
+
+  // An event can be planned when the post goes to exactly one group (WP-P3.2).
+  const eventGroup = Array.isArray(audience) && audience.length === 1 ? b.groups.find((g) => g.id === audience[0]) ?? null : null;
 
   // ---------------------------------------------------------------- who'd see it
   const audIds = useMemo(() => (editing ? [] : audienceIds(audience, b.groups)), [editing, audience, b.groups]);
@@ -647,6 +651,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
             canPoll={!editing}
             pollLocked={editing?.kind === "poll"}
             onTags={() => go("arrange")}
+            onEvent={eventGroup && !editing ? () => setSheet("event") : undefined}
           />
         )}
 
@@ -717,6 +722,21 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
       )}
 
       <AudienceSheet open={sheet === "audience"} onClose={() => setSheet(null)} value={audience} onChange={(a) => set({ audience: a })} groups={b.groups} />
+      {eventGroup && (
+        <PlanGroupEventSheet
+          group={eventGroup}
+          open={sheet === "event"}
+          onClose={() => setSheet(null)}
+          body={draft.body.trim()}
+          onPosted={() => {
+            // The words went with the event's post: this draft is done.
+            finished.current = true;
+            clearDraft();
+            setDraft({ ...EMPTY });
+            navigate(`/porch/g/${eventGroup.id}`, { replace: true });
+          }}
+        />
+      )}
       <PlaceSheet open={sheet === "place"} onClose={() => setSheet(null)} onPick={(p) => set({ place: p })} fromPhotos={photoPlaces} />
       <PollEditor open={sheet === "poll"} onClose={() => setSheet(null)} value={draft.poll} onSave={(v) => set({ poll: v, life: null })} onRemove={() => set({ poll: null })} />
       <LifeEventEditor open={sheet === "life"} onClose={() => setSheet(null)} value={draft.life} onSave={(v) => set({ life: v, poll: null })} onRemove={() => set({ life: null })} />

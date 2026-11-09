@@ -310,6 +310,48 @@ export interface PorchPost {
   saved: boolean;
   /** The groups you run that it's in, and whether it's pinned there (WP-P3.1). */
   pin_groups?: (GroupLabel & { pinned: boolean })[];
+  /** The Calendar event it carries (WP-P3.2), read live. */
+  event?: PostEvent | null;
+}
+
+/** A post's event card: when, where, who's going, and your answer. */
+export type PostEvent =
+  | { cancelled: true; title: string }
+  | {
+      cancelled: false;
+      event_id: string;
+      title: string;
+      /** The next occurrence (or the last, once it's over): ISO, or a day for all-day. */
+      start: string;
+      end: string;
+      all_day: boolean;
+      repeats: boolean;
+      location: string;
+      /** A few of the people going (the organiser first). */
+      going: PorchUser[];
+      going_count: number;
+      maybe_count: number;
+      my_status: "going" | "maybe" | "declined" | null;
+      /** You're invited and haven't answered. */
+      invited: boolean;
+      organiser: boolean;
+      past: boolean;
+    };
+
+/** What the event editor sends to plan an event in a group. */
+export interface PlanEventIn {
+  title: string;
+  description: string;
+  location: string;
+  all_day: boolean;
+  start: string;
+  end: string;
+  tz: string;
+  calendar_id: string | null;
+  repeat: unknown;
+  reminders: number[];
+  invite_all: boolean;
+  body?: string;
 }
 
 export interface MyProfile {
@@ -554,8 +596,9 @@ export const porchApi = {
     const { data } = await apiClient.patch<PorchPost>(`/porch/posts/${id}`, patch);
     return data;
   },
-  async deletePost(id: string): Promise<void> {
-    await apiClient.delete(`/porch/posts/${id}`);
+  /** ``cancelEvent``: the event it carries is cancelled too (its organiser only). */
+  async deletePost(id: string, cancelEvent = false): Promise<void> {
+    await apiClient.delete(`/porch/posts/${id}`, { params: cancelEvent ? { cancel_event: true } : undefined });
   },
   async groupPosts(groupId: string, before: string | null, photos: boolean): Promise<PostPage> {
     const { data } = await apiClient.get<PostPage>(`/porch/groups/${groupId}/posts`, { params: { before: before || undefined, photos: photos || undefined } });
@@ -843,6 +886,17 @@ export const porchApi = {
     else await apiClient.delete(`/porch/groups/${groupId}/pins/${postId}`);
   },
 
+  // ---- group events (WP-P3.2)
+  /** Plan an event in a group: in your calendar, the group invited (or not), and a post carrying it. */
+  async planGroupEvent(groupId: string, body: PlanEventIn): Promise<{ event: import("@/api/calendar").CalEvent; users: Record<string, import("@/api/calendar").CalUser>; post: PorchPost }> {
+    const { data } = await apiClient.post(`/porch/groups/${groupId}/events`, body);
+    return data;
+  },
+  async groupEvents(groupId: string): Promise<{ upcoming: PorchPost[]; past: PorchPost[] }> {
+    const { data } = await apiClient.get<{ upcoming: PorchPost[]; past: PorchPost[] }>(`/porch/groups/${groupId}/events`);
+    return data;
+  },
+
   // ---- highlights (WP-P2.4)
   async myHighlights(): Promise<Highlight[]> {
     const { data } = await apiClient.get<Highlight[]>("/porch/me/highlights");
@@ -1016,6 +1070,8 @@ export interface PostCardSummary {
   subtitle: string;
   thumb: string | null;
   href: string;
+  /** The post's groups that are yours ("Family · Fishing"), for "Posted in …". */
+  where?: string;
 }
 
 /**

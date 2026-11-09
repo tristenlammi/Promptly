@@ -25,7 +25,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, activity, compose, core, deps, events, groups, handoffs, highlights, media, pins, posts, prefs, reports, search, stories, tags, talk
+from . import access, activity, compose, core, deps, events, groups, handoffs, highlights, media, pins, plans, posts, prefs, reports, search, stories, tags, talk
 from .deps import require_porch
 from .models import PorchGroup, PorchGroupMember, PorchProfile
 
@@ -44,6 +44,7 @@ router.include_router(reports.router)
 router.include_router(stories.router)
 router.include_router(highlights.router)
 router.include_router(pins.router)
+router.include_router(plans.router)
 
 
 def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:

@@ -182,14 +182,21 @@ async def _group_rows(db: AsyncSession, post: PorchPost) -> tuple[list[PorchGrou
     return groups, rows
 
 
-async def post_created(db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool) -> int:
+async def post_created(
+    db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool,
+    skip: set[uuid.UUID] | None = None,
+) -> int:
     """A new post (``created``) or a changed one: tag requests, mentions,
     and — for a new post — "All new posts" bells and "Notify me when they
-    post". Returns how many pushes went."""
-    return await _guarded("post", _post_created(db, post, mentioned, tagged, created=created))
+    post", never to ``skip`` (people just invited to the event it carries:
+    Calendar's invite told them). Returns how many pushes went."""
+    return await _guarded("post", _post_created(db, post, mentioned, tagged, created=created, skip=skip or set()))
 
 
-async def _post_created(db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool) -> int:
+async def _post_created(
+    db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool,
+    skip: set[uuid.UUID],
+) -> int:
     author = await db.get(User, post.author_id)
     if author is None or post.deleted_at is not None:
         return 0
@@ -203,7 +210,7 @@ async def _post_created(db: AsyncSession, post: PorchPost, mentioned: Iterable[s
         groups, rows = await _group_rows(db, post)
         alerts = set((await db.execute(select(PorchAlert.user_id).where(PorchAlert.author_id == author.id))).scalars())
         bells = {m.user_id for ms in rows.values() for m in ms if m.notify == "all"}
-        followers = (alerts | bells) & audience - tagged_ - mentioned_
+        followers = (alerts | bells) & audience - tagged_ - mentioned_ - skip
     who = tagged_ | mentioned_ | followers
     if not who:
         return 0

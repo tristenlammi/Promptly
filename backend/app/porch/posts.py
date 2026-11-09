@@ -96,11 +96,14 @@ async def posts_out(db: AsyncSession, viewer: User, posts: list[PorchPost]) -> l
     await talk.decorate(db, viewer, posts, out)
     await tags.decorate(db, viewer, posts, out)
     # Pins (WP-P3.1): the groups you run that it's in, pinned there or not.
-    from . import pins
+    from . import pins, plans
 
     pinned = await pins.pin_groups(db, viewer, posts)
+    # Its event's card (WP-P3.2), read live from Calendar.
+    events = await plans.cards(db, viewer, posts)
     for p, d in zip(posts, out):
         d["pin_groups"] = pinned.get(p.id, [])
+        d["event"] = events.get(p.id)
     return out
 
 
@@ -499,9 +502,12 @@ async def _replace_media(db: AsyncSession, user: User, post: PorchPost, items: l
 
 
 @router.delete("/posts/{post_id}", status_code=204)
-async def delete_post(post_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_porch)) -> None:
+async def delete_post(
+    post_id: uuid.UUID, cancel_event: bool = False, db: AsyncSession = Depends(get_db), user: User = Depends(require_porch),
+) -> None:
     """Delete a post (yours, or one where you're an admin of every group
-    it's in). The photos stay in the poster's library."""
+    it's in). The photos stay in the poster's library. ``cancel_event``: the
+    event it carries is cancelled too (WP-P3.2; only its organiser can)."""
     post = await access.load_post(db, user, post_id)
     if post.author_id != user.id:
         gids = set(
@@ -517,6 +523,15 @@ async def delete_post(post_id: uuid.UUID, db: AsyncSession = Depends(get_db), us
         if not gids or not gids <= admin_of:
             raise core.forbidden("Only the person who posted it, or an admin of every group it's in, can delete it")
     audience = await access.audience_ids(db, post)
+    if cancel_event and post.event_id is not None:
+        from app.calendars import service as cal_service
+        from app.calendars.models import CalEvent
+
+        ev = await db.get(CalEvent, post.event_id)
+        if ev is not None:
+            if ev.created_by != user.id:
+                raise core.forbidden("Only the person who planned the event can cancel it")
+            await cal_service.delete_event(db, user, ev.id)
     post.deleted_at = core.now()
     await db.commit()
     await core.publish(audience, {"type": "post_change", "post_id": str(post.id)})

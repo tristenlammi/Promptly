@@ -28,6 +28,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Replying to a Porch story: send a message or one of six quick reactions from under someone's story, and it goes to your one-to-one conversation with them in Rooms, with the story attached while it's up ("This story has ended" after).
 - Porch highlights and your story archive: every story you post is kept privately for you (Profile → Story archive), and you can keep some on your profile as named highlights with a cover. Each story in a highlight still shows only to the people in the groups it went to, so Mum sees the family ones and your mates theirs. Profiles also show a ring round the picture while someone has a story up.
 - Pinned posts in Porch groups: a group's admins can pin up to three posts to the top of the group's page (never the feed), from a post's "…" menu.
+- Porch group events: plan an event in a group (the group's Event button, or Event when posting to one group) and it goes in Calendar with everyone in the group invited (not for Everyone, unless you choose), on a post with a card showing who's going and Going · Maybe · Can't go. Anyone in the group can answer from the card, someone who joins later too, and it lands in their calendar. A group's Events tab lists what's coming up. Make this an event on your own post now puts the card on the post, and can invite everyone who sees it. Deleting the event leaves "Cancelled" on the post; deleting the post can cancel the event too.
 
 ## [0.34.0] - 2026-11-09
 
