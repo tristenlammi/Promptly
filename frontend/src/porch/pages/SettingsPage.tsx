@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 
 import { porchApi, type NotificationSettings, type PushKind, type PushMode } from "@/api/porch";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { IosPushNote } from "@/components/pwa/IosPushNote";
 import { EmptyState, ItemButton, List, Section } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -55,6 +56,8 @@ function ModeSwitch({ label, value, onChange, disabled }: { label: string; value
 /** Whether this device gets notifications at all. */
 function ThisDevice() {
   const push = usePushSubscription();
+  // iPhone in Safari can't get push until Porch is on the Home Screen.
+  if (!push.loading && !push.supported && push.serverConfigured !== false) return <IosPushNote appName="Porch" what="Porch notifications" />;
   if (push.loading || !push.supported || push.serverConfigured !== true || push.subscribed) return null;
   if (push.permission === "denied") {
     return (
