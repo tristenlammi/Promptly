@@ -27,6 +27,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Changed
 <!-- New-member onboarding (onboard-fixes) -->
+- First sign-in for someone new now opens on Today with a short welcome: what Promptly is, how to put it on this phone, and a button to message the person who set it up (and Porch). It replaces the "Pick your apps" question.
+- Starting a new message in Rooms now lists the people on your Promptly straight away, instead of an empty search.
 - Admin → Users: the create form checks the password against the same rules as the server and shows them, and the role choices are described in plain words.
 
 ### Fixed
