@@ -10,6 +10,8 @@ import { addUsers } from "@/calendar/data";
 import { addDays, fmt, parseYmd, sameDay, timeLabel } from "@/calendar/dates";
 import { CAL_ACCENT, describeRepeat } from "@/calendar/model";
 import { RsvpButtons } from "@/calendar/components/ui";
+import { mapsSearchLink } from "@/maps/links";
+import { useMapsReady } from "@/maps/useMapsReady";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -168,12 +170,7 @@ export function EventCard({ eventId, fallback, meId, users }: { eventId: string;
                   <span className="min-w-0 truncate">{describeRepeat(ev.repeat, start)}</span>
                 </p>
               )}
-              {ev.location && (
-                <p className="flex items-start gap-1.5 text-xs text-[var(--text-muted)]">
-                  <MapPin className="mt-px h-3.5 w-3.5 shrink-0" />
-                  <span className="min-w-0 truncate">{ev.location}</span>
-                </p>
-              )}
+              {ev.location && <Where text={ev.location} />}
             </div>
           </div>
 
@@ -255,5 +252,22 @@ function CardSkeleton() {
       </div>
       <span className="block h-10 border-t border-[var(--border)]" />
     </div>
+  );
+}
+
+/** Where it is: a link into P Maps when Maps works here, else plain text. */
+function Where({ text }: { text: string }) {
+  const mapsReady = useMapsReady();
+  return (
+    <p className="flex items-start gap-1.5 text-xs text-[var(--text-muted)]">
+      <MapPin className="mt-px h-3.5 w-3.5 shrink-0" />
+      {mapsReady ? (
+        <a href={mapsSearchLink(text)} target="_blank" rel="noreferrer noopener" title="Open in P Maps" className="min-w-0 truncate hover:text-[var(--text)] hover:underline">
+          {text}
+        </a>
+      ) : (
+        <span className="min-w-0 truncate">{text}</span>
+      )}
+    </p>
   );
 }

@@ -100,6 +100,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Promptly for Android: P Porch, a home-screen launcher (turn it on in Choose apps) that's also in Android's share sheet, so photos and videos shared from another app open in Porch's composer.
 <!-- Nav badges -->
 - Sidebar count badges: a small terracotta number on the Tasks, Mail, Rooms and Porch rows of the sidebar (and the phone menu, and the sidebar beside the Passwords vault), on the icon when the sidebar is collapsed. Tasks counts what's due today or overdue (in your time zone), Mail your unread Inbox conversations, Rooms your unread messages and mentions plus missed calls you haven't looked at, and Porch new posts in your feed plus new Activity (comments, replies, mentions, reactions, invites and tag requests). It goes away when there's nothing new, shows 99+ past 99, and updates as you read, tick things off or open the app.
+<!-- Calendar: location suggestions (cal-location) -->
+- Calendar: the Location box fills in as you type, from your saved P Maps places (Home, Work, favourites), contacts with an address, and P Maps search (addresses and the businesses OpenStreetMap knows), nearest to you first; anything you type still works as it is. The same box is in Mail's Add to calendar, and an event's place opens in P Maps only when Maps is set up.
 
 ### Changed
 <!-- Calls (DM calls), WP-D5 -->

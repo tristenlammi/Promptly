@@ -3,6 +3,7 @@ import { Loader2, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { ModelSelector } from "@/components/chat/ModelSelector";
+import { LocationInput } from "@/components/maps/LocationInput";
 import { useSelectedModel } from "@/store/modelStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -57,7 +58,7 @@ export function EventSheet({ accountId, threadKey, subject, onClose }: { account
         <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="Starts" className={FIELD} />
         <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} disabled={!time} aria-label="Ends" className={`${FIELD} disabled:opacity-50`} />
       </div>
-      <input value={place} onChange={(e) => setPlace(e.target.value)} maxLength={500} placeholder="Where" aria-label="Where" className={FIELD} />
+      <LocationInput value={place} onChange={setPlace} maxLength={500} placeholder="Where" aria-label="Where" unstyled inlineList className={FIELD} />
       <p className="px-1 text-xs text-[var(--text-muted)]">{time ? "" : "With no time, it's added as an all-day event. "}Check the details: AI can get them wrong.</p>
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]">Cancel</button>

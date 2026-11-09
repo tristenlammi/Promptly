@@ -1,4 +1,5 @@
 import { mapsSearchLink } from "@/maps/links";
+import { useMapsReady } from "@/maps/useMapsReady";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, BellOff, CalendarDays, ClipboardList, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Tag as TagIcon, Text, Trash2, Users, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -44,6 +45,8 @@ export function EventDetail({
   const users = useCalUsers((s) => s.users);
   const refresh = useRefreshEvents();
   const [busy, setBusy] = useState(false);
+  // The place opens in P Maps only when Maps works here; else it's plain text.
+  const mapsReady = useMapsReady(!!ev.location);
   const cal = b.calendars.find((c) => c.id === ev.calendar_id);
   const organiser = ev.created_by ? users[ev.created_by] : null;
   const iOrganise = ev.created_by === b.me.id;
@@ -181,14 +184,19 @@ export function EventDetail({
 
       {ev.location && (
         <Row icon={<MapPin className="h-4 w-4" />}>
-          <a
-            href={mapsSearchLink(ev.location)}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="break-words text-[var(--item-accent)] hover:underline"
-          >
-            {ev.location}
-          </a>
+          {mapsReady ? (
+            <a
+              href={mapsSearchLink(ev.location)}
+              target="_blank"
+              rel="noreferrer noopener"
+              title="Open in P Maps"
+              className="break-words text-[var(--item-accent)] hover:underline"
+            >
+              {ev.location}
+            </a>
+          ) : (
+            <span className="break-words">{ev.location}</span>
+          )}
         </Row>
       )}
 
