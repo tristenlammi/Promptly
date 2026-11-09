@@ -197,15 +197,17 @@ test("a Location question: typed on a phone without an account, and a signed-in 
   await page.getByRole("button", { name: "Submit" }).click();
   await expect(page.getByText("This question needs an answer.")).toBeVisible();
   const box = page.getByRole("combobox", { name: "Where should we pick you up?" });
-  await box.fill("12 Smith St, Hobart");
+  const searched = page.waitForRequest((r) => new URL(r.url()).pathname === `/api/f/${token}/places`, { timeout: 10_000 });
+  await box.click();
+  await box.pressSequentially("12 Smith St, Hobart", { delay: 20 });
+  await searched;
   await page.getByRole("combobox", { name: "Which suburb?" }).fill("Sandy Bay");
-  await page.waitForTimeout(600);
+  await expect(box).toHaveValue("12 Smith St, Hobart");
   await noSidewaysScroll(page);
   await page.getByRole("button", { name: "Submit" }).click();
   await expect(page.getByText("Your answer has been sent.")).toBeVisible({ timeout: 20_000 });
   // Someone without an account only ever uses the form's own place search.
   expect(asked.filter((p) => p.startsWith("/api/maps") || p.startsWith("/api/people"))).toEqual([]);
-  expect(asked.some((p) => p === `/api/f/${token}/places`)).toBe(true);
   await context.close();
   expect(found).toEqual([]);
 
@@ -240,4 +242,80 @@ test("a Location question: typed on a phone without an account, and a signed-in 
   await expect(bob.getByText("Your answer has been sent.")).toBeVisible({ timeout: 20_000 });
   const pl = await (await alice.request.get(`/api/forms/${fileId}/places`, { headers: { Authorization: auth } })).json();
   expect(pl.places).toEqual([{ number: 2, text: "7 Wattle Rd, Lindisfarne", lat: -42.85, lon: 147.36, question_id: "where" }]);
+});
+
+// ---------------------------------------------------------------- WP-F2.3 / F2.4
+
+test("a quiz: answered on a phone, marked by hand, released, and seen from the saved link", async ({ alice, browser }) => {
+  test.setTimeout(240_000);
+  const auth = await bearer(alice);
+  const title = `Trivia night ${stamp}`;
+  const mc = q("cap", "multiple_choice", "Capital of Australia?", {
+    options: [opt("syd", "Sydney"), opt("cbr", "Canberra"), opt("mel", "Melbourne")], other: false, shuffle: false, branching: false,
+  }, true, { quiz: { points: 2, key: { options: ["cbr"] }, feedback_right: "Yes!", feedback_wrong: "It's Canberra." } });
+  const sum = q("sum", "short_text", "What is 6 × 7?", {
+    validation: { kind: "number", min: null, max: null, integer: false }, min_length: null, max_length: null,
+  }, true, { quiz: { points: 1, key: { accept: ["42"] }, feedback_right: "", feedback_wrong: "" } });
+  const why = q("why", "paragraph", "Why do leaves fall?", { min_length: null, max_length: 5000 }, false,
+    { quiz: { points: 2, key: null, feedback_right: "", feedback_wrong: "" } });
+  const { fileId, token } = await makeForm(alice, auth, title, [mc, sum, why], {
+    audience: "link",
+    quiz: { release: "later", show_score: true, show_right_wrong: true, show_answers: true, show_points: true },
+  });
+
+  // The builder shows it's a quiz, and each question's key.
+  await alice.goto(`/files/form/${fileId}`);
+  await expect(alice.getByTestId("quiz-badge")).toHaveText(/Quiz · 5 points/, { timeout: 20_000 });
+  await expect(alice.getByText("2 points · key set").first()).toBeVisible();
+
+  // Someone with the link, on a phone: no key ever reaches the page.
+  const { context, page } = await stranger(browser);
+  const bodies: string[] = [];
+  page.on("response", async (r) => {
+    if (r.url().includes(`/api/f/${token}`) && r.request().method() === "GET") bodies.push(await r.text().catch(() => ""));
+  });
+  await page.goto(`/f/${token}`);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 20_000 });
+  expect(bodies.join("")).not.toContain("Canberra.\"");
+  expect(bodies.join("")).not.toContain("\"accept\":[\"42\"]");
+  expect(bodies.join("")).not.toContain("\"quiz\":{\"points\"");
+  const found = await scanBoth(page, "quiz answer page (phone)");
+  await page.getByRole("radio", { name: "Canberra" }).check();
+  await page.getByLabel("What is 6 × 7?").fill("42");
+  await page.getByLabel("Why do leaves fall?").fill("Less sunlight in autumn.");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByTestId("quiz-waiting")).toBeVisible({ timeout: 20_000 });
+  const resultUrl = await page.getByLabel("Save this link to see your score later").inputValue();
+  expect(resultUrl).toContain(`/f/${token}?result=`);
+  found.push(...(await scanBoth(page, "quiz confirmation (phone)")));
+  await context.close();
+
+  // The owner marks the paragraph in one pass through "Next to mark", then releases.
+  await alice.goto(`/files/form/${fileId}?tab=responses`);
+  const strip = alice.getByTestId("scores-strip");
+  await expect(strip).toBeVisible({ timeout: 20_000 });
+  await strip.getByRole("button", { name: "1 to mark" }).click();
+  await expect(alice.getByTestId("answer-score")).toContainText("3 / 5");
+  await alice.getByTestId("mark-why").getByRole("button", { name: "Right" }).click();
+  await expect(alice.getByTestId("answer-score")).toContainText("5 / 5");
+  await alice.getByRole("button", { name: "Next to mark" }).click();
+  await expect(alice.getByText("Everything's marked.")).toBeVisible();
+  await alice.getByRole("button", { name: "Summary" }).click();
+  await alice.getByTestId("scores-strip").getByRole("button", { name: "Release scores" }).click();
+  await expect(alice.getByText("Released 1 score.")).toBeVisible();
+  await alice.getByRole("button", { name: "Scores", exact: true }).click();
+  await expect(alice.getByTestId("scores-list")).toContainText("5 / 5");
+
+  // Later, from the saved link: the score, ticks, right answers, feedback.
+  const later = await stranger(browser);
+  await later.page.goto(resultUrl);
+  await expect(later.page.getByTestId("quiz-score")).toContainText("5 out of 5", { timeout: 20_000 });
+  await expect(later.page.getByText("Yes!")).toBeVisible();
+  await noSidewaysScroll(later.page);
+  found.push(...(await scanBoth(later.page, "quiz result (phone)")));
+  // A made-up link shows nothing of anyone's.
+  await later.page.goto(`/f/${token}?result=1.not-a-real-key`);
+  await expect(later.page.getByText("There's no score for you on this device.")).toBeVisible({ timeout: 20_000 });
+  await later.context.close();
+  expect(found).toEqual([]);
 });

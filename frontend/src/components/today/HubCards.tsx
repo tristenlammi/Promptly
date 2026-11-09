@@ -812,6 +812,12 @@ export function FormsCard({ f }: { f: NonNullable<Sections["forms"]> }) {
           <span className="shrink-0 text-xs text-[var(--text-muted)]">closes {timeLabel(new Date(x.closes_at))}</span>
         </Link>
       ))}
+      {(f.to_mark ?? []).map((x) => (
+        <Link key={`m-${x.url}`} to={x.url} className="flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+          <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{x.title}</span>
+          <span className="shrink-0 text-xs font-medium text-[var(--accent-text)]">{x.count === 1 ? "1 answer to mark" : `${x.count} answers to mark`}</span>
+        </Link>
+      ))}
     </HubCard>
   );
 }

@@ -281,6 +281,8 @@ export interface FormTemplateInfo {
   description: string;
   accent: Accent;
   questions: number;
+  /** A quiz template (answer keys and points set). */
+  quiz?: boolean;
 }
 
 export interface FormCard {
@@ -302,6 +304,9 @@ export interface FormCard {
   starred: boolean;
   folder_id: string | null;
   owner: string | null;
+  /** A quiz, and how many answers wait for a hand mark. */
+  quiz?: boolean;
+  to_mark?: number;
 }
 
 /** Who sent an answer: an account, an email they typed (not checked),

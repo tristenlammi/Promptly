@@ -45,9 +45,10 @@ class DraftFormTool(Tool):
     timeout_seconds = 30.0
     max_content_chars = 1_500
     description = (
-        "Make a DRAFT form (like Google Forms: RSVP, sign-up sheet, feedback, order form…) in the user's Forms folder, "
-        "with the questions you write. The draft isn't taking answers and has no link — the user opens it, checks it "
-        "and sends it. Use when they ask you to make or set up a form, survey, sign-up or RSVP."
+        "Make a DRAFT form (like Google Forms: RSVP, sign-up sheet, feedback, order form, quiz…) in the user's Forms "
+        "folder, with the questions you write. The draft isn't taking answers and has no link — the user opens it, "
+        "checks it and sends it. For a quiz, give each question its right answer and points: the user is shown each "
+        "answer as 'AI suggested — check it'. Use when they ask you to make or set up a form, survey, quiz, sign-up or RSVP."
     )
     parameters: dict[str, Any] = {
         "type": "object",
@@ -72,6 +73,11 @@ class DraftFormTool(Tool):
                                  "description": "For the grid kinds: the rows (at most 20)."},
                         "columns": {"type": "array", "items": {"type": "string"},
                                     "description": "For the grid kinds: short column labels (at most 8)."},
+                        "answer": {"type": "string",
+                                   "description": "For a quiz: the right option's text (or the accepted short answer)."},
+                        "answers": {"type": "array", "items": {"type": "string"},
+                                    "description": "For a quiz checkboxes question: every right option's text."},
+                        "points": {"type": "integer", "description": "For a quiz: points for this question (1-100)."},
                     },
                     "required": ["kind", "title"],
                 },
@@ -83,7 +89,7 @@ class DraftFormTool(Tool):
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         from app.files.system_folders import ensure_forms_folder
         from app.forms import service
-        from app.forms.ai import items_from
+        from app.forms.ai import is_quiz_draft, items_from
         from app.forms.definition import DefinitionError, blank
 
         _guard_write(ctx)
@@ -96,16 +102,22 @@ class DraftFormTool(Tool):
         defn.update(draft)
         folder = await ensure_forms_folder(ctx.db, ctx.user)
         # A draft: not taking answers, no link (only the person sends it).
+        quiz = is_quiz_draft(draft["items"])
+        settings = {"quiz": {"release": "now", "show_score": True, "show_right_wrong": True, "show_answers": False,
+                             "show_points": False}} if quiz else None
         shell, form = await service.create_form(
-            ctx.db, owner=ctx.user, folder_id=folder.id, definition=defn, accepting=False
+            ctx.db, owner=ctx.user, folder_id=folder.id, definition=defn, accepting=False, settings=settings
         )
         await ctx.db.commit()
         n = sum(1 for i in form.definition.get("items") or [] if i.get("kind") not in ("section", "text", "image"))
         url = f"/files/form/{shell.id}"
         return ToolResult(
             content=(
-                f"Made a draft form “{draft['title']}” with {n} question{'s' if n != 1 else ''} in the Forms folder. "
-                "It isn't taking answers and has no link yet: the user opens it to check it, then sends it. "
+                f"Made a draft {'quiz' if quiz else 'form'} “{draft['title']}” with {n} question{'s' if n != 1 else ''} "
+                "in the Forms folder. It isn't taking answers and has no link yet: the user opens it to check it, then "
+                "sends it. "
+                + ("Each answer you suggested is marked 'AI suggested — check it' until they look. " if quiz else "")
+                + 
                 f"Link for the user: {url}"
             ),
             meta={
@@ -192,6 +204,20 @@ class ReadFormResponsesTool(Tool):
         s = await results.summary(ctx.db, form)
         title = (form.definition or {}).get("title") or "Untitled form"
         lines = [f"Form “{title}”: {s['total']} answer{'s' if s['total'] != 1 else ''}."]
+        if form.quiz is not None:
+            # Quiz stats only — never anyone's own score (that's the Scores
+            # view, for people who can open the Responses).
+            from app.forms.scores import stats
+
+            st = await stats(ctx.db, form)
+            lines.append(
+                f"A quiz out of {st['max']} points: {st['marked']} marked, average {st['average']}, "
+                f"middle score {st['median']}, top score {st['top']}, {st['pending']} still to mark."
+            )
+            if st["histogram"]:
+                lines.append("Scores: " + ", ".join(f"{b['label']}: {b['count']}" for b in st["histogram"]))
+            if st["most_missed"]:
+                lines.append("Most missed: " + "; ".join(f"{m['title']} ({m['right_pct']}% right)" for m in st["most_missed"]))
         for q in s["questions"]:
             head = f"\n## {q['title']}{' (deleted question)' if q['deleted'] else ''} — {q['answered']} answered"
             lines.append(head)

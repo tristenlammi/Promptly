@@ -111,7 +111,7 @@ async def test_built_in_templates(client, db, user):
     r = await client.get("/api/forms/templates", headers=_auth(user))
     assert r.status_code == 200
     keys = [t["key"] for t in r.json()["built_in"]]
-    assert keys == ["rsvp", "signup", "feedback", "contact", "registration", "order"]
+    assert keys == ["rsvp", "signup", "feedback", "contact", "registration", "order", "quiz", "family_trivia"]
     for key in keys:
         f = await _new_form(client, user, form_template=key)
         form = await _form(db, f["id"])

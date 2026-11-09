@@ -181,12 +181,13 @@ def test_search_text_and_assets():
 def test_templates_are_valid():
     from app.forms.templates import KEYS, built_in, listing
 
-    assert len(KEYS) == 6
+    # Six from phase 1, and the Quiz and Family trivia quizzes (WP-F2.4).
+    assert len(KEYS) == 8
     for key in KEYS:
         defn, settings = built_in(key)
         assert defn["items"]
         assert set(settings) <= {
-            "one_per_person", "allow_edit", "show_remaining", "confirmation", "audience"
+            "one_per_person", "allow_edit", "show_remaining", "confirmation", "audience", "quiz"
         }
     assert built_in("nope") is None
     assert [t["key"] for t in listing()] == list(KEYS)

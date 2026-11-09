@@ -115,6 +115,10 @@ export function FormRenderer({
   className,
 }: FormRendererProps) {
   const sections = useMemo(() => sectionsOf(definition), [definition]);
+  const hasPlace = definition.items.some((i) => i.kind === "location" && !i.deleted);
+  useEffect(() => {
+    if (hasPlace) void loadLocationInput();
+  }, [hasPlace]);
   const [answers, setAnswers] = useState<Answers>(initialAnswers ?? {});
   const [path, setPath] = useState<number[]>([0]);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -965,8 +969,24 @@ function Choices(p: QuestionProps & { multi: boolean; describedBy?: string }) {
   );
 }
 
-// Loaded only by a form that has a Location question (the answer page stays light).
-const LocationInput = lazy(() => import("@/components/maps/LocationInput").then((m) => ({ default: m.LocationInput })));
+// Loaded only by a form that has a Location question (the answer page stays
+// light): fetched as soon as such a form is shown, before anyone types.
+const loadLocationInput = () => import("@/components/maps/LocationInput").then((m) => ({ default: m.LocationInput }));
+const LocationInput = lazy(loadLocationInput);
+
+/** Puts the caret back in the place box when it replaces the plain one
+ *  someone was already typing in. */
+function RefocusOnLoad({ id, when }: { id: string; when: { current: boolean } }) {
+  useEffect(() => {
+    if (!when.current) return;
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    el?.focus();
+    const n = el?.value.length ?? 0;
+    el?.setSelectionRange(n, n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
 
 const ASK_PLACEHOLDER: Record<LocationConfig["ask"], string> = {
   address: "Start typing an address",
@@ -992,8 +1012,11 @@ function LocationControl(p: QuestionProps & { fieldProps: FieldProps }) {
     [places, item.id]
   );
   const fp = p.fieldProps as { id: string; "aria-invalid"?: true; "aria-describedby"?: string; "aria-required"?: boolean };
+  const typing = useRef(false);
   const plain = (
     <input
+      onFocus={() => (typing.current = true)}
+      onBlur={() => (typing.current = false)}
       id={fp.id}
       className="pf-input"
       value={v?.text ?? ""}
@@ -1029,6 +1052,7 @@ function LocationControl(p: QuestionProps & { fieldProps: FieldProps }) {
           onChange(s.lat != null && s.lon != null ? { text, lat: s.lat, lon: s.lon, picked: true } : { text, picked: false });
         }}
       />
+      <RefocusOnLoad id={fp.id} when={typing} />
       </Suspense>
       {v?.picked && (
         <span className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-sm" style={{ background: "var(--pf-selected)" }}>

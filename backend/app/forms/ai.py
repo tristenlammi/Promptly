@@ -48,7 +48,9 @@ uses (options for the three choice kinds; max/min_label/max_label for linear_sca
 rating; validation for short_text; include_time for date; mode for time; rows and columns
 for the two grids: at most 20 rows and 8 short columns, e.g. rows of days and columns of
 times). Use plain, friendly
-words. Keep it short: what's needed, nothing more. Never ask for passwords or bank details."""
+words. Keep it short: what's needed, nothing more. Never ask for passwords or bank details.
+For a quiz, also give each question its right answer and points: "answer": "the right option's
+text" (or "answers": [...] for checkboxes, or the accepted text for short_text) and "points": 1."""
 
 OPTIONS_SYSTEM = """You suggest the options for one multiple-choice question on a form.
 Reply with JSON only: {"options": ["...", "..."]}. Plain words, at most 20 options,
@@ -152,6 +154,33 @@ def _labels(raw: Any, most: int, chars: int) -> list[str]:
     return out
 
 
+def _key_from(raw: dict[str, Any], item: dict[str, Any]) -> dict[str, Any] | None:
+    """A model's suggested answer as a quiz key, marked "suggested" so the
+    builder shows "AI suggested this answer — check it" until the owner
+    looks. None when it gave no usable answer."""
+    kind = item["kind"]
+    try:
+        points = max(1, min(100, int(raw.get("points") or 1)))
+    except (TypeError, ValueError):
+        points = 1
+    given = raw.get("answers") if isinstance(raw.get("answers"), list) else raw.get("answer")
+    wanted = [str(x).strip().lower() for x in (given if isinstance(given, list) else [given]) if isinstance(x, (str, int, float))]
+    wanted = [w for w in wanted if w]
+    if not wanted:
+        return None
+    key: dict[str, Any]
+    if kind in ("multiple_choice", "dropdown", "checkboxes"):
+        ids = [o["id"] for o in item["config"]["options"] if o["label"].strip().lower() in wanted]
+        if not ids:
+            return None
+        key = {"options": ids}
+    elif kind == "short_text":
+        key = {"accept": [_s(w, 300) for w in (given if isinstance(given, list) else [given]) if str(w).strip()][:20]}
+    else:
+        return None
+    return {"points": points, "key": key, "feedback_right": "", "feedback_wrong": "", "suggested": True}
+
+
 def items_from(data: Any) -> dict[str, Any]:
     """``{title, description, items}`` from what a model gave: every item
     checked on its own (a broken one is left out, not the whole draft),
@@ -165,6 +194,9 @@ def items_from(data: Any) -> dict[str, Any]:
         it = _item(raw)
         if it is None:
             continue
+        q = _key_from(raw, it)
+        if q is not None:
+            it["quiz"] = q
         try:
             validate_definition({"title": "x", "items": [it]})
         except DefinitionError:
@@ -179,6 +211,12 @@ def items_from(data: Any) -> dict[str, Any]:
     description = _s(data.get("description"), 2000)
     clean = validate_definition({"title": title, "description": description, "items": items})
     return {"title": title, "description": description, "items": clean["items"]}
+
+
+def is_quiz_draft(items: list[dict[str, Any]]) -> bool:
+    """A draft with suggested answer keys is a quiz (shown and released
+    straight away, as the owner can change)."""
+    return any(isinstance(i.get("quiz"), dict) for i in items)
 
 
 def options_from(data: Any) -> list[dict[str, Any]]:

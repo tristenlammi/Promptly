@@ -47,6 +47,7 @@ const MapCardModal = lazy(() => import("@/maps/MapCardModal").then((m) => ({ def
 
 import { ChoiceBars, ScaleColumns, pct, type ChoiceRow } from "./charts";
 import { FileList, FileStrip } from "./Files";
+import { QuestionMark, ScoresStrip, ScoresView, nextToMark } from "./Scores";
 import { Summarise } from "./Summarise";
 import { SheetCard } from "./SheetCard";
 
@@ -61,7 +62,7 @@ import { SheetCard } from "./SheetCard";
  * (React escapes them; links aren't made clickable).
  */
 
-type ViewKind = "summary" | "question" | "individual";
+type ViewKind = "summary" | "question" | "individual" | "scores";
 
 const TEXTY = new Set(["short_text", "paragraph"]);
 
@@ -149,6 +150,19 @@ export function ResponsesTab({
     setNumber(n);
     setView("individual");
   };
+  // "Next to mark": the next answer with a paragraph waiting (a quiz).
+  const goNextToMark = async (from: number | null) => {
+    try {
+      const n = await nextToMark(fileId, from);
+      if (n === null) {
+        toast.success("Everything's marked.");
+        return;
+      }
+      showAnswer(n);
+    } catch (e) {
+      toast.error(extractError(e));
+    }
+  };
 
   return (
     <div className="promptly-scroll min-h-0 flex-1 overflow-y-auto bg-[var(--bg)]">
@@ -182,8 +196,18 @@ export function ResponsesTab({
           </div>
         ) : (
           <>
-            <ViewSwitch view={view} onView={setView} />
+            <ViewSwitch view={view} onView={setView} quiz={!!data.quiz} />
+            {view === "summary" && data.quiz && (
+              <ScoresStrip
+                fileId={fileId}
+                stats={data.quiz}
+                canMark={!!data.can_mark}
+                onScores={() => setView("scores")}
+                onNextToMark={() => void goNextToMark(null)}
+              />
+            )}
             {view === "summary" && <SummaryView fileId={fileId} summary={data} narrow={isPhone} onQuestion={openQuestion} onAnswer={showAnswer} />}
+            {view === "scores" && <ScoresView fileId={fileId} total={data.total} onAnswer={showAnswer} />}
             {view === "question" && (
               <QuestionView
                 fileId={fileId}
@@ -203,6 +227,8 @@ export function ResponsesTab({
                 isPhone={isPhone}
                 sheetLinked={!!data.sheet?.file_id}
                 highlight={openFile}
+                canMark={!!data.can_mark}
+                onNextToMark={(from) => void goNextToMark(from)}
               />
             )}
           </>
@@ -402,9 +428,10 @@ function NotifyButton({ fileId, settings: saved }: { fileId: string; settings: N
   );
 }
 
-function ViewSwitch({ view, onView }: { view: ViewKind; onView: (v: ViewKind) => void }) {
+function ViewSwitch({ view, onView, quiz }: { view: ViewKind; onView: (v: ViewKind) => void; quiz: boolean }) {
   const items: { key: ViewKind; label: string }[] = [
     { key: "summary", label: "Summary" },
+    ...(quiz ? [{ key: "scores" as const, label: "Scores" }] : []),
     { key: "question", label: "Question" },
     { key: "individual", label: "Individual" },
   ];
@@ -847,6 +874,8 @@ function IndividualView({
   isPhone,
   sheetLinked,
   highlight = null,
+  canMark = false,
+  onNextToMark,
 }: {
   fileId: string;
   number: number | null;
@@ -859,6 +888,9 @@ function IndividualView({
   sheetLinked: boolean;
   /** A file to pick out (opened from the sheet). */
   highlight?: string | null;
+  /** A quiz: you can mark (edit access). */
+  canMark?: boolean;
+  onNextToMark?: (from: number) => void;
 }) {
   const qc = useQueryClient();
   // Opened at one file (from the sheet): bring it into view once it's there.
@@ -937,6 +969,13 @@ function IndividualView({
     );
   }
   const r = nav;
+  const marks = r.quiz ?? null;
+  const onMarked = (m: NonNullable<OneResponse["quiz"]>) => {
+    qc.setQueryData<OneResponse>(["form-response", fileId, number, total], (cur) => (cur ? { ...cur, quiz: m } : cur));
+    qc.invalidateQueries({ queryKey: ["form-summary", fileId] });
+    qc.invalidateQueries({ queryKey: ["form-scores", fileId] });
+    if (m.pending === 0) toast.success(`Marked: ${m.score} / ${m.max}`);
+  };
   const navBtn = "inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-40";
   return (
     <div
@@ -981,6 +1020,13 @@ function IndividualView({
               {r.edited_at ? ` · changed ${whenWords(r.edited_at)}` : ""}
             </p>
           </div>
+          {marks && (
+            <p className="w-full text-sm font-semibold tabular-nums text-[var(--text)] sm:w-auto" data-testid="answer-score">
+              {marks.score} / {marks.max}
+              {marks.pending > 0 && <span className="ml-1 font-normal text-amber-700 dark:text-amber-400">({marks.pending} to mark)</span>}
+              {!marks.released && <span className="ml-1 font-normal text-[var(--text-muted)]">· not released</span>}
+            </p>
+          )}
           {canDelete && (
             <button
               type="button"
@@ -1002,10 +1048,24 @@ function IndividualView({
               <dd className={cn("mt-0.5 whitespace-pre-wrap break-words text-sm", a.answered ? "text-[var(--text)]" : "italic text-[var(--text-muted)]")}>
                 {a.answered && a.files ? <FileList fileId={fileId} files={a.files} highlight={highlight} /> : a.answered ? a.text : "No answer"}
               </dd>
+              {marks && marks.items[a.id] && (
+                <QuestionMark fileId={fileId} number={r.number} answer={a} marks={marks} canMark={canMark} onMarked={onMarked} />
+              )}
             </div>
           ))}
         </dl>
       </article>
+      {marks && canMark && onNextToMark && (
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={() => onNextToMark(r.number)}
+            className="inline-flex h-10 items-center gap-1 rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90"
+          >
+            Next to mark <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {isPhone && <p className="mt-2 text-center text-xs text-[var(--text-muted)]">Swipe left or right for the next answer.</p>}
     </div>
   );

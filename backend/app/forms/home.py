@@ -106,6 +106,11 @@ async def list_forms(db: AsyncSession, user: User, *, scope: Scope = "mine") -> 
         )
         new_counts = {fid: int(n) for fid, n in (await db.execute(q)).all()}
 
+    # Quizzes (WP-F2.4): "Quiz · 4 to mark".
+    from app.forms.scores import to_mark
+
+    marking = await to_mark(db, [form.id for _shell, form in rows if form.quiz is not None])
+
     owners: dict[uuid.UUID, str] = {}
     if scope == "shared":
         owner_ids = {shell.user_id for shell, _form in rows if shell.user_id}
@@ -142,6 +147,8 @@ async def list_forms(db: AsyncSession, user: User, *, scope: Scope = "mine") -> 
                 "starred": shell.starred_at is not None,
                 "folder_id": str(shell.folder_id) if shell.folder_id else None,
                 "owner": owners.get(shell.user_id) if scope == "shared" else None,
+                "quiz": form.quiz is not None,
+                "to_mark": marking.get(form.id, 0),
             }
         )
     return out

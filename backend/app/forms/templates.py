@@ -1,9 +1,10 @@
-"""The six built-in form templates (Forms home's "Start a new form" strip,
+"""The built-in form templates (Forms home's "Start a new form" strip,
 ``POST /api/files/office {kind: "form", form_template}``).
 
 Each is a definition plus the settings that make it work out of the box —
 an RSVP lets people change their answer, a sign-up sheet shows the places
-left. Quiz templates arrive with quizzes (phase 2).
+left, and the two quizzes (phase 2, WP-F2.4) come with their answer keys
+and points set and scores shown straight after sending.
 """
 from __future__ import annotations
 
@@ -30,6 +31,19 @@ def _opts(*labels: str, prefix: str = "o", limits: dict[str, int] | None = None,
 
 def _section(id_: str, title: str, description: str = "", after: str = "continue") -> dict:
     return {"id": id_, "kind": "section", "title": title, "description": description, "config": {"after": after}}
+
+
+def _quizq(id_: str, title: str, labels: tuple[str, ...], right: str, *, points: int = 1,
+           right_says: str = "", wrong_says: str = "") -> dict:
+    """A multiple-choice quiz question with its key set."""
+    opts = _opts(*labels, prefix=f"{id_}o")
+    key = [o["id"] for o in opts if o["label"] == right]
+    q = _q(id_, "multiple_choice", title, required=True, options=opts)
+    q["quiz"] = {"points": points, "key": {"options": key}, "feedback_right": right_says, "feedback_wrong": wrong_says}
+    return q
+
+
+_QUIZ_SETTINGS = {"release": "now", "show_score": True, "show_right_wrong": True, "show_answers": True, "show_points": False}
 
 
 _TEMPLATES: dict[str, dict[str, Any]] = {
@@ -174,6 +188,57 @@ _TEMPLATES: dict[str, dict[str, Any]] = {
     },
 }
 
+# Phase 2 (WP-F2.4): quizzes. Built-in templates can't carry pictures (a
+# form's pictures are its own files), so these are plain words.
+_TEMPLATES["quiz"] = {
+    "title": "Quiz",
+    "blurb": "Points, an answer key and scores.",
+    "definition": {
+        "title": "Quiz",
+        "description": "Answer the questions, then see how you did.",
+        "theme": {"accent": "violet"},
+        "items": [
+            _q("name", "short_text", "Your name", required=True),
+            _quizq("q1", "How many days are in a leap year?", ("365", "366", "364"), "366",
+                   right_says="Right: February gets a 29th.", wrong_says="It's 366: February gets a 29th."),
+            {**_q("q2", "short_text", "What is 7 × 8?", required=True,
+                  validation={"kind": "number", "min": None, "max": None, "integer": False}),
+             "quiz": {"points": 1, "key": {"accept": ["56"]}, "feedback_right": "", "feedback_wrong": "7 × 8 = 56."}},
+            {**_q("q3", "checkboxes", "Which of these are planets?", required=True,
+                  options=_opts("Mars", "The Moon", "Venus", "The Sun", prefix="q3o")),
+             "quiz": {"points": 2, "key": {"options": ["q3o1", "q3o3"]}, "feedback_right": "",
+                      "feedback_wrong": "Mars and Venus are planets; the Moon and the Sun aren't."}},
+            {**_q("q4", "paragraph", "In a sentence or two: why do we have seasons?", max_length=1000),
+             "quiz": {"points": 2, "key": None, "feedback_right": "", "feedback_wrong": ""}},
+        ],
+    },
+    "settings": {"one_per_person": True, "confirmation": "Thanks for taking the quiz!", "quiz": dict(_QUIZ_SETTINGS)},
+}
+_TEMPLATES["family_trivia"] = {
+    "title": "Family trivia",
+    "blurb": "Ten questions, answers and points set.",
+    "definition": {
+        "title": "Family trivia",
+        "description": "Ten questions for the whole family. No looking things up!",
+        "theme": {"accent": "teal"},
+        "items": [
+            _q("name", "short_text", "Your name", required=True),
+            _quizq("t1", "Which animal is known as the king of the jungle?", ("Tiger", "Lion", "Elephant", "Gorilla"), "Lion"),
+            _quizq("t2", "How many legs does a spider have?", ("6", "8", "10", "12"), "8"),
+            _quizq("t3", "What colour do you get when you mix blue and yellow?", ("Green", "Purple", "Orange", "Brown"), "Green"),
+            _quizq("t4", "Which planet is closest to the Sun?", ("Venus", "Earth", "Mercury", "Mars"), "Mercury"),
+            _quizq("t5", "How many minutes are in an hour?", ("50", "60", "100", "30"), "60"),
+            _quizq("t6", "What do bees make?", ("Milk", "Honey", "Silk", "Wax paper"), "Honey"),
+            _quizq("t7", "Which is the largest ocean?", ("Atlantic", "Indian", "Arctic", "Pacific"), "Pacific"),
+            _quizq("t8", "How many sides does a hexagon have?", ("5", "6", "7", "8"), "6"),
+            _quizq("t9", "What is frozen water called?", ("Steam", "Ice", "Fog", "Dew"), "Ice"),
+            _quizq("t10", "Which of these is a mammal?", ("Shark", "Dolphin", "Octopus", "Trout"), "Dolphin",
+                   right_says="Yes: dolphins breathe air and feed their young milk."),
+        ],
+    },
+    "settings": {"confirmation": "Thanks for playing!", "quiz": dict(_QUIZ_SETTINGS)},
+}
+
 KEYS = tuple(_TEMPLATES)
 
 
@@ -200,6 +265,7 @@ def listing() -> list[dict[str, Any]]:
                 "description": t["blurb"],
                 "accent": d["theme"]["accent"],
                 "questions": sum(1 for i in d["items"] if i["kind"] != "section"),
+                "quiz": "quiz" in t["settings"],
             }
         )
     return out
