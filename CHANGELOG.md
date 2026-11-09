@@ -99,7 +99,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Porch: report a post or comment from its menu. Admin → Porch has the reports queue (remove it, telling the poster why in their Activity, or keep it), Porch on or off, who can use it (everyone or chosen user groups), video limits, and the Everyone group's name. Server admins can also take a post out of Everyone, with a reason.
 - Promptly for Android: P Porch, a home-screen launcher (turn it on in Choose apps) that's also in Android's share sheet, so photos and videos shared from another app open in Porch's composer.
 <!-- Nav badges -->
-- Sidebar count badges: a small terracotta number on the Tasks, Mail, Rooms and Porch rows of the sidebar (and the phone menu), on the icon when the sidebar is collapsed. Tasks counts what's due today or overdue (in your time zone), Mail your unread Inbox conversations, Rooms your unread messages and mentions plus missed calls you haven't looked at, and Porch new posts in your feed plus new Activity (comments, replies, mentions, reactions, invites and tag requests). It goes away when there's nothing new, shows 99+ past 99, and updates as you read, tick things off or open the app.
+- Sidebar count badges: a small terracotta number on the Tasks, Mail, Rooms and Porch rows of the sidebar (and the phone menu, and the sidebar beside the Passwords vault), on the icon when the sidebar is collapsed. Tasks counts what's due today or overdue (in your time zone), Mail your unread Inbox conversations, Rooms your unread messages and mentions plus missed calls you haven't looked at, and Porch new posts in your feed plus new Activity (comments, replies, mentions, reactions, invites and tag requests). It goes away when there's nothing new, shows 99+ past 99, and updates as you read, tick things off or open the app.
 
 ### Changed
 <!-- Calls (DM calls), WP-D5 -->
@@ -127,6 +127,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes: a label's page opened while the label was new on the device stopped working once it was saved; it now keeps working.
 <!-- Nav badges -->
 - Rooms: the number on the Rooms app icon counted every unread message in rooms you'd set to mentions only; it now counts just the mentions of you there, the same number the Rooms app shows.
+<!-- Passwords: vault nav -->
+- Passwords: opened inside Promptly, it now has Promptly's normal sidebar (expanded, with New chat, Search, your pages and pinned apps in the same simple icons, folders, recent chats and your account) instead of a narrow strip with coloured app icons, and the same slide-in menu on a phone. It follows your collapsed or expanded choice, the same as the rest of Promptly.
+- Opening Passwords while you're in a voice call no longer drops the call: Passwords opens in a new tab and the call carries on in the first one.
 
 ## [0.33.0] - 2026-11-09
 

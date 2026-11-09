@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { badgeLabel, badgeText } from "@/lib/countBadge";
 
 import { CountBadge } from "./CountBadge";
+import { NavRowContent, rowName } from "./sidebarParts";
 
 describe("badgeText", () => {
   it("shows nothing for zero, nonsense or less", () => {
@@ -60,5 +61,28 @@ describe("CountBadge", () => {
     const row = renderToStaticMarkup(<CountBadge app="tasks" n={2} />);
     expect(row).not.toContain("absolute");
     expect(row).toContain("ml-auto");
+  });
+});
+
+describe("NavRowContent (both sidebars' rows)", () => {
+  it("puts the count at the end of an expanded row", () => {
+    const html = renderToStaticMarkup(<NavRowContent icon={<i />} label="Mail" count={{ app: "mail", n: 4 }} />);
+    expect(html).toContain(">Mail</span>");
+    expect(html).toContain('aria-label="4 unread"');
+    expect(html).toContain("ml-auto");
+  });
+  it("shows only the icon and a corner count in the rail", () => {
+    const html = renderToStaticMarkup(<NavRowContent icon={<i />} label="Mail" count={{ app: "mail", n: 4 }} rail />);
+    expect(html).not.toContain(">Mail<");
+    expect(html).toContain("absolute");
+  });
+  it("shows no badge at zero or without a count", () => {
+    expect(renderToStaticMarkup(<NavRowContent icon={<i />} label="Mail" count={{ app: "mail", n: 0 }} />)).not.toContain("data-badge");
+    expect(renderToStaticMarkup(<NavRowContent icon={<i />} label="Files" />)).not.toContain("data-badge");
+  });
+  it("names a rail link with its count", () => {
+    expect(rowName("Rooms", { app: "rooms", n: 3 })).toBe("Rooms, 3 unread");
+    expect(rowName("Rooms", { app: "rooms", n: 0 })).toBe("Rooms");
+    expect(rowName("Files")).toBe("Files");
   });
 });

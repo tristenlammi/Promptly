@@ -1,4 +1,4 @@
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -27,6 +27,8 @@ import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { voiceHarnessEnabled } from "@/pages/dev/flags";
 import { VoiceRoot } from "@/rtc/ui/VoiceRoot";
 import { CallRoot } from "@/rtc/call/ui/CallRoot";
+import { openInNewTab, useKeepVoiceForPasswords, voiceIsLive } from "@/rtc/voice/keepVoice";
+import { useUIStore } from "@/store/uiStore";
 
 // Route-level code splitting. Every page used to be imported eagerly,
 // so opening a chat downloaded the admin console, the automations flow
@@ -330,13 +332,28 @@ function MapsGate() {
   return <AppLayout />;
 }
 
-/** A full page load, so the vault never runs in the main app's document. */
+/** A full page load, so the vault never runs in the main app's document.
+ *  In a voice call that load would end the call, so the vault opens in a
+ *  new tab and this one goes back to where it was (rtc/voice/keepVoice.ts). */
 function LeaveForPasswords() {
+  const navigate = useNavigate();
+  const done = useRef(false);
   useEffect(() => {
-    window.location.replace(window.location.pathname + window.location.search + window.location.hash);
-  }, []);
+    if (done.current) return; // StrictMode runs this twice: one tab
+    done.current = true;
+    const here = window.location.pathname + window.location.search + window.location.hash;
+    if (voiceIsLive() && openInNewTab(here)) {
+      const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+      if (idx > 0) navigate(-1);
+      else navigate("/", { replace: true });
+      return;
+    }
+    window.location.replace(here);
+  }, [navigate]);
   return <FullScreenLoading />;
 }
+
+const closeMobileNav = () => useUIStore.getState().closeMobileNav();
 
 const MailApp = lazyWithRetry(
   () => import("@/mail/MailApp").then((m) => ({ default: m.MailApp })),
@@ -517,6 +534,8 @@ function useReturnAfterSignIn(status: string) {
 
 export default function App() {
   useAuthBootstrap();
+  // In a voice call, Passwords links open a new tab so the call stays up.
+  useKeepVoiceForPasswords(closeMobileNav);
   // Swap the active web manifest on /files* so the browser install
   // prompt targets the standalone "Promptly Files" PWA identity,
   // keeping the main Promptly (chat) install separate.

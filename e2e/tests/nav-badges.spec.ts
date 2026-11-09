@@ -3,8 +3,9 @@ import type { Page } from "@playwright/test";
 import { expect, ready, run, stamp, test } from "../fixtures";
 
 /** Sidebar count badges: an overdue task and an unread Rooms message put a
- *  small terracotta number on the Tasks and Rooms rows (expanded and
- *  collapsed), and they go when the task is done and the message read. */
+ *  small terracotta number on the Tasks and Rooms rows (expanded, collapsed
+ *  and beside the Passwords vault), and they go when the task is done and
+ *  the message read. */
 
 async function bearer(page: Page): Promise<string> {
   const seen = page.waitForRequest((r) => !!r.headers()["authorization"] && r.url().includes("/api/"));
@@ -83,6 +84,13 @@ test("an overdue task and an unread message badge the sidebar, then clear", asyn
     await expectBadge(alice, "tasks", before.tasks, "due");
     await expect(alice.getByRole("link", { name: new RegExp(`, ${before.rooms} unread$`) })).toBeVisible();
     await alice.getByRole("button", { name: "Expand sidebar" }).click();
+
+    // The Passwords page draws its own copy of the sidebar (no main-app
+    // code): the same badges, fetched by the page itself.
+    await alice.goto("/passwords");
+    await expect(alice.getByRole("complementary", { name: "Promptly" })).toBeVisible({ timeout: 30_000 });
+    await expectBadge(alice, "tasks", before.tasks, "due");
+    await expectBadge(alice, "rooms", before.rooms, "unread");
 
     // Reading the conversation in Rooms clears its part (the app's own read).
     await alice.goto(`/rooms/r/${dm.id}`);

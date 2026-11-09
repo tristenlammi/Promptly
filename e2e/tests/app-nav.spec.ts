@@ -10,7 +10,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 
 import { BACKEND, BASE_URL, storageStateFile } from "../lib/stack";
-import { expect, ready, test } from "../fixtures";
+import { expect, ready, run, stamp, test } from "../fixtures";
 
 const PHONE = { width: 375, height: 812 };
 
@@ -44,8 +44,17 @@ async function expectNoPromptlySidebar(page: Page) {
   await expect(page.getByRole("button", { name: "Open navigation menu" })).toHaveCount(0);
 }
 
-/** The vault page's own drawing of Promptly's navigation. */
+/** The vault page's own drawing of Promptly's navigation: the page links. */
 const vaultRail = (page: Page) => page.getByRole("navigation", { name: "Promptly" });
+/** …and the whole sidebar around them (chats, account). */
+const vaultSidebar = (page: Page) => page.getByRole("complementary", { name: "Promptly" });
+
+/** The signed-in page's bearer token, from its own next API call. */
+async function bearer(page: Page, go: () => Promise<unknown>): Promise<string> {
+  const seen = page.waitForRequest((r) => !!r.headers()["authorization"] && r.url().includes("/api/"));
+  await go();
+  return (await seen).headers()["authorization"];
+}
 
 /** A user with no vault yet, signed in by a minted refresh cookie (the
  *  vault's setup has to run for its phone header to show). */
@@ -109,12 +118,23 @@ async function makeVault(page: Page) {
 }
 
 /** WCAG A/AA problems, less the known accent-button contrast (the same
- *  exception photos-a11y.spec.ts makes). */
+ *  exception photos-a11y.spec.ts makes) and the avatar's initials: the
+ *  sidebar footer uses everyone's avatar colour (UserAvatar's palette, white
+ *  initials, some under 4.5:1), beside the name written out in full. */
 async function axe(page: Page, what: string): Promise<string[]> {
   const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   const accent = (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent"))).trim().toLowerCase();
   return violations
-    .map((v) => (v.id === "color-contrast" ? { ...v, nodes: v.nodes.filter((n) => !n.any.some((c) => c.message.toLowerCase().includes(`background color: ${accent}`))) } : v))
+    .map((v) =>
+      v.id === "color-contrast"
+        ? {
+            ...v,
+            nodes: v.nodes.filter(
+              (n) => !n.any.some((c) => c.message.toLowerCase().includes(`background color: ${accent}`)) && !n.html.includes("data-avatar"),
+            ),
+          }
+        : v,
+    )
     .filter((v) => v.nodes.length)
     .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => `${n.target.join(" ")} ${n.html.slice(0, 120)} ${n.any.map((c) => c.message).join("; ")}`).join(" | ")}`);
 }
@@ -122,17 +142,121 @@ async function axe(page: Page, what: string): Promise<string[]> {
 test.describe("app navigation", () => {
   test.describe.configure({ timeout: 180_000 });
 
-  test("Passwords opened from Promptly shows Promptly's navigation and links back", async ({ alice: page }) => {
-    await page.goto("/chat");
+  test("Passwords opened from Promptly shows Promptly's full sidebar and links back", async ({ alice: page }) => {
+    const auth = await bearer(page, () => page.goto("/chat"));
     await ready(page);
+    const title = `Vault nav chat ${stamp}`;
+    const made = await page.request.post("/api/chat/conversations", { headers: { Authorization: auth }, data: { title } });
+    expect(made.ok()).toBe(true);
+    const chatId = (await made.json()).id as string;
+
     // The way Promptly opens it: a full page load into the vault's own document.
     await page.goto("/passwords");
+    const side = vaultSidebar(page);
+    await expect(side).toBeVisible({ timeout: 30_000 });
+    // Expanded, as wide as the main sidebar.
+    expect(Math.round((await side.boundingBox())!.width)).toBe(288);
+    await expect(side.getByText("Promptly", { exact: true })).toBeVisible();
+    await expect(side.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+    await expect(side.getByRole("link", { name: "New chat", exact: true })).toHaveAttribute("href", "/chat");
+    await expect(side.getByRole("link", { name: "Search", exact: true })).toHaveAttribute("href", "/chat?search=1");
     const rail = vaultRail(page);
-    await expect(rail).toBeVisible({ timeout: 30_000 });
-    for (const name of ["Promptly home", "New chat", "Files", "Apps"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
-    await rail.getByRole("link", { name: "Files", exact: true }).click();
+    for (const [name, href] of [
+      ["Today", "/today"],
+      ["Places", "/places"],
+      ["Workspaces", "/workspaces"],
+      ["Files", "/files"],
+      ["Apps", "/apps"],
+    ])
+      await expect(rail.getByRole("link", { name, exact: true })).toHaveAttribute("href", href);
+    // The main sidebar's line icons, no coloured app pictures.
+    await expect(rail.locator("img")).toHaveCount(0);
+
+    // New chat's other kinds, as the main sidebar's caret offers them.
+    await side.getByRole("button", { name: "More chat types" }).click();
+    await expect(side.getByRole("menuitem", { name: /Temporary chat/ })).toHaveAttribute("href", "/chat?temporary=ephemeral");
+    await expect(side.getByRole("menuitem", { name: /Temporary \(1 hour\)/ })).toHaveAttribute("href", "/chat?temporary=one_hour");
+    await page.keyboard.press("Escape");
+    await expect(side.getByRole("menuitem", { name: /Temporary chat/ })).toHaveCount(0);
+
+    // Chats, grouped by day as the main sidebar groups them.
+    const chat = side.getByRole("link", { name: title, exact: true });
+    await expect(chat).toHaveAttribute("href", `/chat/${chatId}`);
+    await expect(side.getByText("Today", { exact: true }).last()).toBeVisible();
+    await expect(side.getByText("Older", { exact: true })).toBeVisible(); // the seed's old chats
+    await expect(side.getByRole("button", { name: "Load older chats" })).toBeVisible();
+    // Folders, closed until opened, with their own chats.
+    const folder = side.getByRole("button", { name: /^E2E old folder 1/ });
+    await expect(folder).toHaveAttribute("aria-expanded", "false");
+    await folder.click();
+    await expect(side.getByRole("link", { name: "E2E filed chat", exact: true })).toBeVisible();
+
+    // You, and the account menu.
+    const account = side.getByRole("button", { name: "Account menu" });
+    await expect(account).toContainText(run.users.alice.username);
+    await account.click();
+    const menu = side.getByRole("menu", { name: "Account" });
+    await expect(menu.getByRole("menuitem", { name: "Account", exact: true })).toHaveAttribute("href", "/account");
+    await expect(menu.getByRole("menuitem", { name: "Archived chats" })).toHaveAttribute("href", "/archive");
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+
+    // A chat opens in Promptly.
+    await chat.click();
+    await expect(page).toHaveURL(new RegExp(`/chat/${chatId}$`));
+    await ready(page);
+
+    // Search opens Promptly's search.
+    await page.goto("/passwords");
+    await vaultSidebar(page).getByRole("link", { name: "Search", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Search conversations" })).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/\/chat$/);
+
+    // New folder opens Promptly's new-folder box.
+    await page.goto("/passwords");
+    await vaultSidebar(page).getByRole("link", { name: "New folder", exact: true }).first().click(); // the heading's button
+    const newFolder = page.getByRole("dialog", { name: "New folder" });
+    await expect(newFolder).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/\/chat$/);
+    await newFolder.getByRole("button", { name: "Cancel" }).click();
+    await expect(newFolder).toHaveCount(0);
+
+    // And the pages are links into Promptly.
+    await page.goto("/passwords");
+    await vaultRail(page).getByRole("link", { name: "Files", exact: true }).click();
     await expect(page).toHaveURL(/\/files$/);
     await ready(page);
+  });
+
+  test("the vault's Promptly sidebar collapses, and remembers it like the main one", async ({ browser }) => {
+    const { ctx, page } = await freshWindow(browser);
+    await page.goto("/passwords");
+    const side = vaultSidebar(page);
+    await expect(side).toBeVisible({ timeout: 30_000 });
+    await expect(side.getByText("No personal chats yet. Start a new chat or open a workspace.")).toBeVisible();
+    await side.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(side.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    expect(Math.round((await side.boundingBox())!.width)).toBe(56);
+    await expect(vaultRail(page).getByRole("link", { name: "Files", exact: true })).toBeVisible();
+    await expect(side.getByRole("link", { name: "New chat", exact: true })).toBeVisible();
+    await page.waitForTimeout(1000); // the setting saves
+
+    // Remembered here…
+    await page.reload();
+    await expect(vaultSidebar(page).getByRole("button", { name: "Expand sidebar" })).toBeVisible({ timeout: 30_000 });
+    // …and it's the main sidebar's own setting.
+    await page.goto("/files");
+    await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible({ timeout: 20_000 });
+    // A new person's first visit asks which apps they want.
+    const welcome = page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "Pick your apps" }) });
+    await welcome.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(welcome).toHaveCount(0);
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
+    await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+    await page.waitForTimeout(1000);
+    await page.goto("/passwords");
+    await expect(vaultSidebar(page).getByRole("button", { name: "Collapse sidebar" })).toBeVisible({ timeout: 30_000 });
+    await ctx.close();
   });
 
   test("…in the installed Promptly window too, and not as the installed Passwords app", async ({ browser }) => {
@@ -226,15 +350,22 @@ test.describe("app navigation", () => {
     const header = page.locator("header").filter({ has: page.getByRole("button", { name: "Menu", exact: true }) });
     const open = header.getByRole("button", { name: "Open navigation menu" });
     await expect(open).toBeVisible();
-    await expect(vaultRail(page)).toBeHidden(); // no squeezed rail on a phone
+    await expect(vaultSidebar(page)).toBeHidden(); // no squeezed sidebar on a phone
     const bad: string[] = [...(await axe(page, "phone"))];
     await open.click();
+    // The main app's phone menu: the whole sidebar in a drawer.
     const drawer = page.getByRole("dialog", { name: "Navigation menu" });
     await expect(drawer).toBeVisible();
-    for (const name of ["New chat", "Today", "Workspaces", "Files", "Apps"]) await expect(drawer.getByRole("link", { name, exact: true })).toBeVisible();
+    for (const name of ["New chat", "Search", "Today", "Workspaces", "Files", "Apps"]) await expect(drawer.getByRole("link", { name, exact: true })).toBeVisible();
+    await expect(drawer.getByText("No personal chats yet. Start a new chat or open a workspace.")).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Account menu" })).toBeVisible();
     bad.push(...(await axe(page, "phone, menu open")));
     await page.keyboard.press("Escape");
-    await expect(drawer).toHaveCount(0);
+    await expect(drawer).toBeHidden(); // slid away, and inert
+    // Its close button closes it too, as the main app's does.
+    await open.click();
+    await drawer.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(drawer).toBeHidden(); // slid away, and inert
 
     // Lock still works, and the menu stays on the unlock screen.
     await page.getByRole("button", { name: "Menu", exact: true }).click();
@@ -242,12 +373,19 @@ test.describe("app navigation", () => {
     await expect(page.getByLabel("Master password")).toBeVisible();
     await expect(page.getByRole("button", { name: "Open navigation menu" })).toBeVisible();
 
-    // A big screen: the rail beside the vault's own sidebar, in light and dark.
+    // A big screen: Promptly's sidebar, expanded, then the vault's own sidebar, in light and dark.
     await page.setViewportSize({ width: 1366, height: 860 });
     await page.getByLabel("Master password").fill(MASTER);
     await page.getByRole("button", { name: "Unlock", exact: true }).click();
-    await expect(page.getByRole("navigation", { name: "Passwords" })).toBeVisible({ timeout: 30_000 });
-    await expect(vaultRail(page)).toBeVisible();
+    const vaultNav = page.getByRole("navigation", { name: "Passwords" });
+    await expect(vaultNav).toBeVisible({ timeout: 30_000 });
+    const side = vaultSidebar(page);
+    await expect(side).toBeVisible();
+    await expect(side.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+    expect((await side.boundingBox())!.x + 288).toBeLessThanOrEqual(Math.ceil((await vaultNav.boundingBox())!.x));
+    await side.getByRole("button", { name: "Account menu" }).click();
+    bad.push(...(await axe(page, "desktop, account menu open")));
+    await page.keyboard.press("Escape");
     bad.push(...(await axe(page, "desktop")));
     await page.evaluate(() => document.documentElement.classList.add("dark"));
     await page.waitForTimeout(800); // let the buttons' colour transitions finish
