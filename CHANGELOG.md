@@ -109,6 +109,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - One thing in Promptly is called a note now. A workspace's documents are called Pages (New page, Untitled page, pages in counts, search, the trash, automations and links); they work exactly as before. Files' New → Note and the Note tile on Files' home start a note in Notes; use Document for long writing.
 - Porch (being built): ticked groups above the feed are now a light tint with a tick instead of solid orange, and on a wide screen the feed's groups are ticked only in the left-hand "In your feed" list (the chip row stays on phones and tablets).
 - Porch (being built): in the composer's Arrange step the order buttons now say "Earlier" and "Later" on phones too (with tooltips), and the badge for group invites moved from Groups to the new Activity tab. Invites in the right-hand panel on wide screens no longer squeeze into a narrow column.
+<!-- v0.34.0 integration: approve instead of refuse -->
+- Chat: after reading something from outside (a web page, an email, a file, or a note in a shared workspace), the chat no longer refuses to change things for you. It shows exactly what it would do on a card (add this event, send this message, make this note, save this to memory, look at your timeline) with "Yes, do it" and "Don't run it", and does it once, only if you say yes. Talk asks out loud the same way instead of saying it won't.
+<!-- v0.34.0 integration: app navigation -->
+- Porch and Notes opened inside Promptly keep Promptly's menu: on a big screen they sit in Promptly's layout, and on a phone Porch's pages have Promptly's menu button at the top (Porch's "Back to Promptly" links are gone). Only the installed Porch or Notes app shows just that app.
+<!-- v0.34.0 integration: phone app -->
+- Promptly for Android 1.6.0 brings this release's phone parts: calls that ring like phone calls, Talk on the phone, the Notes widgets and quick capture, and sharing to Porch from other apps.
 
 ### Fixed
 <!-- Calls (DM calls), WP-D5 -->
