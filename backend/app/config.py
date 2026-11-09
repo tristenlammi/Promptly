@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     # the internal ``backend`` service name are always permitted on top.
     TRUSTED_HOSTS: str = ""
 
+    # ---- Containers that run untrusted input (security review M1) ----
+    # Requests from these compose services are refused outright: the code
+    # sandbox and the Office converter never call the backend, and both
+    # share an internal network with it. Matched by their addresses, looked
+    # up by name; ISOLATED_PEER_CIDRS adds ranges (comma list) on top.
+    ISOLATED_PEER_HOSTS: str = "sandbox,convert"
+    ISOLATED_PEER_CIDRS: str = ""
+
     @property
     def trusted_hosts_list(self) -> list[str]:
         return [h.strip() for h in self.TRUSTED_HOSTS.split(",") if h.strip()]

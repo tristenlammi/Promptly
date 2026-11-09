@@ -30,6 +30,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Workspace search results in the Ctrl+K palette show their highlighted snippet as text, so words in a shared note can't turn into page markup.
 - Updated python-jose to 3.4.0 and cryptography to 44.0.1 for their security fixes.
 - After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"), and before it runs code. A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
+- The code sandbox and the Office converter can no longer call Promptly's own server directly over the internal network they share with it, and big-upload hooks need their secret (no more "it came from inside, so it's fine").
 
 ## [0.35.0] - 2026-11-09
 
