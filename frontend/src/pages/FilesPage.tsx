@@ -1066,6 +1066,10 @@ export function FilesPage({
               newActions={data.writable ? pageActions : []}
             />
           )}
+
+          {/* Room for the floating selection bar, so the last rows can be
+              scrolled clear of it. */}
+          {selectionCount > 0 && <div aria-hidden className={cn("h-24", selectionCount === 1 && "lg:hidden")} />}
         </div>
         </div>
 

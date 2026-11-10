@@ -7,9 +7,6 @@
 .tasks-scope {
   --item-accent: var(--accent);
 }
-:root:has(.tasks-scope) {
-  --item-accent: var(--accent) !important;
-}
 
 /* ------------------------------------------------------------ the tick */
 

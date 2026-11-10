@@ -280,18 +280,19 @@ test.describe("voice channels", () => {
     await expect(bob.getByTestId(`voice-members-${games}`)).toContainText(A, { timeout: 20_000 });
     await expect(bob.getByTestId(`voice-members-${lounge}`)).not.toContainText(A);
 
-    // Another app: the panel comes along in Promptly's sidebar, still connected.
+    // Another app: the call comes along as a card in Promptly's sidebar dock,
+    // still connected.
     await go(alice, "/calendar");
     await expect(alice).toHaveURL(/\/calendar/);
-    await expect(panel(alice).getByTestId("voice-status")).toHaveText("Voice connected");
-    await expect(panel(alice).getByTestId("voice-panel-channel")).toContainText(games);
+    const card = alice.getByTestId("dock-card-voice").first();
+    await expect(card).toContainText(games, { timeout: 15_000 });
     await shot(alice, "desktop-light-panel-in-calendar.png");
     // Mute from there works too.
-    await panel(alice).getByTestId("voice-mute").click();
+    await card.getByTestId("dock-action-mute").click();
     await expect(memberRow(bob, A).locator('[aria-label="Muted"]')).toBeVisible({ timeout: 15_000 });
-    await panel(alice).getByTestId("voice-mute").click();
-    // Back to Rooms in one click from the panel.
-    await panel(alice).getByTestId("voice-panel-channel").click();
+    await card.getByTestId("dock-action-mute").click();
+    // Back to Rooms in one click from the card.
+    await card.getByRole("button", { name: new RegExp(games) }).click();
     await expect(alice).toHaveURL(new RegExp(`/rooms/r/${ids.games}`));
 
     // A reload drops the connection; you come straight back.

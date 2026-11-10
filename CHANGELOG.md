@@ -28,6 +28,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
 
 ### Changed
+- Apps from the Apps page (Contacts, Tasks & Reminders and the rest) keep their own colour for the icon in the header only. Buttons, tabs and selection are Promptly's terracotta, the same as everywhere else.
+- An app whose name is also its title no longer says the name twice under the header; it says Saved.
+- Opening an app shows the outline of a list while it loads, not a spinner.
+- Photos: the People tab is called Faces.
+- Calendar: the quick add box has a pen, not the assistant's sparkle. It doesn't use the assistant.
+- Files: with things selected, the list can be scrolled clear of the bar at the bottom.
 <!-- UI polish, shared foundations (ui-polish) -->
 - Messages such as "Saved" and "Undo" now appear at the bottom of the screen (bottom-left on a computer, bottom-centre on a phone, above the tab bar) so they no longer cover the top of the page.
 - The Ask panel in Item Store apps starts closed, and each app remembers on its own whether you left it open.

@@ -203,7 +203,7 @@ export function Sheet(props: {
             </button>
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4">{children}</div>
+        <div className="promptly-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4">{children}</div>
         {footer && (
           <div className="flex shrink-0 gap-2 border-t border-[var(--border)] px-5 py-3 pb-safe-toolbar">{footer}</div>
         )}

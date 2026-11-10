@@ -24,7 +24,7 @@ import { cn } from "@/utils/cn";
 const MAIN = [
   { key: "all", label: "Photos", icon: Images, sub: "" },
   { key: "albums", label: "Albums", icon: BookImage, sub: "/albums" },
-  { key: "people", label: "People", icon: UsersRound, sub: "/people" },
+  { key: "people", label: "Faces", icon: UsersRound, sub: "/people" },
   // The map lives under Places (its List / Map switch).
   { key: "places", label: "Places", icon: MapPin, sub: "/places", also: "/map" },
 ] as const;
