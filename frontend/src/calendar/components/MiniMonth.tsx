@@ -45,7 +45,7 @@ export function MiniMonth({
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-7 text-center text-[10px] font-medium uppercase text-[var(--text-muted)]">
+      <div className="grid grid-cols-7 text-center text-xs font-medium uppercase text-[var(--text-muted)]">
         {heads.map((h, i) => (
           <span key={i} className="py-1">
             {h.narrow}

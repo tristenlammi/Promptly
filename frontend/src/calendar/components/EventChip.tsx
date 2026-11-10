@@ -46,7 +46,7 @@ export function EventChip({
         title={title}
         className={cn(
           "flex h-full w-full min-w-0 items-center gap-1 rounded-md px-1 text-left hover:bg-[var(--hover)]",
-          compact ? "text-[10px]" : "text-[11px]",
+          "text-xs",
           faded && "line-through opacity-60",
         )}
       >
@@ -68,7 +68,7 @@ export function EventChip({
       style={style}
       className={cn(
         "flex h-full w-full min-w-0 items-center px-1.5 text-left font-medium hover:brightness-95",
-        compact ? "text-[10px]" : "text-[11px]",
+        "text-xs",
         continuesLeft ? "rounded-l-none border-l-0" : "rounded-l-md",
         continuesRight ? "rounded-r-none border-r-0" : "rounded-r-md",
         className,

@@ -146,6 +146,24 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Notes (ui-notes) -->
 - Notes: Close in the "Take a note…" box works on the first click. The formatting buttons keep their place under the text (quieter until you're typing) instead of appearing and pushing Close down.
 - Notes: pressing Enter in a note's title starts a new line under the text that's already there, instead of putting what you type next in front of it.
+- Calendar: click or drag on the week and day grid to draw a new event, with a small bubble beside it for the title, time and calendar ("More options" opens the full editor).
+- Calendar: "+3 more" on a month day opens that day's list in place.
+- Calendar: resize an event from its top edge, and stretch all-day and month events across days from either end.
+- Calendar: Undo after moving a repeating event.
+- Calendar: the editor asks before closing with unsaved changes.
+- Calendar: placeholder blocks while Calendar and its events load.
+- Calendar: on a phone, swipe left or right to change the period.
+- Calendar: more keys (n and p for next and previous, e to edit and Delete to delete the open event, ? for the list).
+- Calendar: Promptly's own date and time pickers in the event editor on a computer (a phone keeps its built-in ones).
+
+### Changed
+- Calendar: buttons, selection and today markers use Promptly's terracotta; blue stays on the app icon and on calendar colours.
+- Calendar: times read "9 am" or "09:00" following your clock setting, never a bare "09".
+- Calendar: the phone header is the month, Today and a view switch (search and earlier/later are in the view menu).
+- Calendar: the phone's week view shows three days instead of seven squeezed columns.
+- Calendar: stepping forward or back slides the view, and switching view fades it in.
+- Calendar: the quick-add button is labelled "Quick add" instead of a sparkle icon.
+- Calendar: the smallest text is now 12px.
 
 ## [0.35.0] - 2026-11-09
 
