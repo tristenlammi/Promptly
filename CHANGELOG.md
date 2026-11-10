@@ -21,6 +21,28 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- UI pass: Rooms (ui-rooms) -->
+- Rooms: what you were typing in a room is kept if you reload or come back later, on that device.
+- Rooms: the emoji picker has a search box and a row of the ones you used lately.
+- Rooms: see who reacted to a message, from the button beside its reactions or by pressing and holding one.
+- Rooms: on a phone, tap a message to see when it was sent.
+- Voice: the voice card shows how long you've been in.
+
+### Changed
+<!-- UI pass: Rooms (ui-rooms) -->
+- Rooms: the reply, react and more buttons now sit on the message they belong to, instead of at the far edge of the screen.
+- Rooms: conversations sit in a centred column on wide screens, with the message box lined up underneath.
+- Rooms: deleting a message happens at once, with Undo for ten seconds, instead of asking first.
+- Rooms: leaving or deleting a space or room, removing someone and clearing call history now ask in Promptly's own style instead of a browser pop-up. Deleting a space asks you to type its name.
+- Rooms: Enter finishes the create and rename forms.
+- Rooms: buttons, selection and your own messages use Promptly's terracotta; indigo stays as the Rooms mark.
+- Rooms: spaces, rooms and messages show placeholder rows while they load, instead of a spinner.
+- Rooms: new messages, the jump-to-latest button and the side panel ease in, the typing line has moving dots, and reactions are bigger and pop when added.
+- Rooms: Block and Unblock moved from the top of a one-to-one conversation into its More menu.
+- Rooms: a brand-new Rooms shows one "Create a space" button, and "It's just you here" is a card with an Add people button.
+- Voice: the voice card says "Good connection", "Okay connection" or "Weak connection" (tap for the details), has bigger buttons on touch screens, says "Leave" instead of "Disconnect", and slides in and out.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added
