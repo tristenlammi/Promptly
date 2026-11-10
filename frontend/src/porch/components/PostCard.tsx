@@ -37,7 +37,6 @@ import { cn } from "@/utils/cn";
 
 import { useBlock } from "../actions";
 import { LISTS, profileKey, putPost } from "../cache";
-import { removeWithUndo } from "../undo";
 import { usePorch } from "../context";
 import { usePostTalk } from "../talkActions";
 import { CommentsSheet, InlineComments } from "./Comments";
@@ -289,23 +288,30 @@ export function PostCard({ post, full = false, media = true, className }: { post
               danger: true,
             })
           : false;
-        removeWithUndo({
-          message: cancelEvent ? "Post deleted. The event will be cancelled too." : post.mine ? "Post deleted. Your photos stay in Photos." : "Post deleted.",
-          hide: () => {
-            // On the post's own page there's nothing left to look at: back to the feed.
-            if (full) navigate("/porch/", { replace: true });
-            putPost(qc, post.id, null);
+        // Deleted now, for everyone; Undo asks the server to put it back as it was.
+        const putBack = () => {
+          qc.setQueryData(["porch", "post", post.id], post);
+          void qc.invalidateQueries({ queryKey: LISTS });
+        };
+        // On the post's own page there's nothing left to look at: back to the feed.
+        if (full) navigate("/porch/", { replace: true });
+        putPost(qc, post.id, null);
+        try {
+          await porchApi.deletePost(post.id, cancelEvent);
+        } catch (err) {
+          putBack();
+          toast.error(apiErrorMessage(err, "Couldn't delete the post, so it's back. Try again."));
+          return;
+        }
+        if (cancelEvent) void qc.invalidateQueries({ queryKey: ["calendar"] });
+        toast.success(cancelEvent ? "Post deleted, and the event is cancelled." : post.mine ? "Post deleted. Your photos stay in Photos." : "Post deleted.", {
+          duration: 10_000,
+          action: {
+            label: "Undo",
+            onClick: () => {
+              porchApi.restorePost(post.id).then(putBack, (err) => toast.error(apiErrorMessage(err, "Couldn't bring the post back.")));
+            },
           },
-          restore: () => {
-            qc.setQueryData(["porch", "post", post.id], post);
-            void qc.invalidateQueries({ queryKey: LISTS });
-          },
-          commit: async () => {
-            await porchApi.deletePost(post.id, cancelEvent);
-            putPost(qc, post.id, null);
-            if (cancelEvent) void qc.invalidateQueries({ queryKey: ["calendar"] });
-          },
-          failed: "Couldn't delete the post, so it's back. Try again.",
         });
       },
     });

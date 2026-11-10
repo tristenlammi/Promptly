@@ -96,6 +96,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Porch: tap a photo to see it full screen. Pinch or double-tap to zoom, swipe sideways for the next one, swipe down to close, and Save keeps a copy. Double-tapping a photo in the feed still likes it.
 - Porch: pull the feed down on a phone to check for new posts, and the "new posts" pill now slides in.
 - Porch: Undo after deleting your own post or comment. It goes at once with no "are you sure", and you have ten seconds to bring it back.
+- Rooms and Porch: a deleted message or post now disappears for everyone straight away, and Undo brings it back exactly as it was (reactions, pin, files and comments included). Before, other people kept seeing it until Undo ran out, and closing the app in those ten seconds could leave it there.
 - Porch on a phone: Search, Saved and Settings buttons at the top of your own profile, and a marker on the bottom bar showing which tab you're on.
 <!-- Porch UI pass (ui-porch) -->
 - Porch: posting takes you straight back to the feed. A small chip shows "Posting… 60%", then "Posted" with View. If it doesn't go, the chip says why, offers Try again, and the post is kept as a draft.

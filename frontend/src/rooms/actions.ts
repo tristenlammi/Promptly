@@ -40,49 +40,35 @@ export async function togglePin(m: Message) {
   }
 }
 
-/** How long "Undo" stays on offer before a delete really happens. */
-const DELETE_GRACE_MS = 10_000;
-const pendingDeletes = new Map<string, { original: Message; timer: number }>();
+/** How long "Undo" stays on offer after a delete. */
+const UNDO_MS = 10_000;
 
-function reallyDelete(id: string) {
-  const p = pendingDeletes.get(id);
-  if (!p) return;
-  window.clearTimeout(p.timer);
-  pendingDeletes.delete(id);
-  roomsApi.deleteMessage(id).catch((err) => {
-    useRoomsStore.getState().patchMessage(p.original.room_id, id, () => p.original);
-    toast.error(apiErrorMessage(err, "Couldn't delete that message, so it's back."));
-  });
-}
-
-// Closing the tab inside the grace period still deletes what was asked for.
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", () => {
-    for (const id of [...pendingDeletes.keys()]) reallyDelete(id);
-  });
-}
-
-/** Delete at once, with a few seconds to change your mind. The message
- *  disappears here straight away; everyone else loses it when Undo runs out. */
+/** Delete now, for everyone, with a few seconds to change your mind: Undo
+ *  asks the server to put the message back exactly as it was. */
 export function deleteMessage(m: Message) {
-  if (m.deleted || pendingDeletes.has(m.id)) return;
+  if (m.deleted) return;
   const store = useRoomsStore.getState();
   store.patchMessage(m.room_id, m.id, (cur) => ({ ...cur, deleted: true, body: "", attachments: [], reactions: [] }));
-  const timer = window.setTimeout(() => reallyDelete(m.id), DELETE_GRACE_MS);
-  pendingDeletes.set(m.id, { original: m, timer });
-  toast.success("Message deleted", {
-    duration: DELETE_GRACE_MS,
-    action: {
-      label: "Undo",
-      onClick: () => {
-        const p = pendingDeletes.get(m.id);
-        if (!p) return;
-        window.clearTimeout(p.timer);
-        pendingDeletes.delete(m.id);
-        store.patchMessage(m.room_id, m.id, () => p.original);
-      },
+  roomsApi.deleteMessage(m.id).then(
+    () => {
+      toast.success("Message deleted", {
+        duration: UNDO_MS,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            roomsApi.restoreMessage(m.id).then(
+              (back) => store.upsertMessage(back),
+              (err) => toast.error(apiErrorMessage(err, "Couldn't bring that message back.")),
+            );
+          },
+        },
+      });
     },
-  });
+    (err) => {
+      store.patchMessage(m.room_id, m.id, () => m);
+      toast.error(apiErrorMessage(err, "Couldn't delete that message, so it's back."));
+    },
+  );
 }
 
 export async function editMessage(m: Message, body: string): Promise<boolean> {

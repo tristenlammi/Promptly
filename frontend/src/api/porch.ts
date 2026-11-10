@@ -600,6 +600,10 @@ export const porchApi = {
   async deletePost(id: string, cancelEvent = false): Promise<void> {
     await apiClient.delete(`/porch/posts/${id}`, { params: cancelEvent ? { cancel_event: true } : undefined });
   },
+  /** Undo a delete, for a minute after it: the post comes back as it was. */
+  async restorePost(id: string): Promise<void> {
+    await apiClient.post(`/porch/posts/${id}/restore`);
+  },
   async groupPosts(groupId: string, before: string | null, photos: boolean): Promise<PostPage> {
     const { data } = await apiClient.get<PostPage>(`/porch/groups/${groupId}/posts`, { params: { before: before || undefined, photos: photos || undefined } });
     return data;
