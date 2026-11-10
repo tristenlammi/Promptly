@@ -35,6 +35,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Bottom sheets close on Esc, keep keyboard focus inside while open, and can be dragged down to close.
 - Empty lists and pages share one look across the Item Store apps and the rest of Promptly.
 - A confirmation asked from inside a sheet now appears in front of it.
+<!-- Sidebar "happening now" dock (ui-dock) -->
+- A "happening now" spot in the sidebar, just above your account: small live cards for the voice channel or call you're in (who's speaking, how long, Mute and Leave), uploads ("Uploading 12 of 40"), the next event or reminder in the next couple of hours (with a tick for the reminder), a mailbox that needs attention or a message that didn't send, location sharing in Maps (with Stop), someone on their way to you, a recording being written up, and how far understanding your photos has got. Three cards show at most and the rest fold into "+N more"; tapping a card takes you back to where it's happening. On the folded sidebar they are icons that open the cards; on a phone they are in the menu, and the menu button carries a dot while something is happening.
+- The sidebar shows which app you're in: Photos, Rooms, Porch, Maps, Notes, Mail, Calendar or any other app now appears as the highlighted row under Apps while it's open, even when it isn't pinned.
+
+### Changed
+- In apps with their own side list (Rooms, Porch, Mail and Files) the main sidebar folds to its icons by itself, and comes back when you leave. Open it there once and it stays open in those apps on that device.
+- The voice panel in the sidebar is now a card in the "happening now" spot. Deafen, camera, sharing your screen and voice settings are in the channel itself, one tap away.
+- On a computer, uploads away from Files and Photos show in the sidebar instead of as a floating pill.
+- The sidebar's Automations link goes to /automations.
 
 ## [0.35.0] - 2026-11-09
 
