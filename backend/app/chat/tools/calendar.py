@@ -41,6 +41,27 @@ _REPEAT_SCHEMA: dict[str, Any] = {
 }
 
 
+_LABEL_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "description": "One of the user's own calendar labels by name (e.g. 'Work'); calendar_events lists them. Only the user sees it.",
+}
+# The fields that change the event itself (a label alone is the user's own).
+_CHANGE_KEYS = ("title", "start", "end", "all_day", "location", "description", "add_guests", "remove_guests", "repeat", "stop_repeating")
+
+
+async def _label(ctx: ToolContext, name: Any):  # noqa: ANN202
+    """The user's own label called ``name`` (never anyone else's)."""
+    if not isinstance(name, str) or not name.strip():
+        return None
+    from app.calendars import labels
+
+    lb = await labels.by_name(ctx.db, ctx.user, name)
+    if lb is None:
+        have = ", ".join(x.name for x in await labels.mine(ctx.db, ctx.user)) or "none yet"
+        raise ToolError(f"No label called “{name.strip()}”. Your labels: {have}.")
+    return lb
+
+
 def _repeat(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict) or not raw.get("freq"):
         return None
@@ -103,7 +124,7 @@ def _untrusted(ctx: ToolContext) -> None:
     guard_write(ctx, "changing the calendar")
 
 
-def _fmt_occ(o: dict, tz_name: str, users: dict, cal_names: dict) -> str:
+def _fmt_occ(o: dict, tz_name: str, users: dict, cal_names: dict, label_names: dict | None = None) -> str:
     from app.calendars import recur
 
     if o["all_day"]:
@@ -124,6 +145,8 @@ def _fmt_occ(o: dict, tz_name: str, users: dict, cal_names: dict) -> str:
         bits.append("guests " + ", ".join(f"{users.get(a['user_id'], {}).get('username', '?')} ({a['status']})" for a in o["attendees"]))
     if o["my_status"]:
         bits.append(f"your answer: {o['my_status']}")
+    if o.get("label_id") and label_names and o["label_id"] in label_names:
+        bits.append(f"label {label_names[o['label_id']]}")
     if o["repeat"]:
         bits.append("repeats: " + recur.describe(o["repeat"]))
     line = " · ".join(bits) + f" · event_id {o['event_id']} occurrence {o['occurrence']}"
@@ -190,7 +213,13 @@ class CalendarEventsTool(Tool):
             f"Today is {today:%A %Y-%m-%d}; times are in {tz_name}. "
             f"Calendars: " + ", ".join(cal_names.values()) + f".\nEvents {first} to {last}:"
         )
-        body = "\n".join(_fmt_occ(o, tz_name, users, cal_names) for o in occ[:150]) or "(nothing)"
+        from app.calendars import labels
+
+        mine = await labels.mine(ctx.db, ctx.user)
+        label_names = {str(lb.id): lb.name for lb in mine}
+        if mine:
+            head += f"\n(Your labels: {', '.join(lb.name for lb in mine)}.)"
+        body = "\n".join(_fmt_occ(o, tz_name, users, cal_names, label_names) for o in occ[:150]) or "(nothing)"
         if len(occ) > 150:
             body += f"\n…and {len(occ) - 150} more — narrow the range."
         return ToolResult(content=f"{head}\n{body}")
@@ -297,6 +326,7 @@ class CalendarAddEventTool(Tool):
             "guests": {"type": "array", "items": {"type": "string"}, "description": "Usernames to invite."},
             "repeat": _REPEAT_SCHEMA,
             "reminders": {"type": "array", "items": {"type": "integer"}, "description": "Minutes before (default [10]; all-day default none)."},
+            "label": _LABEL_SCHEMA,
         },
         "required": ["title", "start"],
     }
@@ -307,6 +337,7 @@ class CalendarAddEventTool(Tool):
         from app.calendars import core, service
 
         _untrusted(ctx)
+        label = await _label(ctx, args.get("label"))
         f = service.EventFields(
             title=str(args.get("title") or ""),
             start=str(args.get("start") or ""),
@@ -322,6 +353,10 @@ class CalendarAddEventTool(Tool):
         )
         try:
             ev = await service.create_event(ctx.db, ctx.user, f)
+            if label:
+                from app.calendars import labels
+
+                await labels.set_on_event(ctx.db, ctx.user, ev.id, label.id)
             await ctx.db.commit()
         except HTTPException as e:
             raise ToolError(str(e.detail)) from e
@@ -361,6 +396,7 @@ class CalendarChangeEventTool(Tool):
             "remove_guests": {"type": "array", "items": {"type": "string"}},
             "repeat": _REPEAT_SCHEMA,
             "stop_repeating": {"type": "boolean"},
+            "label": {**_LABEL_SCHEMA, "description": _LABEL_SCHEMA["description"] + " Use 'none' to take it off."},
         },
         "required": ["event_id", "action"],
     }
@@ -393,6 +429,18 @@ class CalendarChangeEventTool(Tool):
                 return ToolResult(content=f"Deleted {title}" + ("" if scope == "all" else f" ({scope})") + ".")
             if action != "update":
                 raise ToolError("action must be update, delete or answer.")
+            has_label = isinstance(args.get("label"), str) and args["label"].strip() != ""
+            label = None
+            if has_label and args["label"].strip().lower() != "none":
+                label = await _label(ctx, args["label"])
+            changes = {k for k in _CHANGE_KEYS if args.get(k) not in (None, "", [])}
+            if has_label and not changes:
+                # Only your own label: anyone who can see the event can do this.
+                from app.calendars import labels
+
+                await labels.set_on_event(ctx.db, ctx.user, ev.id, label.id if label else None)
+                await ctx.db.commit()
+                return ToolResult(content=(f"Labelled “{ev.title}” {label.name}." if label else f"Took the label off “{ev.title}”."))
             f = service.EventFields(
                 title=args.get("title"), start=args.get("start"), end=args.get("end"),
                 all_day=args.get("all_day"), location=args.get("location"), description=args.get("description"),
@@ -407,6 +455,10 @@ class CalendarChangeEventTool(Tool):
                 drop = set(await _resolve_people(ctx, list(args.get("remove_guests") or [])))
                 f.guests = [g for g in [*have, *add] if g not in drop]
             ev = await service.update_event(ctx.db, ctx.user, eid, f, scope=scope, occurrence=occurrence)
+            if has_label:
+                from app.calendars import labels
+
+                await labels.set_on_event(ctx.db, ctx.user, ev.id, label.id if label else None)
             await ctx.db.commit()
         except HTTPException as e:
             raise ToolError(str(e.detail)) from e

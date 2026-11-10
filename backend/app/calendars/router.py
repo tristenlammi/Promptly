@@ -14,7 +14,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 
-from . import core, extras, ics, lookup, notify, service, sharing
+from . import core, extras, ics, labels, lookup, notify, service, sharing
 from .models import CalAttendee, CalCalendar, CalEvent, CalEventRoom, CalFeed, CalMember
 
 router = APIRouter()
@@ -64,6 +64,7 @@ async def _calendars_out(db: AsyncSession, user: User) -> list[dict]:
 @router.get("/bootstrap")
 async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     await core.ensure_personal(db, user)
+    my_labels = [labels.label_out(lb) for lb in await labels.mine(db, user)]
     await db.commit()
     cals = await _calendars_out(db, user)
     people = {user.id} | {uuid.UUID(uid) for c in cals for uid in c["member_roles"]}
@@ -78,6 +79,8 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
         "users": await core.users_map(db, people),
         "feed_token": feed.token if feed else None,
         "prefs": _prefs(user),
+        # Your own labels (nobody else's; see labels.py).
+        "labels": my_labels,
         # Which other apps can show on the calendar ("Also show").
         "apps": {k: k in kinds for k in ("tasks", "contacts", "workout", "mealplan", "budget", "trip", "health")},
     }
@@ -281,6 +284,90 @@ async def remove_member(cal_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession 
     await db.commit()
 
 
+# ================================================================== labels
+# Your own colour-coding (labels.py): nobody else sees them.
+
+
+class LabelIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    color: str = Field(pattern=_HEX)
+
+
+class LabelPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    color: str | None = Field(default=None, pattern=_HEX)
+    position: int | None = Field(default=None, ge=0, le=1000)
+    hidden: bool | None = None  # untick: hide its events from your view
+
+
+class EventLabelIn(BaseModel):
+    label_id: uuid.UUID | None = None  # null takes yours off
+
+
+async def _my_label(db: AsyncSession, user: User, label_id: uuid.UUID | None) -> labels.CalLabel | None:
+    if label_id is None:
+        return None
+    lb = await labels.own_label(db, user, label_id)
+    if lb is None:
+        raise core.not_found("Label")
+    return lb
+
+
+@router.get("/labels")
+async def list_labels(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    out = [labels.label_out(lb) for lb in await labels.mine(db, user)]
+    await db.commit()
+    return {"labels": out}
+
+
+@router.post("/labels", status_code=201)
+async def create_label(body: LabelIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await labels.mine(db, user)  # the defaults first, so they keep their place
+    if await labels.count(db, user) >= labels.MAX_LABELS:
+        raise service.bad(f"You can have up to {labels.MAX_LABELS} labels.")
+    lb = labels.CalLabel(user_id=user.id, name=body.name.strip(), color=body.color, position=await labels.next_position(db, user))
+    db.add(lb)
+    await db.commit()
+    return labels.label_out(lb)
+
+
+@router.patch("/labels/{label_id}")
+async def update_label(label_id: uuid.UUID, body: LabelPatch, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    lb = await _my_label(db, user, label_id)
+    assert lb is not None
+    if body.name is not None:
+        lb.name = body.name.strip()
+    if body.color is not None:
+        lb.color = body.color
+    if body.position is not None:
+        lb.position = body.position
+    if body.hidden is not None:
+        lb.hidden = body.hidden
+    await db.commit()
+    return labels.label_out(lb)
+
+
+@router.delete("/labels/{label_id}", status_code=204)
+async def delete_label(label_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    """Delete one of your labels; the events it was on just lose it."""
+    lb = await _my_label(db, user, label_id)
+    await db.delete(lb)
+    await db.commit()
+
+
+@router.put("/events/{event_id}/label")
+async def set_event_label(event_id: uuid.UUID, body: EventLabelIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Your label on an event you can see (any event: yours, a shared
+    calendar's, an invitation). Only you see it."""
+    ev, m, att = await core.load_event(db, event_id, user)
+    if core.busy_only(m, att):
+        raise core.not_found()
+    lb = await _my_label(db, user, body.label_id)
+    await labels.set_on_event(db, user, ev.id, lb.id if lb else None)
+    await db.commit()
+    return {"event_id": str(ev.id), "label_id": str(lb.id) if lb else None}
+
+
 @router.get("/people-suggestions")
 async def people_suggestions(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     """People on this Promptly who are in your Contacts (matched by email, or
@@ -334,6 +421,7 @@ async def get_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db), use
     out = core.event_out(ev, m, att, atts, user)
     # Positioned on the next occurrence — for a notification's link to open on.
     out.update(_next_occurrence(ev, core.now()))
+    await labels.fill(db, user, [out])
     if out.get("busy_only"):
         return {"event": out, "users": {}}
     out["rooms"] = await sharing.rooms_out(db, ev, user)
@@ -374,6 +462,8 @@ class EventIn(BaseModel):
     guests: list[uuid.UUID] = Field(default_factory=list, max_length=50)
     guests_can_edit: bool = False
     color: str | None = Field(default=None, pattern=_HEX)
+    # One of your own labels (only you see it).
+    label_id: uuid.UUID | None = None
     # Planned in a room: everyone in it is invited, and a card is posted there.
     room_id: uuid.UUID | None = None
     # What it was made from: a task planned into a time slot, or a Porch post.
@@ -414,6 +504,7 @@ class EventPatch(BaseModel):
     guests: list[uuid.UUID] | None = Field(default=None, max_length=50)
     guests_can_edit: bool | None = None
     color: str | None = Field(default=None, pattern=_HEX)
+    label_id: uuid.UUID | None = None  # yours; null takes it off
     scope: Literal["all", "this", "following"] = "all"
     occurrence: str | None = Field(default=None, max_length=40)
 
@@ -424,11 +515,14 @@ async def create_event(body: EventIn, db: AsyncSession = Depends(get_db), user: 
         from app.porch.handoffs import check_event
 
         await check_event(db, user, body.source.post_id, body.guests)
-    f = service.EventFields(**body.model_dump(exclude={"repeat", "color", "room_id", "source"}), repeat=body.repeat, repeat_set=True, color=body.color, color_set=True)
+    label = await _my_label(db, user, body.label_id)
+    f = service.EventFields(**body.model_dump(exclude={"repeat", "color", "room_id", "source", "label_id"}), repeat=body.repeat, repeat_set=True, color=body.color, color_set=True)
     # In a room, the card (and its push) is the invitation — no second ping.
     ev = await service.create_event(db, user, f, ping_guests=body.room_id is None)
     if body.source is not None:
         ev.source = body.source.model_dump(mode="json")
+    if label is not None:
+        await labels.set_on_event(db, user, ev.id, label.id)
     porch_post = None
     if isinstance(body.source, PorchPostSource):
         # Porch WP-P3.2: your own post carries the event (its card).
@@ -491,6 +585,7 @@ async def room_upcoming(room_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
         o.update(_next_occurrence(ev, now))
         out.append(o)
     out.sort(key=lambda o: o["start"])
+    await labels.fill(db, user, out)
     people = {uuid.UUID(a["user_id"]) for o in out for a in o["attendees"]} | {uuid.UUID(o["created_by"]) for o in out if o["created_by"]}
     return {"events": out[:20], "users": await core.users_map(db, people)}
 
@@ -505,13 +600,16 @@ async def update_event(event_id: uuid.UUID, body: EventPatch, db: AsyncSession =
             from app.porch.handoffs import check_new_guests
 
             await check_new_guests(db, existing, body.guests)
-    data = body.model_dump(exclude={"scope", "occurrence", "repeat", "color"}, exclude_unset=True)
+    label = await _my_label(db, user, body.label_id) if "label_id" in given else None
+    data = body.model_dump(exclude={"scope", "occurrence", "repeat", "color", "label_id"}, exclude_unset=True)
     f = service.EventFields(
         **data,
         repeat=body.repeat, repeat_set="repeat" in given,
         color=body.color, color_set="color" in given,
     )
     ev = await service.update_event(db, user, event_id, f, scope=body.scope, occurrence=body.occurrence)
+    if "label_id" in given:
+        await labels.set_on_event(db, user, ev.id, label.id if label else None)
     # Porch WP-P3.2: a post carrying it keeps its name for "Cancelled: …".
     from app.porch import plans as porch_plans
 
@@ -607,6 +705,7 @@ async def invites(db: AsyncSession = Depends(get_db), user: User = Depends(get_c
         o = core.event_out(ev, None, att, atts.get(ev.id, []), user)
         o.update(_next_occurrence(ev, now))
         out.append(o)
+    await labels.fill(db, user, out)
     people = {e.created_by for e in events if e.created_by}
     return {"invites": out, "users": await core.users_map(db, people)}
 

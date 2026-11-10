@@ -266,6 +266,10 @@ def _occurrence(ev: CalEvent, occurrence: str | None) -> datetime:
 async def _copy_guests(db: AsyncSession, src: CalEvent, dst: CalEvent) -> None:
     for a in (await db.execute(select(CalAttendee).where(CalAttendee.event_id == src.id))).scalars():
         db.add(CalAttendee(event_id=dst.id, user_id=a.user_id, status=a.status, reminders=a.reminders, invited_by=a.invited_by, responded_at=a.responded_at))
+    # Everyone's own label follows onto the new piece of the series.
+    from .labels import copy_to
+
+    await copy_to(db, src.id, dst.id)
 
 
 def _clone(ev: CalEvent, start_at: datetime, repeat: dict[str, Any] | None) -> CalEvent:

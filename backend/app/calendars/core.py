@@ -200,6 +200,9 @@ async def occurrences_out(db: AsyncSession, user: User, events: list[CalEvent], 
         ):
             out.append({**base, "id": f"{ev.id}:{recur.stamp(s)}", "occurrence": recur.stamp(s), "start": iso(s, ev.all_day), "end": end_iso(e, ev.all_day)})
     out.sort(key=lambda o: (o["start"], o["title"]))
+    from .labels import fill
+
+    await fill(db, user, out)
     return out
 
 
@@ -241,6 +244,8 @@ def event_out(ev: CalEvent, m: CalMember | None, my_att: CalAttendee | None, att
         "can_delete": can_delete(ev, m, user),
         # What it was made from (a task planned into a time slot), else None.
         "source": ev.source,
+        # Your own label (never anyone else's) — filled in by labels.fill.
+        "label_id": None,
     }
 
 
@@ -251,7 +256,7 @@ def _busy_out(ev: CalEvent) -> dict[str, Any]:
         "all_day": ev.all_day, "series_start": iso(ev.start_at, ev.all_day), "series_end": end_iso(ev.end_at, ev.all_day),
         "tz": ev.tz, "repeat": None, "color": None, "created_by": None, "guests_can_edit": False, "reminders": [],
         "event_reminders": [], "attendees": [], "my_status": None, "on_my_calendar": True, "can_edit": False,
-        "can_delete": False, "busy_only": True,
+        "can_delete": False, "busy_only": True, "label_id": None,
     }
 
 
