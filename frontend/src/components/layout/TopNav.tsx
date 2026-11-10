@@ -6,6 +6,8 @@ import { useUIStore } from "@/store/uiStore";
 import { VoicePill } from "@/rtc/ui/VoicePill";
 import { cn } from "@/utils/cn";
 
+import { useDockCount } from "./dock/store";
+
 interface TopNavProps {
   /** Rendered inside an <h1>. Strings are truncated; pass a ReactNode for
    *  interactive titles (e.g. an inline-editable input). */
@@ -30,6 +32,9 @@ export function TopNav({
   const titleIsString = typeof title === "string";
   const isMobile = useIsMobile();
   const openMobileNav = useUIStore((s) => s.openMobileNav);
+  // Something's happening now (a call, uploads, an event soon): the menu
+  // button carries a dot, since the cards themselves are inside the menu.
+  const happening = useDockCount();
 
   return (
     <>
@@ -54,14 +59,17 @@ export function TopNav({
           <button
             type="button"
             onClick={openMobileNav}
-            aria-label="Open navigation menu"
+            aria-label={happening > 0 ? "Open navigation menu. Something is happening now" : "Open navigation menu"}
             className={cn(
-              "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+              "relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
               "text-[var(--text-muted)] transition",
               "hover:bg-[var(--hover)] hover:text-[var(--text)]"
             )}
           >
             <Menu className="h-5 w-5" />
+            {happening > 0 && (
+              <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--accent)] ring-2 ring-[var(--bg)]" />
+            )}
           </button>
         )}
         <div className="min-w-0 flex-1">
