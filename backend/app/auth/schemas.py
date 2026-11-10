@@ -129,10 +129,6 @@ class UserResponse(BaseModel):
     # NULL = full access to the admin's curated pool. Admins effectively
     # ignore this field (they always see everything).
     allowed_models: list[str] | None = None
-    # Whether the user may run code via the "Run" affordance on code
-    # artifacts (POST /api/code/run). The frontend uses this to show/hide
-    # the button; admins are effectively always True. Server re-checks.
-    can_execute_code: bool = True
     # May the user's automation HTTP steps reach the local network? Admins
     # always may; the flow editor hides the option otherwise.
     can_reach_private_network: bool = False

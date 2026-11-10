@@ -180,21 +180,145 @@ body,
   }
 }
 
-/* Toast entrance — slides down from just above its resting spot and
-   fades in. Honoured by the prefers-reduced-motion block above (it
-   neutralises all animations to ~0ms). */
-@keyframes promptly-toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(-0.5rem) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
+/* ------------------------------------------------------------------
+   Motion set (UI plan A1). One place for how things move.
+
+   Tokens: use these in any transition/animation so the whole suite keeps
+   the same pace.
+     --motion-fast  small things: menus, tooltips, fades, exits
+     --motion-base  dialogs, toasts, side panels
+     --motion-slow  sheets and anything that travels a long way
+     --ease-out     things arriving (quick start, soft landing)
+     --ease-in      things leaving
+     --ease-in-out  things moving from one place to another
+
+   Classes (each "in" has a matching "out"; "out" holds its last frame so
+   the element can be unmounted afterwards, see ``usePresence``):
+     .motion-fade-in / -out      scrims, plain fades
+     .motion-dialog-in / -out    centred dialogs: fade + slight scale
+     .motion-sheet-in / -out     bottom sheets: slide up / down
+     .motion-pop-in / -out       menus, popovers, tooltips: pop from the
+                                 corner nearest the trigger (set
+                                 ``transform-origin`` on the element)
+     .motion-panel-in / -out     side panels sliding in from the right
+     .motion-panel-left-in/-out  side panels sliding in from the left
+     .motion-toast-in / -out     toasts rising from the bottom edge
+     .motion-rise-in             new content easing in (rows, cards)
+
+   Reduced motion: the global ``prefers-reduced-motion`` block below cuts
+   every animation and transition to ~0ms, so nothing here needs its own
+   opt-out.
+   ------------------------------------------------------------------ */
+:root {
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes motion-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes motion-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes motion-dialog-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes motion-dialog-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(4px) scale(0.97); }
+}
+@keyframes motion-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+/* ``--sheet-from`` lets a sheet that was dragged part-way down carry on
+   from where the finger left it. */
+@keyframes motion-sheet-out {
+  from { transform: translateY(var(--sheet-from, 0px)); }
+  to { transform: translateY(100%); }
+}
+@keyframes motion-pop-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes motion-pop-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.96); }
+}
+@keyframes motion-panel-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes motion-panel-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(24px); }
+}
+@keyframes motion-panel-left-in {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes motion-panel-left-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-24px); }
+}
+@keyframes motion-toast-in {
+  from { opacity: 0; transform: translateY(0.75rem) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes motion-toast-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(0.5rem) scale(0.98); }
+}
+@keyframes motion-rise-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.motion-fade-in { animation: motion-fade-in var(--motion-fast) ease-out; }
+.motion-fade-out { animation: motion-fade-out var(--motion-fast) var(--ease-in) forwards; }
+.motion-dialog-in { animation: motion-dialog-in var(--motion-base) var(--ease-out); }
+.motion-dialog-out { animation: motion-dialog-out var(--motion-fast) var(--ease-in) forwards; }
+.motion-sheet-in { animation: motion-sheet-in var(--motion-slow) var(--ease-out); }
+.motion-sheet-out { animation: motion-sheet-out var(--motion-base) var(--ease-in) forwards; }
+.motion-pop-in { animation: motion-pop-in var(--motion-fast) var(--ease-out); }
+.motion-pop-out { animation: motion-pop-out var(--motion-fast) var(--ease-in) forwards; }
+.motion-panel-in { animation: motion-panel-in var(--motion-base) var(--ease-out); }
+.motion-panel-out { animation: motion-panel-out var(--motion-fast) var(--ease-in) forwards; }
+.motion-panel-left-in { animation: motion-panel-left-in var(--motion-base) var(--ease-out); }
+.motion-panel-left-out { animation: motion-panel-left-out var(--motion-fast) var(--ease-in) forwards; }
+.motion-toast-in { animation: motion-toast-in var(--motion-base) var(--ease-out); }
+.motion-toast-out { animation: motion-toast-out var(--motion-fast) var(--ease-in) forwards; }
+.motion-rise-in { animation: motion-rise-in var(--motion-base) var(--ease-out); }
+
+/* Menu rows (shared Menu): 36px with a mouse, 40px under a finger. */
+.promptly-menu-row { min-height: 36px; }
+@media (hover: none) and (pointer: coarse) {
+  .promptly-menu-row { min-height: 40px; }
+}
+
+/* Toasts (A6) sit at the bottom: centred on a phone, bottom-left on
+   desktop just right of the sidebar (ToastViewport measures it into
+   ``--toast-left``). A page with its own bottom bar (a phone tab bar, a
+   composer) lifts them clear by setting ``--bottom-bar-height`` on
+   <html>; see ``useBottomBarInset`` in ToastViewport.tsx. */
+.promptly-toasts {
+  left: 0;
+  right: 0;
+  align-items: center;
+  padding: 0 0.75rem;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--bottom-bar-height, 0px) + 0.75rem);
+}
+@media (min-width: 769px) {
+  .promptly-toasts {
+    left: calc(var(--toast-left, 0px) + 1rem);
+    right: auto;
+    align-items: flex-start;
+    padding: 0;
+    bottom: 1rem;
   }
 }
+/* Kept for anything still using the old class name. */
 .promptly-toast-in {
-  animation: promptly-toast-in 0.18s ease-out;
+  animation: motion-toast-in var(--motion-base) var(--ease-out);
 }
 
 /* Skeleton placeholder pulse. Neutralised by the reduced-motion block

@@ -80,7 +80,7 @@ export function Sheet({
 
   return createPortal(
     <div data-note-pop="" className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:px-4">
-      <button type="button" aria-label="Close" tabIndex={-1} onClick={() => closeRef.current()} className="absolute inset-0 bg-black/50" />
+      <button type="button" aria-label="Close" tabIndex={-1} onClick={() => closeRef.current()} className="note-fade-in absolute inset-0 bg-black/50" />
       <div
         ref={box}
         role="dialog"
@@ -89,7 +89,7 @@ export function Sheet({
         aria-label={bare ? title : undefined}
         tabIndex={-1}
         className={cn(
-          "relative flex max-h-[92dvh] w-full flex-col overflow-hidden bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-lg)] outline-none",
+          "note-sheet-in relative flex max-h-[92dvh] w-full flex-col overflow-hidden bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-lg)] outline-none",
           "rounded-t-2xl pb-[env(safe-area-inset-bottom,0px)] sm:rounded-2xl sm:pb-0",
           width,
           className,

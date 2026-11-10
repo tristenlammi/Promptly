@@ -135,7 +135,7 @@ function CalendarRow({ cal, onSettings }: { cal: Calendar; onSettings: () => voi
           {!cal.hidden && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{cal.name}</span>
-        {members > 1 && <span className="shrink-0 text-[10px] text-[var(--text-muted)]">{cal.personal && cal.role === "owner" ? "Shared" : members}</span>}
+        {members > 1 && <span className="shrink-0 text-xs text-[var(--text-muted)]">{cal.personal && cal.role === "owner" ? "Shared" : members}</span>}
       </label>
       <button
         type="button"
@@ -212,7 +212,7 @@ function Invitations({ onOpen }: { onOpen: (ev: CalEvent) => void }) {
       <h3 className="flex items-center gap-1.5 pl-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
         <Mail className="h-3.5 w-3.5" />
         Invitations
-        <span className="rounded-full bg-[var(--item-accent)] px-1.5 text-[10px] font-bold text-white">{invites.length}</span>
+        <span className="rounded-full bg-[var(--item-accent)] px-1.5 text-xs font-bold text-white">{invites.length}</span>
       </h3>
       {invites.map((ev) => {
         const start = ev.all_day ? parseYmd(ev.start) : new Date(ev.start);
@@ -338,7 +338,7 @@ function AlsoShow({ b }: { b: CalendarBootstrap }) {
               </option>
             ))}
           </select>
-          <span className="text-[11px] text-[var(--text-muted)]">Shown beside the hours in week and day view.</span>
+          <span className="text-xs text-[var(--text-muted)]">Shown beside the hours in week and day view.</span>
         </div>
       )}
     </section>

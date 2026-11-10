@@ -9,6 +9,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
 import { BOOTSTRAP_KEY, dmTitle, patchRoom, removeRoom, upsertRoom } from "../cache";
+import { askInSheet } from "./ConfirmSheet";
 import { PeoplePicker } from "./PeoplePicker";
 import { ChannelVoiceSettings } from "@/rtc/ui/ChannelVoiceSettings";
 import { cn } from "@/utils/cn";
@@ -102,8 +103,8 @@ export function CreateRoomSheet({
                 aria-checked={kind === o.value}
                 onClick={() => setKind(o.value)}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
-                  kind === o.value ? "border-[var(--item-accent)] bg-[color-mix(in_srgb,var(--item-accent)_8%,transparent)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
+                  "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                  kind === o.value ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
                 )}
               >
                 <o.Icon className="h-5 w-5 shrink-0 text-[var(--text-muted)]" />
@@ -122,14 +123,20 @@ export function CreateRoomSheet({
           <TextInput
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void create()}
+            onKeyDown={(e) => e.key === "Enter" && !busy && void create()}
             placeholder={kind === "voice" ? "Lounge" : "holidays"}
             maxLength={80}
             data-autofocus=""
           />
         </Field>
         <Field label="Topic (optional)">
-          <TextInput value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="What's this room for?" maxLength={300} />
+          <TextInput
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !busy && void create()}
+            placeholder="What's this room for?"
+            maxLength={300}
+          />
         </Field>
       </div>
     </Sheet>
@@ -208,7 +215,14 @@ export function RoomSettingsSheet({
         {isAdmin && (
           <div className="flex flex-col gap-3">
             <Field label="Name" hint={!isVoice && slug(name) && slug(name) !== name ? `#${slug(name)}` : undefined}>
-              <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
+              <TextInput
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && dirty && norm(name) && !busy) void save({ name: norm(name), topic: topic.trim() || null }, "Saved");
+                }}
+                maxLength={80}
+              />
             </Field>
             <Field label="Topic">
               <TextArea value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={300} placeholder="What's this room for?" className="!min-h-[64px]" />
@@ -227,7 +241,7 @@ export function RoomSettingsSheet({
 
         <div className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <div className="flex items-start gap-3">
-            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-[var(--item-accent)]" />
+            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent-text)]" />
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <span className="text-sm font-semibold text-[var(--text)]">Promptly can read this room</span>
               <span className="text-xs leading-relaxed text-[var(--text-muted)]">{AI_CONTEXT_EXPLAINER}</span>
@@ -256,14 +270,15 @@ export function RoomSettingsSheet({
               icon={<Trash2 className="h-4 w-4" />}
               disabled={busy}
               onClick={async () => {
-                if (
-                  !window.confirm(
-                    isVoice
-                      ? `Delete ${room.name}? Anyone in it is disconnected, and its chat is deleted for everyone.`
-                      : `Delete #${room.name} and all its messages for everyone?`,
-                  )
-                )
-                  return;
+                const ok = await askInSheet({
+                  title: isVoice ? `Delete ${room.name}?` : `Delete #${room.name}?`,
+                  message: isVoice
+                    ? "Anyone in it is disconnected, and its chat is deleted for everyone."
+                    : "All its messages are deleted for everyone. This can't be undone.",
+                  confirmLabel: isVoice ? "Delete channel" : "Delete room",
+                  danger: true,
+                });
+                if (!ok) return;
                 setBusy(true);
                 try {
                   await roomsApi.deleteRoom(room.id);
@@ -354,7 +369,7 @@ export function DmSettingsSheet({ open, onClose, room, b }: { open: boolean; onC
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <div className="flex items-start gap-3">
-            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-[var(--item-accent)]" />
+            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent-text)]" />
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <span className="text-sm font-semibold text-[var(--text)]">Let Promptly read this conversation</span>
               <span className="text-xs leading-relaxed text-[var(--text-muted)]">
@@ -400,7 +415,7 @@ export function DmSettingsSheet({ open, onClose, room, b }: { open: boolean; onC
           >
             Close conversation
           </ItemButton>
-          <p className="mt-1.5 text-[11px] text-[var(--text-muted)]">Hides it from your list. Nothing is deleted.</p>
+          <p className="mt-1.5 text-xs text-[var(--text-muted)]">Hides it from your list. Nothing is deleted.</p>
         </div>
       </div>
     </Sheet>

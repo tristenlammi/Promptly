@@ -1,11 +1,11 @@
-import { Bell, CalendarDays, Clock, Flag, ListChecks, Plus, Repeat as RepeatIcon, Send, Trash2, X } from "lucide-react";
+import { Bell, CalendarDays, Clock, Flag, ListChecks, Repeat as RepeatIcon, Send, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { SendToSheet } from "@/components/share/SendToSheet";
 import { TagPicker } from "@/components/tags/TagPicker";
 import { LinkedSection } from "@/components/links/LinkedSection";
 import type { ItemHandle } from "@/items/useItem";
-import { Chip, Field, ItemButton, Segmented, Select, Sheet, Stepper, TextArea, TextInput, Toggle, fmtDay, todayISO, uid } from "@/items/ui";
+import { Chip, Field, ItemButton, Segmented, Select, Sheet, Stepper, TextArea, TextInput, Toggle, fmtDay, todayISO } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { Link } from "react-router-dom";
 
@@ -14,6 +14,8 @@ import { cn } from "@/utils/cn";
 import { ALERTS, PRIORITY, alertLabel } from "./logic";
 import { WEEKDAY_SHORT, describeRepeat, firstDue, makeRepeat, plusDays, weekday } from "./recur";
 import { TaskCheck, useToggle } from "./parts";
+import { nextWeekDay } from "./reschedule";
+import { Steps } from "./steps";
 import type { Freq, Repeat, Task, TasksData } from "./types";
 
 /*
@@ -38,8 +40,7 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
   const task = item.data.tasks.find((t) => t.id === taskId) ?? null;
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
-  const [step, setStep] = useState("");
-  const toggle = useToggle(item);
+  const toggle = useToggle(item, { instant: true });
   const ro = !item.canEdit;
   const [sending, setSending] = useState(false);
   useEffect(() => {
@@ -151,7 +152,7 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
           aria-label="Title"
           className="!h-auto border-transparent !px-1 py-1 text-lg font-semibold md:text-base"
         />
-        {/\/mail\?open=[\w/-]+/.exec(notes) && <Link to={/\/mail\?open=[\w/-]+/.exec(notes)![0]} className="px-1 text-xs font-medium text-[var(--item-accent)]">Open the email</Link>}
+        {/\/mail\?open=[\w/-]+/.exec(notes) && <Link to={/\/mail\?open=[\w/-]+/.exec(notes)![0]} className="px-1 text-xs font-medium text-[var(--accent-text)]">Open the email</Link>}
         <TextArea value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={commitText} placeholder="Notes" aria-label="Notes" className="min-h-[64px]" />
 
         <Row icon={CalendarDays} label="Due">
@@ -159,7 +160,7 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
             {[
               ["Today", today],
               ["Tomorrow", plusDays(today, 1)],
-              ["Next week", plusDays(today, ((7 - weekday(today) + s.week_start) % 7) || 7)],
+              ["Next week", nextWeekDay(today, s.week_start)],
             ].map(([label, day]) => (
               <Chip key={label} active={task.due === day} onClick={() => setDue(day)}>
                 {label}
@@ -314,51 +315,10 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
         </Row>
 
         <Row icon={ListChecks} label={`Steps${task.steps.length ? ` · ${task.steps.filter((x) => x.done).length}/${task.steps.length}` : ""}`}>
-          {task.steps.length > 0 && (
-            <ul className="flex flex-col">
-              {task.steps.map((st) => (
-                <li key={st.id} className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={st.done}
-                    aria-label={st.title}
-                    onClick={() => {
-                      const target = !st.done;
-                      edit((t) => {
-                        const x = t.steps.find((y) => y.id === st.id);
-                        if (x) x.done = target;
-                      });
-                    }}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center"
-                  >
-                    <span className={cn("h-4 w-4 rounded border-2 border-[var(--text-muted)]", st.done && "border-[var(--item-accent)] bg-[var(--item-accent)]")} />
-                  </button>
-                  <span className={cn("min-w-0 flex-1 text-sm text-[var(--text)]", st.done && "text-[var(--text-muted)] line-through")}>{st.title}</span>
-                  <button type="button" aria-label={`Remove step ${st.title}`} onClick={() => edit((t) => void (t.steps = t.steps.filter((y) => y.id !== st.id)))} className="flex h-10 w-10 items-center justify-center text-[var(--text-muted)] hover:text-[var(--danger)]">
-                    <X className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <form
-            className="flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const v = step.trim();
-              if (!v) return;
-              const id = uid("s");
-              edit((t) => void t.steps.push({ id, title: v.slice(0, 300), done: false }));
-              setStep("");
-            }}
-          >
-            <TextInput value={step} onChange={(e) => setStep(e.target.value)} placeholder="Add a step" aria-label="New step" enterKeyHint="done" />
-            <ItemButton type="submit" aria-label="Add step" icon={<Plus className="h-4 w-4" />} disabled={!step.trim()} />
-          </form>
+          <Steps task={task} readOnly={ro} edit={edit} />
         </Row>
         {task.created_at && (
-          <p className="flex items-center gap-1 px-1 text-[11px] text-[var(--text-muted)]">
+          <p className="flex items-center gap-1 px-1 text-xs text-[var(--text-muted)]">
             <Clock className="h-3 w-3" />
             Added {fmtDay(task.created_at.slice(0, 10))}
             {task.done_at ? ` · done ${fmtDay(task.done_at.slice(0, 10))}` : ""}

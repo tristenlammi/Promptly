@@ -56,7 +56,7 @@ def test_the_voice_allowlist():
         assert get_tool(name) is not None, name
     # What needs a screen and minutes, or deletes: never.
     assert not names & set(voice_tools.NOT_ON_VOICE)
-    for name in ("deep_research", "run_agents", "code_interpreter", "generate_image", "forget", "read_room"):
+    for name in ("deep_research", "run_agents", "generate_image", "forget", "read_room"):
         assert name not in names
     # A Rooms message waits for a yes like any change (phase 2).
     assert "post_to_room" in names and voice_tools.is_write("post_to_room")
@@ -79,7 +79,7 @@ async def test_a_spoken_turn_is_offered_only_the_allowlist(db, user, conversatio
     assert offered and offered <= voice_tools.voice_tool_names([])
     assert {"my_day", "calendar_add_event", "calendar_events"} <= offered
     assert not offered & set(voice_tools.DEVICE)
-    assert "code_interpreter" not in offered and not any(n.startswith("mcp__") for n in offered)
+    assert not any(n.startswith("mcp__") for n in offered)
     assert "never say it's done" in model.system()
     await finish(c)
 

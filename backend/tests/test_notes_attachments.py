@@ -85,7 +85,11 @@ async def client(db, root, queued, live, local_stt, monkeypatch):
     from app.main import app
 
     monkeypatch.setattr(get_settings(), "TUS_ENABLED", True)
-    monkeypatch.setattr(get_settings(), "TUS_HOOK_SECRET", None)
+    # Not about who may call the hooks (that needs TUS_HOOK_SECRET,
+    # test_only_tusd_can_call_the_hooks): let the test client through.
+    from app.files import tus_hooks as _tus
+
+    monkeypatch.setattr(_tus, "_caller_ok", lambda request, key: True)
     rate_limit._settings.RATE_LIMIT_ENABLED = False
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:

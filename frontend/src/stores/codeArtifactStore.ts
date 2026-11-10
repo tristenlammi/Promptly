@@ -39,7 +39,7 @@ interface State {
   /** Current working copy of the source, mutated by CodeMirror.
    *  Reset button snaps this back to ``payload.source``. */
   draft: string;
-  activeTab: "preview" | "code" | "output";
+  activeTab: "preview" | "code";
 }
 
 interface Actions {
@@ -47,7 +47,7 @@ interface Actions {
   closeArtifact: () => void;
   setDraft: (draft: string) => void;
   resetDraft: () => void;
-  setActiveTab: (tab: "preview" | "code" | "output") => void;
+  setActiveTab: (tab: "preview" | "code") => void;
 }
 
 export const useCodeArtifactStore = create<State & Actions>((set, get) => ({

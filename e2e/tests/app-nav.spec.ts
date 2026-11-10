@@ -158,7 +158,8 @@ test.describe("app navigation", () => {
     expect(Math.round((await side.boundingBox())!.width)).toBe(288);
     await expect(side.getByText("Promptly", { exact: true })).toBeVisible();
     await expect(side.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
-    await expect(side.getByRole("link", { name: "New chat", exact: true })).toHaveAttribute("href", "/chat");
+    // .first(): chats from other specs can be called "New chat" too.
+    await expect(side.getByRole("link", { name: "New chat", exact: true }).first()).toHaveAttribute("href", "/chat");
     await expect(side.getByRole("link", { name: "Search", exact: true })).toHaveAttribute("href", "/chat?search=1");
     const rail = vaultRail(page);
     for (const [name, href] of [
@@ -247,8 +248,8 @@ test.describe("app navigation", () => {
     // …and it's the main sidebar's own setting.
     await page.goto("/files");
     await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible({ timeout: 20_000 });
-    // A new person's first visit asks which apps they want.
-    const welcome = page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "Pick your apps" }) });
+    // A new person's first visit shows the welcome.
+    const welcome = page.getByRole("dialog").filter({ has: page.getByTestId("welcome-dialog") });
     await welcome.getByRole("button", { name: "Close", exact: true }).click();
     await expect(welcome).toHaveCount(0);
     await page.getByRole("button", { name: "Expand sidebar" }).click();

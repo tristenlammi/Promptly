@@ -74,6 +74,10 @@ _CODE["note"] = 16
 PORCH_RENDITIONS = ("porch_thumb", "porch_preview", "porch_poster", "porch_video", "porch_full", "porch_cover")
 # Codes 17-22, after Notes' 16 (fixed at the v0.34.0 merge; they never move).
 _CODE.update(zip(PORCH_RENDITIONS, range(17, 23)))
+# Porch stories (WP-P2.1, app/porch/stories.py): the "file" is the story,
+# served only while the viewer can see it. Codes 23-26 (append only).
+PORCH_STORY_RENDITIONS = ("porch_story_thumb", "porch_story_preview", "porch_story_poster", "porch_story_video")
+_CODE.update(zip(PORCH_STORY_RENDITIONS, range(23, 27)))
 assert len(set(_CODE.values())) == len(_CODE), "media_urls._CODE: two renditions share a code"
 _NAME = {v: k for k, v in _CODE.items()}
 # What each rendition is on disk under derived/<file_id>/.
@@ -236,6 +240,6 @@ def verify(token: str, *, now: float | None = None) -> MediaClaim | None:
 
 
 __all__ = [
-    "MediaClaim", "OFFLINE_KINDS", "PORCH_RENDITIONS", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "offline_expiry",
+    "MediaClaim", "OFFLINE_KINDS", "PORCH_RENDITIONS", "PORCH_STORY_RENDITIONS", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "offline_expiry",
     "offline_file", "rendition_tag", "shown", "sign", "sign_basemap", "sign_offline", "sign_shown", "verify", "version_tag",
 ]

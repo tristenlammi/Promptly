@@ -6,12 +6,15 @@ import { Clock } from "lucide-react";
 import { type FileItem, supportsEditGrant, shareRolesFor, shareLinksAllowed } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveSimpleList } from "@/components/files/DriveSimpleList";
+import { DriveListSkeleton } from "@/components/files/DriveListSkeleton";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
+import { MoveItemModal } from "@/components/files/MoveItemModal";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { downloadAuthed, openFile as openInEditor } from "@/components/files/helpers";
 import {
+  useMoveFile,
   useRecentFiles,
   useStarFile,
   useTrashFile,
@@ -30,6 +33,8 @@ export function RecentFilesPage() {
   const { data, isLoading } = useRecentFiles(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<FileItem | null>(null);
+  const [moveFor, setMoveFor] = useState<FileItem | null>(null);
+  const move = useMoveFile();
 
   // Documents, sheets and whiteboards open on their editor page (WP-3.4);
   // everything else previews.
@@ -55,9 +60,7 @@ export function RecentFilesPage() {
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="w-full px-6 py-6">
-          {isLoading && (
-            <div className="text-sm text-[var(--text-muted)]">Loading…</div>
-          )}
+          {isLoading && <DriveListSkeleton />}
 
           {!isLoading && files.length === 0 && (
             <DriveEmptyState
@@ -80,7 +83,9 @@ export function RecentFilesPage() {
                   onShare: () => setShareFor(f),
                   onStar: f.starred_at ? undefined : () => star.mutate({ id: f.id, scope: SCOPE }),
                   onUnstar: f.starred_at ? () => unstar.mutate({ id: f.id, scope: SCOPE }) : undefined,
-                  onMove:
+                  // Shared and workspace files stay where their owner put them.
+                  onMove: f.scope === "shared" || f.sharing?.role === "grantee" ? undefined : () => setMoveFor(f),
+                  onShowInFolder:
                     f.folder_id !== undefined
                       ? () => navigate(f.folder_id ? `/files/folder/${f.folder_id}` : "/files")
                       : undefined,
@@ -104,6 +109,28 @@ export function RecentFilesPage() {
           else star.mutate({ id: f.id, scope: SCOPE });
         }}
       />
+
+      {moveFor && (
+        <MoveItemModal
+          open
+          scope={SCOPE}
+          kind="file"
+          itemId={moveFor.id}
+          itemName={moveFor.filename}
+          currentParentId={moveFor.folder_id ?? null}
+          onClose={() => setMoveFor(null)}
+          onSubmit={async (target) => {
+            await move.mutateAsync({
+              id: moveFor.id,
+              folderId: target,
+              scope: SCOPE,
+              from: moveFor.folder_id ?? null,
+              name: moveFor.filename,
+            });
+            setMoveFor(null);
+          }}
+        />
+      )}
 
       <ShareGrantsModal
         open={!!shareFor}

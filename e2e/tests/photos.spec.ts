@@ -67,7 +67,9 @@ test("photos show by date taken, can be archived, and a folder can be left out",
   await expect(bar).toContainText("2 selected");
   await bar.getByRole("button", { name: "Archive" }).click();
   await expect.poll(async () => (await july2021(page, auth)).filter((n) => names.includes(n)).length).toBe(0);
-  await page.getByRole("navigation", { name: "Photos", exact: true }).getByRole("link", { name: "Archive" }).click();
+  // Archive is under the menu's "More places".
+  await page.getByRole("navigation", { name: "Photos", exact: true }).getByRole("button", { name: "More places" }).click();
+  await page.getByRole("menuitem", { name: "Archive" }).click();
   await expect(tileA).toBeVisible();
   await tileA.hover();
   await tileA.getByRole("button", { name: "Select" }).click();

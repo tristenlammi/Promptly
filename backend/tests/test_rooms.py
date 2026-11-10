@@ -493,3 +493,52 @@ async def test_open_dm_helper_refuses_a_new_one_to_one_across_a_block(client, db
     assert await service.dm_refusal(db, room, bob.id)
     with pytest.raises(HTTPException):
         await service.open_dm(db, ann, [ann.id])
+
+
+async def test_undo_a_delete_brings_everything_back(client, db, people):
+    """A deleted message is gone for everyone at once, comes back exactly on
+    Undo, and is only wiped once Undo has run out."""
+    from datetime import timedelta
+
+    from app.rooms import service
+    from app.rooms.models import RoomAttachment, RoomMessage, RoomReaction
+
+    ann, bob, cat, _ = people
+    _sid, room = await make_space(client, ann, bob)
+    att = (await client.post(f"/api/rooms/rooms/{room}/attachments", headers=H(bob), files={"file": ("beach.png", _png(), "image/png")})).json()
+    m = await say(client, bob, room, "see you at six", attachment_ids=[att["id"]])
+    await client.put(f"/api/rooms/messages/{m['id']}/reactions", headers=H(ann), json={"emoji": "👍"})
+    await client.patch(f"/api/rooms/messages/{m['id']}", headers=H(ann), json={"pinned": True})
+
+    assert (await client.delete(f"/api/rooms/messages/{m['id']}", headers=H(bob))).status_code == 204
+    got = (await client.get(f"/api/rooms/rooms/{room}/messages", headers=H(ann))).json()["messages"][-1]
+    assert got["deleted"] and got["body"] == "" and got["attachments"] == [] and got["reactions"] == []
+    assert (await client.get(att["url"])).status_code == 404
+    assert (await client.get(f"/api/rooms/rooms/{room}/pins", headers=H(ann))).json() == []
+    # Still inside the Undo time: the cleaner leaves it alone.
+    assert await service.purge_deleted(db) == 0
+
+    # Not just anyone can bring it back.
+    assert (await client.post(f"/api/rooms/messages/{m['id']}/restore", headers=H(cat))).status_code == 404
+    r = await client.post(f"/api/rooms/messages/{m['id']}/restore", headers=H(bob))
+    assert r.status_code == 200, r.text
+    back = r.json()
+    assert not back["deleted"] and back["body"] == "see you at six" and back["pinned"]
+    assert [a["id"] for a in back["attachments"]] == [att["id"]] and back["reactions"][0]["emoji"] == "👍"
+    assert (await client.get(att["url"])).status_code == 200
+    # Restoring a message that isn't deleted changes nothing.
+    assert (await client.post(f"/api/rooms/messages/{m['id']}/restore", headers=H(bob))).status_code == 200
+
+    # Deleted for good: too late to undo, and the cleaner wipes it.
+    await client.delete(f"/api/rooms/messages/{m['id']}", headers=H(bob))
+    row = await db.get(RoomMessage, uuid.UUID(m["id"]))
+    await db.refresh(row)
+    row.deleted_at = row.deleted_at - timedelta(minutes=5)
+    await db.commit()
+    assert (await client.post(f"/api/rooms/messages/{m['id']}/restore", headers=H(bob))).status_code == 409
+    assert await service.purge_deleted(db) == 1
+    await db.refresh(row)
+    assert row.body == "" and row.pinned_at is None and row.deleted_at is not None
+    assert (await db.execute(select(RoomAttachment).where(RoomAttachment.message_id == row.id))).scalars().all() == []
+    assert (await db.execute(select(RoomReaction).where(RoomReaction.message_id == row.id))).scalars().all() == []
+    assert await service.purge_deleted(db) == 0

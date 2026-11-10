@@ -115,7 +115,11 @@ from app.chat.stream_runner import (
     stop_session,
 )
 from app.chat.personal_context import build_personal_context_prompt
-from app.chat.tools.base import reads_outside_content
+from app.chat.tools.base import note_sources, reads_outside_content, start_step
+
+# Tools whose ``sources`` are pages this turn found: opening one later in the
+# turn doesn't wait for a yes (``guard_outbound``).
+_SOURCE_TOOLS = frozenset({"web_search", "deep_research", "fetch_url"})
 from app.chat.semantic_search import (
     embed_query,
     get_embedding_config,
@@ -3839,10 +3843,9 @@ async def _dispatch_tools(
     # A hop that reads outside content marks the turn untrusted *before*
     # anything runs: calls in one hop run in parallel, so a ``remember``
     # alongside a ``fetch_url`` must already see it (R-019).
-    if ctx.turn is not None and any(
-        reads_outside_content(slot.get("name") or "") for slot in pending_calls.values()
-    ):
-        ctx.turn["untrusted"] = True
+    # It also remembers what the turn had read before this hop, which is what
+    # holds an outbound call (``guard_outbound``, security review H2).
+    start_step(ctx.turn, [slot.get("name") or "" for slot in pending_calls.values()])
 
     # ---- Phase 1: validate, account, launch --------------------------
     for idx in sorted(pending_calls.keys()):
@@ -4432,6 +4435,9 @@ async def _dispatch_tools(
             # sources mid-turn can use the same hook unchanged.
             if result.sources and on_sources is not None:
                 on_sources(result.sources)
+            # This turn's search results can be opened without a yes (H2).
+            if result.sources and name in _SOURCE_TOOLS:
+                note_sources(ctx.turn, result.sources)
 
             # Sum any tool-reported USD spend into the per-message total
             # so the assistant message bubble can show "this turn cost
@@ -4856,6 +4862,11 @@ async def _stream_generator(
         # ItemAction.from_documents), and nothing more.
         in_workspace = conv.workspace_id is not None
         turn_state = TurnState(untrusted=False, own_attachments_only=False)
+        # Addresses the person wrote themselves: opening them never waits for
+        # a yes, however much outside content the turn reads (H2).
+        from app.chat.tools.base import allow_urls, urls_in
+
+        allow_urls(turn_state, urls_in(triggering_text))
         turn_state.saw_files(triggering_files, user_id=user.id, in_workspace=in_workspace)
         # Chunks retrieved from files attached on earlier turns: the same files.
         turn_state.saw_files(attachment_rag_files, user_id=user.id, in_workspace=in_workspace)
@@ -5312,9 +5323,6 @@ async def _stream_generator(
         else:
             if ctx.get("tools_enabled"):
                 enabled_categories.add("artefact")
-                # Phase 4 — the code interpreter rides on the same Tools
-                # toggle as the artefact generators.
-                enabled_categories.add("code")
                 # Batch 4.1 — workspace write-back *proposals*. Only in
                 # workspace chats. The tools never write; they file a
                 # pending proposal the user applies from a preview card,

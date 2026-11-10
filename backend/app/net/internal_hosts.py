@@ -2,7 +2,7 @@
 
 Automation HTTP steps that may reach the local network (an admin's, or a
 user an admin allowed) still can't call these: the database, Redis, the
-code sandbox, the unauthenticated Ollama / Whisper / TTS admin APIs. They
+unauthenticated Ollama / Whisper / TTS admin APIs. They
 are refused by name and by every address the names resolve to (R-015).
 """
 from __future__ import annotations
@@ -11,12 +11,12 @@ INTERNAL_HOSTS: frozenset[str] = frozenset(
     {
         # docker-compose service names (resolvable on the promptly network)
         "backend", "arq-worker", "collab", "frontend", "nginx",
-        "postgres", "redis", "sandbox", "searxng",
+        "postgres", "redis", "searxng",
         "ollama", "ollama-gpu", "ollama-rocm", "whisper", "tts",
         # container names
         "promptly-backend", "promptly-arqworker", "promptly-collab",
         "promptly-frontend", "promptly-nginx", "promptly-postgres",
-        "promptly-redis", "promptly-sandbox", "promptly-searxng",
+        "promptly-redis", "promptly-searxng",
         "promptly-ollama", "promptly-ollama-gpu", "promptly-ollama-rocm",
         "promptly-whisper", "promptly-tts",
     }

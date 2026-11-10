@@ -7,17 +7,17 @@ import mimetypes
 import re
 import shutil
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.files.storage import absolute_path
 
 from . import core
-from .models import Room, RoomAttachment, RoomMember, RoomMessage
+from .models import Room, RoomAttachment, RoomMember, RoomMessage, RoomReaction
 
 logger = logging.getLogger("promptly.rooms.service")
 
@@ -234,6 +234,56 @@ def remove_attachment_files(a: RoomAttachment) -> None:
             absolute_path(att_path(a, thumb)).unlink(missing_ok=True)
         except (OSError, ValueError):
             pass
+
+
+# A deleted message can be brought back (Undo) for this long…
+RESTORE_WINDOW = timedelta(seconds=60)
+# …and what it held is wiped for good once this has passed.
+PURGE_AFTER = timedelta(minutes=2)
+
+
+async def purge_deleted(db: AsyncSession, *, older_than: timedelta = PURGE_AFTER) -> int:
+    """Wipe what deleted messages still hold — their words, files, reactions,
+    pin and links — once Undo has run out. The empty row stays, so replies
+    to it and the room's numbering still make sense."""
+    from app.links.service import purge_sources
+
+    cutoff = datetime.now(timezone.utc) - older_than
+    rows = (
+        (
+            await db.execute(
+                select(RoomMessage)
+                .where(
+                    RoomMessage.deleted_at.is_not(None),
+                    RoomMessage.deleted_at < cutoff,
+                    or_(
+                        RoomMessage.body != "",
+                        RoomMessage.pinned_at.is_not(None),
+                        exists().where(RoomAttachment.message_id == RoomMessage.id),
+                        exists().where(RoomReaction.message_id == RoomMessage.id),
+                    ),
+                )
+                .limit(500)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return 0
+    ids = [m.id for m in rows]
+    for m in rows:
+        m.body = ""
+        m.pinned_at = None
+        m.mentions = []
+    atts = (await db.execute(select(RoomAttachment).where(RoomAttachment.message_id.in_(ids)))).scalars().all()
+    for a in atts:
+        remove_attachment_files(a)
+        await db.delete(a)
+    await db.execute(delete(RoomReaction).where(RoomReaction.message_id.in_(ids)))
+    await purge_sources(db, "room_msg", ids)
+    await db.commit()
+    return len(rows)
 
 
 def remove_room_files(room_id: uuid.UUID) -> None:

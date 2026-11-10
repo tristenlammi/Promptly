@@ -8,6 +8,7 @@ import { photosApi, type PhotoItem } from "@/api/photos";
 import { ClusterMap, type MapPick } from "@/components/maps/ClusterMap";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { apiErrorMessage } from "@/utils/apiError";
+import { Skeleton } from "@/components/shared/Skeleton";
 
 /** The Photos map (PH-5): where your photos were taken, clustered — click
  *  a cluster for its photos. Streets, towns and place names come from this
@@ -43,7 +44,7 @@ export function PhotoMapPage() {
         </Link>
       </header>
       <div className="relative min-h-0 flex-1">
-        {isLoading && <p className="p-6 text-sm text-[var(--text-muted)]">Loading…</p>}
+        {isLoading && <Skeleton className="absolute inset-0 rounded-none" />}
         {error && <p role="alert" className="p-6 text-sm text-[var(--text-muted)]">{apiErrorMessage(error, "Couldn't load the map.")}</p>}
         {/* MapLibre makes its container position: relative — the size comes
             from this wrapper. */}

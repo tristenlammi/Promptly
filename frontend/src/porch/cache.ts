@@ -28,6 +28,18 @@ export const savedKey = ["porch", "list", "saved"] as const;
 export const commentsKey = (postId: string) => ["porch", "comments", postId] as const;
 export const ACTIVITY_KEY = ["porch", "activity"] as const;
 export const NOTIFY_KEY = ["porch", "notifications"] as const;
+/** Stories (WP-P2.2): the row, one person's live ones, and your archive. */
+export const STORIES_KEY = ["porch", "stories"] as const;
+export const STORIES_ROW_KEY = ["porch", "stories", "row"] as const;
+export const userStoriesKey = (id: string, feed: boolean) => ["porch", "stories", "u", id, feed] as const;
+export const storyViewersKey = (id: string) => ["porch", "stories", "viewers", id] as const;
+export const STORY_ARCHIVE_KEY = ["porch", "stories", "archive"] as const;
+/** Highlights (WP-P2.4): yours, and someone's as you see them. */
+export const HIGHLIGHTS_KEY = ["porch", "highlights", "me"] as const;
+/** A group's pinned posts (WP-P3.1) and its events (WP-P3.2). */
+export const groupPinsKey = (id: string) => ["porch", "pins", id] as const;
+export const groupEventsKey = (id: string) => ["porch", "group-events", id] as const;
+export const userHighlightsKey = (id: string) => ["porch", "highlights", "u", id] as const;
 export const ALERTS_KEY = ["porch", "alerts"] as const;
 
 /** Change one post wherever it's cached (lists and its own query). */
@@ -114,5 +126,7 @@ export function groupsChanged(qc: QueryClient, groupId?: string): void {
     void qc.invalidateQueries({ queryKey: groupKey(groupId) });
     void qc.invalidateQueries({ queryKey: membersKey(groupId) });
     void qc.invalidateQueries({ queryKey: pendingKey(groupId) });
+    void qc.invalidateQueries({ queryKey: ["porch", "pins", groupId] });
+    void qc.invalidateQueries({ queryKey: ["porch", "group-events", groupId] });
   }
 }

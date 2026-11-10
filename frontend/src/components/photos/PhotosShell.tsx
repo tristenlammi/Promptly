@@ -1,47 +1,52 @@
 import { Suspense, useLayoutEffect, useRef, useState } from "react";
-import { Archive, BookImage, Eraser, Heart, Home, Images, Loader2, MapPin, Search, Settings2, Upload, UsersRound } from "lucide-react";
-import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
+import { Archive, BookImage, ChevronDown, Eraser, Heart, Home, Images, MapPin, Search, Settings2, Upload, UsersRound } from "lucide-react";
+import { Link, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { PhotoSettingsDialog } from "@/components/photos/PhotoSettingsDialog";
 import { PhotosAppTabs } from "@/components/photos/PhotosAppTabs";
+import { PhotosDropZone } from "@/components/photos/photosDrop";
+import { PopMenu, PopMenuItem } from "@/components/photos/PopMenu";
 import { usePhotosBase, usePhotosPath } from "@/components/photos/photosPath";
 import { RouteBoundary } from "@/components/system/RouteBoundary";
 import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { UnderstandingStatus } from "@/components/photos/UnderstandingStatus";
 import { useUploadStore } from "@/store/uploadStore";
+import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { SkeletonTileGrid } from "@/components/shared/Skeleton";
 
 /** The Photos menu, on every Photos page (the timeline, albums, people,
  *  places and the map, clean-up, search…) — it stays put while you move
  *  between them; each page's own title and tools sit below it. */
 
-const VIEWS = [
-  { id: "all", label: "Photos", icon: Images },
-  { id: "favorites", label: "Favourites", icon: Heart },
-  { id: "archive", label: "Archive", icon: Archive },
-  { id: "family", label: "Family", icon: Home },
+// Four places in the row; the rest wait under "More".
+// Sub-paths under the Photos base (``/files/photos`` or ``/photos``).
+const MAIN = [
+  { key: "all", label: "Photos", icon: Images, sub: "" },
+  { key: "albums", label: "Albums", icon: BookImage, sub: "/albums" },
+  { key: "people", label: "Faces", icon: UsersRound, sub: "/people" },
+  // The map lives under Places (its List / Map switch).
+  { key: "places", label: "Places", icon: MapPin, sub: "/places", also: "/map" },
 ] as const;
 
-// Sub-paths under the Photos base (``/files/photos`` or ``/photos``).
-const SECTIONS = [
-  { sub: "/albums", label: "Albums", icon: BookImage },
-  { sub: "/people", label: "People", icon: UsersRound },
-  // The map lives under Places (its List / Map switch).
-  { sub: "/places", label: "Places", icon: MapPin, also: "/map" },
-  { sub: "/cleanup", label: "Clean up", icon: Eraser },
+const MORE = [
+  { key: "favorites", label: "Favourites", icon: Heart, sub: "?view=favorites" },
+  { key: "archive", label: "Archive", icon: Archive, sub: "?view=archive" },
+  { key: "family", label: "Family", icon: Home, sub: "?view=family" },
+  { key: "cleanup", label: "Clean up", icon: Eraser, sub: "/cleanup" },
 ] as const;
 
 // Search and Settings sit by Upload, always in view.
 const iconButton = (active: boolean) =>
   cn(
-    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition",
+    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition sm:h-8 sm:w-8",
     active ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]",
   );
 
 const pill = (active: boolean) =>
   cn(
-    "flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs transition",
+    "flex min-h-10 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs transition sm:min-h-8",
     active ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
   );
 
@@ -81,6 +86,25 @@ export function PhotosShell({ app = false }: { app?: boolean } = {}) {
     return () => ro.disconnect();
   }, [compact, phoneApp]);
   const view = onTimeline ? params.get("view") || "all" : null;
+  const navigate = useNavigate();
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  // Which place you are in, by its key.
+  const here =
+    view ??
+    (pathname.startsWith(photosPath("/albums"))
+      ? "albums"
+      : pathname.startsWith(photosPath("/people"))
+        ? "people"
+        : pathname.startsWith(photosPath("/places")) || pathname.startsWith(photosPath("/map"))
+          ? "places"
+          : pathname.startsWith(photosPath("/cleanup"))
+            ? "cleanup"
+            : null);
+  const inMore = MORE.find((m) => m.key === here);
+  const upload = (files: File[]) => {
+    if (files.length) startUploads({ files, scope: "mine", folderId: null, route: "camera" });
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -104,33 +128,53 @@ export function PhotosShell({ app = false }: { app?: boolean } = {}) {
           aria-label="Photos"
           className={cn("min-w-0 flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none]", phoneApp ? "hidden" : "flex")}
         >
-          {VIEWS.map((v) => {
-            const Icon = v.icon;
+          {MAIN.map((m) => {
+            const Icon = m.icon;
+            const active = here === m.key;
             return (
-              <Link
-                key={v.id}
-                to={v.id === "all" ? photosPath() : photosPath(`?view=${v.id}`)}
-                aria-current={view === v.id ? "page" : undefined}
-                title={v.label}
-                className={pill(view === v.id)}
-              >
+              <Link key={m.key} to={photosPath(m.sub)} aria-current={active ? "page" : undefined} title={m.label} className={pill(active)}>
                 <Icon className="h-3.5 w-3.5" />
-                {/* Icons only when the labels don't fit — every item alike. */}
-                <span className={compact ? "sr-only" : undefined}>{v.label}</span>
+                {/* Icons only when the labels don't fit: every item alike. */}
+                <span className={compact ? "sr-only" : undefined}>{m.label}</span>
               </Link>
             );
           })}
-          {SECTIONS.map((s) => {
-            const to = photosPath(s.sub);
-            const active = pathname.startsWith(to) || ("also" in s && pathname.startsWith(photosPath(s.also)));
-            const Icon = s.icon;
-            return (
-              <Link key={s.sub} to={to} aria-current={active ? "page" : undefined} title={s.label} className={pill(active)}>
-                <Icon className="h-3.5 w-3.5" />
-                <span className={compact ? "sr-only" : undefined}>{s.label}</span>
-              </Link>
-            );
-          })}
+          {/* Favourites, Archive, Family and Clean up. While you're in one
+              of them, the button wears its name. */}
+          <button
+            ref={moreButton}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            title={inMore ? `${inMore.label} (more places)` : "More places"}
+            // Its own name, so screen readers don't hear two "More" buttons
+            // beside a page's own More menu (an album, a memory).
+            aria-label={inMore ? `${inMore.label} (more places)` : "More places"}
+            onClick={() => setMoreOpen((v) => !v)}
+            className={pill(!!inMore)}
+          >
+            {inMore && <inMore.icon className="h-3.5 w-3.5" />}
+            <span className={compact && inMore ? "sr-only" : undefined}>{inMore ? inMore.label : "More"}</span>
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+          <PopMenu open={moreOpen} anchor={moreButton} onClose={() => setMoreOpen(false)} label="More places">
+            {MORE.map((m) => {
+              const Icon = m.icon;
+              return (
+                <PopMenuItem
+                  key={m.key}
+                  icon={<Icon className="h-4 w-4" />}
+                  current={here === m.key}
+                  onSelect={() => {
+                    setMoreOpen(false);
+                    navigate(photosPath(m.sub));
+                  }}
+                >
+                  {m.label}
+                </PopMenuItem>
+              );
+            })}
+          </PopMenu>
         </nav>
         <span className="flex shrink-0 items-center gap-1.5 text-xs text-[var(--text-muted)]">
           <span className="mr-1.5 inline-flex">
@@ -170,29 +214,31 @@ export function PhotosShell({ app = false }: { app?: boolean } = {}) {
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
               e.target.value = "";
-              if (files.length) startUploads({ files, scope: "mine", folderId: null, route: "camera" });
+              upload(files);
             }}
           />
           <button
             type="button"
             onClick={() => uploadInput.current?.click()}
-            className="flex items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white"
+            className="flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white hover:bg-[var(--accent-hover)] sm:min-h-8"
           >
             <Upload className="h-3.5 w-3.5" /> Upload
           </button>
         </span>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* Drop photos anywhere below the menu to upload them. */}
+      <PhotosDropZone
+        className="relative flex min-h-0 flex-1 flex-col"
+        onFiles={upload}
+        onNothing={() => toast.info("Only photos and videos can go in Photos.")}
+      >
         {/* In Files, AppLayout's boundary catches a page's chunk loading;
             the standalone app has none above it, so it brings its own. */}
         {app ? (
           <RouteBoundary>
             <Suspense
               fallback={
-                <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Loading…
-                </div>
+<SkeletonTileGrid count={24} className="p-4" label="Loading" />
               }
             >
               <Outlet />
@@ -201,7 +247,7 @@ export function PhotosShell({ app = false }: { app?: boolean } = {}) {
         ) : (
           <Outlet />
         )}
-      </div>
+      </PhotosDropZone>
       {phoneApp && <PhotosAppTabs onSettings={() => setSettingsOpen(true)} />}
       {settingsOpen && <PhotoSettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>

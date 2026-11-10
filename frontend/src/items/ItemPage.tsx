@@ -25,7 +25,9 @@ import { VersionHistoryPanel } from "@/components/files/VersionHistoryPanel";
 import { ErrorState } from "@/components/shared/Callout";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
+import { useBottomBarInset } from "@/components/shared/ToastViewport";
 import { toast } from "@/store/toastStore";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 import { cn } from "@/utils/cn";
 
 import { itemsApi, loadItemDoc, type ItemDoc } from "./api";
@@ -83,8 +85,9 @@ export function ItemPage({ standalone = false }: { standalone?: boolean } = {}) 
   }
   if (isLoading || !doc || module === undefined) {
     return (
-      <div className="flex h-full items-center justify-center text-[var(--text-muted)]">
-        <Loader2 className="h-5 w-5 animate-spin" />
+      <div className="h-full bg-[var(--bg)]">
+        <div className="h-14 border-b border-[var(--border)]" />
+        <SkeletonRows count={7} label="Opening…" className="mx-auto w-full max-w-2xl px-2 pt-6" />
       </div>
     );
   }
@@ -104,11 +107,12 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
   const tabParam = params.get("tab");
   const [tab, setTabState] = useState<string>(() => (tabParam && (tabs.some((t) => t.id === tabParam) || tabParam === "ask") ? tabParam : tabs[0]?.id ?? "ask"));
   const [aiOpen, setAiOpen] = useState<boolean>(() => {
+    // Closed until asked for, and remembered app by app: opening it in
+    // Budget doesn't open it in Recipes.
     try {
-      const saved = localStorage.getItem(AI_OPEN_KEY);
-      return narrowDesktop ? saved === "1" : saved !== "0";
+      return localStorage.getItem(`${AI_OPEN_KEY}.${doc.kind}`) === "1";
     } catch {
-      return true;
+      return false;
     }
   });
   const [pending, setPending] = useState<{ text: string; send: boolean } | null>(null);
@@ -146,7 +150,7 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
   const toggleAi = (open: boolean) => {
     setAiOpen(open);
     try {
-      localStorage.setItem(AI_OPEN_KEY, open ? "1" : "0");
+      localStorage.setItem(`${AI_OPEN_KEY}.${doc.kind}`, open ? "1" : "0");
     } catch {
       /* private mode */
     }
@@ -186,21 +190,24 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
     }
   };
 
+  // The app's own colour is its mark only (the header icon). Buttons, tabs
+  // and selection use Promptly's accent, like everywhere else in the suite.
   const accent = spec?.color ?? "#D97757";
+  const ACTION = "var(--accent)";
   // Sheets and menus render in a portal, outside this tree: give the whole
-  // page the item's accent while it's open.
+  // page the accent while it's open.
   useEffect(() => {
     setItemTimeZone((useAuthStore.getState().user?.settings as { timezone?: string } | undefined)?.timezone);
     const root = document.documentElement;
-    root.style.setProperty("--item-accent", accent);
+    root.style.setProperty("--item-accent", ACTION);
     // Apps size their own touch targets; opt out of the global icon-button minimum.
     root.dataset.itemApp = "";
     return () => {
       root.style.removeProperty("--item-accent");
       delete root.dataset.itemApp;
     };
-  }, [accent]);
-  const style = { "--item-accent": accent } as CSSProperties;
+  }, []);
+  const style = { "--item-accent": ACTION } as CSSProperties;
   const Icon = module?.icon ?? itemIcon(spec?.icon);
   const onboarding = !!module?.needsOnboarding?.(item.data) && !!module.Onboarding && item.canEdit;
   const active = tabs.find((t) => t.id === tab) ?? tabs[0];
@@ -223,9 +230,7 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
   ) : active ? (
     <Suspense
       fallback={
-        <div className="flex justify-center py-10 text-[var(--text-muted)]">
-          <Loader2 className="h-5 w-5 animate-spin" />
-        </div>
+        <SkeletonRows count={7} label="Loading…" className="mx-auto w-full max-w-2xl px-2 pt-6" />
       }
     >
       <active.View {...viewProps} />
@@ -234,6 +239,9 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
 
   const showAskTab = isPhone && spec;
   const phoneTabs = [...tabs.map((t) => ({ id: t.id, label: t.label, icon: t.icon })), ...(showAskTab ? [{ id: "ask", label: "Ask", icon: Sparkles }] : [])];
+
+  // Toasts sit above the phone tab bar, not on top of it.
+  useBottomBarInset(64, isPhone && !onboarding && phoneTabs.length > 1);
 
   return (
     <div style={style} className="flex h-full min-h-0 flex-col bg-[var(--bg)]">
@@ -276,7 +284,7 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
           ) : (
             <h1 className="truncate px-1.5 text-[15px] font-semibold text-[var(--text)]">{doc.title}</h1>
           )}
-          <SaveState item={item} name={spec?.name ?? ""} />
+          <SaveState item={item} name={spec?.name ?? ""} title={title} />
         </div>
         {primary && !isPhone && (
           <button
@@ -557,7 +565,10 @@ function FileBanners({ doc, item }: { doc: ItemDoc<any>; item: ItemHandle<any> }
   );
 }
 
-function SaveState({ item, name }: { item: ItemHandle<unknown>; name: string }) {
+function SaveState({ item, name, title }: { item: ItemHandle<unknown>; name: string; title: string }) {
+  // The app name under the title says what kind of thing this is; when the
+  // title already is the app name, saying it twice is noise.
+  const same = name.trim().toLowerCase() === title.trim().toLowerCase();
   const map = {
     saved: { icon: Check, text: "Saved", cls: "" },
     saving: { icon: Loader2, text: "Saving…", cls: "animate-spin" },
@@ -569,7 +580,7 @@ function SaveState({ item, name }: { item: ItemHandle<unknown>; name: string }) 
   return (
     <div className={cn("flex items-center gap-1 px-1.5 text-[11px] leading-tight", item.status === "offline" || item.status === "error" ? "text-[var(--warning)]" : "text-[var(--text-muted)]")} aria-live="polite">
       {s.icon && <s.icon className={cn("h-3 w-3", s.cls)} />}
-      <span className="truncate">{item.status === "saved" ? name : s.text}</span>
+      <span className="truncate">{item.status === "saved" && !same ? name : s.text}</span>
     </div>
   );
 }

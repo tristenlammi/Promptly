@@ -164,7 +164,7 @@ function Strip({
               style={dragging ? { transform: `translateX(${ghostX}px) scale(1.06)`, touchAction: "none" } : { touchAction: over ? "none" : "pan-x" }}
             >
               <PickImage pick={p} label="" className="pointer-events-none h-full w-full" />
-              <span aria-hidden className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/60 px-1 text-[11px] font-bold text-white">
+              <span aria-hidden className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/60 px-1 text-xs font-bold text-white">
                 {i + 1}
               </span>
             </button>
@@ -177,7 +177,7 @@ function Strip({
             type="button"
             onClick={onAdd}
             aria-label="Add more photos"
-            className="flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed border-[var(--border)] text-[11px] font-medium text-[var(--text-muted)] hover:border-[var(--item-accent)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:h-[72px] md:w-[72px]"
+            className="flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed border-[var(--border)] text-xs font-medium text-[var(--text-muted)] hover:border-[var(--item-accent)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:h-[72px] md:w-[72px]"
           >
             <ImagePlus className="h-5 w-5" aria-hidden />
             Add
@@ -356,7 +356,7 @@ export function ArrangeStep({
             rows={3}
             placeholder="What's in it, for people using a screen reader"
           />
-          <span className="text-[11px] text-[var(--text-muted)]">
+          <span className="text-xs text-[var(--text-muted)]">
             {cur.alt && !cur.altTouched ? "Filled in from Photos. Change it if you like." : "Read out to people who can't see the picture."}
           </span>
         </label>

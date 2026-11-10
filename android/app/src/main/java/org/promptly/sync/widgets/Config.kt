@@ -354,3 +354,120 @@ class OneNoteConfigActivity : ComponentActivity() {
         }
     }
 }
+
+@Composable
+private fun ShapeTile(shape: PhotoShape, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+    Column(
+        modifier.selectable(selected = selected, onClick = onClick, role = Role.RadioButton).padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(width = 64.dp, height = 56.dp)) {
+            // The same outline the widget cuts the photo to.
+            val pts = PhotoShapes.outline(shape, size.width, size.height)
+            val path = androidx.compose.ui.graphics.Path()
+            path.moveTo(pts[0], pts[1])
+            for (i in 2 until pts.size step 2) path.lineTo(pts[i], pts[i + 1])
+            path.close()
+            drawPath(path, color)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(shape.label, style = MaterialTheme.typography.labelMedium, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Photo: which album, which shape, and what a tap does. */
+class PhotoConfigActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        val id = widgetId(this)
+        if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return finish()
+        ready(this, id)
+        setContent {
+            CaptureTheme {
+                val scope = rememberCoroutineScope()
+                var albums by remember { mutableStateOf<List<PhotoAlbum>?>(null) }
+                var offline by remember { mutableStateOf(false) }
+                var picked by remember { mutableStateOf<String?>(null) }
+                var was by remember { mutableStateOf<String?>(null) }
+                var savedTitle by remember { mutableStateOf("") }
+                var shape by remember { mutableStateOf(PhotoShape.ROUNDED) }
+                var tap by remember { mutableStateOf(PhotoWidget.TAP_NEXT) }
+                val linked = remember { Widgets.link(this@PhotoConfigActivity) == Link.LINKED }
+                LaunchedEffect(Unit) {
+                    prefsOf(this@PhotoConfigActivity, id)?.let { p ->
+                        picked = p[PhotoWidget.ALBUM_ID]?.ifBlank { null }
+                        was = picked
+                        savedTitle = p[PhotoWidget.ALBUM_TITLE].orEmpty()
+                        shape = PhotoShape.of(p[PhotoWidget.SHAPE])
+                        tap = if (p[PhotoWidget.TAP] == PhotoWidget.TAP_OPEN) PhotoWidget.TAP_OPEN else PhotoWidget.TAP_NEXT
+                    }
+                    val account = if (linked) Store(this@PhotoConfigActivity).account else null
+                    val got = if (account == null) null else withContext(Dispatchers.IO) { runCatching { WidgetApi(account).albums() }.getOrNull() }
+                    offline = got == null
+                    albums = got ?: emptyList()
+                }
+                Screen("Photo widget", onSave = {
+                    val chosen = albums.orEmpty().firstOrNull { it.id == picked }
+                    scope.launch {
+                        save(this@PhotoConfigActivity, id, { p ->
+                            picked?.let { album ->
+                                p[PhotoWidget.ALBUM_ID] = album
+                                if (chosen != null) p[PhotoWidget.ALBUM_TITLE] = chosen.title
+                                if (album != was) {
+                                    // A different album: start from its own photos.
+                                    p.remove(PhotoWidget.CURRENT)
+                                    p.remove(PhotoWidget.RECENT)
+                                    p.remove(PhotoWidget.SHOWN_AT)
+                                }
+                            }
+                            p[PhotoWidget.SHAPE] = shape.key
+                            p[PhotoWidget.TAP] = tap
+                        }) { PhotoWidget().update(this@PhotoConfigActivity, it) }
+                        if (picked != null) WidgetSync.now(this@PhotoConfigActivity)
+                        finish()
+                    }
+                }) {
+                    Section("Album")
+                    val list = albums
+                    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+                    when {
+                        !linked -> Text("Link this phone to Promptly first, then choose an album here.", style = MaterialTheme.typography.bodyMedium, color = quiet)
+                        list == null -> Text("Looking…", style = MaterialTheme.typography.bodyMedium, color = quiet)
+                        list.isEmpty() -> {
+                            // No signal: the album already chosen stays chosen.
+                            if (offline && picked != null && savedTitle.isNotBlank()) Choice(savedTitle, true, {})
+                            Text(
+                                if (offline) "Your albums show here when there's signal." else "No albums yet. Make one in P Photos, then pick it here.",
+                                style = MaterialTheme.typography.bodyMedium, color = quiet,
+                            )
+                        }
+                        else -> for (a in list) {
+                            val photos = when (a.count) {
+                                0 -> "no photos yet"
+                                1 -> "1 photo"
+                                else -> "${a.count} photos"
+                            }
+                            Choice("${a.title} — $photos" + (if (a.shared) ", shared with you" else ""), picked == a.id, { picked = a.id })
+                        }
+                    }
+                    Section("Shape")
+                    for (row in PhotoShape.entries.chunked(3)) {
+                        Row(Modifier.fillMaxWidth()) {
+                            for (s in row) ShapeTile(s, shape == s, { shape = s }, Modifier.weight(1f))
+                        }
+                    }
+                    Section("When you tap the photo")
+                    Choice("Show another photo", tap == PhotoWidget.TAP_NEXT, { tap = PhotoWidget.TAP_NEXT })
+                    Choice("Open the album in P Photos", tap == PhotoWidget.TAP_OPEN, { tap = PhotoWidget.TAP_OPEN })
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Text(
+                        "A new photo shows every half hour. A few are kept on this phone, so it works with no signal. Anyone holding your unlocked phone can see the widget.",
+                        style = MaterialTheme.typography.bodySmall, color = quiet,
+                    )
+                }
+            }
+        }
+    }
+}

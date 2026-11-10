@@ -7,7 +7,8 @@
 //
 // It has no browser or network in it: both sides are interfaces, so a test can run many browsers
 // against one vault. The rule it must keep is that a bug here can't quietly empty someone's
-// bookmarks. So the first run only adds, and a run that would delete a lot stops and asks.
+// bookmarks. So the first run only adds (apart from what was deleted elsewhere and is still in
+// the vault's recently deleted), and a run that would delete a lot stops and asks.
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
@@ -19,9 +20,11 @@ export const isRootKey = (s: string) => s.startsWith("root:");
 const FALLBACK = rootKey("other");
 
 /** One bookmark or folder as the browser has it. `parent` is a node id or a root key. */
-export type BookmarkNode = { node: string; parent: string; title: string; url?: string; index: number };
+export type BookmarkNode = { node: string; parent: string; title: string; url?: string; index: number; /** When the browser says it was added, in ms. */ added?: number };
 /** The same in the vault. `parent` is an item id or a root key. A folder has no url. */
 export type BookmarkItem = { id: string; parent: string; title: string; url?: string; pos: number };
+/** One that was deleted and is still in "Recently deleted". `at` is when, in ms. */
+export type DeletedBookmark = BookmarkItem & { at: number };
 
 export interface BrowserSide {
   /** Everything that syncs. Separators, bookmarklets and managed folders aren't listed. */
@@ -36,6 +39,9 @@ export interface BrowserSide {
 
 export interface VaultSide {
   read(): Promise<BookmarkItem[]>;
+  /** What's been deleted and not yet purged. A browser with no memory of the last run (its first,
+   *  or after off and on) would otherwise take its own copy of one for new and bring it back. */
+  deleted?(): Promise<DeletedBookmark[]>;
   create(item: BookmarkItem): Promise<void>;
   update(item: BookmarkItem): Promise<void>;
   remove(id: string): Promise<void>;
@@ -53,8 +59,9 @@ export type SyncResult =
   | { status: "held"; base: Base; fromBrowser: number; fromVault: number; total: number };
 
 /** `deletedLately` is how many went recently, so a lot can't go a little at a time. `allowUpTo` is
- *  a person's yes: for as many as they were shown, and no more. */
-export type SyncOptions = { hash: (s: string) => string; newId: () => string; allowMassDelete?: boolean; deletedLately?: number; allowUpTo?: number };
+ *  a person's yes: for as many as they were shown, and no more. `keepAll` is a person's no: what's
+ *  in this browser stays and goes back to the vault, deleted elsewhere or not. */
+export type SyncOptions = { hash: (s: string) => string; newId: () => string; allowMassDelete?: boolean; deletedLately?: number; allowUpTo?: number; keepAll?: boolean };
 
 /** Deleting more than this in one go needs a yes. */
 export function massDeleteLimit(total: number): number {
@@ -172,6 +179,17 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
   const counts: SyncCounts = { addedToVault: 0, changedInVault: 0, removedFromVault: 0, addedToBrowser: 0, changedInBrowser: 0, removedFromBrowser: 0, merged: 0, failed: 0 };
 
   repairTree(items, touched);
+  const depthOf = (n: BookmarkNode): number => {
+    let d = 0;
+    let at = n.parent;
+    while (!isRootKey(at) && d <= MAX_DEPTH) {
+      const up = nodes.get(at);
+      if (!up) break;
+      at = up.parent;
+      d++;
+    }
+    return d;
+  };
 
   // ---- Exact duplicates ------------------------------------------------------------------
   // Two browsers with the same bookmarks that both run for the first time each add them all. The
@@ -257,6 +275,57 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
   }
   for (const node of removeNodes) nodeToItem.delete(node);
 
+  // ---- Deleted elsewhere, and this browser has no memory of it ---------------------------
+  // With nothing remembered (a first run, off and on, a reinstalled extension) every bookmark here
+  // looks new. One that was deleted in another browser would go back to the vault as a new item
+  // and reappear everywhere, so the deletion never took. If it's the same bookmark in the same
+  // place as one in "Recently deleted", and it was here before that was deleted, it goes from here
+  // too. It counts as a deletion below, so a lot of them still stops and asks, and "Keep them
+  // everywhere" (keepAll) skips this. One added again after the deletion is a new bookmark.
+  const stale = new Map<string, DeletedBookmark>();
+  if (!Object.keys(base).length && !opts.keepAll && vault.deleted) {
+    const tombs = new Map<string, DeletedBookmark[]>();
+    for (const t of await vault.deleted()) {
+      if (!validItem(t) || items.has(t.id) || dropped.has(t.id) || !Number.isFinite(t.at)) continue;
+      const k = keyOf(t.parent, t.title, t.url);
+      const q = tombs.get(k);
+      if (q) q.push(t);
+      else tombs.set(k, [t]);
+    }
+    if (tombs.size) {
+      // The same matching as "New in the browser" below does, done now so a parent's item is known.
+      const waiting = new Map<string, BookmarkItem[]>();
+      for (const it of items.values()) {
+        const k = keyOf(it.parent, it.title, it.url);
+        const q = waiting.get(k);
+        if (q) q.push(it);
+        else waiting.set(k, [it]);
+      }
+      const fresh = new Set<string>();
+      for (const n of [...nodes.values()].sort((a, b) => depthOf(a) - depthOf(b) || a.index - b.index)) {
+        // Inside a folder that's new, it's new as well.
+        if (fresh.has(n.parent)) {
+          fresh.add(n.node);
+          continue;
+        }
+        const parent = isRootKey(n.parent) ? n.parent : nodeToItem.get(n.parent) ?? stale.get(n.parent)?.id ?? FALLBACK;
+        const k = keyOf(parent, n.title, n.url);
+        const match = waiting.get(k)?.shift();
+        if (match) {
+          nodeToItem.set(n.node, match.id);
+          itemToNode.set(match.id, n.node);
+          continue;
+        }
+        const q = tombs.get(k);
+        const at = q && n.added !== undefined ? q.findIndex((t) => n.added! < t.at) : -1;
+        if (q && at !== -1) {
+          stale.set(n.node, q.splice(at, 1)[0]);
+          browserDelete.add(n.node);
+        } else fresh.add(n.node);
+      }
+    }
+  }
+
   // A folder can't go while something newer is still inside it, on either side.
   for (let changed = true; changed; ) {
     changed = false;
@@ -278,6 +347,7 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
       }
     }
   }
+  for (const node of [...stale.keys()]) if (!browserDelete.has(node)) stale.delete(node);
 
   const total = Math.max(items.size, nodes.size);
   // One side suddenly empty says something happened to that side: a server reset or restored, a
@@ -295,17 +365,6 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
   }
 
   // ---- New in the browser ----------------------------------------------------------------
-  const depthOf = (n: BookmarkNode): number => {
-    let d = 0;
-    let at = n.parent;
-    while (!isRootKey(at) && d <= MAX_DEPTH) {
-      const up = nodes.get(at);
-      if (!up) break;
-      at = up.parent;
-      d++;
-    }
-    return d;
-  };
   const live = [...nodes.values()].filter((n) => !browserDelete.has(n.node) && !removeNodes.has(n.node)).sort((a, b) => depthOf(a) - depthOf(b) || a.index - b.index);
   const parentInVault = (n: BookmarkNode) => (isRootKey(n.parent) ? n.parent : nodeToItem.get(n.parent) ?? FALLBACK);
 
@@ -494,17 +553,30 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
   // Innermost first, since a folder with something left in it stays.
   const gone = [...browserDelete, ...removeNodes].map((n) => nodes.get(n)).filter((n): n is BookmarkNode => !!n);
   gone.sort((a, b) => depthOf(b) - depthOf(a));
+  // A bookmark that wouldn't go is remembered as it was, so the next run tries again. Forgotten,
+  // it would look new next time and go back to the vault, and the deletion would be undone
+  // everywhere. A folder is different: one with something left in it is meant to stay.
+  const retry: Base = {};
+  let notRemoved = 0;
   for (const n of gone) {
     try {
       await browser.remove(n.node);
       counts.removedFromBrowser++;
     } catch {
       counts.failed++;
+      if (!browserDelete.has(n.node)) continue;
+      notRemoved++;
+      if (n.url === undefined) continue;
+      const id = nodeToItem.get(n.node);
+      const old = id ? entries.get(id) : undefined;
+      const t = stale.get(n.node);
+      if (id && old) retry[id] = old;
+      else if (t) retry[t.id] = { node: n.node, parent: h(t.parent), title: h(n.title), url: h(n.url), pos: t.pos };
     }
   }
 
   // ---- Remember what both sides look like now --------------------------------------------
-  const next: Base = {};
+  const next: Base = { ...retry };
   for (const it of items.values()) {
     const node = itemToNode.get(it.id);
     if (!node) continue;
@@ -516,7 +588,7 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
     }
     next[it.id] = { node, parent: h(it.parent), title: h(it.title), url: h(it.url ?? ""), pos: it.pos };
   }
-  return { status: "ok", base: next, counts, total: items.size, deleted: going, wroteVault: dropped.size + removedItems.size + created.size + touched.size > 0 };
+  return { status: "ok", base: next, counts, total: items.size, deleted: going - notRemoved, wroteVault: dropped.size + removedItems.size + created.size + touched.size > 0 };
 }
 
 // ---- Showing them ---------------------------------------------------------------------------

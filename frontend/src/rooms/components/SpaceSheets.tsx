@@ -11,6 +11,7 @@ import { cn } from "@/utils/cn";
 
 import { BOOTSTRAP_KEY, updateBootstrap } from "../cache";
 import { SPACE_COLORS } from "../format";
+import { askInSheet } from "./ConfirmSheet";
 import { PeoplePicker } from "./PeoplePicker";
 import { NotifyControl, SpaceIcon, UserAvatar } from "./ui";
 
@@ -24,6 +25,7 @@ function SpaceLook({
   setEmoji,
   setColor,
   autoFocus,
+  onEnter,
 }: {
   name: string;
   emoji: string;
@@ -32,6 +34,8 @@ function SpaceLook({
   setEmoji: (v: string) => void;
   setColor: (v: string) => void;
   autoFocus?: boolean;
+  /** Enter in the name box does the sheet's main thing. */
+  onEnter?: () => void;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -42,6 +46,12 @@ function SpaceLook({
             value={name}
             maxLength={80}
             onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && onEnter) {
+                e.preventDefault();
+                onEnter();
+              }
+            }}
             placeholder="Family, The Lads, Book club…"
             data-autofocus={autoFocus ? "" : undefined}
           />
@@ -60,7 +70,7 @@ function SpaceLook({
               onClick={() => setEmoji(e)}
               className={cn(
                 "flex h-10 w-10 items-center justify-center rounded-xl border text-lg",
-                emoji === e ? "border-[var(--item-accent)] bg-[var(--hover)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
+                emoji === e ? "border-[var(--accent)] bg-[var(--hover)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
               )}
             >
               {e || <span className="text-xs font-semibold text-[var(--text-muted)]">Aa</span>}
@@ -136,7 +146,7 @@ export function CreateSpaceSheet({ open, onClose }: { open: boolean; onClose: ()
       <p className="mb-4 text-sm text-[var(--text-muted)]">
         A space is a home for a group — family, friends, a club — with its own rooms. It starts with <b>#general</b>.
       </p>
-      <SpaceLook name={name} emoji={emoji} color={color} setName={setName} setEmoji={setEmoji} setColor={setColor} autoFocus />
+      <SpaceLook name={name} emoji={emoji} color={color} setName={setName} setEmoji={setEmoji} setColor={setColor} autoFocus onEnter={() => !busy && void create()} />
     </Sheet>
   );
 }
@@ -192,20 +202,35 @@ export function SpaceSettingsSheet({
 
   const dirty = name.trim() !== space.name || (emoji || null) !== (space.emoji || null) || color !== (space.color ?? SPACE_COLORS[0]);
 
+  const saveLook = () => {
+    if (!dirty || !name.trim() || busy) return;
+    void run(() => roomsApi.updateSpace(space.id, { name: name.trim(), emoji: emoji || null, color }), "Couldn't save.", "Saved");
+  };
+
   const leave = async () => {
-    if (!window.confirm(`Leave ${space.name}? You'll need someone to add you back.`)) return;
+    if (
+      !(await askInSheet({
+        title: `Leave ${space.name}?`,
+        message: "You'll need someone to add you back.",
+        confirmLabel: "Leave space",
+        danger: true,
+      }))
+    )
+      return;
     if (await run(() => roomsApi.removeSpaceMember(space.id, b.me.id), "Couldn't leave the space.", `You left ${space.name}.`)) {
       onClose();
       navigate("/rooms/");
     }
   };
   const del = async () => {
-    const typed = window.prompt(`Delete ${space.name} and all its rooms and messages for everyone? Type the space's name to confirm.`);
-    if (typed === null) return;
-    if (typed.trim() !== space.name) {
-      toast.error("The name didn't match — nothing was deleted.");
-      return;
-    }
+    const ok = await askInSheet({
+      title: `Delete ${space.name}?`,
+      message: "All its rooms and messages are deleted for everyone. This can't be undone.",
+      confirmLabel: "Delete space",
+      danger: true,
+      typeToConfirm: space.name,
+    });
+    if (!ok) return;
     if (await run(() => roomsApi.deleteSpace(space.id), "Couldn't delete the space.", `${space.name} was deleted.`)) {
       updateBootstrap(qc, (cur) => ({ ...cur, spaces: cur.spaces.filter((s) => s.id !== space.id) }));
       onClose();
@@ -232,12 +257,8 @@ export function SpaceSettingsSheet({
           <>
             {isAdmin ? (
               <>
-                <SpaceLook name={name} emoji={emoji} color={color} setName={setName} setEmoji={setEmoji} setColor={setColor} />
-                <ItemButton
-                  variant="primary"
-                  disabled={!dirty || !name.trim() || busy}
-                  onClick={() => void run(() => roomsApi.updateSpace(space.id, { name: name.trim(), emoji: emoji || null, color }), "Couldn't save.", "Saved")}
-                >
+                <SpaceLook name={name} emoji={emoji} color={color} setName={setName} setEmoji={setEmoji} setColor={setColor} onEnter={saveLook} />
+                <ItemButton variant="primary" disabled={!dirty || !name.trim() || busy} onClick={saveLook}>
                   Save changes
                 </ItemButton>
               </>
@@ -263,7 +284,7 @@ export function SpaceSettingsSheet({
                   });
                 }}
               />
-              <span className="text-[11px] text-[var(--text-muted)]">
+              <span className="text-xs text-[var(--text-muted)]">
                 Mentions = only when someone @mentions you, @everyone, or replies to you. Each room can override this.
               </span>
             </div>
@@ -345,8 +366,8 @@ export function SpaceSettingsSheet({
                       </Select>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-xs text-[var(--text-muted)]">
-                        {role === "owner" && <Crown className="h-3.5 w-3.5 text-[#C08B2C]" />}
-                        {role === "admin" && <Shield className="h-3.5 w-3.5 text-[var(--item-accent)]" />}
+                        {role === "owner" && <Crown className="h-3.5 w-3.5 text-[var(--warning)]" />}
+                        {role === "admin" && <Shield className="h-3.5 w-3.5 text-[var(--accent-text)]" />}
                         {role ? role[0].toUpperCase() + role.slice(1) : ""}
                       </span>
                     )}
@@ -355,9 +376,14 @@ export function SpaceSettingsSheet({
                         type="button"
                         aria-label={`Remove ${u?.username ?? "member"} from ${space.name}`}
                         disabled={busy}
-                        onClick={() => {
-                          if (window.confirm(`Remove ${u?.username ?? "them"} from ${space.name}?`))
-                            void run(() => roomsApi.removeSpaceMember(space.id, id), "Couldn't remove them.");
+                        onClick={async () => {
+                          const ok = await askInSheet({
+                            title: `Remove ${u?.username ?? "them"} from ${space.name}?`,
+                            message: "They lose access to its rooms. You can add them back later.",
+                            confirmLabel: "Remove",
+                            danger: true,
+                          });
+                          if (ok) void run(() => roomsApi.removeSpaceMember(space.id, id), "Couldn't remove them.");
                         }}
                         className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--danger)]"
                       >

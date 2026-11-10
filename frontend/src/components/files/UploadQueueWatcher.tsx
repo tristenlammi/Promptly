@@ -28,6 +28,8 @@ import { useUploadStore } from "@/store/uploadStore";
  *      the UI reflects a file that the server accepted before the
  *      abort reached it (rare but happens with tiny files).
  */
+const MEDIA_NAME = /\.(jpe?g|png|gif|webp|avif|heic|heif|dng|tiff?|bmp|mp4|mov|m4v|webm|mkv|avi|3gp)$/i;
+
 export function UploadQueueWatcher() {
   const qc = useQueryClient();
 
@@ -39,6 +41,10 @@ export function UploadQueueWatcher() {
     const pending = new Map<string, { scope: FileScope; folderId: string | null }>();
     const done: string[] = [];
     const workspaces = new Set<string>();
+    // A photo or video also lands in Photos; its timeline is refreshed too,
+    // and once more a moment later, when the library has taken it in.
+    let media = false;
+    let mediaTimer: number | null = null;
     let timer: number | null = null;
     const flush = () => {
       timer = null;
@@ -46,6 +52,15 @@ export function UploadQueueWatcher() {
       pending.clear();
       workspaces.forEach((wid) => invalidateWorkspaceDrive(qc, wid));
       workspaces.clear();
+      if (media) {
+        media = false;
+        void qc.invalidateQueries({ queryKey: ["photos"] });
+        if (mediaTimer !== null) window.clearTimeout(mediaTimer);
+        mediaTimer = window.setTimeout(() => {
+          mediaTimer = null;
+          void qc.invalidateQueries({ queryKey: ["photos"] });
+        }, 4000);
+      }
       // One file uploaded on its own: show it (the list is virtualised, so
       // it may land out of view). A batch doesn't pull the view around.
       if (done.length === 1) useFilesShellStore.getState().reveal(`file:${done[0]}`);
@@ -58,6 +73,7 @@ export function UploadQueueWatcher() {
       events.forEach((e) => {
         pending.set(`${e.scope}|${e.folderId ?? ""}`, { scope: e.scope, folderId: e.folderId });
         if (e.status === "done" && e.fileId) done.push(e.fileId);
+        if (e.status === "done" && MEDIA_NAME.test(e.name)) media = true;
         if (e.workspaceId) workspaces.add(e.workspaceId);
         // Somewhere else in the app: say so when one fails (WP-8.2) — the
         // panel only shows where files are.
@@ -78,6 +94,7 @@ export function UploadQueueWatcher() {
     return () => {
       unsubscribe();
       if (timer !== null) window.clearTimeout(timer);
+      if (mediaTimer !== null) window.clearTimeout(mediaTimer);
     };
   }, [qc]);
 

@@ -31,6 +31,7 @@ import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
 import { confirm as confirmDialog } from "@/components/shared/ConfirmDialog";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 // React Flow is a heavy chunk — only load it when the Flow view is opened.
 const TaskFlowEditor = lazyWithRetry(
@@ -474,7 +475,7 @@ export function TaskDetailPage() {
               <TaskRunDocument run={run} />
             </>
           ) : (
-            <div className="text-sm text-[var(--text-muted)]">Loading…</div>
+            <SkeletonRows count={3} label="Loading" />
           )}
         </section>
       </div>

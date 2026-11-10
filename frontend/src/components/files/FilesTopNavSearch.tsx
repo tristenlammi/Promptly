@@ -181,8 +181,8 @@ export function FilesTopNavSearch() {
         <button
           type="button"
           onClick={() => setSheetOpen(true)}
-          title="Search Drive"
-          aria-label="Search Drive"
+          title="Search Files"
+          aria-label="Search Files"
           className={cn(
             "inline-flex h-9 w-9 items-center justify-center rounded-md",
             "border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] transition",
@@ -222,7 +222,7 @@ export function FilesTopNavSearch() {
       <Search className="h-3.5 w-3.5 text-[var(--text-muted)]" />
       <input
         type="search"
-        placeholder="Search Drive…"
+        placeholder="Search Files…"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onFocus={() => setFocused(true)}
@@ -298,7 +298,7 @@ function SearchSheet({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Search Drive"
+      aria-label="Search Files"
       className="fixed inset-0 z-50 flex flex-col bg-[var(--bg)] pt-safe"
     >
       <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-3">
@@ -314,7 +314,7 @@ function SearchSheet({
               onSubmit(value);
             }
           }}
-          placeholder="Search Drive by name or content…"
+          placeholder="Search Files by name or content…"
           className="min-w-0 flex-1 bg-transparent text-base text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none"
           autoComplete="off"
           autoCorrect="off"

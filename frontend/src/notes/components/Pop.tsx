@@ -85,7 +85,7 @@ export function Pop({
         items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
       }}
       style={{ left: at?.left ?? -9999, top: at?.top ?? -9999, width: Math.min(width, window.innerWidth - 16) }}
-      className={cn("fixed z-[70] rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[var(--text)] shadow-[var(--shadow-lg)]")}
+      className={cn("fixed z-[70] rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[var(--text)] shadow-[var(--shadow-lg)]", at && "note-pop-in")}
     >
       {children}
     </div>,

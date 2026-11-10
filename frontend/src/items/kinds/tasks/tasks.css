@@ -1,0 +1,191 @@
+/* Tasks & Reminders — colour scope and motion.
+ *
+ * Colour: red is the app's mark and the high-priority flag only. Buttons,
+ * selection, focus rings and the tick use the suite's terracotta. The item
+ * kit paints with --item-accent, so the views re-point it here (and on the
+ * root while a tasks view is mounted, for sheets and menus in a portal). */
+.tasks-scope {
+  --item-accent: var(--accent);
+}
+
+/* ------------------------------------------------------------ the tick */
+
+.tasks-check {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.tasks-check-ring {
+  transition: background-color 160ms ease, border-color 160ms ease, transform 140ms ease;
+}
+.tasks-check:active:not(:disabled) .tasks-check-ring {
+  transform: scale(0.9);
+}
+.tasks-tick {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.tasks-check.is-done .tasks-tick {
+  stroke-dashoffset: 0;
+  opacity: 1;
+}
+@media (hover: hover) {
+  .tasks-check:not(.is-done):not(:disabled):hover .tasks-tick {
+    stroke-dashoffset: 0;
+    opacity: 0.6;
+  }
+}
+.tasks-check.is-drawing .tasks-tick {
+  animation: tasksTick 260ms 70ms ease-out both;
+}
+.tasks-check.is-drawing .tasks-check-ring {
+  animation: tasksPop 340ms cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes tasksTick {
+  from { stroke-dashoffset: 1; opacity: 1; }
+  to { stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes tasksPop {
+  0% { transform: scale(0.85); }
+  45% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+/* ------------------------------------------------------------ the row */
+
+/* A one-row grid, so the row can fold to nothing without knowing its height. */
+.tasks-row {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 220ms ease, opacity 220ms ease;
+}
+.tasks-row > .tasks-row-inner {
+  min-height: 0;
+  min-width: 0;
+}
+.tasks-row.is-folding {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.tasks-row.is-folding > .tasks-row-inner,
+.tasks-row.is-new > .tasks-row-inner {
+  overflow: hidden;
+}
+.tasks-row.is-new {
+  animation: tasksRowIn 260ms ease-out both;
+}
+@keyframes tasksRowIn {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+
+/* The title strikes through left to right (a drawn line, so it can move). */
+.tasks-title {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 0 58%;
+  background-size: 0% 1.5px;
+  transition: background-size 300ms ease-out, color 300ms ease-out;
+}
+.tasks-row.is-ticking .tasks-title {
+  background-size: 100% 1.5px;
+  color: var(--text-muted);
+}
+
+/* "Move to another day" — shown when the pointer is on the row (or the
+   keyboard is in it). Phones swipe instead. */
+.tasks-row-action {
+  display: none;
+}
+@media (hover: hover) {
+  .tasks-row-action {
+    display: flex;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .tasks-row:hover .tasks-row-action,
+  .tasks-row:focus-within .tasks-row-action,
+  .tasks-row-action[aria-expanded="true"] {
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------ swipe */
+
+.tasks-swipe {
+  position: relative;
+  touch-action: pan-y;
+}
+.tasks-swipe.is-swiping {
+  overflow: hidden;
+}
+.tasks-swipe-content {
+  position: relative;
+  background: var(--surface);
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.tasks-swipe.is-swiping .tasks-swipe-content {
+  transition: none;
+}
+.tasks-swipe-under {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 1.25rem;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  gap: 0.5rem;
+}
+.tasks-swipe-under > * {
+  transition: transform 140ms ease, opacity 140ms ease;
+  opacity: 0.75;
+}
+.tasks-swipe-under.is-armed > * {
+  transform: scale(1.12);
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------ menus, drags */
+
+.tasks-pop {
+  animation: tasksPopIn 120ms ease-out both;
+  transform-origin: top right;
+}
+@keyframes tasksPopIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* A day in Upcoming while a task is held over it. */
+.tasks-drop {
+  border-radius: 1rem;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.tasks-drop.is-over {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 0 8px color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.tasks-ghost {
+  cursor: grabbing;
+  transform: rotate(-0.6deg) scale(1.02);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tasks-check.is-drawing .tasks-tick,
+  .tasks-check.is-drawing .tasks-check-ring,
+  .tasks-row.is-new,
+  .tasks-pop {
+    animation: none !important;
+  }
+  .tasks-row,
+  .tasks-title,
+  .tasks-swipe-content,
+  .tasks-check-ring,
+  .tasks-ghost {
+    transition: none !important;
+    transform: none;
+  }
+}

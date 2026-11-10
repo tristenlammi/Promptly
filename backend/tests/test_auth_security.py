@@ -339,6 +339,26 @@ async def test_logging_out_kills_that_refresh_token(db, user, client):
     assert (await client.post("/api/auth/refresh")).status_code == 401
 
 
+async def test_logging_out_ends_the_access_token_too(db, user, client):
+    """L3: a copied access token stopped working only when it expired."""
+    from app.auth.utils import hash_password
+
+    user.password_hash = hash_password("correct horse")
+    await db.commit()
+    r = await client.post("/api/auth/login", json={"email": user.email, "password": "correct horse"})
+    assert r.status_code == 200
+    access = r.json()["access_token"]
+    me = {"Authorization": f"Bearer {access}"}
+    assert (await client.get("/api/auth/me", headers=me)).status_code == 200
+
+    await client.post("/api/auth/logout")
+    assert (await client.get("/api/auth/me", headers=me)).status_code == 401
+    # Another sign-in (another session) is unaffected.
+    r2 = await client.post("/api/auth/login", json={"email": user.email, "password": "correct horse"})
+    other = {"Authorization": f"Bearer {r2.json()['access_token']}"}
+    assert (await client.get("/api/auth/me", headers=other)).status_code == 200
+
+
 async def test_signing_yourself_out_everywhere(db, user, client):
     before = user.token_version or 0
     assert (await client.post("/api/auth/logout-everywhere", headers=_auth(user))).status_code == 204

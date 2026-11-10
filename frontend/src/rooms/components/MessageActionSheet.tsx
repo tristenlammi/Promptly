@@ -57,7 +57,7 @@ export function MessageActionSheet({
                   onClick={act(() => toggleReaction(m, e, meId))}
                   className={cn(
                     "flex h-12 w-12 items-center justify-center rounded-full text-2xl",
-                    mine ? "bg-[color-mix(in_srgb,var(--item-accent)_18%,transparent)]" : "bg-[var(--surface-2)]",
+                    mine ? "bg-[color-mix(in_srgb,var(--accent)_18%,transparent)]" : "bg-[var(--surface-2)]",
                   )}
                 >
                   {e}

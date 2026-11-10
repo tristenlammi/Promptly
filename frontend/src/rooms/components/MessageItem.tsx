@@ -1,9 +1,9 @@
-import { AlertCircle, Copy, CornerUpLeft, Loader2, MoreHorizontal, Pencil, Pin, RotateCw, SmilePlus, Trash2 } from "lucide-react";
+import { AlertCircle, Copy, CornerUpLeft, Loader2, MoreHorizontal, Pencil, Pin, RotateCw, SmilePlus, Trash2, Users } from "lucide-react";
 import { memo, useRef, useState, type ReactNode } from "react";
 
 import type { ShareKind } from "@/api/crossapp";
 import type { Message, RoomUser } from "@/api/rooms";
-import { toast } from "@/store/toastStore";
+import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
 import { copyText, deleteMessage, togglePin, toggleReaction } from "../actions";
@@ -42,6 +42,11 @@ export interface MessageCtx {
   canCall?: boolean;
 }
 
+/** Room for the hover action bar beside a bubble (nine 32px buttons and their gaps). */
+const TOOLBAR_W = 316;
+/** A message this recent, on arrival, eases in. */
+const FRESH_MS = 8000;
+
 function authorName(m: Pick<Message, "author_id" | "kind">, users: Record<string, RoomUser>) {
   if (m.kind === "promptly") return "Promptly";
   return m.author_id ? users[m.author_id]?.username ?? "Someone" : "Someone";
@@ -60,7 +65,15 @@ export const MessageItem = memo(function MessageItem({
 }) {
   const [hoverPicker, setHoverPicker] = useState<HTMLElement | null>(null);
   const press = useRef<{ t: number; x: number; y: number } | null>(null);
+  const anchor = useRef<HTMLDivElement>(null);
+  // The action bar sits beside a short bubble, and on the top corner of a wide one.
+  const [beside, setBeside] = useState(false);
+  // Phones: tap a grouped message to see when it was sent.
+  const [showTime, setShowTime] = useState(false);
   const own = m.kind === "user" && m.author_id === ctx.meId;
+  // Someone else's message arriving while you watch eases in (yours already
+  // did, as the "Sending…" row).
+  const [fresh] = useState(() => !own && Math.abs(Date.now() - new Date(m.created_at).getTime()) < FRESH_MS);
 
   if (m.kind === "system") {
     const call = callMetaOf(m);
@@ -117,12 +130,18 @@ export const MessageItem = memo(function MessageItem({
           ctx.onActions(m);
         }
       }}
+      onMouseEnter={() => {
+        const a = anchor.current;
+        const col = a?.parentElement;
+        if (a && col) setBeside(a.offsetWidth + TOOLBAR_W <= col.clientWidth);
+      }}
       className={cn(
         "group relative flex gap-3 px-3 transition-colors md:px-4",
         own && "flex-row-reverse",
         grouped ? "py-0.5" : "pt-2 pb-0.5",
-        isPromptly && "bg-[color-mix(in_srgb,var(--item-accent)_7%,transparent)]",
-        highlight && "!bg-[color-mix(in_srgb,#C08B2C_22%,transparent)]",
+        fresh && "rooms-msg-in",
+        isPromptly && "bg-[color-mix(in_srgb,var(--accent)_7%,transparent)]",
+        highlight && "!bg-[color-mix(in_srgb,var(--warning)_22%,transparent)]",
         !ctx.isPhone && "hover:bg-[var(--hover)]",
         ctx.isPhone && "select-none [-webkit-touch-callout:none]",
       )}
@@ -138,7 +157,7 @@ export const MessageItem = memo(function MessageItem({
           <time
             dateTime={m.created_at}
             title={fullDate(m.created_at)}
-            className="invisible block pt-0.5 text-right text-[10px] leading-5 text-[var(--text-muted)] group-hover:visible"
+            className="invisible block pt-0.5 text-right text-xs leading-5 text-[var(--text-muted)] group-hover:visible"
           >
             {timeOf(m.created_at).replace(/\s?[AP]M$/i, "")}
           </time>
@@ -146,17 +165,17 @@ export const MessageItem = memo(function MessageItem({
       </div>
       <div className={cn("flex min-w-0 flex-1 flex-col", own ? "items-end pl-10 md:pl-24" : "items-start pr-10 md:pr-24")}>
         {!grouped && own && (
-          <time dateTime={m.created_at} title={fullDate(m.created_at)} className="mb-0.5 text-[11px] text-[var(--text-muted)]">
+          <time dateTime={m.created_at} title={fullDate(m.created_at)} className="mb-0.5 text-xs text-[var(--text-muted)]">
             {timeOf(m.created_at)}
           </time>
         )}
         {!grouped && !own && (
           <div className="flex items-baseline gap-2">
-            <span className={cn("truncate text-sm font-semibold", isPromptly ? "text-[var(--item-accent)]" : "text-[var(--text)]")}>{name}</span>
+            <span className={cn("truncate text-sm font-semibold", isPromptly ? "text-[var(--accent-text)]" : "text-[var(--text)]")}>{name}</span>
             {isPromptly && typeof m.meta?.asked_by === "string" && (
-              <span className="truncate text-[11px] text-[var(--text-muted)]">answering {ctx.users[m.meta.asked_by as string]?.username ?? "someone"}</span>
+              <span className="truncate text-xs text-[var(--text-muted)]">answering {ctx.users[m.meta.asked_by as string]?.username ?? "someone"}</span>
             )}
-            <time dateTime={m.created_at} title={fullDate(m.created_at)} className="shrink-0 text-[11px] text-[var(--text-muted)]">
+            <time dateTime={m.created_at} title={fullDate(m.created_at)} className="shrink-0 text-xs text-[var(--text-muted)]">
               {timeOf(m.created_at)}
             </time>
           </div>
@@ -166,6 +185,15 @@ export const MessageItem = memo(function MessageItem({
           <p className="text-sm italic text-[var(--text-muted)]">Message deleted</p>
         ) : (
           <>
+            <div
+              ref={anchor}
+              className={cn("relative flex max-w-full flex-col", own ? "items-end" : "items-start")}
+              onClick={(e) => {
+                if (!ctx.isPhone || !grouped) return;
+                if ((e.target as HTMLElement).closest("a,button,img,video,audio,input,textarea")) return;
+                setShowTime((v) => !v);
+              }}
+            >
             {typeof m.meta?.event_id === "string" ? (
               <EventCard eventId={m.meta.event_id} fallback={m.body} meId={ctx.meId} users={ctx.users} />
             ) : shareOf(m) ? (
@@ -184,26 +212,32 @@ export const MessageItem = memo(function MessageItem({
                 </Bubble>
               )
             )}
-            {m.edited_at && <span className="text-[10px] text-[var(--text-muted)]" title={fullDate(m.edited_at)}>(edited)</span>}
+            {m.edited_at && <span className="text-xs text-[var(--text-muted)]" title={fullDate(m.edited_at)}>(edited)</span>}
             {m.pinned && (
-              <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-[var(--text-muted)]">
+              <span className="inline-flex items-center gap-0.5 text-xs text-[var(--text-muted)]">
                 <Pin className="h-3 w-3" /> pinned
               </span>
             )}
             <AttachmentList attachments={m.attachments} />
-            {m.reactions.length > 0 && <Reactions m={m} ctx={ctx} />}
-          </>
-        )}
-      </div>
-
-      {!ctx.isPhone && !m.deleted && (
+            {showTime && grouped && ctx.isPhone && (
+              <time dateTime={m.created_at} className="mt-0.5 animate-[fadeIn_120ms_ease-out] text-xs text-[var(--text-muted)]">
+                {timeOf(m.created_at)}
+              </time>
+            )}
+            {/* The action bar belongs to the bubble: beside a short one, on the
+                top corner of a wide one. The strip is at least as wide as the
+                bubble, so the bar can't slide under the avatar or off the pane. */}
+            {!ctx.isPhone && (
         <div
           className={cn(
-            "absolute -top-3 z-10 hidden items-center gap-0.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-0.5 shadow-[var(--shadow-sm)] group-hover:flex group-focus-within:flex",
-            own ? "left-3" : "right-3",
+            "pointer-events-none absolute z-10 hidden w-max group-hover:flex group-focus-within:flex",
+            beside
+              ? cn("top-0", own ? "right-full pr-1.5" : "left-full pl-1.5")
+              : cn("-top-8 min-w-full", own ? "right-0 justify-start" : "left-0 justify-end"),
             hoverPicker && "!flex",
           )}
         >
+        <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-0.5 shadow-[var(--shadow-sm)]">
           {QUICK_REACTIONS.slice(0, 3).map((e) => (
             <ToolButton key={e} label={`React ${e}`} onClick={() => toggleReaction(m, e, ctx.meId)}>
               <span className="text-base leading-none">{e}</span>
@@ -227,7 +261,7 @@ export const MessageItem = memo(function MessageItem({
             <Copy className="h-4 w-4" />
           </ToolButton>
           {(own || ctx.canModerate) && (
-            <ToolButton label="Delete (Shift-click skips the question)" onClick={(_el, e) => void deleteMessage(m, e.shiftKey)} danger>
+            <ToolButton label="Delete" onClick={() => deleteMessage(m)} danger>
               <Trash2 className="h-4 w-4" />
             </ToolButton>
           )}
@@ -240,7 +274,14 @@ export const MessageItem = memo(function MessageItem({
             />
           </Popover>
         </div>
-      )}
+        </div>
+            )}
+            </div>
+            <Reactions m={m} ctx={ctx} />
+          </>
+        )}
+      </div>
+
       {ctx.isPhone && !m.deleted && (
         <button
           type="button"
@@ -262,7 +303,7 @@ function Bubble({ own, children }: { own: boolean; children: ReactNode }) {
       className={cn(
         "max-w-full rounded-2xl px-3 py-1.5",
         own
-          ? "rounded-br-md bg-[color-mix(in_srgb,var(--item-accent)_22%,var(--surface))]"
+          ? "rounded-br-md bg-[color-mix(in_srgb,var(--accent)_22%,var(--surface))]"
           : "rounded-bl-md bg-[var(--surface-2)]",
       )}
     >
@@ -289,7 +330,7 @@ function ToolButton({
       title={label}
       onClick={(e) => onClick(e.currentTarget, e)}
       className={cn(
-        "flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
+        "flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
         danger && "hover:!text-[var(--danger)]",
       )}
     >
@@ -312,7 +353,7 @@ function ReplyQuote({
     <button
       type="button"
       onClick={() => onJump(reply.seq ?? -1, reply.id)}
-      className="mb-0.5 flex max-w-full items-center gap-1.5 rounded-md text-left text-xs text-[var(--text-muted)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+      className="mb-0.5 flex max-w-full items-center gap-1.5 rounded-md text-left text-xs text-[var(--text-muted)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
     >
       <CornerUpLeft className="h-3 w-3 shrink-0 -scale-y-100" />
       <span className="shrink-0 font-semibold">{name}</span>
@@ -323,36 +364,124 @@ function ReplyQuote({
 
 function Reactions({ m, ctx }: { m: Message; ctx: MessageCtx }) {
   const longPress = useRef<number | null>(null);
+  const [who, setWho] = useState<string | null>(null);
+  // Chips that were here when the message first showed stay still; one
+  // added while you watch pops.
+  const seen = useRef<Set<string> | null>(null);
+  const popped = useRef(new Set<string>());
+  if (!seen.current) seen.current = new Set(m.reactions.map((r) => r.emoji));
+  for (const r of m.reactions) {
+    if (!seen.current.has(r.emoji)) {
+      seen.current.add(r.emoji);
+      popped.current.add(r.emoji);
+    }
+  }
+  const cancel = () => {
+    if (longPress.current) window.clearTimeout(longPress.current);
+    longPress.current = null;
+  };
+  const nameOf = (id: string) => (id === ctx.meId ? "You" : ctx.users[id]?.username ?? "Someone");
+  if (m.reactions.length === 0) return null;
+  const shown = who ? m.reactions.find((r) => r.emoji === who) ?? m.reactions[0] : undefined;
   return (
-    <div className="mt-1 flex flex-wrap gap-1">
+    <div className="mt-1 flex flex-wrap items-center gap-1.5">
       {m.reactions.map((r) => {
         const mine = r.user_ids.includes(ctx.meId);
-        const names = r.user_ids.map((id) => (id === ctx.meId ? "You" : ctx.users[id]?.username ?? "Someone")).join(", ");
+        const names = r.user_ids.map(nameOf).join(", ");
         return (
           <button
             key={r.emoji}
             type="button"
             aria-pressed={mine}
-            aria-label={`${r.emoji} ${r.user_ids.length} — ${names}`}
+            aria-label={`${r.emoji} ${r.user_ids.length}: ${names}`}
             title={names}
             onClick={() => toggleReaction(m, r.emoji, ctx.meId)}
-            onTouchStart={() => {
-              longPress.current = window.setTimeout(() => toast.info(`${r.emoji} ${names}`), 500);
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              cancel();
+              setWho(r.emoji);
             }}
-            onTouchEnd={() => longPress.current && window.clearTimeout(longPress.current)}
-            onTouchMove={() => longPress.current && window.clearTimeout(longPress.current)}
+            onTouchStart={(e) => {
+              // Holding a chip shows who reacted (not the message's own menu).
+              e.stopPropagation();
+              cancel();
+              longPress.current = window.setTimeout(() => {
+                navigator.vibrate?.(12);
+                setWho(r.emoji);
+              }, 450);
+            }}
+            onTouchEnd={cancel}
+            onTouchMove={cancel}
+            onTouchCancel={cancel}
             className={cn(
-              "inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs font-medium tabular-nums transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
+              "inline-flex h-9 min-w-[3rem] items-center justify-center gap-1.5 rounded-full border px-2.5 text-sm font-medium tabular-nums transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:h-8",
+              popped.current.has(r.emoji) && "rooms-reaction-pop",
               mine
-                ? "border-[var(--item-accent)] bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] text-[var(--text)]"
+                ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--text)]"
                 : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]",
             )}
           >
-            <span className="text-sm leading-none">{r.emoji}</span>
+            <span className="text-base leading-none">{r.emoji}</span>
             {r.user_ids.length}
           </button>
         );
       })}
+      {!ctx.isPhone && (
+        <button
+          type="button"
+          aria-label="See who reacted"
+          title="See who reacted"
+          onClick={() => setWho(m.reactions[0].emoji)}
+          className="hidden h-8 w-8 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] group-hover:flex"
+        >
+          <Users className="h-4 w-4" />
+        </button>
+      )}
+      {/* The sheet is drawn elsewhere on the page, but its taps still bubble
+          up to this row; stop them opening the message's own menu. */}
+      <div
+        className="contents"
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.stopPropagation()}
+      >
+      <Sheet open={!!shown} onClose={() => setWho(null)} title="Who reacted" size="sm">
+        {shown && (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Reactions">
+              {m.reactions.map((r) => (
+                <button
+                  key={r.emoji}
+                  type="button"
+                  role="tab"
+                  aria-selected={r.emoji === shown.emoji}
+                  onClick={() => setWho(r.emoji)}
+                  className={cn(
+                    "inline-flex h-10 min-w-[3.25rem] items-center justify-center gap-1.5 rounded-full border px-3 text-sm font-medium tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                    r.emoji === shown.emoji
+                      ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--text)]"
+                      : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]",
+                  )}
+                >
+                  <span className="text-base leading-none">{r.emoji}</span>
+                  {r.user_ids.length}
+                </button>
+              ))}
+            </div>
+            <ul className="flex flex-col">
+              {shown.user_ids.map((id) => (
+                <li key={id} className="flex min-h-[44px] items-center gap-3 py-1">
+                  <UserAvatar user={ctx.users[id]} size={32} />
+                  <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{nameOf(id)}</span>
+                  <span className="text-lg leading-none">{shown.emoji}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Sheet>
+      </div>
     </div>
   );
 }
@@ -373,9 +502,9 @@ export function PendingItem({
 }) {
   const failed = p.status === "failed";
   return (
-    <div className={cn("flex flex-row-reverse gap-3 px-3 md:px-4", grouped ? "py-0.5" : "pt-2 pb-0.5", !failed && "opacity-60")}>
+    <div className={cn("rooms-msg-in flex flex-row-reverse gap-3 px-3 md:px-4", grouped ? "py-0.5" : "pt-2 pb-0.5", !failed && "opacity-60")}>
       <div className="flex min-w-0 flex-1 flex-col items-end pl-10 md:pl-24">
-        {!grouped && <span className="mb-0.5 text-[11px] text-[var(--text-muted)]">{failed ? "Not sent" : "Sending…"}</span>}
+        {!grouped && <span className="mb-0.5 text-xs text-[var(--text-muted)]">{failed ? "Not sent" : "Sending…"}</span>}
         {p.body && (
           <Bubble own>
             <MessageBody body={p.body} usernames={ctx.usernames} me={ctx.meName} />

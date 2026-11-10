@@ -7,6 +7,7 @@ import {
   File as FileIcon,
   Folder,
   House,
+  CircleDashed,
   Image as ImageIcon,
   Images,
   Lock,
@@ -44,6 +45,7 @@ export const SHARE_ICONS: Record<ShareKind, LucideIcon> = {
   form: ClipboardList,
   note: StickyNote,
   porch_post: House,
+  porch_story: CircleDashed,
 };
 
 export const shareKey = (messageId: string) => ["rooms", "share-card", messageId] as const;
@@ -80,7 +82,7 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
           <Lock className="h-5 w-5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-[var(--text)]">{kind === "porch_post" ? "Porch post" : "Shared item"}</span>
+          <span className="block text-sm font-medium text-[var(--text)]">{kind === "porch_post" ? "Porch post" : kind === "porch_story" ? "Porch story" : "Shared item"}</span>
           <span className="block text-xs text-[var(--text-muted)]">
             {isError
               ? "Couldn't load this."
@@ -88,6 +90,8 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
                 ? "This note isn't shared with you."
                 : kind === "porch_post"
                   ? "This post isn't shared with you."
+                : kind === "porch_story"
+                  ? "This story has ended."
                 : `You don't have access to ${data?.label ?? label ?? "it"}.`}
           </span>
         </span>
@@ -105,7 +109,7 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
 
   return (
     <>
-      <button type="button" onClick={open} className={`${shell} transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]`}>
+      <button type="button" onClick={open} className={`${shell} transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]`}>
         {card.thumb || card.image_url ? (
           <img
             src={card.thumb ?? card.image_url ?? undefined}
@@ -115,7 +119,7 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
             className="h-12 w-12 shrink-0 rounded-xl bg-[var(--hover)] object-cover"
           />
         ) : (
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--item-accent)_12%,transparent)] text-[var(--item-accent)]">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent-text)]">
             {card.emoji ? <span className="text-2xl leading-none">{card.emoji}</span> : <Icon className="h-5 w-5" />}
           </span>
         )}
@@ -127,8 +131,8 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
         <span
           className={
             card.action
-              ? "inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--item-accent)] px-2.5 py-1.5 text-xs font-semibold text-white"
-              : "inline-flex shrink-0 items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-[var(--item-accent)]"
+              ? "inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-semibold text-white"
+              : "inline-flex shrink-0 items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-[var(--accent-text)]"
           }
         >
           {card.action ?? "Open"} <ArrowUpRight className="h-3.5 w-3.5" />

@@ -50,6 +50,24 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+# The containers that parse what people upload or receive (the backend and
+# its workers, tusd, the Office converter) drop every Linux capability but
+# the three that root needs to read and write ./data whoever's uid owns a
+# file, and can never gain privileges (setuid binaries, file capabilities).
+# Gone: raw sockets, mknod, chroot, binding low ports, changing uids, and
+# the rest of Docker's default set (security review M4). They still run as
+# root: ./data on existing installs is owned by root, and switching them to
+# another user would need a chown of every upload on the way.
+x-hardened: &hardened
+  cap_drop:
+    - ALL
+  cap_add:
+    - CHOWN
+    - DAC_OVERRIDE
+    - FOWNER
+  security_opt:
+    - no-new-privileges:true
+
 services:
   nginx:
     # Pinned to a release line, bumped on purpose (R-243): `update.sh` pulls
@@ -57,17 +75,38 @@ services:
     image: nginx:1.31-alpine
     container_name: Promptly-Nginx
     logging: *default-logging
+    environment:
+      # 1 = your tunnel runs on this machine with host networking and is
+      # shared with other services (README, "Cloudflare Tunnel").
+      - TUNNEL_ON_HOST=${TUNNEL_ON_HOST:-0}
     # Only nginx publishes ports to the host — everything else
     # (frontend, backend, Postgres, Redis, SearXNG) stays on the
     # internal "promptly" docker network and is reached through
     # this reverse proxy. That's simpler for the user (one URL:
     # http://<host>:8087 serves UI + API) and safer (your
     # database is never exposed on the LAN).
+    #
+    # NGINX_BIND (optional, .env) limits which of the host's addresses the
+    # ports open on. Unset = every IPv4 address (0.0.0.0); IPv6 isn't
+    # published (security review M3). Usually set to the server's LAN
+    # address (e.g. 192.168.1.20), so the LAN reaches it and the machine's
+    # other interfaces don't; 127.0.0.1 only when cloudflared runs on the
+    # host itself and nothing on the LAN needs Promptly. Either way: never
+    # port-forward these ports on your router (README, "Exposure").
     ports:
-      - "${NGINX_HTTP_PORT:-8087}:80"
-      - "${NGINX_HTTPS_PORT:-8488}:443"
+      - target: 80
+        published: "${NGINX_HTTP_PORT:-8087}"
+        host_ip: "${NGINX_BIND:-0.0.0.0}"
+        protocol: tcp
+      - target: 443
+        published: "${NGINX_HTTPS_PORT:-8488}"
+        host_ip: "${NGINX_BIND:-0.0.0.0}"
+        protocol: tcp
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # .env settings written into nginx's config at start (the image's
+      # envsubst step): TUNNEL_ON_HOST, see nginx.conf "Real client IP".
+      - ./nginx/templates:/etc/nginx/templates:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
       # Operator server blocks (TLS, server_name…), gitignored — see the
       # include at the end of nginx.conf.
@@ -124,6 +163,9 @@ services:
     # its own): one build per update, and the two can never drift apart.
     image: promptly-backend:local
     container_name: Promptly-Backend
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Operator settings in .env (COOKIE_SECURE, RATE_LIMIT_*, LOCKOUT_*,
     # SETUP_TOKEN, …) reach the backend. Without this only the handful of
@@ -171,12 +213,6 @@ services:
       # (~270 MB), fast, 768-dim — plenty for knowledge-base RAG
       # without making first-run downloads painful.
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
-      # Code-interpreter sandbox (Phase 4). The backend submits
-      # model-written Python here over the internal-only ``sandbox-net``
-      # network. The shared secret (reusing SECRET_KEY) gates job
-      # submission as defense-in-depth on top of the network boundary.
-      - CODE_SANDBOX_URL=http://sandbox:8000
-      - CODE_SANDBOX_SECRET=${SECRET_KEY:-}
       # Speech-to-text worker (Voice Phase 1). Internal-only faster-whisper
       # service the backend POSTs dictation clips to. STT_BACKEND=local
       # uses it; set STT_BACKEND=openai (+ an OpenAI key) to route to the
@@ -234,11 +270,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      # Soft dependency — the chat path still boots and degrades
-      # gracefully (code_interpreter returns a friendly error) if the
-      # sandbox is slow to come up.
-      sandbox:
-        condition: service_started
       # Ollama is a soft dependency — the backend boots even if
       # Ollama is still warming up its embedding model (the RAG
       # ingester will surface a friendly "indexing failed, retry"
@@ -274,10 +305,8 @@ services:
     networks:
       # Backend straddles both networks: ``promptly`` for the app
       # services (Postgres, Redis, Ollama, SearXNG) + the internet,
-      # and ``sandbox-net`` so it can reach the isolated code sandbox
-      # (and ``convert-net`` for the optional Office converter).
+      # and ``convert-net`` for the optional Office converter.
       - promptly
-      - sandbox-net
       - convert-net
     extra_hosts:
       # Lets the backend reach a *native* host Ollama via
@@ -300,6 +329,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-ArqWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Bypass the shared entrypoint (which runs Alembic migrations + singleton
     # provisioning) — the backend owns those. The worker just needs a migrated
@@ -343,7 +375,6 @@ services:
     restart: unless-stopped
     networks:
       - promptly
-      - sandbox-net
       - convert-net
     extra_hosts:
       # Same host-Ollama reachability as the backend (the worker runs
@@ -531,6 +562,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-MediaWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     entrypoint: ["arq", "app.tasks.media_worker.MediaWorkerSettings"]
     env_file:
@@ -563,6 +597,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-MailWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     entrypoint: ["python", "-m", "app.mail.worker"]
     env_file:
@@ -594,6 +631,9 @@ services:
   tusd:
     image: tusproject/tusd:v2.10.1
     container_name: Promptly-Tusd
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Root, so it can write into the uploads folder whoever owns it (the
     # backend runs as root too); it's only reachable through nginx.
@@ -800,48 +840,6 @@ services:
     # `cap_drop` block, run `docker compose up -d searxng`,
     # then restore the cap-drop and recreate.
 
-  sandbox:
-    # Code-interpreter execution worker (Phase 4). Runs model-written
-    # Python in a throwaway, resource-limited scratch dir. Deliberately
-    # locked down:
-    #   * On the internal-only ``sandbox-net`` (no internet, and no
-    #     access to Postgres / Redis / Ollama, which live on ``promptly``).
-    #   * Read-only root filesystem; the ONLY writable path is an
-    #     in-memory tmpfs scratch. Throwaway jobs are wiped immediately;
-    #     per-conversation session dirs persist there across calls (build
-    #     a file, read it next call) and are reaped by idle-TTL + a count
-    #     cap. Cleared on restart. No host or user data volumes mounted.
-    #   * All Linux capabilities dropped, no privilege escalation, PID
-    #     and memory caps. The worker process itself runs as non-root.
-    build:
-      context: ./sandbox
-      dockerfile: Dockerfile
-    container_name: Promptly-Sandbox
-    logging: *default-logging
-    environment:
-      - SANDBOX_SECRET=${SECRET_KEY:-}
-    read_only: true
-    tmpfs:
-      - /sandbox/run:size=512m,uid=10001,gid=10001,mode=0700
-      - /tmp:size=64m
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 256
-    mem_limit: 1g
-    expose:
-      - "8000"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)\""]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    networks:
-      - sandbox-net
-
   whisper:
     # Speech-to-text worker (Voice Phase 1). Wraps faster-whisper in a
     # tiny FastAPI service; the backend POSTs dictation clips to
@@ -966,6 +964,11 @@ services:
     # can't make LibreOffice fetch anything.
     image: gotenberg/gotenberg:8.37.0
     container_name: Promptly-Convert
+    # Runs as its own non-root user; needs no capabilities at all (M4).
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     command:
       - gotenberg
@@ -1046,9 +1049,13 @@ services:
     network_mode: host
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-}: ${LIVEKIT_API_SECRET:-}"
-      # 7880 (signalling + API) also listens on the LAN in host mode; it
-      # only answers requests signed with the key pair. Keep it 7880: nginx
-      # and the backend look for it there.
+      # 7880 (signalling + API) and the metrics port also listen on the LAN
+      # in host mode: nginx and the backend reach them from Docker's bridge
+      # (host.docker.internal), so they can't be bound to 127.0.0.1, and
+      # LiveKit has no bind setting for metrics. 7880 only answers requests
+      # signed with the key pair. Firewall both from the LAN/internet and
+      # never forward them (README, "Calls"); only 7881/tcp and 7882/udp are
+      # meant to be reachable. Keep it 7880: nginx and the backend look there.
       LIVEKIT_CONFIG: |
         port: 7880
         prometheus_port: ${LIVEKIT_METRICS_PORT:-6789}
@@ -1057,13 +1064,21 @@ services:
           udp_port: ${LIVEKIT_UDP_PORT:-7882}
           use_external_ip: true
           advertise_internal_ip: true
+          # LIVEKIT_INTERFACES (optional, .env): only these network
+          # interfaces, comma-separated (e.g. br0). Unraid's "host access
+          # to custom networks" adds shim-br0 with the same address as br0;
+          # LiveKit then opens its UDP port twice on one address and stops
+          # with "address already in use". Empty = every interface.
+          interfaces:
+            includes: [${LIVEKIT_INTERFACES:-}]
         room:
           empty_timeout: 300
           departure_timeout: 20
         webhook:
           api_key: "${LIVEKIT_API_KEY:-}"
           urls:
-            - "http://127.0.0.1:${NGINX_HTTP_PORT:-8087}/api/calls/webhook"
+            # nginx on this host: wherever NGINX_BIND opened it (loopback when unset).
+            - "http://${NGINX_BIND:-127.0.0.1}:${NGINX_HTTP_PORT:-8087}/api/calls/webhook"
         logging:
           level: info
     cpus: 2
@@ -1109,18 +1124,9 @@ networks:
   promptly:
     name: promptly
     driver: bridge
-  # Internal-only network for the code sandbox. ``internal: true`` means
-  # containers on it have NO route to the internet or to the host —
-  # they can only talk to other members of this network. The backend
-  # joins both ``promptly`` and ``sandbox-net``; the sandbox joins ONLY
-  # this one, so executed code is fully air-gapped from everything
-  # except the backend that submits the job.
-  sandbox-net:
-    name: promptly-sandbox
-    driver: bridge
-    internal: true
   # Internal-only, for the optional Office converter (Stage 12): the backend
-  # and worker reach it; it reaches nothing.
+  # and worker reach it; it reaches nothing. ``internal: true`` means
+  # containers on it have NO route to the internet or to the host.
   convert-net:
     name: promptly-convert
     driver: bridge

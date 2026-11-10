@@ -53,7 +53,7 @@ export function DriveSubNav({
         <NavLink
           to="/files/search"
           className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)] md:hidden"
-          aria-label="Search Drive"
+          aria-label="Search Files"
         >
           <DriveSearchIcon />
           Search
@@ -106,7 +106,7 @@ export function DriveSubNav({
               : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
           )
         }
-        aria-label="Search Drive"
+        aria-label="Search Files"
       >
         <DriveSearchIcon />
         <span className="sr-only">Search</span>

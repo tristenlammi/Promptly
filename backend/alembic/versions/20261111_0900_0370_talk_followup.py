@@ -8,14 +8,14 @@
   default (owner decision 3, 2026-11-09).
 
 Revision ID: 0370_talk_followup
-Revises: 0402_scrub_error_routes
+Revises: 0420_drop_code_exec
 """
 import sqlalchemy as sa
 
 from alembic import op
 
 revision = "0370_talk_followup"
-down_revision = "0402_scrub_error_routes"
+down_revision = "0420_drop_code_exec"
 branch_labels = None
 depends_on = None
 

@@ -10,4 +10,6 @@
     <string name="notes_new_note">New note</string>
     <string name="notes_new_list">New list</string>
     <string name="notes_voice_note">Voice note</string>
+    <string name="porch_new_story">New story</string>
+    <string name="porch_new_post">New post</string>
 </resources>

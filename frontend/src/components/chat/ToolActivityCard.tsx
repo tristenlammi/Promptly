@@ -114,6 +114,7 @@ const TOOL_INFO: Record<
     noun: (n) => (n === 1 ? "image" : "images"),
     icon: ImageIcon,
   },
+  // Removed tool: kept only so old chats still show its past runs properly.
   code_interpreter: {
     verb: "Running code",
     noun: (n) => (n === 1 ? "code run" : "code runs"),
