@@ -337,6 +337,12 @@ export function PickStep({
           ]}
           className="mr-auto"
         />
+        {/* Up here, not under the photos: below a long grid nobody found it. */}
+        {showTextLink && (
+          <ItemButton size="sm" variant="secondary" icon={<Type className="h-4 w-4" />} onClick={onTextPost}>
+            Text post
+          </ItemButton>
+        )}
         {isPhone && (
           <ItemButton size="sm" variant="secondary" icon={<Camera className="h-4 w-4" />} onClick={() => camera.current?.click()}>
             Camera
@@ -356,15 +362,6 @@ export function PickStep({
         {source === "albums" && <Albums {...props} />}
         {source === "search" && <SearchPhotos {...props} />}
       </div>
-      {showTextLink && (
-      <button
-        type="button"
-        onClick={onTextPost}
-        className="mx-auto mb-4 mt-2 inline-flex h-11 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-[var(--accent-text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
-      >
-        <Type className="h-4 w-4" aria-hidden /> Write a text post instead
-      </button>
-      )}
     </div>
   );
 }
