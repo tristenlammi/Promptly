@@ -148,7 +148,7 @@ private class NotReady(context: CarContext, private val text: String) : Screen(c
 private class DriveScreen(context: CarContext) : ComposableScreen(context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val vm = Nav.viewModel()
-    private val notifications = TurnByTurnNotificationManager(context = carContext, smallIconRes = R.drawable.ic_map_status)
+    private val notifications = TurnByTurnNotificationManager(context = carContext, channelId = "promptly_turns", smallIconRes = R.drawable.ic_map_status)
     private val bridge = NavigationManagerBridge(
         navigationManager = carContext.getCarService(NavigationManager::class.java),
         viewModel = vm,

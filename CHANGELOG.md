@@ -250,6 +250,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords extension: bookmark sync no longer says "synced" when your server couldn't be reached. It says the other browsers don't have the latest yet, and keeps trying.
 - Passwords bookmark sync: a bookmark deleted in one browser now stays deleted. A browser with no record of its last sync (first sync, sync turned off and on, or the extension reinstalled) used to send its own copy back as a new bookmark, so it stayed there and came back everywhere; it now removes a copy that matches one in Recently deleted and was there before the deletion. A removal the browser refuses is tried again instead of being re-uploaded, and a deleted bookmark is no longer brought back because another device reordered it at the same time. "Keep them everywhere" still brings everything back.
 - Solid accent buttons with white text now meet WCAG AA in light and dark: the fill is the deeper terracotta (white on it is 4.95:1, was 3.1:1) and hover darkens (6.0:1) instead of fading. Accent text, borders, tints, switches and progress bars are unchanged, and the e2e accessibility checks no longer skip accent buttons.
+### Fixed
+- **P Maps driving (phone and Android Auto): a wrong turn now gets a new route within a few seconds.** The check for having left the route ignored every GPS fix less sure than 15 m, which is most of them in a car, so it often never asked for a new route. It now uses any usable fix, allows more room the vaguer the fix, and also notices driving the wrong way along the route.
+- P Maps: after a wrong turn the new route is the best way from where you are, rather than a way back to the points of the route you first picked.
+- P Maps: after a wrong turn, a route you saved as "Always go this way" is only rejoined when that costs no more than the extra minutes you allowed for it. Otherwise you get the best way from where you are.
+- P Maps driving: traffic on the road ahead is checked every minute and a half (every minute while traffic is already slowing you, every three on trips over 150 km), and within seconds of a new route after a wrong turn. It was every three minutes, and a new route kept the old one's traffic until the next check.
+- P Maps driving: a GPS fix arriving at the same moment as a new route can no longer leave the old turns showing on the new line.
+- P Maps: a new route asked for while stopped no longer assumes the direction the phone last guessed you were facing.
+- Android Auto: turn alerts use their own notification channel, so they are no longer silenced with the quiet "navigation running" one.
 
 ## [0.35.0] - 2026-11-09
 
