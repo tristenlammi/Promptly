@@ -6,6 +6,7 @@ import { EmptyState, Fab, ItemButton, Page, ProgressRing, parseDay, todayISO } f
 
 import { buckets, doneOn, sortKey } from "./logic";
 import { AddSheet, Fold, QuickAdd, SectionHead, TaskGroup, TaskRow, useQuickAddRequest, useToggle } from "./parts";
+import { moveMany, useReschedule } from "./reschedule";
 import { TaskEditor } from "./TaskEditor";
 import type { TasksData } from "./types";
 
@@ -17,17 +18,18 @@ export function TodayView({ item, isPhone, ask }: ItemViewProps<TasksData>) {
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const toggle = useToggle(item);
+  const move = useReschedule(item);
   const b = useMemo(() => buckets(data.tasks, today), [data.tasks, today]);
   const done = useMemo(() => doneOn(data, today), [data, today]);
   const doneTasks = useMemo(() => data.tasks.filter((t) => t.done && t.done_at?.slice(0, 10) === today).sort(sortKey), [data.tasks, today]);
   const total = b.today.length + b.overdue.length + done.length;
   useQuickAddRequest(() => (isPhone ? setAdding(true) : document.querySelector<HTMLInputElement>("[aria-label='New task']")?.focus()));
   const row = (t: (typeof b.today)[number], showDue = false) => (
-    <TaskRow key={t.id} task={t} data={data} onToggle={() => toggle(t)} onOpen={() => setOpen(t.id)} canEdit={item.canEdit} showDue={showDue} />
+    <TaskRow key={t.id} task={t} data={data} onToggle={() => toggle(t)} onOpen={() => setOpen(t.id)} canEdit={item.canEdit} showDue={showDue} onReschedule={(due) => move(t, due)} />
   );
 
   return (
-    <Page>
+    <Page className="tasks-scope">
       <header className="flex items-center gap-4">
         <ProgressRing value={total ? done.length / total : 0} size={56}>
           {done.length}/{total}
@@ -55,12 +57,7 @@ export function TodayView({ item, isPhone, ask }: ItemViewProps<TasksData>) {
                 <ItemButton
                   size="sm"
                   variant="ghost"
-                  onClick={() => {
-                    const ids = new Set(b.overdue.map((t) => t.id));
-                    item.update((d) => {
-                      for (const t of d.tasks) if (ids.has(t.id) && !t.done && t.due && t.due < today) t.due = today;
-                    });
-                  }}
+                  onClick={() => moveMany(item, b.overdue, today)}
                 >
                   Move all to today
                 </ItemButton>
