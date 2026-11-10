@@ -154,7 +154,7 @@ test("a poll: ask, vote, change your vote, and see who voted for what", async ({
 
   // Alice asks, from the composer's Share step.
   await alice.goto("/porch/new");
-  await alice.getByRole("button", { name: "Write a text post instead" }).click();
+  await alice.getByRole("button", { name: "Text post", exact: true }).click();
   await alice.getByRole("button", { name: "Poll", exact: true }).click();
   const editor = alice.getByRole("dialog", { name: "Add a poll" });
   await editor.getByRole("textbox", { name: "Option 1" }).fill("Pizza");

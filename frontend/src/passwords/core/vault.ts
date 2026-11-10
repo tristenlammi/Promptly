@@ -1144,12 +1144,16 @@ export class VaultClient {
     const { body } = mergeBodies(base, localBody, server);
     body.seq = Math.max(localBody.seq ?? 0, server.seq ?? 0) + 1;
     const blob = b64u(await encryptItem(key, v.id, local.id, body));
+    // Deleted on one side and changed on the other: the change wins, so an edit is never lost to
+    // a delete. A bookmark that was only moved or reordered is the exception. Its place changes
+    // whenever a browser tidies the order, and that shouldn't bring back one a person deleted.
+    const movedOnly = local.deleted !== serverDeleted && localBody.kind === "bookmark" && server.kind === "bookmark" && localBody.title === server.title && localBody.bookmark?.url === server.bookmark?.url;
     const merged: CachedItem = {
       ...local,
       blob,
       baseBlob: serverBlob,
       revision: serverRevision,
-      deleted: local.deleted && serverDeleted,
+      deleted: (local.deleted && serverDeleted) || movedOnly,
       dirty: true,
     };
     await this.store.putItems([merged]);

@@ -271,6 +271,10 @@ export interface AdminUser {
   storage_cap_bytes: number | null;
   daily_token_budget: number | null;
   monthly_token_budget: number | null;
+  /** How much of their storage they've used, and the limit that applies
+   *  (theirs, else the app's; null = no limit). */
+  storage_used_bytes: number;
+  storage_limit_bytes: number | null;
 }
 
 /** One row of `usage_daily` returned by the admin usage endpoint. */

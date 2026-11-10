@@ -48,6 +48,8 @@
      (4.9:1, where the brand accent is ~3.1:1). The voice sheets use it
      for their primary buttons and switches. */
   --accent-strong: #B5532F;
+  /* Hover on those fills: darker still (6.0:1 with white). */
+  --accent-strong-hover: #A24827;
   /* Raised/recessed neutral surfaces above --surface, used for
      toolbars, table headers, selected/hover rows and inset panels.
      --surface-1 is the faint raised tone; --surface-2 is the slightly
@@ -348,6 +350,22 @@ body,
 :where(:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Solid accent buttons with white text. White on the brand accent is
+   3.1:1; on --accent-strong it's 4.95:1 (WCAG AA), in light and dark. The
+   two classes together out-rank the utility, so every such button gets
+   it and nothing else that uses the accent (text, borders, tints, bars,
+   switches, dots) changes. Hover darkens instead of fading or lightening:
+   90% opacity and --accent-hover both fall back under 4.5:1. */
+.bg-\[var\(--accent\)\].text-white {
+  background-color: var(--accent-strong);
+}
+.bg-\[var\(--accent\)\].text-white.hover\:opacity-90:hover:not(:disabled),
+.bg-\[var\(--accent\)\].text-white.hover\:bg-\[var\(--accent\)\]\/90:hover:not(:disabled),
+.text-white.hover\:bg-\[var\(--accent-hover\)\]:hover:not(:disabled) {
+  background-color: var(--accent-strong-hover);
+  opacity: 1;
 }
 
 body {

@@ -117,24 +117,13 @@ async function makeVault(page: Page) {
   await expect(page.getByRole("heading", { name: "All items" })).toBeVisible({ timeout: 30_000 });
 }
 
-/** WCAG A/AA problems, less the known accent-button contrast (the same
- *  exception photos-a11y.spec.ts makes) and the avatar's initials: the
+/** WCAG A/AA problems, less the avatar's initials: the
  *  sidebar footer uses everyone's avatar colour (UserAvatar's palette, white
  *  initials, some under 4.5:1), beside the name written out in full. */
 async function axe(page: Page, what: string): Promise<string[]> {
   const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
-  const accent = (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent"))).trim().toLowerCase();
   return violations
-    .map((v) =>
-      v.id === "color-contrast"
-        ? {
-            ...v,
-            nodes: v.nodes.filter(
-              (n) => !n.any.some((c) => c.message.toLowerCase().includes(`background color: ${accent}`)) && !n.html.includes("data-avatar"),
-            ),
-          }
-        : v,
-    )
+    .map((v) => (v.id === "color-contrast" ? { ...v, nodes: v.nodes.filter((n) => !n.html.includes("data-avatar")) } : v))
     .filter((v) => v.nodes.length)
     .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => `${n.target.join(" ")} ${n.html.slice(0, 120)} ${n.any.map((c) => c.message).join("; ")}`).join(" | ")}`);
 }

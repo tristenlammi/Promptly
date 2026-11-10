@@ -578,3 +578,20 @@ async def test_android_crash_text_is_scrubbed_and_the_push_names_nothing(db, cli
     assert "\tat org.promptly.sync.Upload.run(Upload.kt:12)" in row.stack
     assert told and all("Divorce" not in t["body"] and "FileNotFound" not in t["body"] for t in told)
     assert all(user.username not in t["body"] and "Pixel" not in t["body"] for t in told)
+
+
+# ------------------------------------------------------- storage on the Users list
+
+
+async def test_the_users_list_shows_how_much_storage_and_nothing_about_the_files(db, client, user):
+    member = await _user(db, "stor")
+    member.storage_cap_bytes = 1000
+    await db.commit()
+    await _file(db, member, name="secret-plans.txt", text_="x" * 250)
+
+    r = await client.get("/api/admin/users", headers=_auth(user))
+    assert r.status_code == 200, r.text
+    row = next(u for u in r.json() if u["id"] == str(member.id))
+    assert row["storage_used_bytes"] == 250
+    assert row["storage_limit_bytes"] == 1000
+    assert "secret-plans" not in r.text

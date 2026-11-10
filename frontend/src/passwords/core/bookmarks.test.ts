@@ -2,14 +2,18 @@
 // matters: indexes shift, a folder with something in it can't be removed, ids are its own.
 import { describe, expect, it } from "vitest";
 
-import { type Base, type BookmarkItem, type BookmarkNode, bookmarksHtml, bookmarkTree, type BrowserSide, massDeleteLimit, reconcile, rootKey, syncableUrl, type VaultSide } from "./bookmarks";
+import { type Base, type BookmarkItem, type BookmarkNode, bookmarksHtml, bookmarkTree, type BrowserSide, type DeletedBookmark, massDeleteLimit, reconcile, rootKey, type SyncOptions, syncableUrl, type VaultSide } from "./bookmarks";
 
-type Raw = { id: string; parent: string; title: string; url?: string };
+type Raw = { id: string; parent: string; title: string; url?: string; added: number };
+/** One clock for every browser and the vault: what matters is what came before what. */
+let clock = 0;
 
 class FakeBrowser implements BrowserSide {
   raw = new Map<string, Raw>();
   order_ = new Map<string, string[]>();
   next = 1;
+  /** A browser that doesn't say when a bookmark was added. */
+  undated = false;
   constructor(public name: string) {}
   private list(p: string) {
     let l = this.order_.get(p);
@@ -18,13 +22,13 @@ class FakeBrowser implements BrowserSide {
   }
   add(parent: string, title: string, url?: string, index?: number): string {
     const id = `${this.name}-${this.next++}`;
-    this.raw.set(id, { id, parent, title, url });
+    this.raw.set(id, { id, parent, title, url, added: ++clock });
     const l = this.list(parent);
     l.splice(index ?? l.length, 0, id);
     return id;
   }
   async read(): Promise<BookmarkNode[]> {
-    return [...this.raw.values()].map((r) => ({ node: r.id, parent: r.parent, title: r.title, url: r.url, index: this.list(r.parent).indexOf(r.id) }));
+    return [...this.raw.values()].map((r) => ({ node: r.id, parent: r.parent, title: r.title, url: r.url, index: this.list(r.parent).indexOf(r.id), added: this.undated ? undefined : r.added }));
   }
   async order(p: string) {
     return [...this.list(p)];
@@ -76,8 +80,19 @@ class FakeBrowser implements BrowserSide {
 class FakeVault implements VaultSide {
   items = new Map<string, BookmarkItem>();
   gone = new Set<string>();
+  /** Recently deleted: kept, and not in read(). */
+  trash = new Map<string, DeletedBookmark>();
   async read() {
     return [...this.items.values()].map((i) => ({ ...i }));
+  }
+  async deleted() {
+    return [...this.trash.values()].map((i) => ({ ...i }));
+  }
+  restore(id: string) {
+    const { at: _at, ...item } = this.trash.get(id)!;
+    this.trash.delete(id);
+    this.gone.delete(id);
+    this.items.set(id, item);
   }
   async create(i: BookmarkItem) {
     this.items.set(i.id, { ...i });
@@ -87,6 +102,8 @@ class FakeVault implements VaultSide {
     this.items.set(i.id, { ...i });
   }
   async remove(id: string) {
+    const had = this.items.get(id);
+    if (had) this.trash.set(id, { ...had, at: ++clock });
     this.items.delete(id);
     this.gone.add(id);
   }
@@ -95,6 +112,7 @@ class FakeVault implements VaultSide {
     const c = new FakeVault();
     c.items = new Map([...this.items].map(([k, v]) => [k, { ...v }]));
     c.gone = new Set(this.gone);
+    c.trash = new Map([...this.trash].map(([k, v]) => [k, { ...v }]));
     return c;
   }
   /** Last writer wins per item, deletions stay: what the vault's own sync gives, near enough. */
@@ -103,6 +121,7 @@ class FakeVault implements VaultSide {
       this.gone.add(id);
       this.items.delete(id);
     }
+    for (const [id, v] of o.trash) if (!this.trash.has(id)) this.trash.set(id, { ...v });
     for (const [id, v] of o.items) if (!this.gone.has(id)) this.items.set(id, { ...v });
   }
 }
@@ -113,8 +132,8 @@ const options = { hash: (s: string) => `h:${s}`, newId: () => `item-${String(++i
 class Device {
   base: Base = {};
   constructor(public browser: FakeBrowser, public vault: FakeVault) {}
-  async run(allowMassDelete = false) {
-    const r = await reconcile(this.browser, this.vault, this.base, { ...options, allowMassDelete });
+  async run(allowMassDelete = false, more: Partial<SyncOptions> = {}) {
+    const r = await reconcile(this.browser, this.vault, this.base, { ...options, allowMassDelete, ...more });
     if (r.status === "ok") this.base = r.base;
     return r;
   }
@@ -571,6 +590,205 @@ describe("bookmark sync", () => {
         expect(r.status === "ok" && r.wroteVault, `seed ${seed}`).toBe(false);
       }
     }
+  });
+
+  // ---- Deletions that have to stick ------------------------------------------------------
+
+  it("a deletion goes to the vault's recently deleted and from the other browser, and a restore brings it back to both", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    a.browser.add(BAR, "Keep", "https://keep.example/");
+    const x = a.browser.add(BAR, "Old", "https://old.example/");
+    await settle([a, b]);
+    await a.browser.remove(x);
+    const r = await a.run();
+    expect(r.status === "ok" && r.counts.removedFromVault).toBe(1);
+    expect([...vault.trash.values()].map((t) => t.title)).toEqual(["Old"]);
+    const rb = await b.run();
+    expect(rb.status === "ok" && rb.counts.removedFromBrowser).toBe(1);
+    expect(b.browser.all().bar).toEqual(["Keep=https://keep.example/"]);
+    // Nothing brings it back on later runs.
+    await settle([a, b]);
+    expect(vault.items.size).toBe(1);
+    expect(a.browser.all()).toEqual(b.browser.all());
+    vault.restore([...vault.trash.keys()][0]);
+    await settle([a, b]);
+    expect(a.browser.all().bar).toEqual(["Keep=https://keep.example/", "Old=https://old.example/"]);
+    expect(a.browser.all()).toEqual(b.browser.all());
+    expect(vault.items.size).toBe(2);
+  });
+
+  it("a browser that's forgotten the last run doesn't bring back what was deleted elsewhere", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    a.browser.add(BAR, "Keep", "https://keep.example/");
+    const x = a.browser.add(BAR, "Old", "https://old.example/");
+    await settle([a, b]);
+    await a.browser.remove(x);
+    await a.run();
+    // Off and on, or the extension reinstalled: b still has the bookmark and remembers nothing.
+    b.base = {};
+    const r = await b.run();
+    expect(r.status === "ok" && r.counts.removedFromBrowser).toBe(1);
+    expect(r.status === "ok" && r.counts.addedToVault).toBe(0);
+    await settle([a, b]);
+    expect(b.browser.all().bar).toEqual(["Keep=https://keep.example/"]);
+    expect(a.browser.all()).toEqual(b.browser.all());
+    expect(vault.items.size).toBe(1);
+    expect(vault.trash.size).toBe(1);
+  });
+
+  it("one added again after it was deleted is a new bookmark, even to a browser that's forgotten", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    const x = a.browser.add(BAR, "Old", "https://old.example/");
+    a.browser.add(BAR, "Keep", "https://keep.example/");
+    await settle([a, b]);
+    await a.browser.remove(x);
+    await settle([a, b]);
+    expect(b.browser.raw.size).toBe(1);
+    b.browser.add(BAR, "Old", "https://old.example/");
+    b.base = {};
+    await settle([b, a]);
+    expect(JSON.stringify(a.browser.all().bar)).toContain("Old=https://old.example/");
+    expect(a.browser.all()).toEqual(b.browser.all());
+    expect(vault.items.size).toBe(2);
+  });
+
+  it("a browser that doesn't say when a bookmark was added keeps it", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    const x = a.browser.add(BAR, "Old", "https://old.example/");
+    await settle([a, b]);
+    await a.browser.remove(x);
+    await a.run();
+    b.browser.undated = true;
+    b.base = {};
+    await settle([b, a]);
+    expect(a.browser.all().bar).toEqual(["Old=https://old.example/"]);
+  });
+
+  it("\"keep them everywhere\" brings back what was deleted elsewhere", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    const x = a.browser.add(BAR, "Old", "https://old.example/");
+    a.browser.add(BAR, "Keep", "https://keep.example/");
+    await settle([a, b]);
+    await a.browser.remove(x);
+    await a.run();
+    b.base = {};
+    const r = await b.run(false, { keepAll: true });
+    expect(r.status === "ok" && r.counts.addedToVault).toBe(1);
+    expect(r.status === "ok" && r.counts.removedFromBrowser).toBe(0);
+    await settle([a, b]);
+    expect(JSON.stringify(a.browser.all().bar)).toContain("Old=https://old.example/");
+    expect(a.browser.all()).toEqual(b.browser.all());
+  });
+
+  it("a folder deleted elsewhere goes from a browser that's forgotten, unless something new is in it", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    const c = new Device(new FakeBrowser("c"), vault);
+    const f = a.browser.add(BAR, "Work");
+    a.browser.add(f, "Wiki", "https://wiki.example/");
+    a.browser.add(f, "Mail", "https://mail.example/");
+    a.browser.add(BAR, "Keep", "https://keep.example/");
+    await settle([a, b, c]);
+    a.browser.removeTree(f);
+    await a.run();
+    const inC = [...c.browser.raw.values()].find((r) => r.title === "Work")!.id;
+    c.browser.add(inC, "Notes", "https://notes.example/");
+    b.base = {};
+    c.base = {};
+    await b.run();
+    expect(b.browser.all().bar).toEqual(["Keep=https://keep.example/"]);
+    await c.run();
+    expect(c.browser.all().bar).toEqual([{ Work: ["Notes=https://notes.example/"] }, "Keep=https://keep.example/"]);
+    await settle([a, b, c]);
+    expect(a.browser.all()).toEqual(c.browser.all());
+    expect(b.browser.all()).toEqual(c.browser.all());
+    expect(JSON.stringify(a.browser.all())).not.toContain("wiki.example");
+  });
+
+  it("a lot deleted elsewhere still stops and asks in a browser that's forgotten, and nothing goes without a yes", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    const n = Array.from({ length: 60 }, (_, i) => a.browser.add(BAR, `B${i}`, `https://b${i}.example/`));
+    await settle([a, b]);
+    for (const node of n.slice(0, 30)) await a.browser.remove(node);
+    await a.run(true);
+    b.base = {};
+    const held = await b.run();
+    expect(held.status).toBe("held");
+    expect(held.status === "held" && held.fromVault).toBe(30);
+    expect(b.browser.raw.size).toBe(60);
+    expect(vault.items.size).toBe(30);
+    const kept = await b.run(false, { keepAll: true });
+    expect(kept.status === "ok" && kept.counts.addedToVault).toBe(30);
+    expect(b.browser.raw.size).toBe(60);
+  });
+
+  it("a bookmark the browser wouldn't remove is tried again, and doesn't go back to the vault as new", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    a.browser.add(BAR, "Keep", "https://keep.example/");
+    const x = a.browser.add(BAR, "Old", "https://old.example/");
+    await settle([a, b]);
+    await a.browser.remove(x);
+    await a.run();
+    const real = b.browser.remove.bind(b.browser);
+    let refuse = 2;
+    b.browser.remove = async (node: string) => {
+      if (refuse-- > 0) throw new Error("busy");
+      return real(node);
+    };
+    const first = await b.run();
+    expect(first.status === "ok" && first.counts.failed).toBe(1);
+    expect(first.status === "ok" && first.deleted).toBe(0);
+    await a.run();
+    const second = await b.run();
+    expect(second.status === "ok" && second.counts.addedToVault).toBe(0);
+    expect(vault.items.size).toBe(1);
+    expect(a.browser.raw.size).toBe(1);
+    const third = await b.run();
+    expect(third.status === "ok" && third.counts.removedFromBrowser).toBe(1);
+    expect(b.browser.all().bar).toEqual(["Keep=https://keep.example/"]);
+    await settle([a, b]);
+    expect(vault.items.size).toBe(1);
+    expect(a.browser.all()).toEqual(b.browser.all());
+  });
+
+  it("the same refusal in a browser that's forgotten is tried again too", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    const b = new Device(new FakeBrowser("b"), vault);
+    a.browser.add(BAR, "Keep", "https://keep.example/");
+    const x = a.browser.add(BAR, "Old", "https://old.example/");
+    await settle([a, b]);
+    await a.browser.remove(x);
+    await a.run();
+    b.base = {};
+    const real = b.browser.remove.bind(b.browser);
+    let refuse = 1;
+    b.browser.remove = async (node: string) => {
+      if (refuse-- > 0) throw new Error("busy");
+      return real(node);
+    };
+    const first = await b.run();
+    expect(first.status === "ok" && first.counts.failed).toBe(1);
+    expect(vault.items.size).toBe(1);
+    await settle([a, b]);
+    expect(b.browser.all().bar).toEqual(["Keep=https://keep.example/"]);
+    expect(a.browser.all()).toEqual(b.browser.all());
+    expect(vault.items.size).toBe(1);
   });
 
   it("the tree for showing is in order, and an orphan or a loop can still be reached", () => {
