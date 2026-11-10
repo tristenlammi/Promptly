@@ -24,6 +24,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Fixed
 - **P Maps driving (phone and Android Auto): a wrong turn now gets a new route within a few seconds.** The check for having left the route ignored every GPS fix less sure than 15 m, which is most of them in a car, so it often never asked for a new route. It now uses any usable fix, allows more room the vaguer the fix, and also notices driving the wrong way along the route.
 - P Maps: after a wrong turn the new route is the best way from where you are, rather than a way back to the points of the route you first picked.
+- P Maps: after a wrong turn, a route you saved as "Always go this way" is only rejoined when that costs no more than the extra minutes you allowed for it. Otherwise you get the best way from where you are.
+- P Maps driving: traffic on the road ahead is checked every minute and a half (every minute while traffic is already slowing you, every three on trips over 150 km), and within seconds of a new route after a wrong turn. It was every three minutes, and a new route kept the old one's traffic until the next check.
+- P Maps driving: a GPS fix arriving at the same moment as a new route can no longer leave the old turns showing on the new line.
 - P Maps: a new route asked for while stopped no longer assumes the direction the phone last guessed you were facing.
 - Android Auto: turn alerts use their own notification channel, so they are no longer silenced with the quiet "navigation running" one.
 

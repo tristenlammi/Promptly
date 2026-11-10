@@ -271,6 +271,38 @@ async def test_the_driving_screen_is_told_about_a_faster_way(user, client, monke
     assert got["traffic"] and got["faster"] is None
 
 
+async def test_a_wrong_turn_leaves_the_preferred_way_when_getting_back_costs_too_much(user, client, monkeypatch):
+    from app.config import get_settings
+    from app.maps import engine
+
+    monkeypatch.setattr(get_settings(), "MAPS_TRAFFIC_KEY", "")
+    asked: list[dict] = []
+    back = {"seconds": 1080}
+
+    async def fake(path, body):
+        asked.append(body)
+        through = [p for p in body["locations"] if p.get("type") == "through"]
+        return _trip(COAST, back["seconds"], "Coast Rd") if through else _trip(DIRECT, 900)
+
+    monkeypatch.setattr(engine, "valhalla", fake)
+    await _prefer(client, user)
+    body = {"costing": "auto", "format": "osrm", "locations": [{"lat": -27.452, "lon": 153.15}, {"lat": WORK["lat"], "lon": WORK["lon"], "type": "break"}]}
+    reroute = {**_hdr(user), "X-Promptly-Reroute": "1"}
+
+    async def went_through(headers):
+        r = await client.post("/api/maps/navigate/route", headers=headers, json=body)
+        assert r.status_code == 200, r.text
+        return any(p.get("type") == "through" for p in asked[-1]["locations"])
+
+    # Three minutes more to stay on your way: within the ten you allow, so it stays.
+    assert await went_through(reroute)
+    # Twenty minutes more (it would double back): the best way from here.
+    back["seconds"] = 2100
+    assert not await went_through(reroute)
+    # Starting a trip still follows your way; only a wrong turn weighs it up.
+    assert await went_through(_hdr(user))
+
+
 async def test_reroutes_from_the_phone_check_closures_now_and_then(user, client, valhalla, monkeypatch):
     from app.maps import planning
 

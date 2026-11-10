@@ -317,6 +317,32 @@ async def around_for_navigation(db: AsyncSession, ask: dict[str, Any], check_clo
     return answer
 
 
+def _nav_seconds(answer: dict[str, Any]) -> float | None:
+    """How long a route for the phone takes, in whichever format was asked for."""
+    routes = answer.get("routes") or []
+    if routes and isinstance(routes[0].get("duration"), (int, float)):
+        return float(routes[0]["duration"])
+    time_ = ((answer.get("trip") or {}).get("summary") or {}).get("time")
+    return float(time_) if isinstance(time_, (int, float)) else None
+
+
+async def worth_rejoining(preferred_ask: dict[str, Any], direct_ask: dict[str, Any], tolerance_minutes: int) -> bool:
+    """After a wrong turn: is your preferred way still worth it from here? Getting
+    back to it can mean doubling back. Past what you said you'd put up with for
+    it, the best way from where you are wins."""
+    try:
+        preferred = _nav_seconds(await engine.valhalla("/route", preferred_ask))
+    except HTTPException:
+        return False
+    try:
+        direct = _nav_seconds(await engine.valhalla("/route", direct_ask))
+    except HTTPException:
+        return True
+    if preferred is None or direct is None:
+        return True
+    return preferred - direct <= tolerance_minutes * 60
+
+
 async def better_route(
     db: AsyncSession,
     user: User,

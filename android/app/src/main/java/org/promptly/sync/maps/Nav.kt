@@ -7,6 +7,7 @@ import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.lifecycle.viewModelScope
 import com.stadiamaps.ferrostar.composeui.notification.DefaultForegroundNotificationBuilder
+import com.stadiamaps.ferrostar.core.AlternativeRouteProcessor
 import com.stadiamaps.ferrostar.core.AndroidTtsObserver
 import com.stadiamaps.ferrostar.core.AndroidTtsStatusListener
 import com.stadiamaps.ferrostar.core.DefaultNavigationViewModel
@@ -16,6 +17,7 @@ import com.stadiamaps.ferrostar.core.RouteDeviationHandler
 import com.stadiamaps.ferrostar.core.annotation.valhalla.valhallaExtendedOSRMAnnotationPublisher
 import com.stadiamaps.ferrostar.core.http.OkHttpClientProvider.Companion.toOkHttpClientProvider
 import com.stadiamaps.ferrostar.core.location.NavigationLocationProvider
+import com.stadiamaps.ferrostar.core.location.NavigationLocationProviding
 import com.stadiamaps.ferrostar.core.location.SimulatedLocationProvider
 import com.stadiamaps.ferrostar.core.location.toUserLocation
 import com.stadiamaps.ferrostar.core.service.FerrostarForegroundServiceManager
@@ -28,10 +30,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
@@ -123,6 +129,8 @@ object Nav {
     private val _traffic = MutableStateFlow<TrafficNow?>(null)
     val traffic = _traffic.asStateFlow()
     private var trafficJob: Job? = null
+    // Counts new routes after wrong turns: the traffic check looks again when it moves.
+    private val rerouted = MutableStateFlow(0L)
     private val _arrived = MutableStateFlow(false)
     val arrived = _arrived.asStateFlow()
     /** Where you arrived, for "You've arrived at Home". */
@@ -172,6 +180,18 @@ object Nav {
         )
     }
 
+    // The navigation library works through each fix on one thread and swaps a new route
+    // in on another, with nothing between them: a fix caught mid-swap could put the old
+    // route's steps back under the new route's line. So both take turns here.
+    private val oneAtATime = Mutex()
+    private val takingTurns = object : NavigationLocationProviding {
+        override suspend fun lastLocation(): Location? = locationProvider.lastLocation()
+
+        override fun locationUpdates(intervalMillis: Long) = flow {
+            locationProvider.locationUpdates(intervalMillis).collect { fix -> oneAtATime.withLock { emit(fix) } }
+        }
+    }
+
     fun init(context: Context) {
         if (!::app.isInitialized) app = context.applicationContext
     }
@@ -217,7 +237,7 @@ object Nav {
         val built = FerrostarCore(
             provider,
             Maps.client(app, Maps.DRIVING_TIMEOUT_SECONDS).toOkHttpClientProvider(),
-            locationProvider,
+            takingTurns,
             config,
             FerrostarForegroundServiceManager(app, DefaultForegroundNotificationBuilder(app)),
         )
@@ -248,6 +268,9 @@ object Nav {
             val stops = OffRouteWatch.stopsOnly(remaining, pinned, { it.kind == WaypointKind.VIA }) { it.coordinate.lat to it.coordinate.lng }
             Log.i(TAG, "Off the route: asking for a new one to ${stops.size} stop(s), ${remaining.size - stops.size} pinned point(s) let go")
             CorrectiveAction.GetNewRoutes(stops)
+        }
+        built.alternativeRouteProcessor = AlternativeRouteProcessor { c, found ->
+            found.firstOrNull()?.let { route -> runBlocking { oneAtATime.withLock { c.replaceRoute(route) } } }
         }
         core = built
         return TripModel(built).also {
@@ -375,7 +398,7 @@ object Nav {
                 pinned = through
                 vm.setDestination(rest.lastOrNull()?.name)
                 withContext(Dispatchers.Main) {
-                    if (vm.navigationUiState.value.isNavigating()) c.replaceRoute(route) else c.startNavigation(route)
+                    if (vm.navigationUiState.value.isNavigating()) oneAtATime.withLock { c.replaceRoute(route) } else c.startNavigation(route)
                 }
                 // The route's cameras follow from watch().
                 liveLoop(vm)
@@ -561,6 +584,12 @@ object Nav {
         _noSignal.value = source == RouteSource.PHONE
         _offRoute.value = null
         offRouteSaid = false
+        if (reroute) {
+            // What was known about traffic was for the old way. Ask about this one shortly.
+            _traffic.value = null
+            _faster.value = null
+            rerouted.value++
+        }
     }
 
     /** No route from the server, and the phone can't make one here. */
@@ -611,7 +640,7 @@ object Nav {
                 val here = vm.navigationUiState.value.location ?: return@launch
                 val route = provider().fetch(here, stops.map { Waypoint(coordinate = GeographicCoordinate(it.lat, it.lon), kind = WaypointKind.BREAK) }).first()
                 pinned = emptyList()
-                withContext(Dispatchers.Main) { c.replaceRoute(route) }
+                withContext(Dispatchers.Main) { oneAtATime.withLock { c.replaceRoute(route) } }
                 then()
                 hazards = emptyList()
                 lastWarningCheck = 0L
@@ -683,7 +712,7 @@ object Nav {
                 val waypoints = offer.through.map(::viaPoint) + Waypoint(coordinate = GeographicCoordinate(to.lat, to.lon), kind = WaypointKind.BREAK)
                 val route = provider().fetch(here, waypoints).first()
                 pinned = offer.through
-                withContext(Dispatchers.Main) { c.replaceRoute(route) }
+                withContext(Dispatchers.Main) { oneAtATime.withLock { c.replaceRoute(route) } }
                 speak("Taking the faster route.")
                 // Traffic on the new road, right away.
                 trafficLoop(vm)
@@ -731,6 +760,8 @@ object Nav {
         trafficJob = vm.viewModelScope.launch(Dispatchers.IO + keepDriving) {
             var asked = false
             while (isActive) {
+                val reroutes = rerouted.value
+                val askedAt = System.currentTimeMillis()
                 val state = vm.navigationUiState.value
                 val progress = state.progress
                 if (!state.isNavigating() || progress == null) break
@@ -786,7 +817,18 @@ object Nav {
                 }
                 // No position yet means no faster-route check: try again soon. No signal: look
                 // again soon, so traffic's back shortly after the signal is.
-                delay(if (vm.navigationUiState.value.location == null || !asked || _noSignal.value) 15_000 else 180_000)
+                val ready = vm.navigationUiState.value.location != null && asked && !_noSignal.value
+                val kmLeft = (vm.navigationUiState.value.progress?.distanceRemaining ?: 0.0) / 1000.0
+                var next = System.currentTimeMillis() + TrafficPace.pause(ready, kmLeft, _traffic.value?.addsMinutes)
+                var seen = reroutes
+                while (isActive) {
+                    val left = next - System.currentTimeMillis()
+                    if (left <= 0) break
+                    // A new route after a wrong turn: don't sit on the old pace.
+                    val moved = withTimeoutOrNull(left) { rerouted.first { it != seen } } ?: break
+                    seen = moved
+                    next = TrafficPace.afterReroute(System.currentTimeMillis(), askedAt, next)
+                }
             }
         }
     }
