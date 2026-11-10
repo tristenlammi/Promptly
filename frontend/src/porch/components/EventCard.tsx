@@ -100,7 +100,7 @@ export function EventCard({ post, className }: { post: PorchPost; className?: st
           className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--item-accent)_14%,var(--surface))] text-[var(--text)]"
           aria-hidden
         >
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text)]">{start.toLocaleDateString(undefined, { month: "short" })}</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text)]">{start.toLocaleDateString(undefined, { month: "short" })}</span>
           <span className="text-xl font-bold leading-none">{start.getDate()}</span>
         </span>
         <div className="min-w-0 flex-1">

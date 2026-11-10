@@ -79,7 +79,7 @@ export function PeoplePicker({
       </div>
       {typed.length >= 2 || rows.length > 0 ? (
         <ul className="flex max-h-64 flex-col overflow-y-auto rounded-xl border border-[var(--border)]" aria-label={typed.length >= 2 ? "People found" : "People you know"}>
-          {typed.length < 2 && <li className="px-3 pt-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">People you know</li>}
+          {typed.length < 2 && <li className="px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">People you know</li>}
           {rows.map((u) => {
             const on = chosen.has(u.id);
             const rel = labelOf.get(u.id);

@@ -733,7 +733,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
             {picks.map((p, i) => (
               <li key={p.key} className="relative shrink-0">
                 <PickImage pick={p} label={`Picked ${i + 1}`} className="h-12 w-12 rounded-lg" />
-                <span aria-hidden className="absolute left-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/60 px-0.5 text-[10px] font-bold text-white">
+                <span aria-hidden className="absolute left-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/60 px-0.5 text-xs font-bold text-white">
                   {i + 1}
                 </span>
               </li>

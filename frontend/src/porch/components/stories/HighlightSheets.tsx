@@ -1,3 +1,4 @@
+import { RowsSkeleton, TilesSkeleton } from "../ui";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -53,7 +54,7 @@ export function StoryTile({ story, picked, order, onClick, label }: { story: Por
       className="group relative block w-full overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2"
     >
       <StoryFrame story={story} small className={cn("w-full transition", picked && "scale-[0.94] rounded-lg")} />
-      <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[11px] font-semibold text-white">
+      <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1.5 py-0.5 text-xs font-semibold text-white">
         {new Date(story.created_at).getDate()}
       </span>
       {picked !== undefined && (
@@ -83,7 +84,7 @@ function ArchivePicker({ picked, onToggle }: { picked: string[]; onToggle: (s: P
   const sentinel = useSentinel(() => {
     if (q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
   });
-  if (q.isPending) return <p className="py-6 text-center text-sm text-[var(--text-muted)]">Loading your stories…</p>;
+  if (q.isPending) return <TilesSkeleton tiles={6} />;
   if (q.isError) return <LoadError what="Couldn't load your stories." onRetry={() => void q.refetch()} />;
   if (!months.length) return <p className="py-8 text-center text-sm text-[var(--text-muted)]">You haven't posted a story yet. Your stories show here after you do, even after their day is up.</p>;
   return (
@@ -246,7 +247,7 @@ export function AddToHighlightSheet({ story, open, onClose }: { story: PorchStor
               <span className="text-sm font-medium text-[var(--text)]">New highlight</span>
             </button>
           </li>
-          {q.isPending && <li className="px-2 py-3 text-sm text-[var(--text-muted)]">Loading…</li>}
+          {q.isPending && <li className="px-2"><RowsSkeleton rows={3} /></li>}
           {(q.data ?? []).map((h) => {
             const already = !!story && h.stories.some((s) => s.id === story.id);
             return (

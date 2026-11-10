@@ -1,3 +1,4 @@
+import { RowsSkeleton } from "../ui";
 import { useQuery } from "@tanstack/react-query";
 import { Eye } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -15,7 +16,7 @@ export function ViewersSheet({ storyId, open, onClose }: { storyId: string; open
   return (
     <Sheet open={open} onClose={onClose} title={q.data ? (n === 1 ? "Seen by 1 person" : `Seen by ${n} people`) : "Seen by"} size="sm">
       {q.isPending ? (
-        <p className="py-6 text-center text-sm text-[var(--text-muted)]">Loading…</p>
+        <RowsSkeleton rows={4} />
       ) : q.isError ? (
         <LoadError what="Couldn't load who saw it." onRetry={() => void q.refetch()} />
       ) : n === 0 ? (

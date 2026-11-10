@@ -206,7 +206,44 @@ export function PostSkeleton() {
   );
 }
 
+/** Grey rows where a list is on its way (people, comments, notifications). */
+export function RowsSkeleton({ rows = 4, className }: { rows?: number; className?: string }) {
+  return (
+    <div role="status" aria-label="Loading" className={cn("flex flex-col gap-4 py-3", className)}>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3" aria-hidden>
+          <Skeleton className="h-9 w-9 shrink-0 rounded-full" />
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Skeleton className={cn("h-3.5", i % 2 ? "w-2/5" : "w-3/5")} />
+            <Skeleton className="h-3 w-1/4" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Grey squares where a grid of photos or stories is on its way. */
+export function TilesSkeleton({ tiles = 9, className }: { tiles?: number; className?: string }) {
+  return (
+    <div role="status" aria-label="Loading" className={cn("grid grid-cols-3 gap-0.5", className)}>
+      {Array.from({ length: tiles }, (_, i) => (
+        <Skeleton key={i} className="aspect-square w-full rounded-none" />
+      ))}
+    </div>
+  );
+}
+
+export type MenuGroup = "share" | "manage" | "safety";
+const MENU_GROUPS: { id: MenuGroup; title: string }[] = [
+  { id: "share", title: "Share" },
+  { id: "manage", title: "Manage" },
+  { id: "safety", title: "Safety" },
+];
+
 export interface MenuAction {
+  /** Which part of a longer menu it sits in (Share, Manage, Safety). */
+  group?: MenuGroup;
   label: string;
   icon: ComponentType<{ className?: string }>;
   onClick: () => void;
@@ -216,12 +253,9 @@ export interface MenuAction {
 
 /** A short list of actions ("…"): a bottom sheet on a phone, a small dialog on desktop. */
 export function ActionSheet({ open, onClose, title, actions }: { open: boolean; onClose: () => void; title: string; actions: MenuAction[] }) {
-  return (
-    <Sheet open={open} onClose={onClose} title={title} size="sm">
-      <ul className="-mx-2 flex flex-col">
-        {actions.map((a) => {
-          const Icon = a.icon;
-          return (
+  const row = (a: MenuAction) => {
+    const Icon = a.icon;
+    return (
             <li key={a.label}>
               <button
                 type="button"
@@ -241,9 +275,27 @@ export function ActionSheet({ open, onClose, title, actions }: { open: boolean; 
                 </span>
               </button>
             </li>
-          );
-        })}
-      </ul>
+    );
+  };
+  // A longer menu comes in parts, each under its own small heading.
+  const parts = [
+    { id: "none", title: "", rows: actions.filter((a) => !a.group) },
+    ...MENU_GROUPS.map((g) => ({ id: g.id as string, title: g.title, rows: actions.filter((a) => a.group === g.id) })),
+  ].filter((p) => p.rows.length > 0);
+  return (
+    <Sheet open={open} onClose={onClose} title={title} size="sm">
+      <div className="-mx-2 flex flex-col">
+        {parts.map((p, i) => (
+          <div key={p.id} role={p.title ? "group" : undefined} aria-label={p.title || undefined} className={cn(i > 0 && "mt-1.5 border-t border-[var(--border)] pt-1.5")}>
+            {p.title && parts.length > 1 && (
+              <p aria-hidden className="px-3 pb-0.5 pt-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                {p.title}
+              </p>
+            )}
+            <ul className="flex flex-col">{p.rows.map(row)}</ul>
+          </div>
+        ))}
+      </div>
     </Sheet>
   );
 }

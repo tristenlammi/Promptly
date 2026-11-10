@@ -64,7 +64,7 @@ function Tile({ photo, order, onToggle, tooLong }: { photo: PhotoItem; order: nu
         />
       )}
       {photo.kind === "video" && (
-        <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1 text-[11px] font-medium text-white">{duration(photo.duration_ms)}</span>
+        <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1 text-xs font-medium text-white">{duration(photo.duration_ms)}</span>
       )}
       <span
         aria-hidden
