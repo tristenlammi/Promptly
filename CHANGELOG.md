@@ -30,6 +30,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Files: when a folder can't be opened you get a plain message with "Try again" instead of "Failed to load files", and a failed "Save a copy" shows a normal message instead of a browser pop-up.
 - Files: starring is instant. The star fills the moment you tap it (and comes back off with a message if it couldn't be saved), and starring several things at once says how many.
 - Files: "Move to…" on Recent opens the move dialog (it used to just open the folder; that is now "Show in folder"), and trashing several starred things offers Undo.
+- - Files: pictures in the preview zoom with the wheel, a pinch or a double-click, drag to look around, and swipe across for the next file.
 <!-- /Files UI -->
 
 ## [0.35.0] - 2026-11-09
