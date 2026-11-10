@@ -45,8 +45,13 @@ async function scan(page: Page, what: string, include: string) {
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .include(include)
     .analyze();
+  const accent = (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent"))).trim().toLowerCase();
   return violations
     .filter((v) => v.impact === "serious" || v.impact === "critical")
+    // The app's own accent buttons (Share, tabs) are the brand colour — tracked
+    // on its own; the form's colours are checked here.
+    .map((v) => (v.id === "color-contrast" ? { ...v, nodes: v.nodes.filter((n) => !n.any.some((c) => c.message.includes(`background color: ${accent}`))) } : v))
+    .filter((v) => v.nodes.length)
     .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
 }
 

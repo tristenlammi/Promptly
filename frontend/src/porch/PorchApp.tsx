@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Bell, Bookmark, Check, CircleDashed, Loader2, Newspaper, PenSquare, Plus, Search, Settings, UserRound, Users } from "lucide-react";
+import { Bell, Bookmark, Check, CircleDashed, Image as ImageIcon, Loader2, Newspaper, PenSquare, Plus, Search, Settings, UserRound, Users } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
@@ -333,7 +333,8 @@ function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
         onClose={() => setMaking(false)}
         title="New"
         actions={[
-          { label: "Post", icon: PenSquare, hint: "Photos, words, a poll or news, kept on Porch", onClick: () => navigate("/porch/new") },
+          { label: "Post", icon: PenSquare, hint: "Words, a poll or news (photos too), kept on Porch", onClick: () => navigate("/porch/new") },
+          { label: "Photo post", icon: ImageIcon, hint: "Straight to picking photos and videos", onClick: () => navigate("/porch/new?photos=1") },
           { label: "Story", icon: CircleDashed, hint: "A photo, video or a few words, for a day", onClick: () => navigate("/porch/story/new") },
         ]}
       />
@@ -357,9 +358,26 @@ function SideNav({ b, route }: { b: Bootstrap; route: Route }) {
         <img src="/item-icons/porch-192.png" alt="" className="h-8 w-8 rounded-lg" />
         <span className="text-lg font-bold text-[var(--text)]">Porch</span>
       </div>
-      <ItemButton variant="primary" icon={<PenSquare className="h-4 w-4" />} onClick={() => navigate("/porch/new")}>
-        New post
-      </ItemButton>
+      {/* One button, two ways in: the words (most of it), or straight to photos. */}
+      <div role="group" aria-label="New post" className="flex">
+        <ItemButton
+          variant="primary"
+          icon={<PenSquare className="h-4 w-4" />}
+          onClick={() => navigate("/porch/new")}
+          className="flex-1 rounded-r-none"
+        >
+          New post
+        </ItemButton>
+        <ItemButton
+          variant="primary"
+          aria-label="New photo post"
+          title="New photo post"
+          onClick={() => navigate("/porch/new?photos=1")}
+          className="rounded-l-none border-l border-white/30 px-3"
+        >
+          <ImageIcon className="h-4 w-4" aria-hidden />
+        </ItemButton>
+      </div>
       <ItemButton variant="secondary" icon={<CircleDashed className="h-4 w-4" />} onClick={() => navigate("/porch/story/new")} className="mb-2">
         New story
       </ItemButton>
