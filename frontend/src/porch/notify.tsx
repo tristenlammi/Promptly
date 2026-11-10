@@ -10,6 +10,7 @@ import { useState } from "react";
 
 import { porchApi, type PorchGroup } from "@/api/porch";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { useInstallPrompt } from "@/lib/installPrompt";
 import { ItemButton } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -18,10 +19,18 @@ import { cn } from "@/utils/cn";
 import { ALERTS_KEY, groupKey, profileKey, updateBootstrap } from "./cache";
 
 /** Ask this device for push permission if it can and hasn't been asked
- *  (or said no). Quietly does nothing otherwise. */
+ *  (or said no). On an iPhone in Safari, says how to get them instead;
+ *  quietly does nothing otherwise. */
 export function useAskForPush() {
   const push = usePushSubscription();
+  const install = useInstallPrompt();
   return async (why: string) => {
+    // iPhone in Safari: no push until Porch is on the Home Screen. Say so
+    // instead of saying nothing.
+    if (install.ios && !install.standalone && push.serverConfigured !== false) {
+      toast.info("To get these on your iPhone, add Porch to your Home Screen: Share → Add to Home Screen. Porch → Settings shows how.", { duration: 10_000 });
+      return;
+    }
     if (push.loading || !push.supported || push.serverConfigured !== true || push.subscribed || push.permission === "denied") return;
     try {
       await push.subscribe();

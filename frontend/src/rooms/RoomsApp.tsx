@@ -9,6 +9,7 @@ import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { InstallFromLink } from "@/components/pwa/InstallFromLink";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { IosPushNote } from "@/components/pwa/IosPushNote";
 import { EmptyState, ItemButton, Segmented, Sheet } from "@/items/ui";
 import "@/items/ui/items.css";
 import { useInstallPrompt } from "@/lib/installPrompt";
@@ -36,6 +37,7 @@ export const ROOMS_ACCENT = "#5865F2";
 const LAST_ROOM_KEY = "rooms:last-room";
 const LAST_IN_SPACE_KEY = "rooms:last-in-space";
 const PUSH_HINT_KEY = "rooms:push-hint-dismissed";
+const IOS_PUSH_HINT_KEY = "rooms:ios-push-hint-dismissed";
 
 function readLS<T>(key: string, fallback: T): T {
   try {
@@ -556,9 +558,12 @@ function SideFooter() {
   const showPush =
     !dismissed && !push.loading && push.supported && push.serverConfigured === true && !push.subscribed && push.permission !== "denied";
   const showInstall = install.canPrompt && !install.standalone;
-  if (!showPush && !showInstall) return null;
+  // iPhone in Safari: push needs Rooms on the Home Screen — say so.
+  const showIos = !dismissed && install.ios && !install.standalone;
+  if (!showPush && !showInstall && !showIos) return null;
   return (
     <div className="flex shrink-0 flex-col gap-2 border-t border-[var(--border)] p-2">
+      {showIos && <IosPushNote appName="Rooms" dismissKey={IOS_PUSH_HINT_KEY} className="text-xs" />}
       {showPush && (
         <div className="relative rounded-xl bg-[var(--surface-2)] p-3 pr-8 text-xs text-[var(--text-muted)]">
           <button

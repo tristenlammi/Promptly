@@ -19,7 +19,9 @@ import {
 } from "@/api/notifications";
 import { porchApi } from "@/api/porch";
 import { Button } from "@/components/shared/Button";
+import { IosPushNote } from "@/components/pwa/IosPushNote";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { isIosDevice, isStandaloneDisplay } from "@/lib/installPrompt";
 import { cn } from "@/utils/cn";
 
 /** Account -> Notifications. Two stacked blocks:
@@ -185,8 +187,11 @@ export function NotificationsPanel() {
         </div>
       )}
 
+      {/* -- iPhone/iPad in Safari: push only reaches the Home Screen app -- */}
+      {push.serverConfigured !== false && <IosPushNote what="notifications" />}
+
       {/* -- Browser unsupported -- */}
-      {push.supported === false && push.serverConfigured !== false && (
+      {push.supported === false && push.serverConfigured !== false && !(isIosDevice() && !isStandaloneDisplay()) && (
         <div className="flex items-start gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--text-muted)]">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>

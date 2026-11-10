@@ -247,8 +247,8 @@ test.describe("app navigation", () => {
     // …and it's the main sidebar's own setting.
     await page.goto("/files");
     await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible({ timeout: 20_000 });
-    // A new person's first visit asks which apps they want.
-    const welcome = page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "Pick your apps" }) });
+    // A new person's first visit shows the welcome.
+    const welcome = page.getByRole("dialog").filter({ has: page.getByTestId("welcome-dialog") });
     await welcome.getByRole("button", { name: "Close", exact: true }).click();
     await expect(welcome).toHaveCount(0);
     await page.getByRole("button", { name: "Expand sidebar" }).click();

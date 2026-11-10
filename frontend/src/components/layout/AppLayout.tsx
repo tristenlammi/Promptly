@@ -17,7 +17,7 @@ import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
 import { NetworkStatusToast } from "./NetworkStatusToast";
-import { WelcomeAppsDialog } from "./WelcomeAppsDialog";
+import { WelcomeDialog } from "./WelcomeDialog";
 import { Sidebar } from "./Sidebar";
 
 /** ``children`` stands in for the route's ``<Outlet>`` — for a page that
@@ -215,7 +215,7 @@ export function AppLayout({ children }: { children?: ReactNode } = {}) {
       </main>
 
       <NetworkStatusToast />
-      <WelcomeAppsDialog />
+      <WelcomeDialog />
       <SearchPalette open={searchPaletteOpen} onClose={closeSearchPalette} />
       {/* Drive upload panel only renders on ``/files*`` routes — it
           short-circuits when no uploads are in flight, so it's zero-cost

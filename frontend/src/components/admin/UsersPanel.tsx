@@ -137,7 +137,7 @@ export function UsersPanel() {
   };
 
   const handleCreate = async (values: UserFormValues) => {
-    await createUser.mutateAsync({
+    return await createUser.mutateAsync({
       email: values.email,
       username: values.username,
       password: values.password,

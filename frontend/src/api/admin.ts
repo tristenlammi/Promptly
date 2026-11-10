@@ -368,6 +368,10 @@ export const adminApi = {
     const { data } = await apiClient.post<AdminUser>("/admin/users", payload);
     return data;
   },
+  /** Email a new member the "Send them this" card through the server's SMTP. */
+  async sendWelcomeEmail(id: string, body: { address: string; password?: string }): Promise<void> {
+    await apiClient.post(`/admin/users/${id}/welcome-email`, body);
+  },
   async updateUser(id: string, payload: UpdateUserPayload): Promise<AdminUser> {
     const { data } = await apiClient.patch<AdminUser>(`/admin/users/${id}`, payload);
     return data;
