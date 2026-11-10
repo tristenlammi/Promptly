@@ -21,6 +21,24 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Mail: write more than one email at a time. Messages sit in a dock at the bottom of the screen; minimise one to read something else and it keeps everything you wrote. Esc tucks a message away (or closes it when it is empty).
+- Mail: drag files onto a message, or paste them, to attach. Attachments show their size, and pictures show a small preview.
+- Mail: in a conversation, Reply and Forward sit under every message, a Reply / Reply all / Forward row follows the last one, earlier messages in a long conversation fold away, and tapping a time shows the full date.
+- Mail: filter search results by Unread, Has attachment, who it is from, and how recent (filters apply to the results already loaded).
+- Mail: new keys: r reply, a reply all, f forward, s star, u mark unread, and ? for the list of shortcuts. j and k keep the highlighted email in view.
+- Mail: a Select button on phones for picking several emails at once.
+
+### Changed
+- Mail: starring, marking read or unread, and "No reply needed" now show straight away, and go back if the change does not save.
+- Mail: Undo for archive, delete, move and send is now a normal toast with an Undo button (still five seconds).
+- Mail: older email loads by itself as you scroll down.
+- Mail: the list shows placeholder rows while your mail loads, instead of a spinner.
+- Mail: every sheet (snooze, labels, mailboxes, add to calendar, settings) is now the same sheet the rest of Promptly uses, with Esc to close.
+- Mail: adding a mailbox asks for just your email and password; server details are under "Advanced", and a failed sign-in suggests what to check.
+- Mail: adding a link while writing uses a small box in the toolbar, not a browser pop-up.
+- Mail: colours come from the shared theme, small text is at least 12px, and buttons are bigger on phones.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added

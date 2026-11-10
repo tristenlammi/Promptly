@@ -596,10 +596,10 @@ export function MailApp() {
     return (
       <div className="relative flex h-full flex-col items-center justify-center gap-3 bg-[var(--bg,transparent)] px-6 text-center">
         {isMobile && showsPromptlyNav("mail") && <PromptlyMenuButton className="absolute left-2 top-2" />}
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#D97757]/15"><Mail className="h-7 w-7 text-[#D97757]" /></span>
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent)]/15"><Mail className="h-7 w-7 text-[var(--accent-text)]" /></span>
         <h1 className="text-xl font-semibold text-[var(--text)]">All your email, in one calm place</h1>
         <p className="max-w-sm text-sm text-[var(--text-muted)]">Connect any mailbox: Gmail, Proton, Fastmail, your work address. Your mail stays where it is, and you can add as many as you like.</p>
-        <button type="button" onClick={() => setAdding(true)} className="mt-2 inline-flex h-10 items-center gap-2 rounded-xl bg-[#D97757] px-4 text-sm font-medium text-white hover:opacity-90"><Plus className="h-4 w-4" />Add a mailbox</button>
+        <button type="button" onClick={() => setAdding(true)} className="mt-2 inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90"><Plus className="h-4 w-4" />Add a mailbox</button>
         {adding && <AccountSheet onClose={() => setAdding(false)} onSaved={() => { setAdding(false); refresh(); }} />}
       </div>
     );
@@ -752,21 +752,21 @@ export function MailApp() {
     return undefined;
   };
   const CAN_LAND = new Set(["inbox", "snoozed", "archive", "trash"]);
-  const chip = (on: boolean) => `inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs md:h-7 ${on ? "border-transparent bg-[#D97757]/15 font-medium text-[var(--text)]" : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:bg-[var(--hover)]"}`;
+  const chip = (on: boolean) => `inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs md:h-7 ${on ? "border-transparent bg-[var(--accent)]/15 font-medium text-[var(--text)]" : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:bg-[var(--hover)]"}`;
 
   const rail = (
     <nav aria-label="Mail folders" className="flex w-60 shrink-0 flex-col border-r border-[var(--border)] p-3">
       <div className="mb-2 shrink-0">{picker}</div>
       <div data-mail-rail-scroll className="promptly-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-0.5">
-      <button type="button" onClick={() => write(newMessage())} className="mb-3 inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#D97757] text-sm font-medium text-white hover:opacity-90"><Pen className="h-4 w-4" />Compose</button>
+      <button type="button" onClick={() => write(newMessage())} className="mb-3 inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] text-sm font-medium text-white hover:opacity-90"><Pen className="h-4 w-4" />Compose</button>
       {ROLES.map(({ role, label, icon: Icon }) => (
-        <button key={role} type="button" onClick={() => showRole(role)} onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ role })])} aria-current={!view.label && view.role === role ? "page" : undefined} {...(CAN_LAND.has(role) ? dropTarget(`role:${role}`, role === "snoozed" ? "Snooze" : `Move to ${label}`) : {})} style={dropStyle(`role:${role}`)} className={`flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-[background-color,box-shadow,transform,opacity] duration-150 ease-out ${dragging && !CAN_LAND.has(role) ? "opacity-40 " : ""}${!view.label && view.role === role ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
+        <button key={role} type="button" onClick={() => showRole(role)} onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ role })])} aria-current={!view.label && view.role === role ? "page" : undefined} {...(CAN_LAND.has(role) ? dropTarget(`role:${role}`, role === "snoozed" ? "Snooze" : `Move to ${label}`) : {})} style={dropStyle(`role:${role}`)} className={`flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-[background-color,box-shadow,transform,opacity] duration-150 ease-out ${dragging && !CAN_LAND.has(role) ? "opacity-40 " : ""}${!view.label && view.role === role ? "bg-[var(--accent)]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
           <Icon className="h-4 w-4" /><span className="flex-1 text-left">{label}</span>
-          {role === "inbox" && unreadInbox > 0 && <span className="text-xs font-medium text-[#D97757]">{unreadInbox}</span>}
+          {role === "inbox" && unreadInbox > 0 && <span className="text-xs font-medium text-[var(--accent-text)]">{unreadInbox}</span>}
         </button>
       ))}
       <div className="mb-1 mt-5 flex shrink-0 items-center justify-between pl-2.5">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Labels</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Labels</p>
         <button type="button" onClick={() => setLabelsOpen(true)} aria-label="Manage labels and rules" title="Manage labels and rules" className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--hover)]"><Settings className="h-3.5 w-3.5" /></button>
       </div>
       {/* Dragging an email opens everything, so any label can take it. */}
@@ -779,15 +779,15 @@ export function MailApp() {
         return (
           <div key={r.path} className="relative shrink-0">
             {l ? (
-              <button type="button" onClick={() => showLabel(l.id)} onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ labels: [l.id, ...(isFolded ? labelsInside(labels, r.path).map((x) => x.id) : [])] }), { label: "Manage labels and rules…", icon: <Settings className={icon} />, onClick: () => setLabelsOpen(true) }])} aria-current={view.label === l.id ? "page" : undefined} aria-label={l.name} title={l.name} {...dropTarget(`label:${l.id}`, `Move to ${l.name}`, l.color)} style={{ ...padding, ...dropStyle(`label:${l.id}`, l.color) }} className={`flex h-8 w-full items-center gap-2.5 rounded-lg text-sm transition-[background-color,box-shadow,transform] duration-150 ease-out ${r.hasChildren ? "pr-8" : "pr-2.5"} ${view.label === l.id ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
+              <button type="button" onClick={() => showLabel(l.id)} onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ labels: [l.id, ...(isFolded ? labelsInside(labels, r.path).map((x) => x.id) : [])] }), { label: "Manage labels and rules…", icon: <Settings className={icon} />, onClick: () => setLabelsOpen(true) }])} aria-current={view.label === l.id ? "page" : undefined} aria-label={l.name} title={l.name} {...dropTarget(`label:${l.id}`, `Move to ${l.name}`, l.color)} style={{ ...padding, ...dropStyle(`label:${l.id}`, l.color) }} className={`flex h-8 w-full items-center gap-2.5 rounded-lg text-sm transition-[background-color,box-shadow,transform] duration-150 ease-out ${r.hasChildren ? "pr-8" : "pr-2.5"} ${view.label === l.id ? "bg-[var(--accent)]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
                 <span style={{ backgroundColor: l.color }} className="h-2 w-2 shrink-0 rounded-full" /><span className="min-w-0 flex-1 truncate text-left">{r.name}</span>
-                {count > 0 && <span className="text-xs font-medium text-[#D97757]">{count}</span>}
+                {count > 0 && <span className="text-xs font-medium text-[var(--accent-text)]">{count}</span>}
               </button>
             ) : (
               // Only a heading: there's a label inside it, but none called this.
               <div onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ labels: labelsInside(labels, r.path).map((x) => x.id) })])} style={padding} title={r.path} className="flex h-8 w-full items-center gap-2.5 pr-8 text-sm text-[var(--text-muted)]">
                 <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                {count > 0 && <span className="text-xs font-medium text-[#D97757]">{count}</span>}
+                {count > 0 && <span className="text-xs font-medium text-[var(--accent-text)]">{count}</span>}
               </div>
             )}
             {r.hasChildren && (
@@ -833,7 +833,7 @@ export function MailApp() {
         </div>
         {/* A phone has no Ctrl or Shift, so picking several gets a button of its own. */}
         {isMobile && rows.length > 0 && (
-          <button type="button" onClick={() => { if (selectMode) setPicked(NONE); setSelectMode((v) => !v); }} aria-pressed={selectMode} aria-label="Select conversations" title="Select" className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${selectMode ? "bg-[#D97757]/15 text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}><CheckSquare className="h-5 w-5" /></button>
+          <button type="button" onClick={() => { if (selectMode) setPicked(NONE); setSelectMode((v) => !v); }} aria-pressed={selectMode} aria-label="Select conversations" title="Select" className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${selectMode ? "bg-[var(--accent)]/15 text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}><CheckSquare className="h-5 w-5" /></button>
         )}
       </div>
       {search && (
@@ -850,7 +850,7 @@ export function MailApp() {
             <option value="month">Past month</option>
             <option value="year">Past year</option>
           </select>
-          {filtering && <button type="button" onClick={() => setFilters(NO_FILTERS)} className="h-10 shrink-0 px-1.5 text-xs font-medium text-[#D97757] md:h-7">Clear</button>}
+          {filtering && <button type="button" onClick={() => setFilters(NO_FILTERS)} className="h-10 shrink-0 px-1.5 text-xs font-medium text-[var(--accent-text)] md:h-7">Clear</button>}
         </div>
       )}
       {(pickedRows.length > 0 || (isMobile && selectMode)) && (
@@ -864,21 +864,21 @@ export function MailApp() {
           ))}
         </div>
       )}
-      {problem && <p className="mx-3 mb-2 rounded-lg bg-[#C62828]/10 px-3 py-2 text-xs text-[var(--text)]"><strong>{problem.email}:</strong> {problem.status_detail}</p>}
+      {problem && <p className="mx-3 mb-2 rounded-lg bg-[var(--danger)]/10 px-3 py-2 text-xs text-[var(--text)]"><strong>{problem.email}:</strong> {problem.status_detail}</p>}
       {(overview?.failed ?? []).map((f) => (
-        <div key={f.id} role="alert" className="mx-3 mb-2 rounded-lg bg-[#C62828]/10 px-3 py-2 text-xs text-[var(--text)]">
+        <div key={f.id} role="alert" className="mx-3 mb-2 rounded-lg bg-[var(--danger)]/10 px-3 py-2 text-xs text-[var(--text)]">
           <p><strong>{f.subject || "(No subject)"}:</strong> {f.error}</p>
           <div className="mt-1 flex gap-3 font-medium">
-            <button type="button" onClick={() => void mailApi.retrySend(f.id).then(refresh)} className="text-[#D97757]">Try again</button>
+            <button type="button" onClick={() => void mailApi.retrySend(f.id).then(refresh)} className="text-[var(--accent-text)]">Try again</button>
             <button type="button" onClick={() => void mailApi.dismissSend(f.id).then(refresh)} className="text-[var(--text-muted)]">Dismiss</button>
           </div>
         </div>
       ))}
       {overview?.sorting && !view.label && view.role === "inbox" && !search && (
         <div className="flex gap-1.5 px-3 pb-2">
-          <button type="button" aria-pressed={!view.needsReply} onClick={() => setView((v) => ({ ...v, needsReply: false }))} className={`h-10 rounded-full px-3 text-xs md:h-7 ${!view.needsReply ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>Everything</button>
-          <button type="button" aria-pressed={!!view.needsReply} onClick={() => setView((v) => ({ ...v, needsReply: true }))} className={`inline-flex h-10 items-center gap-1.5 rounded-full px-3 text-xs md:h-7 ${view.needsReply ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
-            <Sparkles className="h-3 w-3 text-[#D97757]" />Needs a reply{(overview.needs_reply ?? 0) > 0 && <span className="font-medium text-[#D97757]">{overview.needs_reply}</span>}
+          <button type="button" aria-pressed={!view.needsReply} onClick={() => setView((v) => ({ ...v, needsReply: false }))} className={`h-10 rounded-full px-3 text-xs md:h-7 ${!view.needsReply ? "bg-[var(--accent)]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>Everything</button>
+          <button type="button" aria-pressed={!!view.needsReply} onClick={() => setView((v) => ({ ...v, needsReply: true }))} className={`inline-flex h-10 items-center gap-1.5 rounded-full px-3 text-xs md:h-7 ${view.needsReply ? "bg-[var(--accent)]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
+            <Sparkles className="h-3 w-3 text-[var(--accent-text)]" />Needs a reply{(overview.needs_reply ?? 0) > 0 && <span className="font-medium text-[var(--accent-text)]">{overview.needs_reply}</span>}
           </button>
         </div>
       )}
@@ -911,7 +911,7 @@ export function MailApp() {
         )}
         {rows.map((row, i) => (
           <div key={`${row.account_id}/${row.key}`} data-mail-row={idOf(row)}>
-          {row.related && !rows[i - 1]?.related && <p className="px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Related</p>}
+          {row.related && !rows[i - 1]?.related && <p className="px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Related</p>}
           <div style={{ gridTemplateRows: leaving.has(`${row.account_id}/${row.key}`) ? "0fr" : "1fr", transitionDuration: `${LEAVE_MS}ms` }} className={`grid transition-[grid-template-rows,opacity] ease-out ${leaving.has(`${row.account_id}/${row.key}`) ? "opacity-0" : "opacity-100"}`}>
           <div className={`min-h-0 overflow-hidden transition-opacity duration-150 ${dragging && (idOf(dragging) === idOf(row) || (picked.has(idOf(dragging)) && picked.has(idOf(row)))) ? "opacity-40" : ""}`}>
           <ThreadItem key={`${row.account_id}/${row.key}`} quick={isMobile || row.related || pickedRows.length > 0 ? undefined : quickActions(row)} onDragStart={isMobile ? undefined : startDrag} row={row} selected={open?.key === row.key || picked.has(idOf(row))} picked={picked.has(idOf(row))} colour={accounts.length > 1 ? accounts.find((a) => a.id === row.account_id)?.color : undefined} people={people} labels={row.labels.filter((id) => id !== view.label).flatMap((id) => labels.filter((l) => l.id === id))} onOpen={(e) => clickRow(e, row)} onMenu={(x, y) => { if (!picked.has(idOf(row))) setPicked(NONE); setMenu({ row, x, y }); }} onSwipe={isMobile && pickedRows.length === 0 ? (a) => (a === "archive" ? moveAway(row, "archive", "Archived") : moveAway(row, "trash", "Moved to Trash")) : undefined} />
@@ -926,7 +926,7 @@ export function MailApp() {
         )}
       </div>
       {isMobile && (
-        <button type="button" onClick={() => write(newMessage())} aria-label="Compose" className="absolute bottom-[7.5rem] right-4 z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#D97757] text-white shadow-lg"><Pen className="h-5 w-5" /></button>
+        <button type="button" onClick={() => write(newMessage())} aria-label="Compose" className="absolute bottom-[7.5rem] right-4 z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-lg"><Pen className="h-5 w-5" /></button>
       )}
     </section>
   );
@@ -993,9 +993,9 @@ export function MailApp() {
       {isMobile && !open && (
         <nav aria-label="Mail folders" className="flex border-t border-[var(--border)] pb-[env(safe-area-inset-bottom)]">
           {ROLES.filter((r) => r.role !== "snoozed").map(({ role, label, icon: Icon }) => (
-            <button key={role} type="button" onClick={() => showRole(role)} className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] ${!view.label && view.role === role ? "text-[#D97757]" : "text-[var(--text-muted)]"}`}><Icon className="h-5 w-5" />{label}</button>
+            <button key={role} type="button" onClick={() => showRole(role)} className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-xs ${!view.label && view.role === role ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"}`}><Icon className="h-5 w-5" />{label}</button>
           ))}
-          <button type="button" onClick={() => setLabelsOpen(true)} className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] ${view.label ? "text-[#D97757]" : "text-[var(--text-muted)]"}`}><Tag className="h-5 w-5" />Labels</button>
+          <button type="button" onClick={() => setLabelsOpen(true)} className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-xs ${view.label ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"}`}><Tag className="h-5 w-5" />Labels</button>
         </nav>
       )}
       {isMobile && dock}
@@ -1068,7 +1068,7 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
   return (
     <div ref={shell} className="group/row relative overflow-hidden">
     {slide !== 0 && (
-      <div aria-hidden className={`absolute inset-0 flex items-center px-5 text-white ${slide > 0 ? "justify-start bg-[#D97757]" : "justify-end bg-[#C62828]"}`}>
+      <div aria-hidden className={`absolute inset-0 flex items-center px-5 text-white ${slide > 0 ? "justify-start bg-[var(--accent)]" : "justify-end bg-[var(--danger)]"}`}>
         {slide > 0 ? <Archive className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
       </div>
     )}
@@ -1110,23 +1110,23 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
       aria-current={selected ? "true" : undefined}
       aria-pressed={picked ? true : undefined}
       style={{ WebkitTouchCallout: "none", transform: slide ? `translateX(${slide}px)` : undefined, touchAction: "pan-y" }}
-      className={`relative flex w-full gap-3 border-b border-[var(--border)] px-3 py-3 text-left transition-colors ${selected ? "bg-[color-mix(in_srgb,#D97757_10%,var(--bg,var(--surface)))]" : "bg-[var(--bg,var(--surface))] hover:bg-[var(--hover)]"}`}>
+      className={`relative flex w-full gap-3 border-b border-[var(--border)] px-3 py-3 text-left transition-colors ${selected ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg,var(--surface)))]" : "bg-[var(--bg,var(--surface))] hover:bg-[var(--hover)]"}`}>
       {picked
-        ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#D97757] text-white"><Check className="h-5 w-5" /></span>
+        ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white"><Check className="h-5 w-5" /></span>
         : <Avatar person={row.from} people={people} />}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           <span className={`min-w-0 flex-1 truncate text-sm ${unread ? "font-semibold text-[var(--text)]" : "text-[var(--text)]"}`}>{shownName(row.from, people)}{row.count > 1 && <span className="ml-1 font-normal text-[var(--text-muted)]">{row.count}</span>}</span>
           {colour && <span style={{ backgroundColor: colour }} className="h-2 w-2 shrink-0 rounded-full" />}
-          <span className={`shrink-0 text-xs ${unread ? "font-medium text-[#D97757]" : "text-[var(--text-muted)]"}`}>{shortWhen(row.at)}</span>
+          <span className={`shrink-0 text-xs ${unread ? "font-medium text-[var(--accent-text)]" : "text-[var(--text-muted)]"}`}>{shortWhen(row.at)}</span>
         </span>
         <span className={`block truncate text-sm ${unread ? "font-medium text-[var(--text)]" : "text-[var(--text-muted)]"}`}>{row.subject || "(No subject)"}</span>
         <span className="flex items-center gap-1.5">
-          {row.needs_reply && <span className="shrink-0 rounded-full bg-[#D97757]/15 px-1.5 py-px text-[10px] font-medium text-[#D97757]">Reply</span>}
+          {row.needs_reply && <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-px text-xs font-medium text-[var(--accent-text)]">Reply</span>}
           <span className="min-w-0 flex-1 truncate text-xs text-[var(--text-muted)]">{row.summary || row.snippet}</span>
           {labels.slice(0, 2).map((l) => <LabelPill key={l.id} label={l} />)}
           {row.attachments && <Paperclip className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />}
-          {row.starred && <Star className="h-3 w-3 shrink-0 fill-[#D97757] text-[#D97757]" />}
+          {row.starred && <Star className="h-3 w-3 shrink-0 fill-[var(--accent)] text-[var(--accent-text)]" />}
         </span>
       </span>
     </button>
@@ -1239,15 +1239,15 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   const middle = data.messages.slice(1, -1);
   const tucked = !showAll && middle.length >= 2 && middle.every((m) => m.seen);
   const shown = tucked ? [data.messages[0], last] : data.messages;
-  const answer = "inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-[var(--border)] px-4 text-sm text-[var(--text)] transition-colors hover:border-[#D97757]";
-  const action = "inline-flex h-10 shrink-0 items-center gap-1.5 md:h-8 whitespace-nowrap rounded-lg border border-[var(--border)] px-2.5 text-xs text-[var(--text)] transition-colors hover:border-[#D97757]";
+  const answer = "inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-[var(--border)] px-4 text-sm text-[var(--text)] transition-colors hover:border-[var(--accent)]";
+  const action = "inline-flex h-10 shrink-0 items-center gap-1.5 md:h-8 whitespace-nowrap rounded-lg border border-[var(--border)] px-2.5 text-xs text-[var(--text)] transition-colors hover:border-[var(--accent)]";
   const iconButton = "flex h-10 w-10 shrink-0 items-center justify-center md:h-9 md:w-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
   return (
     <>
       <header className="flex items-center gap-1 border-b border-[var(--border)] px-3 py-2">
         {showBack && <button type="button" onClick={onBack} aria-label="Back" className={iconButton}><ArrowLeft className="h-5 w-5" /></button>}
         <h2 className="min-w-0 flex-1 truncate px-1 text-[15px] font-semibold text-[var(--text)]">{data.subject || "(No subject)"}</h2>
-        <button type="button" onClick={() => onAct(starred ? "unstar" : "star")} aria-label={starred ? "Remove star" : "Star"} title={starred ? "Remove star (s)" : "Star (s)"} className={iconButton}><Star className={`h-[18px] w-[18px] ${starred ? "fill-[#D97757] text-[#D97757]" : ""}`} /></button>
+        <button type="button" onClick={() => onAct(starred ? "unstar" : "star")} aria-label={starred ? "Remove star" : "Star"} title={starred ? "Remove star (s)" : "Star (s)"} className={iconButton}><Star className={`h-[18px] w-[18px] ${starred ? "fill-[var(--accent)] text-[var(--accent-text)]" : ""}`} /></button>
         <button type="button" onClick={() => onLabel({ account_id: open.account_id, key: open.key, from: data.messages[0].from, subject: data.subject, labels: data.labels })} aria-label="Label" title="Label" className={iconButton}><Tag className="h-[18px] w-[18px]" /></button>
         <button type="button" onClick={onSnooze} aria-label="Snooze" title="Snooze" className={iconButton}><AlarmClock className="h-[18px] w-[18px]" /></button>
         <button type="button" onClick={() => onMove("archive", "Archived")} aria-label="Archive" className={iconButton}><Archive className="h-[18px] w-[18px]" /></button>
@@ -1262,14 +1262,14 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
       </div>
       <div className="promptly-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {data.summary && (
-          <p className="flex gap-2 rounded-xl bg-[#D97757]/10 px-3 py-2.5 text-sm text-[var(--text)]">
-            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[#D97757]" /><span className="min-w-0">{data.summary}</span>
+          <p className="flex gap-2 rounded-xl bg-[var(--accent)]/10 px-3 py-2.5 text-sm text-[var(--text)]">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-text)]" /><span className="min-w-0">{data.summary}</span>
           </p>
         )}
         {data.snoozed_until && (
-          <p className="flex items-center gap-2 rounded-lg bg-[#D97757]/10 px-3 py-2 text-xs text-[var(--text)]">
-            <AlarmClock className="h-3.5 w-3.5 shrink-0 text-[#D97757]" /><span className="flex-1">Snoozed until {new Date(data.snoozed_until).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</span>
-            <button type="button" onClick={onUnsnooze} className="font-medium text-[#D97757]">Back to Inbox</button>
+          <p className="flex items-center gap-2 rounded-lg bg-[var(--accent)]/10 px-3 py-2 text-xs text-[var(--text)]">
+            <AlarmClock className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" /><span className="flex-1">Snoozed until {new Date(data.snoozed_until).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</span>
+            <button type="button" onClick={onUnsnooze} className="font-medium text-[var(--accent-text)]">Back to Inbox</button>
           </p>
         )}
         <AliasNotes info={aliasInfo} accountId={open.account_id} threadKey={open.key} />
@@ -1334,27 +1334,27 @@ function InviteCard({ message }: { message: Message }) {
     }
   };
   const button = (value: InviteAnswer, label: string) => (
-    <button key={value} type="button" disabled={busy} aria-pressed={answer === value} onClick={() => void say(value)} className={`h-8 rounded-lg px-3 text-xs font-medium disabled:opacity-60 ${answer === value ? "bg-[#D97757] text-white" : "border border-[var(--border)] text-[var(--text)] hover:border-[#D97757]"}`}>{label}</button>
+    <button key={value} type="button" disabled={busy} aria-pressed={answer === value} onClick={() => void say(value)} className={`h-8 rounded-lg px-3 text-xs font-medium disabled:opacity-60 ${answer === value ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"}`}>{label}</button>
   );
   const replied = invite.method === "REPLY" ? invite.attendees.find((a) => a.said) : undefined;
   return (
-    <div className="mb-3 rounded-xl border border-[#D97757]/40 bg-[#D97757]/5 p-3 text-sm">
+    <div className="mb-3 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/5 p-3 text-sm">
       <p className={`font-medium text-[var(--text)] ${invite.cancelled ? "line-through" : ""}`}>{invite.title}</p>
       <p className="text-xs text-[var(--text-muted)]">{inviteWhen(invite)}{invite.location ? ` · ${invite.location}` : ""}</p>
       {invite.organizer && invite.method !== "REPLY" && <p className="text-xs text-[var(--text-muted)]">From {invite.organizer.name || invite.organizer.addr}</p>}
-      {!invite.zone_sure && <p className="mt-1 text-xs text-[#C9A227]">The invite's time zone isn't clear, so check the time.</p>}
+      {!invite.zone_sure && <p className="mt-1 text-xs text-[var(--warning)]">The invite's time zone isn't clear, so check the time.</p>}
       {invite.repeats && !invite.cancelled && invite.method !== "REPLY" && <p className="mt-1 text-xs text-[var(--text-muted)]">This repeats. Only the first date goes in your calendar for now.</p>}
       {replied ? (
         <p className="mt-2 text-xs text-[var(--text)]">{replied.name || replied.addr} said {replied.said === "going" ? "yes" : replied.said === "maybe" ? "maybe" : "no"}.</p>
       ) : invite.cancelled ? (
         <div className="mt-2 flex items-center gap-3 text-xs">
-          <span className="font-medium text-[#C62828]">Cancelled</span>
-          {eventUrl && <button type="button" disabled={busy} onClick={() => void mailApi.removeCancelled(message.id).then(() => setEventUrl(null))} className="font-medium text-[#D97757]">Remove from my calendar</button>}
+          <span className="font-medium text-[var(--danger)]">Cancelled</span>
+          {eventUrl && <button type="button" disabled={busy} onClick={() => void mailApi.removeCancelled(message.id).then(() => setEventUrl(null))} className="font-medium text-[var(--accent-text)]">Remove from my calendar</button>}
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {button("going", "Yes")}{button("maybe", "Maybe")}{button("declined", "No")}
-          {eventUrl && <RouterLink to={eventUrl} className="ml-1 text-xs font-medium text-[#D97757]">Open in Calendar</RouterLink>}
+          {eventUrl && <RouterLink to={eventUrl} className="ml-1 text-xs font-medium text-[var(--accent-text)]">Open in Calendar</RouterLink>}
         </div>
       )}
     </div>
@@ -1390,7 +1390,7 @@ function MessageCard({ message, people, startOpen, onReply, onForward, replyAll 
             <div className="mt-3 flex flex-wrap gap-2">
               {message.attachments.map((a, i) => (
                 <span key={a.part} className="inline-flex max-w-full items-center rounded-lg bg-[var(--hover)] text-xs text-[var(--text)]">
-                  <button type="button" onClick={() => setViewing(i)} title={`Open ${a.name}`} className="flex min-w-0 items-center gap-1.5 rounded-l-lg py-1.5 pl-2.5 pr-1 hover:text-[#D97757]"><Paperclip className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{a.name}</span></button>
+                  <button type="button" onClick={() => setViewing(i)} title={`Open ${a.name}`} className="flex min-w-0 items-center gap-1.5 rounded-l-lg py-1.5 pl-2.5 pr-1 hover:text-[var(--accent-text)]"><Paperclip className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{a.name}</span></button>
                   <button type="button" onClick={() => void mailApi.download(message.id, a.part, a.name).catch(() => toast.error("Couldn't get that attachment."))} aria-label={`Download ${a.name}`} title="Download" className="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)]"><Download className="h-3.5 w-3.5" /></button>
                   <SaveToFiles saved={files.saved.has(a.part)} saving={files.saving.has(a.part)} onSave={() => void files.save(a.part)} name={a.name} className="h-8 w-8" />
                 </span>
@@ -1444,12 +1444,12 @@ function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; 
   return (
     <div className="border-t border-[var(--border)] bg-[var(--surface)] px-3 py-2">
       {answer && (
-        <div className="mx-auto mb-2 max-w-3xl rounded-xl bg-[#D97757]/10 p-3 text-sm text-[var(--text)]">
+        <div className="mx-auto mb-2 max-w-3xl rounded-xl bg-[var(--accent)]/10 p-3 text-sm text-[var(--text)]">
           <div className="flex gap-2">
             <p className="min-w-0 flex-1 whitespace-pre-wrap">{answer.text}</p>
             <button type="button" onClick={() => setAnswer(null)} aria-label="Close answer" className="self-start text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
           </div>
-          <p className="mt-1 text-[11px] text-[var(--text-muted)]">From {answer.read} {answer.read === 1 ? "email" : "emails"}. AI can get things wrong, so check anything important.</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">From {answer.read} {answer.read === 1 ? "email" : "emails"}. AI can get things wrong, so check anything important.</p>
         </div>
       )}
       <div className="mx-auto flex max-w-3xl items-center gap-2">
@@ -1464,12 +1464,12 @@ function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; 
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setChoosing(false)} />
                 <div role="menu" className="promptly-scroll absolute bottom-full left-0 z-40 mb-1 max-h-72 w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
-                  <p className="px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Ask about</p>
+                  <p className="px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Ask about</p>
                   {[undefined, ...accounts].map((a) => (
                     <button key={a?.id ?? "all"} type="button" role="menuitemradio" aria-checked={scope === a?.id} onClick={() => { setScope(a?.id); setChoosing(false); }} className="flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]">
                       {a && <span style={{ backgroundColor: a.color }} className="h-2.5 w-2.5 shrink-0 rounded-full" />}
                       <span className="min-w-0 flex-1 truncate">{a?.email ?? "All mailboxes"}</span>
-                      {scope === a?.id && <Check className="h-4 w-4 shrink-0 text-[#D97757]" />}
+                      {scope === a?.id && <Check className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />}
                     </button>
                   ))}
                 </div>
@@ -1478,7 +1478,7 @@ function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; 
           </div>
         )}
         <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl bg-[var(--hover)] px-3">
-          {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#D97757]" /> : <Sparkles className="h-4 w-4 shrink-0 text-[#D97757]" />}
+          {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--accent-text)]" /> : <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />}
           <input
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
