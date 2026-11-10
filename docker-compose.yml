@@ -50,6 +50,24 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+# The containers that parse what people upload or receive (the backend and
+# its workers, tusd, the Office converter) drop every Linux capability but
+# the three that root needs to read and write ./data whoever's uid owns a
+# file, and can never gain privileges (setuid binaries, file capabilities).
+# Gone: raw sockets, mknod, chroot, binding low ports, changing uids, and
+# the rest of Docker's default set (security review M4). They still run as
+# root: ./data on existing installs is owned by root, and switching them to
+# another user would need a chown of every upload on the way.
+x-hardened: &hardened
+  cap_drop:
+    - ALL
+  cap_add:
+    - CHOWN
+    - DAC_OVERRIDE
+    - FOWNER
+  security_opt:
+    - no-new-privileges:true
+
 services:
   nginx:
     # Pinned to a release line, bumped on purpose (R-243): `update.sh` pulls
@@ -63,9 +81,23 @@ services:
     # this reverse proxy. That's simpler for the user (one URL:
     # http://<host>:8087 serves UI + API) and safer (your
     # database is never exposed on the LAN).
+    #
+    # NGINX_BIND (optional, .env) limits which of the host's addresses the
+    # ports open on. Unset = every IPv4 address (0.0.0.0); IPv6 isn't
+    # published (security review M3). Usually set to the server's LAN
+    # address (e.g. 192.168.1.20), so the LAN reaches it and the machine's
+    # other interfaces don't; 127.0.0.1 only when cloudflared runs on the
+    # host itself and nothing on the LAN needs Promptly. Either way: never
+    # port-forward these ports on your router (README, "Exposure").
     ports:
-      - "${NGINX_HTTP_PORT:-8087}:80"
-      - "${NGINX_HTTPS_PORT:-8488}:443"
+      - target: 80
+        published: "${NGINX_HTTP_PORT:-8087}"
+        host_ip: "${NGINX_BIND:-0.0.0.0}"
+        protocol: tcp
+      - target: 443
+        published: "${NGINX_HTTPS_PORT:-8488}"
+        host_ip: "${NGINX_BIND:-0.0.0.0}"
+        protocol: tcp
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
@@ -124,6 +156,9 @@ services:
     # its own): one build per update, and the two can never drift apart.
     image: promptly-backend:local
     container_name: Promptly-Backend
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Operator settings in .env (COOKIE_SECURE, RATE_LIMIT_*, LOCKOUT_*,
     # SETUP_TOKEN, …) reach the backend. Without this only the handful of
@@ -173,10 +208,11 @@ services:
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
       # Code-interpreter sandbox (Phase 4). The backend submits
       # model-written Python here over the internal-only ``sandbox-net``
-      # network. The shared secret (reusing SECRET_KEY) gates job
-      # submission as defense-in-depth on top of the network boundary.
+      # network. Its own shared secret (never SECRET_KEY: code runs in the
+      # sandbox) gates job submission on top of the network boundary. The
+      # installer and update scripts make one; unset, the code tool is off.
       - CODE_SANDBOX_URL=http://sandbox:8000
-      - CODE_SANDBOX_SECRET=${SECRET_KEY:-}
+      - CODE_SANDBOX_SECRET=${CODE_SANDBOX_SECRET:-}
       # Speech-to-text worker (Voice Phase 1). Internal-only faster-whisper
       # service the backend POSTs dictation clips to. STT_BACKEND=local
       # uses it; set STT_BACKEND=openai (+ an OpenAI key) to route to the
@@ -300,6 +336,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-ArqWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Bypass the shared entrypoint (which runs Alembic migrations + singleton
     # provisioning) — the backend owns those. The worker just needs a migrated
@@ -531,6 +570,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-MediaWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     entrypoint: ["arq", "app.tasks.media_worker.MediaWorkerSettings"]
     env_file:
@@ -563,6 +605,9 @@ services:
     image: promptly-backend:local
     pull_policy: never
     container_name: Promptly-MailWorker
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     entrypoint: ["python", "-m", "app.mail.worker"]
     env_file:
@@ -594,6 +639,9 @@ services:
   tusd:
     image: tusproject/tusd:v2.10.1
     container_name: Promptly-Tusd
+    # Security review M4: no privilege escalation, and only the root
+    # capabilities that reading and writing ./data needs (see x-hardened).
+    <<: *hardened
     logging: *default-logging
     # Root, so it can write into the uploads folder whoever owns it (the
     # backend runs as root too); it's only reachable through nginx.
@@ -811,21 +859,36 @@ services:
     #     per-conversation session dirs persist there across calls (build
     #     a file, read it next call) and are reaped by idle-TTL + a count
     #     cap. Cleared on restart. No host or user data volumes mounted.
-    #   * All Linux capabilities dropped, no privilege escalation, PID
-    #     and memory caps. The worker process itself runs as non-root.
+    #   * No privilege escalation, PID and memory caps, and every Linux
+    #     capability dropped except the few the server needs to hand each
+    #     job its own unprivileged user (uid 10002). The model's code runs
+    #     as that user with no capabilities at all, so it can't read the
+    #     server's environment (the job secret) or touch the server.
     build:
       context: ./sandbox
       dockerfile: Dockerfile
     container_name: Promptly-Sandbox
     logging: *default-logging
     environment:
-      - SANDBOX_SECRET=${SECRET_KEY:-}
+      # Its own secret, never SECRET_KEY (see the backend's CODE_SANDBOX_SECRET).
+      - SANDBOX_SECRET=${CODE_SANDBOX_SECRET:-}
     read_only: true
     tmpfs:
-      - /sandbox/run:size=512m,uid=10001,gid=10001,mode=0700
+      - /sandbox/run:size=512m,uid=0,gid=0,mode=0711
       - /tmp:size=64m
     cap_drop:
       - ALL
+    cap_add:
+      # Start each job as the unprivileged job user (setuid/setgid), give it
+      # its scratch folder (chown), read back and clear up what it wrote
+      # (dac_override/fowner), and stop it on timeout (kill). The job itself
+      # loses all of these the moment it becomes that user.
+      - SETUID
+      - SETGID
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - KILL
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
@@ -966,6 +1029,11 @@ services:
     # can't make LibreOffice fetch anything.
     image: gotenberg/gotenberg:8.37.0
     container_name: Promptly-Convert
+    # Runs as its own non-root user; needs no capabilities at all (M4).
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     command:
       - gotenberg
@@ -1046,9 +1114,13 @@ services:
     network_mode: host
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-}: ${LIVEKIT_API_SECRET:-}"
-      # 7880 (signalling + API) also listens on the LAN in host mode; it
-      # only answers requests signed with the key pair. Keep it 7880: nginx
-      # and the backend look for it there.
+      # 7880 (signalling + API) and the metrics port also listen on the LAN
+      # in host mode: nginx and the backend reach them from Docker's bridge
+      # (host.docker.internal), so they can't be bound to 127.0.0.1, and
+      # LiveKit has no bind setting for metrics. 7880 only answers requests
+      # signed with the key pair. Firewall both from the LAN/internet and
+      # never forward them (README, "Calls"); only 7881/tcp and 7882/udp are
+      # meant to be reachable. Keep it 7880: nginx and the backend look there.
       LIVEKIT_CONFIG: |
         port: 7880
         prometheus_port: ${LIVEKIT_METRICS_PORT:-6789}
@@ -1063,7 +1135,8 @@ services:
         webhook:
           api_key: "${LIVEKIT_API_KEY:-}"
           urls:
-            - "http://127.0.0.1:${NGINX_HTTP_PORT:-8087}/api/calls/webhook"
+            # nginx on this host: wherever NGINX_BIND opened it (loopback when unset).
+            - "http://${NGINX_BIND:-127.0.0.1}:${NGINX_HTTP_PORT:-8087}/api/calls/webhook"
         logging:
           level: info
     cpus: 2

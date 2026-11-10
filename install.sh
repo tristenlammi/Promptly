@@ -124,7 +124,13 @@ seed_secret SECRET_KEY        "$(openssl rand -hex 32)"
 seed_secret SEARXNG_SECRET    "$(openssl rand -hex 32)"
 seed_secret POSTGRES_PASSWORD "$(openssl rand -hex 24)"
 seed_secret SETUP_TOKEN       "$(openssl rand -hex 6)"
+# An .env from before these existed has no such lines: add them.
+for k in TUS_HOOK_SECRET CODE_SANDBOX_SECRET; do
+  grep -qE "^${k}=." .env || { sed -i.bak "/^${k}=\$/d" .env; rm -f .env.bak; printf '%s=change-me\n' "$k" >> .env; }
+done
 seed_secret TUS_HOOK_SECRET   "$(openssl rand -hex 32)"
+# The code sandbox's own job secret (never SECRET_KEY: code runs there).
+seed_secret CODE_SANDBOX_SECRET "$(openssl rand -hex 32)"
 # Calls (LiveKit). An .env from before Calls has no such lines: add them.
 for k in LIVEKIT_API_KEY LIVEKIT_API_SECRET; do
   grep -qE "^${k}=" .env || printf '%s=change-me\n' "$k" >> .env

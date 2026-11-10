@@ -113,7 +113,17 @@ Set-IfPlaceholder ([ref]$envText) "SECRET_KEY"        (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "SEARXNG_SECRET"    (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "POSTGRES_PASSWORD" (New-HexSecret 24)
 Set-IfPlaceholder ([ref]$envText) "SETUP_TOKEN"       (New-HexSecret 6)
+# An .env from before these existed has no such lines (or an empty one): add them.
+foreach ($k in @("TUS_HOOK_SECRET", "CODE_SANDBOX_SECRET")) {
+    if ($envText -notmatch "(?m)^$k=.") {
+        $envText = [regex]::Replace($envText, "(?m)^$k=\r?\n", "")
+        if (-not $envText.EndsWith("`n")) { $envText += "`n" }
+        $envText += "$k=change-me`n"
+    }
+}
 Set-IfPlaceholder ([ref]$envText) "TUS_HOOK_SECRET"   (New-HexSecret 32)
+# The code sandbox's own job secret (never SECRET_KEY: code runs there).
+Set-IfPlaceholder ([ref]$envText) "CODE_SANDBOX_SECRET" (New-HexSecret 32)
 # Calls (LiveKit). An .env from before Calls has no such lines: add them.
 foreach ($k in @("LIVEKIT_API_KEY", "LIVEKIT_API_SECRET")) {
     if ($envText -notmatch "(?m)^$k=") {

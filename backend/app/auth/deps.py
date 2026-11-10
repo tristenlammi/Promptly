@@ -119,6 +119,16 @@ async def _resolve_custom_user(
             detail="Session is no longer valid",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # 4. This sign-in session was signed out (L3): its access tokens end
+    #    now rather than when they expire.
+    from app.auth.revoked_sessions import session_revoked
+
+    if await session_revoked(sid):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session is no longer valid",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 

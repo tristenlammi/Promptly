@@ -299,6 +299,12 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 
+# Outermost: requests from the containers that run untrusted input (the code
+# sandbox, the Office converter) never reach any route (security review M1).
+from app.isolated_peers import IsolatedPeerMiddleware  # noqa: E402
+
+app.add_middleware(IsolatedPeerMiddleware)
+
 
 async def _check_postgres() -> dict:
     """Round-trip a trivial ``SELECT 1`` against the configured database.

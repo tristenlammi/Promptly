@@ -38,7 +38,11 @@ async def client(db, root, monkeypatch):
     from app.main import app
 
     monkeypatch.setattr(get_settings(), "TUS_ENABLED", True)
-    monkeypatch.setattr(get_settings(), "TUS_HOOK_SECRET", None)
+    # Not about who may call the hooks (that needs TUS_HOOK_SECRET,
+    # test_only_tusd_can_call_the_hooks): let the test client through.
+    from app.files import tus_hooks as _tus
+
+    monkeypatch.setattr(_tus, "_caller_ok", lambda request, key: True)
     rate_limit._settings.RATE_LIMIT_ENABLED = False
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
@@ -197,7 +201,13 @@ async def test_a_cancelled_upload_gives_its_room_back(client, user, root):
 @pytest.mark.asyncio
 async def test_only_tusd_can_call_the_hooks(client, user, monkeypatch):
     from app.config import get_settings
+    from app.files import tus_hooks
 
+    monkeypatch.setattr(tus_hooks, "_caller_ok", tus_hooks._check_caller)
+    # No secret set: nobody can call them, not even from the internal network.
+    monkeypatch.setattr(get_settings(), "TUS_HOOK_SECRET", None)
+    r = await client.post("/api/internal/tus-hook", json={"Type": "pre-create", "Event": _event(user, size=1, meta={})})
+    assert r.status_code == 404
     monkeypatch.setattr(get_settings(), "TUS_HOOK_SECRET", "s3cret")
     r = await client.post("/api/internal/tus-hook", json={"Type": "pre-create", "Event": _event(user, size=1, meta={})})
     assert r.status_code == 404

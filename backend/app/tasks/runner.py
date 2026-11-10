@@ -341,8 +341,14 @@ async def _generate(
     # Search and Fetch.
     from app.search.deepseek import mark_turn
 
-    task_turn: dict = {}
+    from app.chat.tools.base import TurnState, allow_urls, start_step, urls_in
+
+    task_turn: dict = TurnState(untrusted=False, own_attachments_only=False)
     mark_turn(task_turn, provider)
+    # The task's own prompt is the person's words: its addresses are always
+    # openable. Once a step has read pages or a connector, opening anything
+    # else is refused (nobody is there to ask; security review H2).
+    allow_urls(task_turn, urls_in(prompt))
     convo: list = [ChatMessage(role="user", content=prompt)]
     sources: list[dict] = []
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None}
@@ -430,6 +436,13 @@ async def _generate(
         if is_deepseek and hop_reasoning:
             assistant_turn["reasoning_content"] = "".join(hop_reasoning)
         convo.append(assistant_turn)
+        start_step(
+            task_turn,
+            [
+                ("mcp__" + c["function"]["name"]) if c["function"]["name"] in mcp_dispatch else c["function"]["name"]
+                for c in tool_calls
+            ],
+        )
         for call in tool_calls:
             name = call["function"]["name"]
             try:
@@ -471,6 +484,11 @@ async def _generate(
                         content = result.content
                         if result.sources:
                             sources.extend(result.sources)
+                            # Found by this run's search: openable later in
+                            # it without a yes (guard_outbound, H2).
+                            from app.chat.tools.base import note_sources
+
+                            note_sources(task_turn, result.sources)
                     except ToolError as e:
                         content = f"Tool error: {e}"
                     except Exception as e:  # noqa: BLE001

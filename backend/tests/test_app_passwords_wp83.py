@@ -166,7 +166,11 @@ async def test_a_device_can_start_a_big_upload_with_its_password(client, db, use
     from app.files import storage
 
     monkeypatch.setattr(storage, "UPLOAD_ROOT", tmp_path.resolve())
-    monkeypatch.setattr(get_settings(), "TUS_HOOK_SECRET", None)
+    # Not about who may call the hooks (that needs TUS_HOOK_SECRET,
+    # test_only_tusd_can_call_the_hooks): let the test client through.
+    from app.files import tus_hooks as _tus
+
+    monkeypatch.setattr(_tus, "_caller_ok", lambda request, key: True)
     uploads = await _make(client, user, name="Backup script", scopes=("upload",))
     dav_only = await _make(client, user, name="Finder", scopes=("dav:read",))
 
