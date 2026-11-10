@@ -11,6 +11,7 @@ import { cn } from "@/utils/cn";
 import { addUsers, useCalUsers, useInvites, useRefreshCalendars, useRefreshEvents, useSetPrefs } from "../data";
 import { allZones, fmt, parseYmd, shortTime } from "../dates";
 import { PALETTE } from "../model";
+import { LabelsSection } from "./Labels";
 import { MiniMonth } from "./MiniMonth";
 import { Popover, RsvpButtons } from "./ui";
 
@@ -89,6 +90,7 @@ export function SidePanel({
           ))}
         </section>
       )}
+      <LabelsSection b={b} />
       <AlsoShow b={b} />
       <Invitations onOpen={onOpenInvite} />
       <section className="flex flex-col gap-0.5">

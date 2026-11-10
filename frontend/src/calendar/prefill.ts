@@ -11,6 +11,8 @@ export interface EventPrefill {
   repeat?: Repeat | null;
   guests?: CalUser[];
   calendarId?: string;
+  /** One of my labels. */
+  labelId?: string;
   /** Planned in a room: everyone in it is invited and a card is posted there. */
   room?: { id: string; name: string };
   /** What it's made from (saved with the event). */

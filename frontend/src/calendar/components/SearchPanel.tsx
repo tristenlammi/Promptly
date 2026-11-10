@@ -6,7 +6,7 @@ import { calendarApi, type Calendar, type CalendarBootstrap } from "@/api/calend
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
-import { addUsers } from "../data";
+import { addUsers, useLabelsMap } from "../data";
 import { addDays, fmt, sameDay, shortTime } from "../dates";
 import { toView, type ViewEvent } from "../model";
 
@@ -99,12 +99,13 @@ function SearchBody({
     addUsers(data?.users);
   }, [data]);
 
+  const labelMap = useLabelsMap(b.labels);
   const groups = useMemo(() => {
     if (!data || !dq) return null;
     const now = new Date();
-    const all = data.events.map((e) => toView(e, calMap, b.me.id));
+    const all = data.events.map((e) => toView(e, calMap, b.me.id, labelMap));
     return { upcoming: all.filter((v) => v.end > now), past: all.filter((v) => v.end <= now) };
-  }, [data, dq, calMap, b.me.id]);
+  }, [data, dq, calMap, b.me.id, labelMap]);
   const flat = groups ? [...groups.upcoming, ...groups.past] : [];
   const [active, setActive] = useState(0);
   useEffect(() => {
