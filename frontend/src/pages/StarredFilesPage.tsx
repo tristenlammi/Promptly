@@ -21,6 +21,7 @@ import {
   useUnstarFile,
   useUnstarFolder,
   invalidateFileQueries,
+  undoToast,
 } from "@/hooks/useFiles";
 import { useDriveSelection } from "@/hooks/useDriveSelection";
 import { downloadAuthed, extractError, openFile as openInEditor } from "@/components/files/helpers";
@@ -128,12 +129,17 @@ export function StarredFilesPage() {
                 "Unstarred"
               )
             }
-            onTrash={() =>
-              void runBulk(
-                () => bulkTrash.mutateAsync(bulkIds()),
-                `Moved ${sel.count} item${sel.count === 1 ? "" : "s"} to trash`
-              )
-            }
+            onTrash={() => {
+              const ids = bulkIds();
+              const n = sel.count;
+              void runBulk(async () => {
+                await bulkTrash.mutateAsync(ids);
+                undoToast(`Moved ${n} item${n === 1 ? "" : "s"} to trash`, async () => {
+                  await filesApi.bulkRestore(ids);
+                  void invalidateFileQueries(qc);
+                });
+              });
+            }}
           />
 
           {!empty && (

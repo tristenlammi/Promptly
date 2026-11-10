@@ -28,6 +28,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Files: an empty folder shows one clean panel with "Upload" and "New" (the list of things to make opens from New), without a table heading and a lone "System" row underneath; a fresh My files tucks its built-in folders behind "Show built-in folders".
 - Files: moving things to the trash no longer asks "are you sure" first. It just goes, with Undo on the message; only "Delete forever" still asks.
 - Files: when a folder can't be opened you get a plain message with "Try again" instead of "Failed to load files", and a failed "Save a copy" shows a normal message instead of a browser pop-up.
+- Files: starring is instant. The star fills the moment you tap it (and comes back off with a message if it couldn't be saved), and starring several things at once says how many.
+- Files: "Move to…" on Recent opens the move dialog (it used to just open the folder; that is now "Show in folder"), and trashing several starred things offers Undo.
 <!-- /Files UI -->
 
 ## [0.35.0] - 2026-11-09
