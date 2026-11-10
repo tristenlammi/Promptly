@@ -35,7 +35,7 @@ test("a big upload survives a refresh and carries on from where it got to", asyn
   });
   await page.goto(`/files/folder/${folder.id}`);
   await ready(page);
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("complementary", { name: "Files" }).getByRole("button", { name: "New", exact: true }).click(); // the rail's (an empty folder offers New too)
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("menuitem", { name: "Upload files" }).click();
   await (await chooser).setFiles(big);
@@ -73,7 +73,7 @@ test("uploading the same file again is skipped — it's already there", async ({
   await ready(page);
   const file = { name: "receipt.txt", mimeType: "text/plain", buffer: Buffer.from(`Paid ${stamp}\n`) };
   for (let round = 0; round < 2; round++) {
-    await page.getByRole("button", { name: "New", exact: true }).click();
+    await page.getByRole("complementary", { name: "Files" }).getByRole("button", { name: "New", exact: true }).click(); // the rail's (an empty folder offers New too)
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("menuitem", { name: "Upload files" }).click();
     await (await chooser).setFiles(file);

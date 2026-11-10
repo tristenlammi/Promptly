@@ -12,7 +12,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [string]$Version
+    [string]$Version,
+    [switch]$SkipAndroidCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,6 +30,13 @@ $changelogFile = Join-Path $root 'CHANGELOG.md'
 
 foreach ($f in @($versionFile, $pkgFile, $changelogFile)) {
     if (-not (Test-Path $f)) { Write-Error "Missing $f" }
+}
+
+# The Android app people download from this server has to be this source's app.
+# -SkipAndroidCheck is for a release you know leaves the app untouched in spirit.
+if (-not $SkipAndroidCheck) {
+    & (Join-Path $PSScriptRoot 'check-android-download.ps1')
+    if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
 $date = (Get-Date).ToString('yyyy-MM-dd')

@@ -82,6 +82,21 @@ export interface PersonPage {
   blocked?: boolean;
   /** Calls: you can call them (calls on for both, no block either way). */
   can_call?: boolean;
+  /** Other apps' sections ("On Porch"), each as you're allowed to see it. */
+  sections?: PersonSection[];
+}
+
+/** A section another app adds to the person page (``app/people/sections.py``). */
+export interface PersonSection {
+  key: string;
+  title: string;
+  /** ``grid``: pictures (or a line of words); ``list``: rows. */
+  kind: "grid" | "list";
+  items: { id: string; title: string; subtitle?: string; image?: string | null; href?: string | null }[];
+  more_url: string | null;
+  more_label: string | null;
+  /** A line under the items ("Groups you're both in: Family"). */
+  note: string | null;
 }
 
 /** Someone you've blocked (Account → Blocked people). */

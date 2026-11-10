@@ -7,6 +7,7 @@ import { trashGuardApi, type FileItem } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveSimpleList } from "@/components/files/DriveSimpleList";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
+import { DriveListSkeleton } from "@/components/files/DriveListSkeleton";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { TopNav } from "@/components/layout/TopNav";
@@ -129,7 +130,7 @@ export function TrashPage() {
     <>
       <TopNav
         title="Trash"
-        subtitle="Items are deleted for good after 30 days. Quota still counts them until then."
+        subtitle="Things here are deleted for good after 30 days. They still take up space until then."
         actions={
           <>
             <FilesTopNavSearch />
@@ -157,9 +158,7 @@ export function TrashPage() {
             </Link>
             .
           </p>
-          {isLoading && (
-            <div className="text-sm text-[var(--text-muted)]">Loading…</div>
-          )}
+          {isLoading && <DriveListSkeleton />}
 
           {!isLoading && empty && (
             <DriveEmptyState

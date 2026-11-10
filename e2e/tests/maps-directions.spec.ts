@@ -51,7 +51,8 @@ async function heldBackLocation(page: Page) {
 async function directionsToTestPlace(page: Page) {
   await page.goto("/maps");
   await page.getByPlaceholder("Search for a place, address or person").fill("Test Destination");
-  await page.getByRole("button", { name: /Test Destination/ }).first().click();
+  // The results are a list the arrow keys move through (options of the search box).
+  await page.getByRole("listbox", { name: "Places found" }).getByRole("option", { name: /Test Destination/ }).first().click();
   await page.getByRole("button", { name: "Directions" }).click();
 }
 
@@ -78,7 +79,7 @@ test("with a location already, directions go straight to the route", async ({ al
   await expect(page.getByPlaceholder("Search for a place, address or person")).toBeVisible();
   await page.evaluate(() => (window as unknown as { __fix: () => void }).__fix());
   await page.getByPlaceholder("Search for a place, address or person").fill("Test Destination");
-  await page.getByRole("button", { name: /Test Destination/ }).first().click();
+  await page.getByRole("listbox", { name: "Places found" }).getByRole("option", { name: /Test Destination/ }).first().click();
   const asked = page.waitForRequest((r) => r.method() === "POST" && r.url().includes("/api/maps/route"));
   await page.getByRole("button", { name: "Directions" }).click();
   expect((await asked).postDataJSON().stops[0].name).toBe("Your location");

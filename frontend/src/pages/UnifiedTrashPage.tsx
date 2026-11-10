@@ -26,6 +26,7 @@ import { confirm } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /** Apps in the order their groups appear, with a label and an icon. */
 const APPS: { key: string; label: string; icon: LucideIcon }[] = [
@@ -206,7 +207,7 @@ export function UnifiedTrashPage() {
             </div>
           )}
 
-          {isLoading && <div className="text-sm text-[var(--text-muted)]">Loading…</div>}
+          {isLoading && <SkeletonRows count={3} label="Loading" />}
           {isError && <div className="text-sm text-[var(--danger)]">Couldn't load the trash.</div>}
 
           {!isLoading && !isError && items.length === 0 && (

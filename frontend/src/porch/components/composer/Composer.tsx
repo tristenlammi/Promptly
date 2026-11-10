@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { linksApi } from "@/api/links";
 import { memoriesApi } from "@/api/memories";
-import type { PhotoItem } from "@/api/photos";
+import { photosApi, type PhotoItem } from "@/api/photos";
 import { porchApi, type PorchPost, type PorchUser } from "@/api/porch";
 import { Callout } from "@/components/shared/Callout";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -17,6 +17,7 @@ import { cn } from "@/utils/cn";
 
 import { BOOTSTRAP_KEY, LISTS, putPost } from "../../cache";
 import { usePorch } from "../../context";
+import { startPosting } from "../../posting";
 import { scrollPorchTo } from "../../scroll";
 import { ArrangeStep } from "./ArrangeStep";
 import { AudienceSheet, audienceIds } from "./AudienceSheet";
@@ -26,6 +27,7 @@ import {
   EMPTY, clearDraft, firstLink, hasContent, loadDraft, newKey, pollProblem, saveDraft, videoLimitWords, videoSeconds,
   type Audience, type Draft, type Pick, type Step,
 } from "./model";
+import { PlanGroupEventSheet } from "../PlanGroupEventSheet";
 import { PickImage } from "./PickImage";
 import { PickStep } from "./PickStep";
 import { PlaceSheet } from "./PlaceSheet";
@@ -41,6 +43,10 @@ export interface ComposerStart {
   shared?: boolean;
   /** ``?for=<user id>``: "Post for Sam" on their birthday (Today, Porch). */
   forUser?: string | null;
+  /** ``?file=<library file id>``: a video too long for a story, posted instead. */
+  file?: string | null;
+  /** ``?photos=1``: "New photo post", straight to picking photos. */
+  photos?: boolean;
 }
 
 const STEP_TITLES: Record<Step, string> = { pick: "Pick photos", arrange: "Arrange", share: "Share" };
@@ -97,7 +103,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   // ---------------------------------------------------------------- start
   const initial = useMemo<{ draft: Draft; restored: boolean }>(() => {
     if (editing) return { draft: fromPost(editing), restored: false };
-    const fresh = !!(start?.memory || start?.shared || start?.forUser);
+    const fresh = !!(start?.memory || start?.shared || start?.forUser || start?.file);
     const kept = fresh ? null : loadDraft();
     const d: Draft = kept ?? { ...EMPTY };
     // A kept draft's groups: only ones you're still in.
@@ -116,7 +122,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   const [draft, setDraft] = useState<Draft>(initial.draft);
   const [restored, setRestored] = useState(initial.restored);
   const [active, setActive] = useState(0);
-  const [sheet, setSheet] = useState<null | "audience" | "place" | "life" | "poll">(null);
+  const [sheet, setSheet] = useState<null | "audience" | "place" | "life" | "poll" | "event">(null);
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -243,6 +249,8 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   useEffect(() => {
     if (began.current || editing) return;
     began.current = true;
+    // A kept draft that already has photos carries on where it was.
+    if (start?.photos) setDraft((d) => (d.picks.length ? d : { ...d, step: "pick" }));
     if (start?.memory) {
       void memoriesApi
         .get(start.memory)
@@ -258,6 +266,16 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
           }));
         })
         .catch(() => toast.error("That memory isn't there any more."));
+    }
+    if (start?.file) {
+      void photosApi
+        .items([start.file])
+        .then((items) => {
+          const own = items.filter((p) => p.mine !== false);
+          if (!own.length) throw new Error("gone");
+          setDraft((d) => ({ ...d, step: "arrange", picks: own.map(libraryPick) }));
+        })
+        .catch(() => toast.error("That photo or video isn't in your library any more."));
     }
     if (start?.forUser) {
       // A birthday post: "Happy birthday @sam! 🎂", mentioning them.
@@ -337,6 +355,9 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
     }
     return out;
   }, [info.data]);
+
+  // An event can be planned when the post goes to exactly one group (WP-P3.2).
+  const eventGroup = Array.isArray(audience) && audience.length === 1 ? b.groups.find((g) => g.id === audience[0]) ?? null : null;
 
   // ---------------------------------------------------------------- who'd see it
   const audIds = useMemo(() => (editing ? [] : audienceIds(audience, b.groups)), [editing, audience, b.groups]);
@@ -453,13 +474,37 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
     }
   }, [editing, navigate, people.data, qc, start?.group]);
 
+  /** A new post: back to the feed straight away; it goes up behind (the
+   *  status chip in Porch shows how far along it is). */
+  const handOver = () => {
+    const d = draftRef.current;
+    // Anyone named with @ who'll see it is mentioned, picked from the list or not.
+    const mentions: PorchUser[] = [...d.mentions];
+    for (const u of people.data ?? []) if (!mentions.some((m) => m.id === u.id) && mentionedIn(d.body, u)) mentions.push(u);
+    if (!startPosting(d, mentions, qc)) {
+      setError("Your last post is still going up. Give it a moment, then post this one.");
+      return;
+    }
+    finished.current = true;
+    clearDraft();
+    setDraft({ ...EMPTY });
+    const groups = d.audience ?? "all";
+    const one = Array.isArray(groups) && groups.length === 1 && start?.group === groups[0] ? groups[0] : null;
+    navigate(one ? `/porch/g/${one}` : "/porch/", { replace: true });
+    scrollPorchTo(0);
+  };
+
   const post = () => {
     if (failed.length) {
       setError(failed.length === 1 ? "One photo didn't upload. Take it out, or try again." : `${failed.length} photos didn't upload. Take them out, or try again.`);
       return;
     }
-    if (uploading) {
+    if (uploading && editing) {
       setWaiting(true);
+      return;
+    }
+    if (!editing) {
+      handOver();
       return;
     }
     void submit();
@@ -501,9 +546,11 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
       if (step === "share") return null;
       return () => go(step === "pick" ? (picks.length ? "arrange" : "share") : "share");
     }
-    if (step === "pick") return null;
+    // Back to the words while nothing's picked; with photos picked, Pick is
+    // the first step (Share → Arrange → Pick), so it closes (keeping a draft).
+    if (step === "pick") return picks.length ? null : () => go("share");
     if (step === "arrange") return () => go("pick");
-    return () => go(picks.length ? "arrange" : "pick");
+    return picks.length ? () => go("arrange") : null;
   };
   const backFn = back();
   const nextLabel = step === "share" ? (editing ? "Save" : "Post") : "Next";
@@ -513,7 +560,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
     else if (step === "arrange") go("share");
     else post();
   };
-  const title = editing ? (step === "share" ? "Edit post" : STEP_TITLES[step]) : STEP_TITLES[step];
+  const title = editing ? (step === "share" ? "Edit post" : STEP_TITLES[step]) : step === "share" && !picks.length ? "New post" : STEP_TITLES[step];
   const stepNo = step === "pick" ? 1 : step === "arrange" ? 2 : 3;
 
   const headBtn =
@@ -533,10 +580,9 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
         )}
         <div className="flex min-w-0 flex-1 flex-col">
           <h1 className="truncate text-lg font-bold leading-tight text-[var(--text)]">{title}</h1>
-          {!editing && (
+          {!editing && (picks.length > 0 || step !== "share") && (
             <span className="text-xs text-[var(--text-muted)]">
-              {picks.length || step !== "share" ? `Step ${stepNo} of 3` : "A text post"}
-              {picks.length > 0 && ` · ${picks.length} of ${maxMedia}`}
+              {picks.length ? `Step ${stepNo} of 3 · ${picks.length} of ${maxMedia}` : "Pick some, or go back to post just words"}
             </span>
           )}
         </div>
@@ -578,7 +624,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
             onTextPost={() => go("share")}
             isPhone={isPhone}
             maxVideoMs={maxVideoMs}
-            showTextLink={!picks.length && !editing}
+            showTextLink={false}
           />
         )}
         {step === "arrange" && picks.length > 0 && (
@@ -635,6 +681,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
             canPoll={!editing}
             pollLocked={editing?.kind === "poll"}
             onTags={() => go("arrange")}
+            onEvent={eventGroup && !editing ? () => setSheet("event") : undefined}
           />
         )}
 
@@ -692,7 +739,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
             {picks.map((p, i) => (
               <li key={p.key} className="relative shrink-0">
                 <PickImage pick={p} label={`Picked ${i + 1}`} className="h-12 w-12 rounded-lg" />
-                <span aria-hidden className="absolute left-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/60 px-0.5 text-[10px] font-bold text-white">
+                <span aria-hidden className="absolute left-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/60 px-0.5 text-xs font-bold text-white">
                   {i + 1}
                 </span>
               </li>
@@ -705,6 +752,21 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
       )}
 
       <AudienceSheet open={sheet === "audience"} onClose={() => setSheet(null)} value={audience} onChange={(a) => set({ audience: a })} groups={b.groups} />
+      {eventGroup && (
+        <PlanGroupEventSheet
+          group={eventGroup}
+          open={sheet === "event"}
+          onClose={() => setSheet(null)}
+          body={draft.body.trim()}
+          onPosted={() => {
+            // The words went with the event's post: this draft is done.
+            finished.current = true;
+            clearDraft();
+            setDraft({ ...EMPTY });
+            navigate(`/porch/g/${eventGroup.id}`, { replace: true });
+          }}
+        />
+      )}
       <PlaceSheet open={sheet === "place"} onClose={() => setSheet(null)} onPick={(p) => set({ place: p })} fromPhotos={photoPlaces} />
       <PollEditor open={sheet === "poll"} onClose={() => setSheet(null)} value={draft.poll} onSave={(v) => set({ poll: v, life: null })} onRemove={() => set({ poll: null })} />
       <LifeEventEditor open={sheet === "life"} onClose={() => setSheet(null)} value={draft.life} onSave={(v) => set({ life: v, poll: null })} onRemove={() => set({ life: null })} />

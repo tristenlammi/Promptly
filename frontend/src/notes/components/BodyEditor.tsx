@@ -99,6 +99,8 @@ export function takeEscape(e: KeyboardEvent): void {
 
 export interface BodyEditorHandle {
   focus: (where?: "start" | "end") => void;
+  /** Put the caret on a fresh line under the text that's there. */
+  continueBelow: () => void;
   editor: Editor | null;
 }
 
@@ -290,6 +292,22 @@ export const BodyEditor = forwardRef<
 
   useImperativeHandle(ref, () => ({
     focus: (where = "end") => editor?.commands.focus(where),
+    // From the title: carry on writing under what's already there. A new
+    // empty line is added when the last one has words in it, so what you
+    // type next never runs into them (it isn't a change until you type:
+    // ``norm`` drops a trailing empty block, and no save is sent for it).
+    continueBelow: () => {
+      if (!editor) return;
+      const last = editor.state.doc.lastChild;
+      if (last && last.content.size > 0) {
+        editor
+          .chain()
+          .insertContentAt(editor.state.doc.content.size, { type: "paragraph" })
+          .setMeta("preventUpdate", true)
+          .focus("end")
+          .run();
+      } else editor.commands.focus("end");
+    },
     editor,
   }));
 
@@ -312,12 +330,14 @@ export const BodyEditor = forwardRef<
       }}
     >
       <EditorContent editor={editor} />
-      {editable && toolbar === "focus" && focused && editor && <FormatBar editor={editor} />}
+      {/* Always there while the note can be edited (quieter until the text
+          has focus), so nothing under it moves when focus comes and goes. */}
+      {editable && toolbar === "focus" && editor && <FormatBar editor={editor} quiet={!focused} />}
     </div>
   );
 });
 
-function FormatBar({ editor }: { editor: Editor }) {
+function FormatBar({ editor, quiet = false }: { editor: Editor; quiet?: boolean }) {
   const btn = (active: boolean) =>
     cn("flex h-8 w-8 items-center justify-center rounded-md note-hover", active && "bg-[var(--note-hover)] ring-1 ring-[color-mix(in_srgb,currentColor_25%,transparent)]");
   const keep = (e: React.MouseEvent) => {
@@ -363,7 +383,7 @@ function FormatBar({ editor }: { editor: Editor }) {
     );
   }
   return (
-    <div role="toolbar" aria-label="Formatting" className="mt-2 flex flex-wrap items-center gap-0.5 note-muted" onMouseDown={keep}>
+    <div role="toolbar" aria-label="Formatting" className={cn("mt-2 flex flex-wrap items-center gap-0.5 note-muted transition-opacity", quiet && "opacity-60")} onMouseDown={keep}>
       <button type="button" aria-label="Heading 1" aria-pressed={editor.isActive("heading", { level: 1 })} className={btn(editor.isActive("heading", { level: 1 }))} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>
         <Heading1 className="h-4 w-4" />
       </button>

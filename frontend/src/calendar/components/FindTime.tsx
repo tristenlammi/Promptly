@@ -207,7 +207,7 @@ function FindTimeBody({ onClose, me, people, start, end, ignore, onPick }: FindT
             </button>
             <div className="min-w-0 px-1 text-center md:text-left" aria-live="polite">
               <p className="truncate text-sm font-semibold text-[var(--text)]">{dateLabel}</p>
-              {dayName && <p className="text-[11px] leading-tight text-[var(--text-muted)]">{dayName}</p>}
+              {dayName && <p className="text-xs leading-tight text-[var(--text-muted)]">{dayName}</p>}
             </div>
             <button
               type="button"
@@ -239,7 +239,7 @@ function FindTimeBody({ onClose, me, people, start, end, ignore, onPick }: FindT
                 {Array.from({ length: 24 }, (_, h) => (
                   <span
                     key={h}
-                    className="absolute top-1/2 -translate-y-1/2 pl-1.5 text-[11px] tabular-nums text-[var(--text-muted)]"
+                    className="absolute top-1/2 -translate-y-1/2 pl-1.5 text-xs tabular-nums text-[var(--text-muted)]"
                     style={{ left: h * HOUR_W }}
                   >
                     {h === 0 ? "" : hourLabel(h)}
@@ -247,7 +247,7 @@ function FindTimeBody({ onClose, me, people, start, end, ignore, onPick }: FindT
                 ))}
                 {/* The proposed time's label, over the hours (in the header so rows scroll under it). */}
                 <span
-                  className="pointer-events-none absolute top-1/2 flex h-[22px] -translate-x-1/2 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-[var(--item-accent)] px-2 text-[11px] font-semibold tabular-nums text-white shadow-[var(--shadow-sm)]"
+                  className="pointer-events-none absolute top-1/2 flex h-[22px] -translate-x-1/2 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-[var(--item-accent)] px-2 text-xs font-semibold tabular-nums text-white shadow-[var(--shadow-sm)]"
                   style={{ left: (startMin + dur / 2) * ppm }}
                 >
                   {timeLabel(propS)} – {timeLabel(propE)}
@@ -281,7 +281,7 @@ function FindTimeBody({ onClose, me, people, start, end, ignore, onPick }: FindT
                     {!isPhone && (
                       <span className="flex min-w-0 flex-col">
                         <span className="truncate text-sm font-medium text-[var(--text)]">{p.id === me.id ? "You" : p.username}</span>
-                        {conflict && <span className="text-[11px] leading-tight text-[#9a6c12] dark:text-[#e2b65e]">Not available</span>}
+                        {conflict && <span className="text-xs leading-tight text-[#9a6c12] dark:text-[#e2b65e]">Not available</span>}
                       </span>
                     )}
                     <span className="sr-only">{conflict ? "Not available at the proposed time" : busy ? "Free at the proposed time" : ""}</span>
@@ -309,7 +309,7 @@ function FindTimeBody({ onClose, me, people, start, end, ignore, onPick }: FindT
                           style={{ left: a * ppm + 1, width: Math.max(4, w - 2), ...BUSY_STRIPES }}
                           title={`Not available ${timeLabel(new Date(Math.max(s, dayS)))} – ${timeLabel(new Date(Math.min(e, dayS + DAY_MIN * 60_000)))}`}
                         >
-                          {w > 92 && <span className="truncate text-[11px] font-medium text-[var(--text-muted)]">Not available</span>}
+                          {w > 92 && <span className="truncate text-xs font-medium text-[var(--text-muted)]">Not available</span>}
                         </span>
                       );
                     })}
@@ -398,7 +398,7 @@ function FindTimeBody({ onClose, me, people, start, end, ignore, onPick }: FindT
               </span>
             )}
           </p>
-          <div className="flex shrink-0 items-center gap-3 text-[11px] text-[var(--text-muted)]">
+          <div className="flex shrink-0 items-center gap-3 text-xs text-[var(--text-muted)]">
             <span className="inline-flex items-center gap-1.5">
               <span className="h-3 w-4 rounded border border-[var(--item-accent)] bg-[color-mix(in_srgb,var(--item-accent)_26%,transparent)]" />
               Proposed

@@ -10,13 +10,20 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { commentsKey, refreshPost } from "../cache";
+import { usePorch } from "../context";
+import { removeWithUndo } from "../undo";
 import { MentionBox, mentionedIn } from "./composer/MentionBox";
 import { ReactionPicker, ReactionsLine, useLongPress, WhoReactedSheet } from "./Reactions";
 import { ReportSheet } from "./ReportSheet";
 import { RichText } from "./RichText";
-import { ActionSheet, PersonLink, PorchAvatar, fullTime, shortAgo, type MenuAction } from "./ui";
+import { ActionSheet, PersonLink, PorchAvatar, RowsSkeleton, fullTime, shortAgo, type MenuAction } from "./ui";
 
 type Thread = { comments: PorchComment[]; count: number };
+
+/** A comment shown the moment you send it, before the server has it. */
+const SENDING = "sending-";
+const isSending = (c: PorchComment) => c.id.startsWith(SENDING);
+let sendingSeq = 0;
 
 /** Everyone who can see the post (not you): the @mention list. */
 function useAudience(postId: string, enabled: boolean) {
@@ -72,6 +79,7 @@ export function CommentThread({
   focusBox?: boolean;
 }) {
   const qc = useQueryClient();
+  const { b } = usePorch();
   const q = useQuery({ queryKey: commentsKey(post.id), queryFn: () => porchApi.comments(post.id), staleTime: 15_000 });
   const audience = useAudience(post.id, true);
   const [replyTo, setReplyTo] = useState<PorchComment | null>(null);
@@ -103,16 +111,63 @@ export function CommentThread({
     setSending(true);
     const who = [...mentions];
     for (const u of audience.data ?? []) if (!who.some((m) => m.id === u.id) && mentionedIn(body, u)) who.push(u);
-    try {
-      const c = await porchApi.addComment(post.id, body, { parentId: replyTo?.id ?? null, mentions: who.filter((u) => mentionedIn(body, u)).map((u) => u.id) });
-      qc.setQueryData<Thread>(commentsKey(post.id), (t) => placeComment(t, c, "add"));
+    const named = who.filter((u) => mentionedIn(body, u));
+    const parent = replyTo;
+    // It's in the list at once; the box is clear for the next one.
+    const mine: PorchComment = {
+      id: `${SENDING}${++sendingSeq}`,
+      post_id: post.id,
+      parent_id: parent?.id ?? null,
+      author: b?.me ?? null,
+      body,
+      mentions: named,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      edited_at: null,
+      mine: true,
+      can_edit: false,
+      can_delete: false,
+      reactions: { emojis: [], mine: null },
+    };
+    const shown = !!qc.getQueryData<Thread>(commentsKey(post.id));
+    const kept = { text, mentions };
+    if (shown) {
+      qc.setQueryData<Thread>(commentsKey(post.id), (t) => placeComment(t, mine, "add"));
       setText("");
       setMentions([]);
       setReplyTo(null);
+      window.setTimeout(() => document.getElementById(`comment-${mine.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 60);
+    }
+    try {
+      const c = await porchApi.addComment(post.id, body, { parentId: parent?.id ?? null, mentions: named.map((u) => u.id) });
+      qc.setQueryData<Thread>(commentsKey(post.id), (t) => {
+        if (!t) return t;
+        // Swap the placeholder for the real one (or add it, if the list was reloaded meanwhile).
+        const has = t.comments.some((x) => x.id === mine.id || (x.replies ?? []).some((r) => r.id === mine.id));
+        if (!has) return t.comments.some((x) => x.id === c.id || (x.replies ?? []).some((r) => r.id === c.id)) ? t : placeComment(t, c, "add");
+        const swap = (x: PorchComment): PorchComment => (x.id === mine.id ? { ...c, replies: x.replies } : x);
+        return { ...t, comments: t.comments.map((x) => ({ ...swap(x), replies: (x.replies ?? []).map(swap) })) };
+      });
+      if (!shown) {
+        setText("");
+        setMentions([]);
+        setReplyTo(null);
+      }
       void refreshPost(qc, post.id);
-      window.setTimeout(() => document.getElementById(`comment-${c.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 60);
     } catch (err) {
-      toast.error(apiErrorMessage(err, "Couldn't post your comment. Try again."));
+      // Not sent: out of the list, and back in the box to try again.
+      qc.setQueryData<Thread>(commentsKey(post.id), (t) => {
+        if (!t) return t;
+        const gone = (x: PorchComment) => x.id !== mine.id;
+        const had = t.comments.some((x) => !gone(x) || (x.replies ?? []).some((r) => !gone(r)));
+        return had ? { count: Math.max(0, t.count - 1), comments: t.comments.filter(gone).map((x) => ({ ...x, replies: (x.replies ?? []).filter(gone) })) } : t;
+      });
+      if (shown) {
+        setText((t) => (t.trim() ? t : kept.text));
+        setMentions((m) => (m.length ? m : kept.mentions));
+        setReplyTo((r) => r ?? parent);
+      }
+      toast.error(apiErrorMessage(err, "Couldn't post your comment. It's back in the box to try again."));
     } finally {
       setSending(false);
     }
@@ -135,7 +190,7 @@ export function CommentThread({
   }, [data]);
   let list: ReactNode;
   if (q.isPending) {
-    list = <p className="py-8 text-center text-sm text-[var(--text-muted)]">Loading comments…</p>;
+    list = <RowsSkeleton rows={3} />;
   } else if (q.isError) {
     list = (
       <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-[var(--text-muted)]">
@@ -179,7 +234,7 @@ export function CommentThread({
               const tag = replyTo.author ? `@${replyTo.author.username} ` : "";
               setText((t) => (t === tag ? "" : t));
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-[var(--hover)]"
+            className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-[var(--hover)]"
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -195,7 +250,7 @@ export function CommentThread({
               setText((t) => `${t}${e}`);
               box.current?.focus();
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-lg hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-lg hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
           >
             {e}
           </button>
@@ -222,7 +277,7 @@ export function CommentThread({
           <Send className="h-4 w-4" aria-hidden />
         </ItemButton>
       </div>
-      {groupsNote && <p className="text-[11px] text-[var(--text-muted)]">{groupsNote}</p>}
+      {groupsNote && <p className="text-xs text-[var(--text-muted)]">{groupsNote}</p>}
     </div>
   );
   return <>{children(list, boxEl)}</>;
@@ -262,6 +317,7 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
   const [who, setWho] = useState(false);
   const [reporting, setReporting] = useState(false);
   const heart = useLongPress((at) => setPicker(at));
+  const [pop, setPop] = useState(false);
   // Long-press: your own comment's Edit / Delete, or Report someone else's.
   const hold = useLongPress(() => setMenu(true), 550);
 
@@ -295,22 +351,31 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
   };
 
   const remove = async () => {
-    const theirs = !c.mine;
-    const ok = await confirm({
-      title: "Delete this comment?",
-      message: theirs ? `This deletes ${c.author?.name ?? "their"}'s comment on your post for everyone.` : "It's deleted for everyone.",
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await porchApi.deleteComment(c.id);
-      set(c, "remove");
-      void refreshPost(qc, post.id);
-      toast.success("Comment deleted.");
-    } catch (err) {
-      toast.error(apiErrorMessage(err, "Couldn't delete the comment. Try again."));
+    // Your own goes at once, with Undo. Someone else's (on your post): asked first.
+    if (!c.mine) {
+      const ok = await confirm({
+        title: "Delete this comment?",
+        message: `This deletes ${c.author?.name ?? "their"}'s comment on your post for everyone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!ok) return;
     }
+    const before = qc.getQueryData<Thread>(commentsKey(post.id));
+    removeWithUndo({
+      message: "Comment deleted.",
+      hide: () => set(c, "remove"),
+      restore: () => {
+        if (before) qc.setQueryData<Thread>(commentsKey(post.id), before);
+        void qc.invalidateQueries({ queryKey: commentsKey(post.id) });
+      },
+      commit: async () => {
+        await porchApi.deleteComment(c.id);
+        set(c, "remove");
+        void refreshPost(qc, post.id);
+      },
+      failed: "Couldn't delete the comment, so it's back. Try again.",
+    });
   };
 
   if (c.deleted) {
@@ -328,6 +393,22 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
   const name = c.author?.name ?? "Someone";
   if (!c.mine) actions.push({ label: "Report", icon: TriangleAlert, danger: true, hint: "Tell the admins of a group it's in", onClick: () => setReporting(true) });
   const r = c.reactions;
+
+  // Just sent, still on its way: the words, and nothing to press yet.
+  if (isSending(c)) {
+    return (
+      <div id={`comment-${c.id}`} className="flex gap-3 opacity-70">
+        <PorchAvatar user={c.author} size={small ? 24 : 32} className="mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <p className="whitespace-pre-wrap break-words text-sm leading-snug text-[var(--text)]">
+            <b className="mr-1.5 font-semibold">{name}</b>
+            <RichText text={c.body} mentions={c.mentions} />
+          </p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Sending…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div id={`comment-${c.id}`} data-comment={c.id} className="flex gap-3">
@@ -375,7 +456,7 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
               </time>
             )}
             {c.edited_at && <span title={fullTime(c.edited_at)}>edited</span>}
-            <button type="button" onClick={() => onReply(c)} className="min-h-[28px] font-semibold hover:text-[var(--text)]" aria-label={`Reply to ${name}`}>
+            <button type="button" onClick={() => onReply(c)} className="-mx-1.5 min-h-[40px] px-1.5 font-semibold hover:text-[var(--text)]" aria-label={`Reply to ${name}`}>
               Reply
             </button>
             <ReactionsLine r={r} onWho={c.mine ? () => setWho(true) : undefined} className="text-xs text-[var(--text-muted)]" />
@@ -385,7 +466,7 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
                 aria-label={`More for ${c.mine ? "your" : `${name}'s`} comment`}
                 aria-haspopup="dialog"
                 onClick={() => setMenu(true)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-[var(--hover)] hover:text-[var(--text)]"
               >
                 <MoreHorizontal className="h-4 w-4" aria-hidden />
               </button>
@@ -399,19 +480,20 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
           {...heart.handlers}
           onClick={() => {
             if (heart.consumed()) return;
+            setPop(!r.mine);
             void react(r.mine ? null : HEART);
           }}
           aria-pressed={!!r.mine}
           aria-label={r.mine ? `Take back your ${r.mine} on ${name}'s comment` : `React to ${name}'s comment with a heart`}
           title="Tap for ❤️, hold for more"
-          className="flex h-9 w-9 shrink-0 items-center justify-center self-start rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+          className="flex h-10 w-10 shrink-0 items-center justify-center self-start rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
         >
           {r.mine && r.mine !== HEART ? (
             <span className="text-base" aria-hidden>
               {r.mine}
             </span>
           ) : (
-            <Heart className={cn("h-4 w-4", r.mine && "fill-[var(--danger)] text-[var(--danger)]")} aria-hidden />
+            <Heart className={cn("h-4 w-4", r.mine && pop && "porch-pop", r.mine && "fill-[var(--danger)] text-[var(--danger)]")} aria-hidden />
           )}
         </button>
       )}

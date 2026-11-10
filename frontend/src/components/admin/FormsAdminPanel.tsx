@@ -10,6 +10,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
 import { SettingsCard } from "./SettingsCard";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 const KEY = ["admin", "forms"];
 
@@ -28,7 +29,7 @@ export function FormsAdminPanel() {
     onError: (e) => toast.error(apiErrorMessage(e)),
   });
 
-  if (isLoading) return <p className="text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (isLoading) return <SkeletonRows count={3} label="Loading" />;
   if (error || !data) return <p className="text-sm text-[var(--danger)]">{apiErrorMessage(error, "Forms couldn't be loaded.")}</p>;
 
   return (

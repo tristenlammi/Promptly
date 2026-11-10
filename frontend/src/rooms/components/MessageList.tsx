@@ -3,6 +3,7 @@ import { ArrowDown, Hash, Loader2, MessagesSquare, Volume2 } from "lucide-react"
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { roomsApi, type Message, type Room } from "@/api/rooms";
+import { Skeleton } from "@/components/shared/Skeleton";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
@@ -304,7 +305,7 @@ export function MessageList({
         Couldn't load messages.
         <button
           type="button"
-          className="font-semibold text-[var(--item-accent)] underline"
+          className="font-semibold text-[var(--accent-text)] underline"
           onClick={() => {
             setError(false);
             loadTail(roomId).catch(() => setError(true));
@@ -330,11 +331,9 @@ export function MessageList({
         aria-live="off"
         tabIndex={0}
       >
-        <div className="flex min-h-full flex-col justify-end pb-2">
+        <div className="mx-auto flex min-h-full w-full max-w-[760px] flex-col justify-end pb-2">
           {!w ? (
-            <div className="flex flex-1 items-center justify-center py-16 text-[var(--text-muted)]">
-              <Loader2 className="h-5 w-5 animate-spin" aria-label="Loading messages" />
-            </div>
+            <MessageSkeleton />
           ) : (
             <>
               {w.hasMoreBefore ? (
@@ -358,7 +357,7 @@ export function MessageList({
                     {newLine && (
                       <div data-new-line className="relative my-1 flex items-center px-4" role="separator" aria-label="New messages">
                         <span className="h-px flex-1 bg-[var(--danger)]" />
-                        <span className="ml-2 rounded bg-[var(--danger)] px-1.5 text-[10px] font-bold uppercase tracking-wide text-white">New</span>
+                        <span className="ml-2 rounded bg-[var(--danger)] px-1.5 text-xs font-bold uppercase tracking-wide text-white">New</span>
                       </div>
                     )}
                     <MessageItem m={m} grouped={!newDay && !newLine && groupsWith(prev, m)} highlight={highlightId === m.id} ctx={listCtx} />
@@ -381,16 +380,45 @@ export function MessageList({
         </div>
       </div>
       {(farFromBottom || unseen > 0) && w && (
-        <button
-          type="button"
-          onClick={jumpToLatest}
-          className="absolute bottom-3 left-1/2 z-10 inline-flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--item-accent)] px-4 text-sm font-semibold text-white shadow-[var(--shadow-lg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-        >
-          <ArrowDown className="h-4 w-4" />
-          {unseen > 0 ? `${unseen} new message${unseen === 1 ? "" : "s"}` : "Jump to latest"}
-        </button>
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+          <button
+            type="button"
+            onClick={jumpToLatest}
+            className="rooms-pill-in pointer-events-auto inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[var(--shadow-lg)] transition-colors hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          >
+            <ArrowDown className="h-4 w-4" />
+            {unseen > 0 ? `${unseen} new message${unseen === 1 ? "" : "s"}` : "Jump to latest"}
+          </button>
+        </div>
       )}
       <SrOnly live="polite">{unseen > 0 ? `${unseen} new message${unseen === 1 ? "" : "s"}` : ""}</SrOnly>
+    </div>
+  );
+}
+
+/** The shape of a conversation while its messages load. */
+function MessageSkeleton() {
+  const rows: { own?: boolean; lines: string[] }[] = [
+    { lines: ["w-52", "w-36"] },
+    { own: true, lines: ["w-44"] },
+    { lines: ["w-64"] },
+    { lines: ["w-40", "w-56", "w-28"] },
+    { own: true, lines: ["w-56", "w-32"] },
+    { lines: ["w-48"] },
+  ];
+  return (
+    <div className="flex flex-col gap-4 px-3 py-4 md:px-4" role="status" aria-label="Loading messages">
+      {rows.map((r, i) => (
+        <div key={i} className={cn("flex gap-3", r.own && "flex-row-reverse")}>
+          {!r.own && <Skeleton className="h-9 w-9 shrink-0 !rounded-full" />}
+          <div className={cn("flex flex-col gap-1.5", r.own && "items-end")}>
+            {!r.own && <Skeleton className="h-3 w-24" />}
+            {r.lines.map((w, j) => (
+              <Skeleton key={j} className={cn("h-8 !rounded-2xl", w)} />
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -399,7 +427,7 @@ function DayDivider({ label }: { label: string }) {
   return (
     <div className="my-2 flex items-center gap-3 px-4" role="separator" aria-label={label}>
       <span className="h-px flex-1 bg-[var(--border)]" />
-      <span className="text-[11px] font-semibold text-[var(--text-muted)]">{label}</span>
+      <span className="text-xs font-semibold text-[var(--text-muted)]">{label}</span>
       <span className="h-px flex-1 bg-[var(--border)]" />
     </div>
   );

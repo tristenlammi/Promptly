@@ -10,8 +10,10 @@ import type { FileItem } from "@/api/files";
 export type ShareKind = "file" | "folder" | "photo" | "album" | "task" | "recipe" | "trip" | "form"
   // A note in Notes.
   | "note"
-  | "porch_post";
-export const SHARE_KINDS: readonly ShareKind[] = ["file", "folder", "photo", "album", "task", "recipe", "trip", "form", "note", "porch_post"];
+  | "porch_post"
+  // Porch stories (WP-P2.3): a story reply's card.
+  | "porch_story";
+export const SHARE_KINDS: readonly ShareKind[] = ["file", "folder", "photo", "album", "task", "recipe", "trip", "form", "note", "porch_post", "porch_story"];
 
 /** What's being shared: ``id`` is the thing; tasks, recipes and trips also
  *  name the app file they live in (``file_id``). */

@@ -25,7 +25,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, activity, compose, core, deps, events, groups, handoffs, media, posts, prefs, reports, search, tags, talk
+from . import access, activity, compose, core, deps, events, groups, handoffs, highlights, media, pins, plans, posts, prefs, reports, search, stories, tags, talk
 from .deps import require_porch
 from .models import PorchGroup, PorchGroupMember, PorchProfile
 
@@ -41,6 +41,10 @@ router.include_router(handoffs.router)
 router.include_router(search.router)
 router.include_router(prefs.router)
 router.include_router(reports.router)
+router.include_router(stories.router)
+router.include_router(highlights.router)
+router.include_router(pins.router)
+router.include_router(plans.router)
 
 
 def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:
@@ -56,6 +60,7 @@ def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:
             activity_seen_at=p.activity_seen_at.isoformat() if p.activity_seen_at else None,
             welcomed=p.welcomed_at is not None,
             last_groups=p.last_groups,
+            last_story_groups=p.last_story_groups,
         )
     return out
 
@@ -90,6 +95,7 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(req
             "max_media": media.MAX_MEDIA,
             "video_max_seconds": s.porch_video_max_seconds if s is not None else 300,
             "video_max_mb": s.porch_video_max_mb if s is not None else 1024,
+            "story_video_max_seconds": stories.VIDEO_MAX_SECONDS,
         },
     }
 

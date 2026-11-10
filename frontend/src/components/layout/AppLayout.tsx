@@ -1,4 +1,5 @@
-import { Suspense, useEffect, useRef, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -9,6 +10,7 @@ import { SearchPalette } from "@/components/chat/SearchPalette";
 import { UploadProgressPanel } from "@/components/files/UploadProgressPanel";
 import { UploadQueueWatcher } from "@/components/files/UploadQueueWatcher";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { mailApi } from "@/mail/api";
 import { appKeyFor } from "@/lib/appLaunch";
 import { useComposerStore } from "@/store/composerStore";
 import { authApi } from "@/api/auth";
@@ -16,9 +18,28 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
+import { DockFeeds } from "./dock/DockFeeds";
 import { NetworkStatusToast } from "./NetworkStatusToast";
-import { WelcomeAppsDialog } from "./WelcomeAppsDialog";
+import { WelcomeDialog } from "./WelcomeDialog";
 import { Sidebar } from "./Sidebar";
+
+/** Apps with their own side list. With the main sidebar open as well that
+ *  makes three columns, so the sidebar folds to its icon rail while one of
+ *  them is open and comes back when you leave. */
+const LIST_APP_ROUTE = /^\/(rooms|porch|mail|files|notes|calendar|maps)(\/|$)/;
+/** Pages that show the full upload list themselves. */
+const DRIVE_ROUTE = /^\/(files|workspaces|photos)(\/|$)/;
+/** "expanded" once you've opened the sidebar inside one of those apps: it
+ *  then stays open in them, on this device, until you fold it again. */
+const LIST_APP_KEY = "promptly.sidebar.listApps";
+
+function readListAppChoice(): "expanded" | null {
+  try {
+    return window.localStorage.getItem(LIST_APP_KEY) === "expanded" ? "expanded" : null;
+  } catch {
+    return null;
+  }
+}
 
 /** ``children`` stands in for the route's ``<Outlet>`` — for a page that
  *  also runs on its own as an installed app and is wrapped here only when
@@ -29,12 +50,33 @@ export function AppLayout({ children }: { children?: ReactNode } = {}) {
   // (saved to your account), until you change it.
   const collapsed = useAuthStore((s) => !!s.user?.settings?.sidebar_collapsed);
   const patchSettings = useAuthStore((s) => s.patchSettings);
+  const location = useLocation();
+  // Inside an app with its own side list the sidebar is the icon rail unless
+  // you've opened it there yourself; everywhere else it's as you left it.
+  // Mail with no mailbox connected is one welcome screen, no side list yet,
+  // so the sidebar stays as it is. (The same query Mail itself runs, so it's one request.)
+  const onMail = /^\/mail(\/|$)/.test(location.pathname);
+  const mailOverview = useQuery({ queryKey: ["mail-overview"], queryFn: mailApi.overview, enabled: onMail, staleTime: 15_000 }).data;
+  const mailEmpty = onMail && !!mailOverview && (mailOverview.accounts?.length ?? 0) === 0;
+  const inListApp = !isMobile && !mailEmpty && LIST_APP_ROUTE.test(location.pathname);
+  const [listAppChoice, setListAppChoice] = useState<"expanded" | null>(readListAppChoice);
+  const railed = inListApp ? listAppChoice !== "expanded" : collapsed;
   const toggleCollapsed = () => {
+    if (inListApp) {
+      const next = railed ? "expanded" : null;
+      setListAppChoice(next);
+      try {
+        if (next) window.localStorage.setItem(LIST_APP_KEY, next);
+        else window.localStorage.removeItem(LIST_APP_KEY);
+      } catch {
+        /* private window: the choice lasts until the page is closed */
+      }
+      return;
+    }
     const next = !collapsed;
     patchSettings({ sidebar_collapsed: next });
     void authApi.updatePreferences({ sidebar_collapsed: next }).catch(() => patchSettings({ sidebar_collapsed: !next }));
   };
-  const location = useLocation();
   const navigate = useNavigate();
 
   const mobileNavOpen = useUIStore((s) => s.mobileNavOpen);
@@ -187,7 +229,7 @@ export function AppLayout({ children }: { children?: ReactNode } = {}) {
         )}
       >
         <Sidebar
-          collapsed={isMobile ? false : collapsed}
+          collapsed={isMobile ? false : railed}
           onToggle={isMobile ? closeMobileNav : toggleCollapsed}
         />
       </div>
@@ -215,14 +257,19 @@ export function AppLayout({ children }: { children?: ReactNode } = {}) {
       </main>
 
       <NetworkStatusToast />
-      <WelcomeAppsDialog />
+      <WelcomeDialog />
       <SearchPalette open={searchPaletteOpen} onClose={closeSearchPalette} />
       {/* Drive upload panel only renders on ``/files*`` routes — it
           short-circuits when no uploads are in flight, so it's zero-cost
           elsewhere. The watcher is always mounted so completion events
           fire query invalidations even from other routes. */}
       <UploadQueueWatcher />
-      <UploadProgressPanel />
+      {/* Away from those pages on a computer, the sidebar's "happening now"
+          dock shows uploads instead of the floating pill. Phones keep the
+          pill: their sidebar is a closed drawer most of the time. */}
+      {(isMobile || DRIVE_ROUTE.test(location.pathname)) && <UploadProgressPanel />}
+      {/* Keeps the dock's feeds running, whichever form the sidebar is in. */}
+      <DockFeeds />
     </div>
   );
 }

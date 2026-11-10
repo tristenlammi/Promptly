@@ -31,6 +31,288 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Forms phase 2, WP-F2.4 -->
 - Forms: quiz results. Responses gain a Scores strip (average, middle and top score, a chart of scores, how many are still to mark, the most missed questions, and Release scores) and a Scores list, best first. Mark paragraph answers with Right, Wrong or a number of points, then "Next to mark" takes you to the next one; any automatic mark can be changed too. New Quiz and Family trivia templates. Make with AI and chat can draft a quiz with suggested answers, each shown as "AI suggested this answer — check it" until you look. Quiz cards on the Forms home and Today say how many answers are waiting to be marked; chat can read a quiz's averages and most missed questions, never anyone's own score.
 
+## [0.36.2] - 2026-11-11
+
+### Added
+
+- Porch: the "New post" button has a photo button on its right that opens straight onto picking photos and videos; "New post" itself opens on the words. On a phone the + menu has "Photo post" too.
+
+### Fixed
+
+- Calls on Unraid: new optional `LIVEKIT_INTERFACES` in `.env` (e.g. `br0`) limits the calls service to your LAN interface. With "host access to custom networks" on, Unraid adds a second interface with the same address, and the calls service kept restarting with "address already in use".
+
+### Changed
+
+- Solid terracotta buttons (New chat, New post, Save…) are the real brand terracotta again, not the deeper shade v0.36.0 gave them. White on it is below the WCAG AA contrast ratio for small text (3.1:1); the owner chose the brand colour, and the e2e accessibility checks skip those buttons again.
+
+## [0.36.1] - 2026-11-11
+
+### Added
+
+- `TUNNEL_ON_HOST=1` in `.env`: one Cloudflare Tunnel shared with other services, running on the server with host networking, works with Promptly again. nginx trusts the visitor address it sends, so each visitor keeps their own rate limit instead of everyone sharing one. Linux servers only (README, "Cloudflare Tunnel").
+
+## [0.36.0] - 2026-11-11
+
+### Added
+
+<!-- New-member onboarding (onboard-fixes) -->
+- Admin → Users: after you create an account, a "Send them this" card shows the address, username and password with the steps to sign in, ready to copy, share, or email to them when email is set up.
+- Dialogs, sheets and menus now open and close with a short, soft movement instead of snapping in and out (off when your device asks for reduced motion).
+- Icon buttons in the Item Store apps show a quick themed tooltip on hover or keyboard focus, in place of the slow browser one.
+- Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
+- Admin → Users: a Storage column for everyone at once, with a small bar, the percentage, and used / limit (or "no limit"). You can also sort by most storage. It shows totals only, never what the files are.
+- Photo widget for Android: put a photo from one of your albums on your home screen. Pick the album and a shape (rounded, circle, soft square, flower, heart or arch) when you add it, and it shows a different photo from that album every half hour. Tap it for another photo, or set it to open the album instead. Add as many as you like, each with its own album and shape, at any size. It keeps a few small copies on the phone so it still changes with no signal.
+
+### Changed
+
+- Releases: the release script now refuses to cut a version when the Android app on the Install apps page is older than the app's source, so the download is always the latest app.
+<!-- New-member onboarding (onboard-fixes) -->
+- First sign-in for someone new now opens on Today with a short welcome: what Promptly is, how to put it on this phone, and a button to message the person who set it up (and Porch). It replaces the "Pick your apps" question.
+- Install apps starts with one recommended step for the device you're on (iPhone, Android or computer); the separate per-app installs, Android Auto and the passwords extension are under "More".
+- Today shows a small "Install Promptly on this device" link when you're using Promptly in a browser, and iPhone users get an "Add to Home Screen" link in the sidebar.
+- On an iPhone in Safari, Rooms, Porch and Account → Notifications now explain how to get message alerts (add Promptly to the Home Screen) instead of hiding the option.
+- Plainer words for new people: the sign-in page says "Your family's private space" and to ask the person who set up Promptly for an account; "Usage & cost" is now "AI usage"; the chat model button shows just the model's name; new chats suggest everyday things to ask; and the Apps page has a few words under each app.
+- Starting a new message in Rooms now lists the people on your Promptly straight away, instead of an empty search.
+- Admin → Users: the create form checks the password against the same rules as the server and shows them, and the role choices are described in plain words.
+- Porch: on a computer a post's ⋯ menu drops down from the button instead of opening a sheet in the middle of the screen. Double-tap to like answers a little faster.
+- Photos: in search, Faces, Places and memories, where photos can't be picked, tiles no longer show a tick that did nothing. While you're picking photos, the set-up banner and memories fade back out of the way.
+- Messages at the bottom of the screen start beside the app's own side list in Porch, Rooms, Calendar and Notes, instead of sitting on top of it.
+- Mail with no mailbox connected keeps the Promptly sidebar open: there's no mail list yet for it to make room for.
+- Files: the uploads panel moves up out of the way while the selection bar is showing, so neither covers the other.
+- More lists show an outline while they load in place of the word "Loading…": Photos pages, the family library, Archive, Trash, a task, an import, sharing dialogs, workspace members and several Settings and Admin panels.
+- Apps from the Apps page (Contacts, Tasks & Reminders and the rest) keep their own colour for the icon in the header only. Buttons, tabs and selection are Promptly's terracotta, the same as everywhere else.
+- An app whose name is also its title no longer says the name twice under the header; it says Saved.
+- Opening an app shows the outline of a list while it loads, not a spinner.
+- Photos: the People tab is called Faces.
+- Notes, Calendar and Maps fold the main sidebar down to its icons, like Mail and Files do, so their own side list has room.
+- Calendar: the quick add box has a pen, not the assistant's sparkle. It doesn't use the assistant.
+- Files: with things selected, the list can be scrolled clear of the bar at the bottom.
+<!-- UI polish, shared foundations (ui-polish) -->
+- Messages such as "Saved" and "Undo" now appear at the bottom of the screen (bottom-left on a computer, bottom-centre on a phone, above the tab bar) so they no longer cover the top of the page.
+- The Ask panel in Item Store apps starts closed, and each app remembers on its own whether you left it open.
+- Automations now live at /automations. Old /tasks links and bookmarks still work.
+- Bottom sheets close on Esc, keep keyboard focus inside while open, and can be dragged down to close.
+- Empty lists and pages share one look across the Item Store apps and the rest of Promptly.
+- A confirmation asked from inside a sheet now appears in front of it.
+<!-- Sidebar "happening now" dock (ui-dock) -->
+- A "happening now" spot in the sidebar, just above your account: small live cards for the voice channel or call you're in (who's speaking, how long, Mute and Leave), uploads ("Uploading 12 of 40"), the next event or reminder in the next couple of hours (with a tick for the reminder), a mailbox that needs attention or a message that didn't send, location sharing in Maps (with Stop), someone on their way to you, a recording being written up, and how far understanding your photos has got. Three cards show at most and the rest fold into "+N more"; tapping a card takes you back to where it's happening. On the folded sidebar they are icons that open the cards; on a phone they are in the menu, and the menu button carries a dot while something is happening.
+- The sidebar shows which app you're in: Photos, Rooms, Porch, Maps, Notes, Mail, Calendar or any other app now appears as the highlighted row under Apps while it's open, even when it isn't pinned.
+- In apps with their own side list (Rooms, Porch, Mail and Files) the main sidebar folds to its icons by itself, and comes back when you leave. Open it there once and it stays open in those apps on that device.
+- The voice panel in the sidebar is now a card in the "happening now" spot. Deafen, camera, sharing your screen and voice settings are in the channel itself, one tap away.
+- On a computer, uploads away from Files and Photos show in the sidebar instead of as a floating pill.
+- The sidebar's Automations link goes to /automations.
+<!-- Files UI (ui-files) -->
+- Files: Recent, Starred, Trash, Shared links, Home and Devices show placeholder rows while they load, like My files does, instead of the word "Loading".
+- Files: the search box says "Search Files" (it used to say "Search Drive"), and Trash says things there "still take up space" instead of talking about quota.
+- Files: an empty folder shows one clean panel with "Upload" and "New" (the list of things to make opens from New), without a table heading and a lone "System" row underneath; a fresh My files tucks its built-in folders behind "Show built-in folders".
+- Files: moving things to the trash no longer asks "are you sure" first. It just goes, with Undo on the message; only "Delete forever" still asks.
+- Files: when a folder can't be opened you get a plain message with "Try again" instead of "Failed to load files", and a failed "Save a copy" shows a normal message instead of a browser pop-up.
+- Files: starring is instant. The star fills the moment you tap it (and comes back off with a message if it couldn't be saved), and starring several things at once says how many.
+- Files: "Move to…" on Recent opens the move dialog (it used to just open the folder; that is now "Show in folder"), and trashing several starred things offers Undo.
+- - Files: pictures in the preview zoom with the wheel, a pinch or a double-click, drag to look around, and swipe across for the next file.
+- - Files: the selection bar now floats at the bottom and slides in, so the list no longer jumps; on a phone it names its three main actions and keeps the rest under More.
+- - Files: the left list is grouped into Browse, Shared and Tools, and storage is one slim line that opens to show what is using the space and the last backup.
+- - Files: "Details" is in every item's menu; on a phone or tablet it opens as a sheet from the bottom.
+- Photos: on a phone, a handle on the right edge of the timeline to drag through the months, with the month shown beside it.
+- Photos: Undo after moving photos to the trash or archiving them, in the timeline, in an album and in the viewer.
+- Photos: drop photos or videos anywhere in Photos to upload them; dropped on an open album, they go into that album.
+- Photos: tick a whole day from its date heading.
+- Photos viewer: a "More" button on phones with Send, Download, Download edited and Archive; the F, A and Delete keys favourite, archive and trash; every button says what it does when you hover.
+- Photos viewer: the photo follows your finger as you swipe and the next one slides in; it opens growing from its tile and follows a swipe down to close.
+- Photos: the selection bar floats over the grid, so the photos no longer jump when you start picking; its buttons are bigger.
+- Photos: the menu keeps Photos, Albums, People and Places in the row; Favourites, Archive, Family and Clean up are under "More".
+- Photos: the heart flips straight away, with a small pop, in the grid and the viewer.
+- Photos: grey placeholder tiles and album cards while things load, in place of "Loading…".
+- Photos: New album, Save as a smart album and closing the editor with changes ask in the app's own dialogs, not the browser's.
+- Photos: photos added from an album page upload through the upload list, so they show progress and can be retried.
+- Photos: the tick on a tile is easier to hit, and the empty Photos page is shorter, with a "Set up phone backup" button.
+<!-- UI pass: Rooms (ui-rooms) -->
+- Rooms: what you were typing in a room is kept if you reload or come back later, on that device.
+- Rooms: the emoji picker has a search box and a row of the ones you used lately.
+- Rooms: see who reacted to a message, from the button beside its reactions or by pressing and holding one.
+- Rooms: on a phone, tap a message to see when it was sent.
+- Voice: the voice card shows how long you've been in.
+<!-- UI pass: Rooms (ui-rooms) -->
+- Rooms: the reply, react and more buttons now sit on the message they belong to, instead of at the far edge of the screen.
+- Rooms: conversations sit in a centred column on wide screens, with the message box lined up underneath.
+- Rooms: deleting a message happens at once, with Undo for ten seconds, instead of asking first.
+- Rooms: leaving or deleting a space or room, removing someone and clearing call history now ask in Promptly's own style instead of a browser pop-up. Deleting a space asks you to type its name.
+- Rooms: Enter finishes the create and rename forms.
+- Rooms: buttons, selection and your own messages use Promptly's terracotta; indigo stays as the Rooms mark.
+- Rooms: spaces, rooms and messages show placeholder rows while they load, instead of a spinner.
+- Rooms: new messages, the jump-to-latest button and the side panel ease in, the typing line has moving dots, and reactions are bigger and pop when added.
+- Rooms: Block and Unblock moved from the top of a one-to-one conversation into its More menu.
+- Rooms: a brand-new Rooms shows one "Create a space" button, and "It's just you here" is a card with an Add people button.
+- Voice: the voice card says "Good connection", "Okay connection" or "Weak connection" (tap for the details), has bigger buttons on touch screens, says "Leave" instead of "Disconnect", and slides in and out.
+<!-- Porch UI pass (ui-porch) -->
+- Porch: tap a photo to see it full screen. Pinch or double-tap to zoom, swipe sideways for the next one, swipe down to close, and Save keeps a copy. Double-tapping a photo in the feed still likes it.
+- Porch: pull the feed down on a phone to check for new posts, and the "new posts" pill now slides in.
+- Porch: Undo after deleting your own post or comment. It goes at once with no "are you sure", and you have ten seconds to bring it back.
+- Rooms and Porch: a deleted message or post now disappears for everyone straight away, and Undo brings it back exactly as it was (reactions, pin, files and comments included). Before, other people kept seeing it until Undo ran out, and closing the app in those ten seconds could leave it there.
+- Porch on a phone: Search, Saved and Settings buttons at the top of your own profile, and a marker on the bottom bar showing which tab you're on.
+<!-- Porch UI pass (ui-porch) -->
+- Porch: posting takes you straight back to the feed. A small chip shows "Posting… 60%", then "Posted" with View. If it doesn't go, the chip says why, offers Try again, and the post is kept as a draft.
+- Porch: a new post starts with the words, with "Add photos or videos" as the first button, so a short post is one step.
+- Porch: your comment shows the moment you send it. If it can't be sent it goes back in the box.
+- Porch: liking gives a small pop, and on a phone the number of comments sits beside the comment button.
+- Porch: a post's "…" menu is set out as Share, Manage and Safety.
+- Porch: the welcome is now the top of your feed the first time you open it, with nothing to close.
+- Porch: lists show grey placeholders while they load, not the word "Loading…".
+- Porch: on a computer the right-hand column only shows when there's an invite or a group to join; otherwise the feed sits in the middle.
+- Porch: unread badges match the rest of Promptly, the smallest text is bigger, and the small buttons (photo arrows, comment heart and "…", reactions) are easier to hit.
+<!-- Maps UI pass (ui-maps) -->
+- Maps on a phone: the panel at the bottom now drags between three heights (just the handle, half the screen, nearly full) by its handle, so the map is never stuck behind it.
+- Maps: Undo after removing a saved place, a recent place, your parked car or a usual route, and after you stop sharing your location. A delete that fails now says so and puts the row back.
+- Maps search: your recent places show as soon as you tap the search box, the arrow keys and Enter pick a result, Esc closes the list, and "nothing found" suggests what to try.
+- Maps routes: each route shows when you would arrive, the quickest one is tagged "Fastest", a Swap button reverses the trip, and each step has a turn icon.
+- Maps place card: a Share button, how far the place is from you, and "Copy coordinates" in place of the raw numbers.
+- Maps: "Send to my phone" on a computer or iPhone shows a code to scan (or a link to copy) that opens the trip in Promptly on your Android phone.
+- Maps on a computer: zoom buttons, and a compass button that turns the map back to north when it has been rotated.
+- Places: "Open in Maps" on each place that is on the map.
+<!-- Maps UI pass (ui-maps) -->
+- Maps: the locate button shows when the map is following you and when location is blocked; charging stations and traffic are now under one Layers button.
+- Maps: placeholder rows while a route, a timeline day or your offline areas load; the Home, Place and Route panels slide between each other.
+- Maps: bigger tap targets on phones, terracotta for selected buttons, and switches and pill choices in place of tick boxes and drop-downs (avoid tolls, timeline, live location, offline areas).
+- Maps: when Maps is not set up, people who are not admins are told to ask their admin instead of seeing setup steps.
+- Places: a proper empty state, with a way back to all places when a filter or map spot has nothing.
+<!-- Notes look and feel (ui-notes) -->
+- Notes: "Delete forever" now asks first, on a note in the Trash, on several selected notes and inside an open note.
+- Notes on a phone: swipe a card sideways to archive it (or bring it back from the Archive), and press and hold a card for everything you can do with it: colour, select, pin, remind, share, labels, archive, delete. Press and hold used to select the note; Select is now the first choice in that list.
+- Notes on a phone: with notes selected, the actions sit along the bottom with their names (Pin, Colour, Labels, Archive, Delete).
+- Notes: a note opens by growing out of its card and closes back into it, cards glide to their new places when you add, pin, archive or move one, and "Take a note…" opens smoothly. Menus, sheets and the phone's side menu ease in. All of it stays still if your device asks for less motion.
+- Notes: while your notes load you see the shape of the cards instead of a spinner, and the columns no longer jump on first paint.
+- Notes: with only a few notes the cards sit centred under "Take a note…", and in dark mode a plain card is a touch lighter than the page with an edge you can see.
+- Notes: "Edit labels" opens in place: rename a label, change its colour or delete it without leaving Notes. Labels are shared with your other apps, so the change shows everywhere.
+- Notes: bigger buttons on cards and bigger colour swatches, easier to hit with a finger.
+- Calendar: buttons, selection and today markers use Promptly's terracotta; blue stays on the app icon and on calendar colours.
+- Calendar: times read "9 am" or "09:00" following your clock setting, never a bare "09".
+- Calendar: the phone header is the month, Today and a view switch (search and earlier/later are in the view menu).
+- Calendar: the phone's week view shows three days instead of seven squeezed columns.
+- Calendar: stepping forward or back slides the view, and switching view fades it in.
+- Calendar: the quick-add button is labelled "Quick add" instead of a sparkle icon.
+- Calendar: the smallest text is now 12px.
+- Mail: write more than one email at a time. Messages sit in a dock at the bottom of the screen; minimise one to read something else and it keeps everything you wrote. Esc tucks a message away (or closes it when it is empty).
+- Mail: drag files onto a message, or paste them, to attach. Attachments show their size, and pictures show a small preview.
+- Mail: in a conversation, Reply and Forward sit under every message, a Reply / Reply all / Forward row follows the last one, earlier messages in a long conversation fold away, and tapping a time shows the full date.
+- Mail: filter search results by Unread, Has attachment, who it is from, and how recent (filters apply to the results already loaded).
+- Mail: new keys: r reply, a reply all, f forward, s star, u mark unread, and ? for the list of shortcuts. j and k keep the highlighted email in view.
+- Mail: a Select button on phones for picking several emails at once.
+- Mail: starring, marking read or unread, and "No reply needed" now show straight away, and go back if the change does not save.
+- Mail: Undo for archive, delete, move and send is now a normal toast with an Undo button (still five seconds).
+- Mail: older email loads by itself as you scroll down.
+- Mail: the list shows placeholder rows while your mail loads, instead of a spinner.
+- Mail: every sheet (snooze, labels, mailboxes, add to calendar, settings) is now the same sheet the rest of Promptly uses, with Esc to close.
+- Mail: adding a mailbox asks for just your email and password; server details are under "Advanced", and a failed sign-in suggests what to check.
+- Mail: adding a link while writing uses a small box in the toolbar, not a browser pop-up.
+- Mail: colours come from the shared theme, small text is at least 12px, and buttons are bigger on phones.
+<!-- Contacts UI pass (ui-contacts) -->
+- Contacts: a "More" menu next to the search box with Import, Export, Find duplicates and Reminders & display, so they are one tap from the list instead of under Groups.
+- Contacts: select several people at once (More → Select contacts, Ctrl or Shift-click, or press and hold on a phone) to add them to a group, export them or delete them, with Undo on the delete.
+- Contacts: Call, Email and Favourite buttons appear on a row when you point at it, and "Clear filters" shows when nothing matches.
+- Person page: Call, Text, Email and Directions tiles for people who aren't on Promptly, and their address opens in Maps.
+- Photos faces: "Turn on face recognition" with a button when it's off, instead of a line pointing at settings.
+<!-- Contacts UI pass (ui-contacts) -->
+- Contacts: buttons and selection are terracotta like the rest of Promptly; the blue stays for the app's own mark.
+- The three screens that were all called "People" now have their own names: Contacts (the address book), Faces (in Photos) and the person page, with the same back and More buttons at the top of each.
+- Photos faces: saying two people are the same now shows both faces and asks first, and offers Undo straight after for named people.
+- Person page: Block and Unblock moved into the More menu at the top, and unblocking asks first.
+- Contacts: the delete buttons on notes and history are faintly visible instead of hidden until you point at them.
+- Contacts, Faces and the person page show the page's shape while loading instead of "Loading…".
+- Tasks: swipe a task right on a phone to tick it off, or left to move it to tomorrow, next week or a day you pick. On a computer the same choices sit on a button that shows when you point at a task.
+- Tasks: drag a task onto another day in Upcoming to move it there (with a mouse), with Undo.
+- Tasks: steps inside a task can be renamed where they sit, dragged into order, and brought back with Undo after removing one.
+- Tasks: tap a task in the Completed list to put it back on your list.
+- Tasks: keyboard keys. Up and Down move between tasks, Enter or E opens one, T moves it to today, Q starts a new one.
+- Tasks: ticking a task now draws the tick, strikes the title through and folds the row away before it moves to Done. Tap the circle again while it plays to call it off; Undo still works after.
+- Tasks: "Move all to today" says how many tasks it moved and offers Undo.
+- Tasks: deleting a list asks in the app's own dialog (not the browser's), and can be undone, putting its tasks back.
+- Tasks: the list editor has a grid of icons to pick from instead of a text box, and colours have names.
+- Tasks: buttons, selection and the tick use the suite's terracotta; red is kept for the app's mark and the high-priority flag.
+- Tasks: new tasks ease into place, and a task being reordered follows your pointer.
+- Tasks: Settings explains typing tasks with plain examples first, and shows priority as !, !! and !!!.
+- Tasks: bigger tap targets on phones for the day "+", send, new list and the reorder grip.
+
+### Fixed
+
+<!-- Release e2e pass (release-prep) -->
+- Photos: the menu's "More places" button is called that for screen readers too, so it's no longer a second "More" beside an album's or a memory's own More button.
+- Porch: with photos picked for a new post, going Back from Share to Arrange to Pick now ends at Close (keeping a draft). It went round in a loop with no way out on a phone.
+- Forms: typing quickly into an option you just added with Enter no longer loses letters (it could keep only the last one or two).
+- Notes: with lots of notes, opening Notes no longer sends so many requests at once that the server turns some away, which could make a note say "This note isn't on this device yet" while you were online. Notes are copied to the device a little more slowly, and a turned-away request is tried again.
+
+<!-- New-member onboarding (onboard-fixes) -->
+- Choosing a password: a live checklist shows the rules (length, a number, a symbol), and errors read as plain sentences instead of "new_password: Value error, …".
+- After changing your password, an old error message no longer stays on screen, and you see that it worked.
+- Files: the "System" row at the bottom of a folder no longer cuts off the list's rounded corners.
+- Photos: a photo or video you upload shows in the grid straight away, without a reload.
+- Files: the folder list at the side drops a folder as soon as you move it to trash, and brings it back on Undo or restore.
+- Photos: the viewer no longer shows a Next arrow on the last photo once it knows there are no more.
+- Contacts: a new contact with nothing typed yet shows "?" on its picture, not "NN".
+<!-- Maps UI pass (ui-maps) -->
+- Maps: stopping live location sharing, pausing the timeline, changing how long history is kept and deleting a timeline day now say so when they fail instead of failing silently.
+<!-- Notes (ui-notes) -->
+- Notes: Close in the "Take a note…" box works on the first click. The formatting buttons keep their place under the text (quieter until you're typing) instead of appearing and pushing Close down.
+- Notes: pressing Enter in a note's title starts a new line under the text that's already there, instead of putting what you type next in front of it.
+- Calendar: click or drag on the week and day grid to draw a new event, with a small bubble beside it for the title, time and calendar ("More options" opens the full editor).
+- Calendar: "+3 more" on a month day opens that day's list in place.
+- Calendar: resize an event from its top edge, and stretch all-day and month events across days from either end.
+- Calendar: Undo after moving a repeating event.
+- Calendar: the editor asks before closing with unsaved changes.
+- Calendar: placeholder blocks while Calendar and its events load.
+- Calendar: on a phone, swipe left or right to change the period.
+- Calendar: more keys (n and p for next and previous, e to edit and Delete to delete the open event, ? for the list).
+- Calendar: Promptly's own date and time pickers in the event editor on a computer (a phone keeps its built-in ones).
+- Tasks: the Completed list shows each task's time in your own time format and under the right local day.
+- Porch: a new post now opens on the words, so a text post is just "write and post"; "Add photos or videos" is there when you want them. Before, the text-post option was a link underneath all your photos, where it was easy to never find.
+- Passwords extension: bookmark sync no longer says "synced" when your server couldn't be reached. It says the other browsers don't have the latest yet, and keeps trying.
+- Passwords bookmark sync: a bookmark deleted in one browser now stays deleted. A browser with no record of its last sync (first sync, sync turned off and on, or the extension reinstalled) used to send its own copy back as a new bookmark, so it stayed there and came back everywhere; it now removes a copy that matches one in Recently deleted and was there before the deletion. A removal the browser refuses is tried again instead of being re-uploaded, and a deleted bookmark is no longer brought back because another device reordered it at the same time. "Keep them everywhere" still brings everything back.
+- Solid accent buttons with white text now meet WCAG AA in light and dark: the fill is the deeper terracotta (white on it is 4.95:1, was 3.1:1) and hover darkens (6.0:1) instead of fading. Accent text, borders, tints, switches and progress bars are unchanged, and the e2e accessibility checks no longer skip accent buttons.
+- **P Maps driving (phone and Android Auto): a wrong turn now gets a new route within a few seconds.** The check for having left the route ignored every GPS fix less sure than 15 m, which is most of them in a car, so it often never asked for a new route. It now uses any usable fix, allows more room the vaguer the fix, and also notices driving the wrong way along the route.
+- P Maps: after a wrong turn the new route is the best way from where you are, rather than a way back to the points of the route you first picked.
+- P Maps: after a wrong turn, a route you saved as "Always go this way" is only rejoined when that costs no more than the extra minutes you allowed for it. Otherwise you get the best way from where you are.
+- P Maps driving: traffic on the road ahead is checked every minute and a half (every minute while traffic is already slowing you, every three on trips over 150 km), and within seconds of a new route after a wrong turn. It was every three minutes, and a new route kept the old one's traffic until the next check.
+- P Maps driving: a GPS fix arriving at the same moment as a new route can no longer leave the old turns showing on the new line.
+- P Maps: a new route asked for while stopped no longer assumes the direction the phone last guessed you were facing.
+- Android Auto: turn alerts use their own notification channel, so they are no longer silenced with the quiet "navigation running" one.
+
+### Removed
+
+- Running code is gone: the AI can no longer run Python in chat, code blocks no longer have a Run button, and the code sandbox container is no longer installed (./update.sh removes it). HTML, React and SVG previews of code blocks still work, and old chats still show their past runs. The "Code execution" setting on users is gone with it.
+
+### Security
+
+<!-- Security review fixes (sec-fixes) -->
+- A placeholder TUS_HOOK_SECRET (copied from .env.example) now stops Promptly starting on a public address, like a placeholder SECRET_KEY does. ./update.sh fills it in before it restarts anything.
+- After a SECRET_KEY change, mail account passwords, saved secrets, the breach-check key and the traffic key are also moved onto the new key at start-up (with SECRET_KEY_PREVIOUS set), not only MFA, provider and connector secrets.
+- Password-reset emails, single sign-on and feedback emails no longer take this server's address from the request. A forged Host header could make a real reset email link to someone else's site. Links now always use the public address set in Admin, or the one you're using when it's one of those.
+- Workspace search results in the Ctrl+K palette show their highlighted snippet as text, so words in a shared note can't turn into page markup.
+- Updated python-jose to 3.4.0 and cryptography to 44.0.1 for their security fixes.
+- After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"). A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
+- The Office converter can no longer call Promptly's own server directly over the internal network it shares with it, and big-upload hooks need their secret (no more "it came from inside, so it's fine").
+- Fetching a web page (the AI's page reader, remote images in Mail, automations, link previews) connects to the exact address that was checked, so a site can't switch its DNS to an address inside your network between the check and the request.
+- nginx ignores the visitor address in CF-Connecting-IP when it arrives through Docker's gateway, so a device on your network can't pretend to be someone else to the rate limits. cloudflared should run as a container on Promptly's network (README, "Cloudflare Tunnel").
+- New optional NGINX_BIND in .env picks which address ports 8087/8488 open on (usually the server's LAN address). By default they now open on IPv4 only. The README has a new "Exposure" section: what should be reachable, and how to check from outside on IPv4 and IPv6.
+- The server, its workers, the upload service and the Office converter run with almost all Linux privileges removed and can't gain new ones.
+- Signing out now ends that session's access straight away, instead of up to 15 minutes later.
+- Once a public address is set, pages on this machine's localhost are no longer allowed to make signed-in requests to Promptly (unless DEBUG is on).
+- Calls on Linux: LiveKit's ports 7880 and 6789 are documented as firewall-only (they can't be limited to localhost because nginx and the backend reach them over Docker's bridge).
+<!-- UI polish, shared foundations (ui-polish) -->
+
+## [0.35.0] - 2026-11-09
+
+### Added
+<!-- Porch phases 2–3 (porch-p2) -->
+- Porch stories: photo, video and text stories that disappear after a day, posted to your groups the way posts are and seen only by the people in those groups. Only you see who has viewed yours. Videos can be up to a minute. A story can carry words, an @mention and a place; the person mentioned gets a notification, and nothing else about a story sends one. Stories are never searched, they are in Export my library, and a story can be reported to its group's admins like a post.
+- Porch stories on screen: a row of stories under the group chips (new ones ringed in terracotta, with the group's emoji when they went to one group), a full-screen viewer (tap for the next or last one, hold to pause, swipe down or Esc to close), "Seen by" on your own, and a story maker with the phone's camera, your Photos library or words on a colour, plus stickers you drag, pinch and style. ＋ now offers Post or Story, and long-pressing P Porch on Android offers New story and New post. A video over a minute offers to become a post instead.
+- Replying to a Porch story: send a message or one of six quick reactions from under someone's story, and it goes to your one-to-one conversation with them in Rooms, with the story attached while it's up ("This story has ended" after).
+- Porch highlights and your story archive: every story you post is kept privately for you (Profile → Story archive), and you can keep some on your profile as named highlights with a cover. Each story in a highlight still shows only to the people in the groups it went to, so Mum sees the family ones and your mates theirs. Profiles also show a ring round the picture while someone has a story up.
+- Pinned posts in Porch groups: a group's admins can pin up to three posts to the top of the group's page (never the feed), from a post's "…" menu.
+- Porch group events: plan an event in a group (the group's Event button, or Event when posting to one group) and it goes in Calendar with everyone in the group invited (not for Everyone, unless you choose), on a post with a card showing who's going and Going · Maybe · Can't go. Anyone in the group can answer from the card, someone who joins later too, and it lands in their calendar. A group's Events tab lists what's coming up. Make this an event on your own post now puts the card on the post, and can invite everyone who sees it. Deleting the event leaves "Cancelled" on the post; deleting the post can cancel the event too.
+- People pages show what you share with someone in other apps, starting with Porch: "On Porch" has their latest posts you can see, the groups you're both in, and See all on Porch. Nothing shows from a group you're not in.
+
+### Changed
+- Install apps: the Passwords browser extension for Chrome, Edge and Brave now comes from the Chrome Web Store with one "Add to Chrome" button, and keeps itself up to date. Installing it by hand from a zip is still there as a fallback.
+
 ## [0.34.0] - 2026-11-09
 
 ### Added

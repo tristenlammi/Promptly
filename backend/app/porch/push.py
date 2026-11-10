@@ -182,14 +182,21 @@ async def _group_rows(db: AsyncSession, post: PorchPost) -> tuple[list[PorchGrou
     return groups, rows
 
 
-async def post_created(db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool) -> int:
+async def post_created(
+    db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool,
+    skip: set[uuid.UUID] | None = None,
+) -> int:
     """A new post (``created``) or a changed one: tag requests, mentions,
     and — for a new post — "All new posts" bells and "Notify me when they
-    post". Returns how many pushes went."""
-    return await _guarded("post", _post_created(db, post, mentioned, tagged, created=created))
+    post", never to ``skip`` (people just invited to the event it carries:
+    Calendar's invite told them). Returns how many pushes went."""
+    return await _guarded("post", _post_created(db, post, mentioned, tagged, created=created, skip=skip or set()))
 
 
-async def _post_created(db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool) -> int:
+async def _post_created(
+    db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool,
+    skip: set[uuid.UUID],
+) -> int:
     author = await db.get(User, post.author_id)
     if author is None or post.deleted_at is not None:
         return 0
@@ -203,7 +210,7 @@ async def _post_created(db: AsyncSession, post: PorchPost, mentioned: Iterable[s
         groups, rows = await _group_rows(db, post)
         alerts = set((await db.execute(select(PorchAlert.user_id).where(PorchAlert.author_id == author.id))).scalars())
         bells = {m.user_id for ms in rows.values() for m in ms if m.notify == "all"}
-        followers = (alerts | bells) & audience - tagged_ - mentioned_
+        followers = (alerts | bells) & audience - tagged_ - mentioned_ - skip
     who = tagged_ | mentioned_ | followers
     if not who:
         return 0
@@ -369,6 +376,36 @@ async def removed(db: AsyncSession, author_id: uuid.UUID, *, what: str, scope: s
         return int(await _send(to=author_id, kind="removed", mode="on", title=title, body=body, url="/porch/activity", tag=f"porch:removed:{uuid.uuid4()}", actor=None))
 
     return await _guarded("removal", go())
+
+
+# ------------------------------------------------------------------ stories (WP-P2.1)
+
+
+async def story_mentioned(db: AsyncSession, story: Any, mentioned: Iterable[str | uuid.UUID]) -> int:
+    """"Sam mentioned you in a story" — the only push a story sends
+    (decision S3: nothing for a new story). Only people who can see it."""
+
+    async def go() -> int:
+        author = await db.get(User, story.author_id)
+        if author is None or story.deleted_at is not None:
+            return 0
+        audience = await access.story_audience_ids(db, story) - {author.id}
+        who = {uuid.UUID(str(m)) for m in mentioned} & audience
+        who &= await _allowed(db, who)
+        if not who:
+            return 0
+        modes = await _modes(db, who)
+        name = core.display_name(author)
+        sent = 0
+        for uid in who:
+            sent += await _send(
+                to=uid, kind="mention", mode=modes[uid]["mention"], title=f"{name} mentioned you in a story",
+                body="See it before it's gone (stories last a day).", url=f"/porch/stories/{author.id}",
+                tag=f"porch:story:{story.id}", actor=author,
+            )
+        return sent
+
+    return await _guarded("story", go())
 
 
 # ------------------------------------------------------------------ reports (WP-P2.0)

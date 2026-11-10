@@ -109,11 +109,13 @@ test.describe("notes", () => {
       return n ? `${n.color}:${n.pinned}:${n.labels.map((l) => l.name).join(",")}` : null;
     }).toBe(`sand:true:${label}`);
 
-    // The label in the rail lists it.
-    await page.getByRole("link", { name: new RegExp(`^${label}`) }).click();
+    // The label in the rail lists it. (Notes' own menu: Promptly's app rail
+    // has Notes, Archive and Trash links too.)
+    const notesNav = page.getByRole("navigation", { name: "Notes" });
+    await notesNav.getByRole("link", { name: new RegExp(`^${label}`) }).click();
     await expect(card(page, t)).toBeVisible();
     await expect(card(page, other)).toHaveCount(0);
-    await page.getByRole("link", { name: "Notes", exact: true }).click();
+    await notesNav.getByRole("link", { name: "Notes", exact: true }).click();
 
     // Search, and the Lists chip.
     const search = page.getByRole("searchbox", { name: "Search your notes" });
@@ -128,7 +130,7 @@ test.describe("notes", () => {
     await card(page, other).hover();
     await card(page, other).getByRole("button", { name: `Archive ${other}` }).click();
     await expect(card(page, other)).toHaveCount(0);
-    await page.getByRole("link", { name: "Archive" }).click();
+    await notesNav.getByRole("link", { name: "Archive" }).click();
     await expect(card(page, other)).toBeVisible();
     await expect.poll(async () => (await serverNotes(page, auth, "archive")).some((x) => x.title === other)).toBe(true);
 
@@ -137,7 +139,7 @@ test.describe("notes", () => {
     await card(page, other).getByRole("button", { name: `More for ${other}` }).click();
     await page.getByRole("menuitem", { name: "Delete note" }).click();
     await expect(card(page, other)).toHaveCount(0);
-    await page.getByRole("link", { name: "Trash" }).click();
+    await notesNav.getByRole("link", { name: "Trash" }).click();
     await expect(page.getByText("Notes in the Trash are deleted after 30 days.")).toBeVisible();
     await expect(card(page, other)).toBeVisible();
     await card(page, other).hover();
@@ -146,7 +148,7 @@ test.describe("notes", () => {
     await expect.poll(async () => (await serverNotes(page, auth, "archive")).some((x) => x.title === other)).toBe(true);
 
     // Select two and colour them together.
-    await page.getByRole("link", { name: "Notes", exact: true }).click();
+    await notesNav.getByRole("link", { name: "Notes", exact: true }).click();
     await card(page, t).hover();
     await card(page, t).getByRole("button", { name: `Select ${t}` }).click();
     await expect(page.getByText("1 selected")).toBeVisible();

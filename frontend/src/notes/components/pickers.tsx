@@ -23,7 +23,7 @@ export function ColorGrid({ value, onPick }: { value: string | null; onPick: (c:
           onClick={() => onPick(c)}
           data-color={c}
           className={cn(
-            "note-c note-swatch relative flex h-8 w-8 items-center justify-center rounded-full border-2",
+            "note-c note-swatch relative flex h-9 w-9 items-center justify-center rounded-full border-2",
             value === c ? "border-[var(--accent)]" : "border-[var(--border)] hover:border-[var(--text-muted)]",
           )}
         >

@@ -14,7 +14,6 @@ from typing import Any
 from app.chat.tools.base import Tool
 from app.chat.tools.maps import MapsChargersTool, MapsDirectionsTool, MapsSearchTool, TimelineDayTool, TimelineVisitsTool
 from app.chat.tools.calendar import CalendarAddEventTool, CalendarChangeEventTool, CalendarEventsTool, CalendarFreeTimesTool
-from app.chat.tools.code_interpreter import CodeInterpreterTool
 from app.chat.tools.crossapp import FindPersonTool, MyDayTool, PostToRoomTool, ReadRoomTool, SearchAppsTool
 from app.chat.tools.deep_research import DeepResearchTool
 from app.chat.tools.echo import EchoTool
@@ -55,7 +54,6 @@ REGISTRY: list[Tool] = [
     EchoTool(),
     GeneratePdfTool(),
     GenerateImageTool(),
-    CodeInterpreterTool(),
     WebSearchTool(),
     FetchUrlTool(),
     # Answers from the user's own files (category "drive", WP-5.2) —

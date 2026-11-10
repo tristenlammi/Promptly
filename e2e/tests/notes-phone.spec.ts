@@ -22,9 +22,10 @@ test.describe("notes on a phone", () => {
     await expect(card(page, t)).toBeVisible();
     await expect.poll(async () => (await serverNotes(page, auth)).some((n) => n.title === t)).toBe(true);
 
-    // Two columns side by side.
-    const lefts = await page.locator("article[data-note-card]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
-    if (lefts.length >= 2) expect(new Set(lefts).size).toBe(2);
+    // Two columns side by side (once the cards have slid into place: the
+    // grid animates a card that's added or moves).
+    const lefts = () => page.locator("article[data-note-card]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
+    if ((await lefts()).length >= 2) await expect.poll(async () => new Set(await lefts()).size).toBe(2);
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width).toBeLessThanOrEqual(390);
 

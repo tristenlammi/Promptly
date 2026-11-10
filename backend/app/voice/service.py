@@ -3,8 +3,8 @@
 Resolves the configured STT backend and forwards the audio to it:
 
 * ``local``  — the bundled faster-whisper worker (``WHISPER_URL``). The
-  private, self-hosted default; mirrors how the code sandbox and SearXNG
-  are reached over the internal docker network.
+  private, self-hosted default; mirrors how SearXNG
+  is reached over the internal docker network.
 * ``openai`` — OpenAI's hosted transcription API. Optional; only used
   when ``STT_BACKEND=openai`` *and* an ``OPENAI_API_KEY`` is configured.
   Both go through the same multipart shape, so the call sites are nearly

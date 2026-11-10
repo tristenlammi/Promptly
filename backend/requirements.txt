@@ -30,10 +30,11 @@ limits==3.13.0
 coredis==4.17.0
 
 # ---- Auth ----
-python-jose[cryptography]==3.3.0
+# 3.4.0: fixes the algorithm-confusion and JWE "zip bomb" CVEs (2024-33663/33664).
+python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.2.0
-cryptography==43.0.1
+cryptography==44.0.1
 
 # ---- Settings / validation ----
 pydantic==2.9.2

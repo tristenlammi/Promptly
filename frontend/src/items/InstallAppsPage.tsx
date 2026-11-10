@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Car, Download, KeyRound, Loader2, Monitor, Share, Smartphone } from "lucide-react";
+import { ArrowUpRight, Car, CheckCircle2, ChevronDown, Download, KeyRound, Loader2, Monitor, Smartphone } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { extractError } from "@/components/files/helpers";
 import { TopNav } from "@/components/layout/TopNav";
+import { IosHomeScreenSteps } from "@/components/layout/WelcomeDialog";
 import { OpenInBrowserGuide } from "@/components/pwa/OpenInBrowserGuide";
-import { isStandaloneDisplay } from "@/lib/installPrompt";
+import { isStandaloneDisplay, useInstallPrompt } from "@/lib/installPrompt";
 import { toast } from "@/store/toastStore";
 
 import { porchApi } from "@/api/porch";
@@ -103,24 +104,28 @@ function isAndroid(): boolean {
 /** "Promptly for Android": one app that puts every part of Promptly on the
  *  phone as its own icon (P Rooms, P Workout…), full screen — no browser
  *  install steps. Shown on Android when the server has the APK. */
-function AndroidAppCard({ kinds }: { kinds: string[] }) {
-  const { data: apk } = useQuery({
+function useAndroidApk() {
+  return useQuery({
     queryKey: ["android-apk"],
     queryFn: async () => {
       const r = await fetch("/downloads/Promptly.json", { cache: "no-store" });
       return r.ok ? ((await r.json()) as { version: string; size_bytes: number }) : null;
     },
     staleTime: 60_000,
-  });
+  }).data;
+}
+
+function AndroidAppCard({ kinds, bare }: { kinds: string[]; bare?: boolean }) {
+  const apk = useAndroidApk();
   if (!apk) return null;
   // The phone pre-ticks these in its app picker: the built-in apps plus every
   // app you've added here.
   const apps = ["photos", "rooms", "calendar", "mail", "maps", ...kinds].join(",");
   const setup = `promptlyapp://setup?server=${encodeURIComponent(location.origin)}&apps=${encodeURIComponent(apps)}`;
   return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface)] p-4">
+    <section className={bare ? "flex flex-col gap-3" : "flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface)] p-4"}>
       <div className="flex items-center gap-3">
-        <img src="/pwa-192.png" alt="" className="h-12 w-12 shrink-0 rounded-2xl" />
+        {!bare && <img src="/pwa-192.png" alt="" className="h-12 w-12 shrink-0 rounded-2xl" />}
         <div className="min-w-0 flex-1">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text)]">
             <Smartphone className="h-4 w-4 text-[var(--accent-text)]" /> Promptly for Android
@@ -260,7 +265,9 @@ function WindowsPasswordsCard() {
 
 type ExtensionInfo = { version: string; chrome: { size_bytes: number }; firefox: { size_bytes: number }; firefox_signed?: { size_bytes: number } };
 
-/** The browser extension, until it's in the stores: loaded by hand from a zip. */
+const CHROME_STORE_URL = "https://chromewebstore.google.com/detail/promptly-passwords/ipiljpicohcmkpnblgblpgdekjoemghj";
+
+/** The browser extension: the Chrome Web Store for Chromium browsers (a zip by hand as a fallback); Firefox from here. */
 function BrowserExtensionCard() {
   const info = useDownloadInfo<ExtensionInfo>("PromptlyPasswordsExtension.json");
   if (!info) return null;
@@ -273,11 +280,9 @@ function BrowserExtensionCard() {
             <KeyRound className="h-4 w-4 text-[var(--accent-text)]" /> Promptly Passwords browser extension
           </h2>
           <p className="text-xs text-[var(--text-muted)]">
-            Fills your logins, 2FA codes and passkeys on websites. It isn't in the browser stores yet.{" "}
-            {info.firefox_signed
-              ? "On Firefox it installs from here and updates itself; on the others it's installed by hand and doesn't."
-              : "It's installed by hand, and doesn't update itself."}{" "}
-            Version {info.version}.
+            Fills your logins, 2FA codes and passkeys on websites. On Chrome, Edge and Brave it comes from the Chrome Web Store and
+            keeps itself up to date.{" "}
+            {info.firefox_signed ? "On Firefox it installs from here and updates itself too." : "On Firefox it's installed by hand for now."}
           </p>
         </div>
       </div>
@@ -286,19 +291,34 @@ function BrowserExtensionCard() {
         <ol className="flex flex-col gap-2">
           <li className="flex flex-wrap items-center gap-2">
             <span>1.</span>
-            <a href="/downloads/promptly-passwords-chrome.zip" download className={DOWNLOAD_BUTTON}>
-              <Download className="h-4 w-4" /> Download ({megabytes(info.chrome.size_bytes)})
+            <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className={DOWNLOAD_BUTTON} data-testid="chrome-store">
+              <Download className="h-4 w-4" /> Add to Chrome
             </a>
           </li>
-          <li>2. Unzip it to a folder you'll keep. The browser goes on using that folder.</li>
           <li>
-            3. Go to <code className="font-mono text-xs">chrome://extensions</code> (in Edge, <code className="font-mono text-xs">edge://extensions</code>) and turn
-            on <b>Developer mode</b>.
+            2. Choose <b>Add to Chrome</b> on the store page. In Edge, choose <b>Allow extensions from other stores</b> first, then <b>Get</b>.
           </li>
-          <li>
-            4. Choose <b>Load unpacked</b> and pick the folder.
-          </li>
+          <li>3. Open it from the puzzle-piece menu and enter this address: <code className="font-mono text-xs">{location.origin}</code></li>
         </ol>
+        <details className="text-xs text-[var(--text-muted)]">
+          <summary className="cursor-pointer">Can't use the store? Install it by hand (version {info.version})</summary>
+          <ol className="mt-2 flex flex-col gap-2">
+            <li className="flex flex-wrap items-center gap-2">
+              <span>1.</span>
+              <a href="/downloads/promptly-passwords-chrome.zip" download className={DOWNLOAD_BUTTON}>
+                <Download className="h-4 w-4" /> Download ({megabytes(info.chrome.size_bytes)})
+              </a>
+            </li>
+            <li>2. Unzip it to a folder you'll keep. The browser goes on using that folder, and it won't update itself.</li>
+            <li>
+              3. Go to <code className="font-mono">chrome://extensions</code> (in Edge, <code className="font-mono">edge://extensions</code>) and turn on{" "}
+              <b>Developer mode</b>.
+            </li>
+            <li>
+              4. Choose <b>Load unpacked</b> and pick the folder.
+            </li>
+          </ol>
+        </details>
         <h3 className="mt-1 font-semibold">Firefox</h3>
         {info.firefox_signed ? (
           <ol className="flex flex-col gap-2">
@@ -338,6 +358,12 @@ export function InstallAppsPage() {
   const { data: apps, isLoading } = useQuery({ queryKey: ["apps-launcher"], queryFn: itemsApi.launcher });
   const { data: porchOn } = useQuery({ queryKey: ["porch", "available"], queryFn: porchApi.available, staleTime: 5 * 60_000 });
   const [busy, setBusy] = useState<string | null>(null);
+  const install = useInstallPrompt();
+  const standalone = install.standalone || install.installed;
+  const ios = isIos();
+  const android = isAndroid();
+  const device = ios ? (/ipad/i.test(navigator.userAgent) ? "iPad" : "iPhone") : android ? "phone" : "computer";
+  const apkReady = !!useAndroidApk();
   // Inside an installed app a page just opens in the same app window, where
   // the browser won't offer an install: hand it to the browser instead.
   const [handoff, setHandoff] = useState<{ row: Installable; url: string } | null>(null);
@@ -401,50 +427,96 @@ export function InstallAppsPage() {
       <TopNav title="Install apps" />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-          <p className="text-sm text-[var(--text-muted)]">
-            Put any part of Promptly on your home screen or desktop as its own app — its own icon and window, with no
-            Promptly menus around it. Everything stays in your Promptly, so search and chats still see it.
-          </p>
-          {isAndroid() && <AndroidAppCard kinds={(apps ?? []).map((a) => a.kind)} />}
-          {!isIos() && <AndroidAutoCard />}
-          {isWindows() && <WindowsPasswordsCard />}
-          {!isAndroid() && !isIos() && <BrowserExtensionCard />}
-          {isIos() && (
-            <p className="flex items-start gap-2 rounded-2xl bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
-              <Share className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
-              <span>
-                On iPhone and iPad: tap Install, then in Safari tap <b>Share</b> → <b>Add to Home Screen</b> on the page
-                that opens.
-              </span>
-            </p>
-          )}
-
-          <section className="flex flex-col gap-2">
-            <h2 className="px-1 text-sm font-semibold text-[var(--text)]">Promptly</h2>
-            <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
-              {CORE.filter((a) => a.id !== "porch" || porchOn === true).map(rowEl)}
-            </ul>
-          </section>
-
-          <section className="flex flex-col gap-2">
-            <h2 className="px-1 text-sm font-semibold text-[var(--text)]">Your apps</h2>
-            {isLoading ? (
-              <div className="flex justify-center py-8 text-[var(--text-muted)]">
-                <Loader2 className="h-5 w-5 animate-spin" />
+          <section
+            id="this-device"
+            aria-labelledby="this-device-title"
+            className="flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface)] p-4"
+            data-testid="install-this-device"
+          >
+            <div className="flex items-center gap-3">
+              <img src="/pwa-192.png" alt="" className="h-12 w-12 shrink-0 rounded-2xl" />
+              <div className="min-w-0 flex-1">
+                <h2 id="this-device-title" className="text-base font-semibold text-[var(--text)]">
+                  {standalone ? "Promptly is installed" : `Install Promptly on this ${device}`}
+                </h2>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {standalone
+                    ? "You're using it as an app right now."
+                    : "Recommended. It opens full screen with its own icon, and can send you message alerts."}
+                </p>
               </div>
-            ) : appRows.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--text-muted)]">
-                Apps you add from the store show up here too.{" "}
-                <button type="button" onClick={() => navigate("/apps/store")} className="font-medium text-[var(--accent-text)]">
-                  Get apps
-                </button>
-              </div>
+            </div>
+            {standalone ? (
+              <p className="flex items-center gap-2 text-sm text-[var(--text)]">
+                <CheckCircle2 className="h-4 w-4 text-[var(--success)]" aria-hidden /> Nothing more to do here.
+              </p>
+            ) : ios ? (
+              <IosHomeScreenSteps />
+            ) : android && apkReady ? (
+              <AndroidAppCard kinds={(apps ?? []).map((a) => a.kind)} bare />
             ) : (
-              <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
-                {appRows.map(rowEl)}
-              </ul>
+              <div className="flex flex-col gap-2 text-sm text-[var(--text)]">
+                <button
+                  type="button"
+                  onClick={() => (install.canPrompt ? void install.prompt() : void go(CORE[0], true))}
+                  disabled={busy !== null}
+                  className={DOWNLOAD_BUTTON + " self-start disabled:opacity-60"}
+                >
+                  {busy === "promptly:i" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  Install Promptly
+                </button>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {android
+                    ? "If nothing appears, open Chrome's ⋮ menu and choose Install app or Add to Home screen."
+                    : "If nothing appears, look for the install icon at the right of the address bar, or your browser's menu → Install Promptly."}
+                </p>
+              </div>
             )}
           </section>
+
+          <details className="group rounded-2xl border border-[var(--border)] bg-[var(--surface)]" data-testid="install-more">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-semibold text-[var(--text)] [&::-webkit-details-marker]:hidden">
+              <ChevronDown className="h-4 w-4 transition group-open:rotate-180" aria-hidden />
+              More: each app on its own{android ? ", Android Auto" : ""}{!android && !ios ? ", passwords extension" : ""}
+            </summary>
+            <div className="flex flex-col gap-6 border-t border-[var(--border)] p-4">
+              <p className="text-sm text-[var(--text-muted)]">
+                Put any part of Promptly on your home screen or desktop as its own app — its own icon and window, with no
+                Promptly menus around it. Everything stays in your Promptly, so search and chats still see it.
+                {ios && " On iPhone and iPad: tap Install, then Share → Add to Home Screen on the page that opens."}
+              </p>
+              {!ios && <AndroidAutoCard />}
+              {isWindows() && <WindowsPasswordsCard />}
+              {!android && !ios && <BrowserExtensionCard />}
+
+              <section className="flex flex-col gap-2">
+                <h2 className="px-1 text-sm font-semibold text-[var(--text)]">Promptly</h2>
+                <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+                  {CORE.filter((a) => a.id !== "porch" || porchOn === true).map(rowEl)}
+                </ul>
+              </section>
+
+              <section className="flex flex-col gap-2">
+                <h2 className="px-1 text-sm font-semibold text-[var(--text)]">Your apps</h2>
+                {isLoading ? (
+                  <div className="flex justify-center py-8 text-[var(--text-muted)]">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  </div>
+                ) : appRows.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--text-muted)]">
+                    Apps you add from the store show up here too.{" "}
+                    <button type="button" onClick={() => navigate("/apps/store")} className="font-medium text-[var(--accent-text)]">
+                      Get apps
+                    </button>
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+                    {appRows.map(rowEl)}
+                  </ul>
+                )}
+              </section>
+            </div>
+          </details>
         </div>
       </div>
       {handoff && (

@@ -554,7 +554,7 @@ function RolePicker({
       role: "viewer_copy",
       label: "Viewer + copy",
       title:
-        "Read-only access plus the ability to save a copy into their own Drive.",
+        "Read-only access plus the ability to save a copy into their own files.",
       icon: <CopyIcon className="h-3 w-3" />,
     },
   ];

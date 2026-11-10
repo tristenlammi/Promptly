@@ -49,6 +49,12 @@ IN_ITEM = {"task": "tasks", "recipe": "mealplan", "trip": "trip"}
 KINDS = (*KINDS, "porch_post")
 LABELS["porch_post"] = "a Porch post"
 
+# Porch stories (WP-P2.3): a reply or reaction to a story carries its card.
+# Never grantable; shown only while the story is live and the viewer can see
+# it — anyone else, the poster too once it's over, gets "This story has ended".
+KINDS = (*KINDS, "porch_story")
+LABELS["porch_story"] = "a Porch story"
+
 
 def _uuid(v: Any) -> uuid.UUID | None:
     try:
@@ -347,6 +353,10 @@ async def card(db: AsyncSession, user: User, share: dict) -> dict | None:
         from app.porch.handoffs import card as porch_card
 
         out = await porch_card(db, user, share.get("id"))
+    elif kind == "porch_story":
+        from app.porch.stories import card as story_card
+
+        out = await story_card(db, user, share.get("id"))
     else:
         out = None
     if out is None:

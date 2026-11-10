@@ -23,7 +23,10 @@ tusd treats any non-2xx hook reply as an internal error (the client sees a
 500 and retries), so every reply here is 200 JSON: refusals are
 ``RejectUpload`` (pre-create) or an ``HTTPResponse`` status (pre-finish).
 The endpoint is internal — nginx refuses ``/api/internal/`` from outside —
-and needs ``TUS_HOOK_SECRET`` (``?key=``) when one is set.
+and needs ``TUS_HOOK_SECRET`` (``?key=``). Without one every call is refused
+(security review M1): a "call from the internal network" isn't proof it's
+tusd, since other containers (the Office converter) share networks with
+the backend. ./update.sh and the installer generate the secret.
 """
 from __future__ import annotations
 
@@ -305,15 +308,15 @@ async def _post_terminate(event: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _caller_ok(request: Request, key: str | None) -> bool:
+def _check_caller(request: Request, key: str | None) -> bool:
     secret = settings.TUS_HOOK_SECRET or ""
-    if secret:
-        return hmac.compare_digest(secret, key or "")
-    # No secret configured: only a container on the internal network (no
-    # nginx-forwarded headers — nginx refuses /api/internal/ anyway).
-    from app.rate_limit import _is_service_call
+    if not secret:
+        logger.warning("tus hook refused: TUS_HOOK_SECRET isn't set (run ./update.sh to generate it)")
+        return False
+    return hmac.compare_digest(secret, key or "")
 
-    return _is_service_call(request)
+
+_caller_ok = _check_caller
 
 
 @router.post("/tus-hook")

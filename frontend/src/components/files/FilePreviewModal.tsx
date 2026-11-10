@@ -53,6 +53,8 @@ import {
   type ArtifactLanguage,
 } from "@/components/codeArtifacts/previewable";
 import { cn } from "@/utils/cn";
+
+import { ZoomStage } from "./ZoomStage";
 import { useRecordOpen } from "@/hooks/useRecordOpen";
 
 import {
@@ -408,6 +410,8 @@ export function FilePreviewModal({
           file={file}
           kind={kind}
           initialPage={initialPage}
+          onSwipe={(dir) => (dir === 1 ? goNext() : goPrev())}
+          onClose={close}
           onDirtyChange={(d) => {
             dirtyRef.current = d;
           }}
@@ -454,15 +458,19 @@ function PreviewBody({
   kind,
   initialPage,
   onDirtyChange,
+  onSwipe,
+  onClose,
 }: {
   file: FileItem;
   kind: PreviewKind;
   initialPage?: number;
   onDirtyChange?: (dirty: boolean) => void;
+  onSwipe?: (dir: 1 | -1) => void;
+  onClose?: () => void;
 }) {
   switch (kind) {
     case "image":
-      return <ImagePreview file={file} />;
+      return <ImagePreview file={file} onSwipe={onSwipe} onClose={onClose} />;
     case "video":
       return <VideoPreview file={file} />;
     case "pdf":
@@ -494,7 +502,16 @@ function PreviewBody({
 // camera raw) is shown through the server's renderer (WP-7.3).
 const BROWSER_IMAGES = new Set(["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/bmp", "image/avif", "image/svg+xml"]);
 
-function ImagePreview({ file }: { file: FileItem }) {
+function ImagePreview({
+  file,
+  onSwipe,
+  onClose,
+}: {
+  file: FileItem;
+  onSwipe?: (dir: 1 | -1) => void;
+  onClose?: () => void;
+}) {
+  const [zoomed, setZoomed] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -541,30 +558,28 @@ function ImagePreview({ file }: { file: FileItem }) {
     };
   }, [file.id, rendered]);
 
+  // Zoomed in: swap the small preview for the original's full detail.
+  useEffect(() => {
+    if (zoomed && original) {
+      setUrl(original);
+      setOriginal(null);
+    }
+  }, [zoomed, original]);
+
   if (err) return <PreviewError>{err}</PreviewError>;
   if (!url) return <PreviewLoading />;
+  // Wheel, pinch or double-click to zoom; drag to look around; swipe
+  // across for the next file (the Photos viewer's gestures).
   return (
-    <div className="relative flex max-h-full max-w-full items-center justify-center">
+    <ZoomStage key={file.id} onSwipe={onSwipe} onClose={onClose} onZoomChange={setZoomed}>
       <img
         src={url}
         alt={file.filename}
-        className="max-h-full max-w-full select-none rounded-md shadow-2xl"
+        className="max-h-full max-w-full select-none rounded-md object-contain shadow-2xl"
         draggable={false}
         onError={() => setErr("This picture couldn't be loaded. Close it and open it again.")}
       />
-      {original && (
-        <button
-          type="button"
-          onClick={() => {
-            setUrl(original);
-            setOriginal(null);
-          }}
-          className="absolute bottom-2 right-2 rounded-md bg-black/60 px-2 py-1 text-xs text-white hover:bg-black/80"
-        >
-          Full size
-        </button>
-      )}
-    </div>
+    </ZoomStage>
   );
 }
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     # additionally enforce Host validation at the app layer — loopback and
     # the internal ``backend`` service name are always permitted on top.
     TRUSTED_HOSTS: str = ""
+
+    # ---- Containers that run untrusted input (security review M1) ----
+    # Requests from these compose services are refused outright: the
+    # Office converter never calls the backend, and it shares an internal
+    # network with it. Matched by their addresses, looked up by name;
+    # ISOLATED_PEER_CIDRS adds ranges (comma list) on top.
+    ISOLATED_PEER_HOSTS: str = "convert"
+    ISOLATED_PEER_CIDRS: str = ""
 
     @property
     def trusted_hosts_list(self) -> list[str]:
@@ -231,15 +239,6 @@ class Settings(BaseSettings):
 
     # ---- Redis ----
     REDIS_URL: str = "redis://redis:6379/0"
-
-    # ---- Code interpreter sandbox (Phase 4) ----
-    # Base URL of the isolated execution worker. Empty disables the
-    # ``code_interpreter`` tool entirely (it'll report itself as
-    # unavailable rather than silently failing). The shared secret is
-    # sent on every job so only the backend can submit work.
-    CODE_SANDBOX_URL: str = "http://sandbox:8000"
-    CODE_SANDBOX_SECRET: str = ""
-    CODE_SANDBOX_TIMEOUT_S: int = 30
 
     # ---- Speech-to-text (Voice Phase 1) ----
     # ``STT_BACKEND`` selects how dictation clips are transcribed:
@@ -409,19 +408,6 @@ class Settings(BaseSettings):
             return False
         return self.DOMAIN.strip().lower() not in {"", "localhost", "127.0.0.1"}
 
-    @model_validator(mode="after")
-    def _mirror_sandbox_secret(self) -> "Settings":
-        """The code-sandbox bearer reuses ``SECRET_KEY`` by default.
-
-        Compose already passes it through explicitly, but this keeps a
-        bare ``uvicorn``/non-compose launch (``.env`` sets ``SECRET_KEY``
-        only) working the same way, rather than backend and sandbox
-        landing on mismatched — or empty — bearers.
-        """
-        if not self.CODE_SANDBOX_SECRET:
-            self.CODE_SANDBOX_SECRET = self.SECRET_KEY
-        return self
-
     def validate_boot_safety(self) -> list[str]:
         """Return a list of fatal-config errors that prevent boot.
 
@@ -486,6 +472,18 @@ class Settings(BaseSettings):
                     "REDIS_URL contains a 'change-me' placeholder password. "
                     "Set a real REDIS_PASSWORD in .env."
                 )
+            # The other shared secret: a placeholder copied from
+            # .env.example is a publicly known value. Unset is fine here
+            # (the tus hook then refuses every call); ./update.sh and the
+            # installer generate it.
+            for name in ("TUS_HOOK_SECRET",):
+                value = (getattr(self, name, None) or "").lower()
+                if "change-me" in value or "changeme" in value:
+                    errors.append(
+                        f"{name} is still the 'change-me' placeholder on a "
+                        "public DOMAIN. Run ./update.sh to generate it, or set "
+                        "it in .env (openssl rand -hex 32)."
+                    )
         # SINGLE_USER_MODE returns the admin user with NO token check, so
         # it must never run on a network-reachable host. Allow it only for
         # localhost / private-LAN / dev. ``getattr`` keeps this resilient

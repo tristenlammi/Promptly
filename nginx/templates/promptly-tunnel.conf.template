@@ -1,0 +1,8 @@
+# Made from .env when nginx starts (the image's envsubst step); don't edit
+# the copy in the container. TUNNEL_ON_HOST=1 in .env: a tunnel or proxy
+# running on this machine itself (cloudflared with host networking, say)
+# reaches nginx through Docker's gateway, so trust the visitor address it
+# sends from there (nginx.conf, "Real client IP").
+map $pid $promptly_tunnel_on_host {
+    default "${TUNNEL_ON_HOST}";
+}

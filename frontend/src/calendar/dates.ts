@@ -114,14 +114,34 @@ export function timeLabel(d: Date): string {
   return fmt(d, { hour: "numeric", minute: "2-digit" });
 }
 
-/** Short time for chips: "9am", "9:30am" (locale-ish). */
+/** The user's Time format setting as Intl options ({} = follow the locale). */
+export function clockOpts(): Intl.DateTimeFormatOptions {
+  const clock = useAuthStore.getState().user?.settings?.clock;
+  return clock === "12h" ? { hourCycle: "h12" } : clock === "24h" ? { hourCycle: "h23" } : {};
+}
+
+let locale12: boolean | null = null;
+/** True when the user's clock (their setting, else the locale's) is 12-hour. */
+export function uses12h(): boolean {
+  const clock = useAuthStore.getState().user?.settings?.clock;
+  if (clock === "12h") return true;
+  if (clock === "24h") return false;
+  if (locale12 === null) locale12 = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hour12 ?? false;
+  return locale12;
+}
+
+/** Short time for chips: "9am", "9:30am"; on a 24-hour clock "09:00", never a bare "09". */
 export function shortTime(d: Date): string {
+  if (!uses12h()) return fmt(d, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const s = fmt(d, d.getMinutes() ? { hour: "numeric", minute: "2-digit" } : { hour: "numeric" });
   return s.replace(/\s?([AP])M$/i, (_m, p: string) => p.toLowerCase() + "m");
 }
 
+/** The hour gutter: "9 am" or "09:00". */
 export function hourLabel(h: number): string {
-  return shortTime(new Date(2000, 0, 1, h));
+  const d = new Date(2000, 0, 1, h);
+  if (!uses12h()) return fmt(d, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  return fmt(d, { hour: "numeric" }).replace(/\s?([AP])M$/i, (_m, p: string) => " " + p.toLowerCase() + "m");
 }
 
 export function ordinal(n: number): string {
@@ -196,7 +216,7 @@ export function differsFromLocal(tz: string | null | undefined, at: Date = new D
 /** A time as the clock reads in ``tz``: "9:00 AM" (with the weekday when ``withDay``). */
 export function timeInZone(d: Date, tz: string, withDay = false): string {
   try {
-    return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "numeric", minute: "2-digit", ...(withDay ? { weekday: "short" } : {}) }).format(d);
+    return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "numeric", minute: "2-digit", ...clockOpts(), ...(withDay ? { weekday: "short" } : {}) }).format(d);
   } catch {
     return timeLabel(d);
   }

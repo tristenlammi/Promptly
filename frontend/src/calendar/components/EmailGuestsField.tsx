@@ -71,7 +71,7 @@ export function EmailGuestsField({
                 <Mail className="h-3.5 w-3.5" />
               </span>
               <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{g.email}</span>
-              {g.id ? <StatusBadge status={g.status ?? "invited"} /> : <span className="text-[11px] text-[var(--text-muted)]">Emailed when you save</span>}
+              {g.id ? <StatusBadge status={g.status ?? "invited"} /> : <span className="text-xs text-[var(--text-muted)]">Emailed when you save</span>}
               <button
                 type="button"
                 aria-label={`Remove ${g.email}`}

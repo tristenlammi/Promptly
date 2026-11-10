@@ -224,3 +224,12 @@ export function overdueLabel(days: number): string {
   if (days < 60) return `${Math.round(days / 7)} weeks overdue`;
   return `${Math.round(days / 30.4)} months overdue`;
 }
+
+// ---------------------------------------------------------------- colour
+
+/* The item shell already points ``--item-accent`` at the suite's terracotta
+ * (the app's own colour is its header mark only), so this is a plain wrapper
+ * kept for the views that use it. */
+export function ContactsTheme({ children }: { children: ReactNode }) {
+  return <>{children}</>;
+}

@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useRef } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -8,6 +8,7 @@ import { isOwnAppWindow } from "@/lib/appLaunch";
 import { ToastViewport } from "@/components/shared/ToastViewport";
 import { UpdateBanner } from "@/components/layout/UpdateBanner";
 import { ConfirmHost } from "@/components/shared/ConfirmDialog";
+import { PromptHost } from "@/components/shared/PromptDialog";
 import { ChatPage } from "@/pages/ChatPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { ForgotPasswordPage, ResetPasswordPage } from "@/pages/PasswordResetPages";
@@ -219,6 +220,13 @@ const StarredFilesPage = lazyWithRetry(
   () => import("@/pages/StarredFilesPage").then((m) => ({ default: m.StarredFilesPage })),
   "StarredFilesPage"
 );
+/** ``/tasks`` and ``/tasks/:id`` → ``/automations…``, keeping the query and hash. */
+function AutomationsRedirect() {
+  const { id } = useParams();
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: id ? `/automations/${encodeURIComponent(id)}` : "/automations", search, hash }} replace />;
+}
+
 const TaskDetailPage = lazyWithRetry(
   () => import("@/pages/TaskDetailPage").then((m) => ({ default: m.TaskDetailPage })),
   "TaskDetailPage"
@@ -892,8 +900,12 @@ export default function App() {
         <Route path="/chat/:id" element={<ChatPage />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
-        <Route path="/tasks" element={<TasksPage />} />
-        <Route path="/tasks/:id" element={<TaskDetailPage />} />
+        <Route path="/automations" element={<TasksPage />} />
+        <Route path="/automations/:id" element={<TaskDetailPage />} />
+        {/* Automations used to live at /tasks: old links, bookmarks and
+            notifications still land in the right place. */}
+        <Route path="/tasks" element={<AutomationsRedirect />} />
+        <Route path="/tasks/:id" element={<AutomationsRedirect />} />
         {/* My work folded into Today's Workspaces card. */}
         <Route path="/work" element={<Navigate to="/today" replace />} />
         <Route path="/today" element={<TodayPage />} />
@@ -985,6 +997,7 @@ export default function App() {
       <UpdateBanner />
       <ToastViewport />
       <ConfirmHost />
+      <PromptHost />
     </>
   );
 }

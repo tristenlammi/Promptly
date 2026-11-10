@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Circle, Copy, Download, FlipHorizontal2, Grid3x3, Highlighter, ImagePlus, Minus, MousePointer2, MoveUpRight, Pencil,
+  Circle, Copy, Download, FlipHorizontal2, Grid3x3, Highlighter, ImagePlus, Loader2, Minus, MousePointer2, MoveUpRight, Pencil,
   Redo2, RotateCcw, RotateCw, Share2, Smile, Square, Sticker, Trash2, Type, Undo2, X,
 } from "lucide-react";
 
@@ -13,6 +13,7 @@ import {
   shapeBounds, stickerUrl,
 } from "@/components/photos/photoMarkup";
 import { FILTER_PRESETS, cssFilter, presetOf } from "@/components/photos/filterPresets";
+import { ItemButton, Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -541,9 +542,10 @@ export function PhotoEditor({
 
   // ------------------------------------------------------------- ways out
 
+  // With changes made, closing asks first (in the app's own sheet).
+  const [closeAsk, setCloseAsk] = useState(false);
   const requestClose = useCallback(() => {
-    const ask = opsOnlyRef.current ? "Close without keeping these changes?" : "Close without saving? Your changes will be lost.";
-    if (plain(opsRef.current) !== baseline && !window.confirm(ask)) return;
+    if (plain(opsRef.current) !== baseline) return setCloseAsk(true);
     closeRef.current();
   }, [baseline]);
   const finish = () => {
@@ -653,12 +655,14 @@ export function PhotoEditor({
 
   // Keys: Esc closes (asks first with changes), Delete removes the picked
   // mark, Ctrl+Z / Ctrl+Shift+Z undo / redo.
-  const keyState = useRef({ undo, redo, removeSelected, requestClose, picker, textDraft, tab });
-  keyState.current = { undo, redo, removeSelected, requestClose, picker, textDraft, tab };
+  const keyState = useRef({ undo, redo, removeSelected, requestClose, picker, textDraft, tab, closeAsk });
+  keyState.current = { undo, redo, removeSelected, requestClose, picker, textDraft, tab, closeAsk };
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const s = keyState.current;
       const typing = (e.target as HTMLElement)?.closest?.("input, textarea, [contenteditable]");
+      // The "close without saving?" sheet is up: the keys are its own.
+      if (s.closeAsk) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         if (s.picker) setPicker(null);
@@ -731,7 +735,7 @@ export function PhotoEditor({
       </div>
       <div ref={stage} className="relative flex min-h-0 flex-1 items-center justify-center" onPointerMove={onMove} onPointerUp={onUp}>
         {!img ? (
-          <p className="text-sm text-white/60">Loading…</p>
+          <Loader2 role="status" aria-label="Loading the photo" className="h-6 w-6 animate-spin text-white/60" />
         ) : (
           <div className="relative" style={{ width: box.w, height: box.h }}>
             {/* The dimming outside the crop stays on the picture. */}
@@ -980,6 +984,32 @@ export function PhotoEditor({
         </div>
         )}
       </div>
+      <Sheet
+        open={closeAsk}
+        onClose={() => setCloseAsk(false)}
+        title={opsOnly ? "Close without keeping these changes?" : "Close without saving?"}
+        size="sm"
+        footer={
+          <>
+            <ItemButton variant="secondary" data-autofocus onClick={() => setCloseAsk(false)}>
+              Keep editing
+            </ItemButton>
+            <ItemButton
+              variant="danger"
+              onClick={() => {
+                setCloseAsk(false);
+                closeRef.current();
+              }}
+            >
+              {opsOnly ? "Close" : "Close without saving"}
+            </ItemButton>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--text)]">
+          {opsOnly ? "The changes you made here won't be kept." : "Your changes will be lost. The photo stays as it was."}
+        </p>
+      </Sheet>
     </div>,
     document.body,
   );
