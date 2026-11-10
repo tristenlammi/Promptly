@@ -25,6 +25,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 <!-- New-member onboarding (onboard-fixes) -->
 - Admin → Users: after you create an account, a "Send them this" card shows the address, username and password with the steps to sign in, ready to copy, share, or email to them when email is set up.
+- Dialogs, sheets and menus now open and close with a short, soft movement instead of snapping in and out (off when your device asks for reduced motion).
+- Icon buttons in the Item Store apps show a quick themed tooltip on hover or keyboard focus, in place of the slow browser one.
+- Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
+- Admin → Users: a Storage column for everyone at once, with a small bar, the percentage, and used / limit (or "no limit"). You can also sort by most storage. It shows totals only, never what the files are.
+- Photo widget for Android: put a photo from one of your albums on your home screen. Pick the album and a shape (rounded, circle, soft square, flower, heart or arch) when you add it, and it shows a different photo from that album every half hour. Tap it for another photo, or set it to open the album instead. Add as many as you like, each with its own album and shape, at any size. It keeps a few small copies on the phone so it still changes with no signal.
 
 ### Changed
 
@@ -220,7 +225,6 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Calendar: more keys (n and p for next and previous, e to edit and Delete to delete the open event, ? for the list).
 - Calendar: Promptly's own date and time pickers in the event editor on a computer (a phone keeps its built-in ones).
 - Tasks: the Completed list shows each task's time in your own time format and under the right local day.
-- Admin → Users: a Storage column for everyone at once, with a small bar, the percentage, and used / limit (or "no limit"). You can also sort by most storage. It shows totals only, never what the files are.
 - Porch: "Text post" is now a button at the top of the new-post screen. It was a link underneath all your photos, where it was easy to never find.
 - Passwords extension: bookmark sync no longer says "synced" when your server couldn't be reached. It says the other browsers don't have the latest yet, and keeps trying.
 - Passwords bookmark sync: a bookmark deleted in one browser now stays deleted. A browser with no record of its last sync (first sync, sync turned off and on, or the extension reinstalled) used to send its own copy back as a new bookmark, so it stayed there and came back everywhere; it now removes a copy that matches one in Recently deleted and was there before the deletion. A removal the browser refuses is tried again instead of being re-uploaded, and a deleted bookmark is no longer brought back because another device reordered it at the same time. "Keep them everywhere" still brings everything back.
@@ -255,10 +259,6 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Once a public address is set, pages on this machine's localhost are no longer allowed to make signed-in requests to Promptly (unless DEBUG is on).
 - Calls on Linux: LiveKit's ports 7880 and 6789 are documented as firewall-only (they can't be limited to localhost because nginx and the backend reach them over Docker's bridge).
 <!-- UI polish, shared foundations (ui-polish) -->
-- Dialogs, sheets and menus now open and close with a short, soft movement instead of snapping in and out (off when your device asks for reduced motion).
-- Icon buttons in the Item Store apps show a quick themed tooltip on hover or keyboard focus, in place of the slow browser one.
-- Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
-- Photo widget for Android: put a photo from one of your albums on your home screen. Pick the album and a shape (rounded, circle, soft square, flower, heart or arch) when you add it, and it shows a different photo from that album every half hour. Tap it for another photo, or set it to open the album instead. Add as many as you like, each with its own album and shape, at any size. It keeps a few small copies on the phone so it still changes with no signal.
 
 ## [0.35.0] - 2026-11-09
 
