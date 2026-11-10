@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-11
+
 ### Added
 
 <!-- New-member onboarding (onboard-fixes) -->
