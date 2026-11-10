@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
+import { askingToDelete } from "../actions";
 import { displayTitle, type Note } from "../types";
 import { escapeTaken, takeEscape } from "./BodyEditor";
 import { NoteEditor } from "./NoteEditor";
@@ -21,6 +22,7 @@ export function NoteDialog({ note, onClose, autoFocus, startWith }: { note: Note
       if (!box.current?.contains(document.activeElement) && !(document.activeElement as HTMLElement | null)?.closest("[data-note-pop]")) box.current?.querySelector<HTMLElement>(autoFocus ? FOCUSABLE : '[aria-label="Title"]')?.focus();
     });
     const onKey = (e: KeyboardEvent) => {
+      if (askingToDelete()) return; // the question on top has the keyboard
       if (e.key === "Escape") {
         if (escapeTaken(e)) return;
         takeEscape(e);

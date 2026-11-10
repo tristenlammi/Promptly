@@ -35,7 +35,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
-import { noteOps } from "./actions";
+import { askingToDelete, noteOps } from "./actions";
 import { AddImageButton } from "./components/AddImage";
 import { attachPhotos, Composer } from "./components/Composer";
 import type { CardActions } from "./components/NoteCard";
@@ -328,7 +328,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   useEffect(() => {
     if (!selected.size || noteId) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) setSelected(new Set());
+      if (e.key === "Escape" && !e.defaultPrevented && !askingToDelete()) setSelected(new Set());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -369,7 +369,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       trash: (id) => noteOps.trash([id]),
       labels: (id, el) => setLabelFor({ ids: [id], anchor: el }),
       restore: (id) => noteOps.restore([id]),
-      forever: (id) => noteOps.forever([id]),
+      forever: (id) => void noteOps.forever([id]),
       remind: (id, el) => setRemindFor({ id, anchor: el }),
       share: (id) => setShareFor(id),
     }),
@@ -603,7 +603,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
           <button type="button" aria-label="Restore" title="Restore" className={selBtn} onClick={() => (noteOps.restore(selIds), done())}>
             <RotateCcw className="h-5 w-5" />
           </button>
-          <button type="button" aria-label="Delete forever" title="Delete forever" className={selBtn} onClick={() => (noteOps.forever(selIds), done())}>
+          <button type="button" aria-label="Delete forever" title="Delete forever" className={selBtn} onClick={async () => (await noteOps.forever(selIds)) && done()}>
             <Trash2 className="h-5 w-5" />
           </button>
         </>
