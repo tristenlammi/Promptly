@@ -206,6 +206,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Photos: the menu's "More places" button is called that for screen readers too, so it's no longer a second "More" beside an album's or a memory's own More button.
 - Porch: with photos picked for a new post, going Back from Share to Arrange to Pick now ends at Close (keeping a draft). It went round in a loop with no way out on a phone.
 - Forms: typing quickly into an option you just added with Enter no longer loses letters (it could keep only the last one or two).
+- Notes: with lots of notes, opening Notes no longer sends so many requests at once that the server turns some away, which could make a note say "This note isn't on this device yet" while you were online. Notes are copied to the device a little more slowly, and a turned-away request is tried again.
 
 <!-- New-member onboarding (onboard-fixes) -->
 - Choosing a password: a live checklist shows the rules (length, a number, a symbol), and errors read as plain sentences instead of "new_password: Value error, …".
