@@ -180,6 +180,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Tasks: bigger tap targets on phones for the day "+", send, new list and the reorder grip.
 
 ### Fixed
+- Photos: a photo or video you upload shows in the grid straight away, without a reload.
 <!-- Maps UI pass (ui-maps) -->
 - Maps: stopping live location sharing, pausing the timeline, changing how long history is kept and deleting a timeline day now say so when they fail instead of failing silently.
 <!-- Notes (ui-notes) -->
