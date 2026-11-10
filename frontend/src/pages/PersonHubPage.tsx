@@ -18,12 +18,15 @@ import {
   Mail,
   MapPin,
   MessageCircle,
+  MessageSquare,
+  MoreHorizontal,
+  Navigation,
   Phone,
   Share2,
   UserRound,
   Video,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { peopleHubApi, type PersonPage, type PersonRef, type PersonSection } from "@/api/peopleHub";
@@ -32,8 +35,11 @@ import { PersonAvatar } from "@/components/people/PeoplePicker";
 import { LinkedSection } from "@/components/links/LinkedSection";
 import { blockPerson, unblockPerson } from "@/components/people/blockActions";
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
+import { Skeleton } from "@/components/shared/Skeleton";
+import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { fmt, parseYmd, sameDay, addDays, timeLabel } from "@/calendar/dates";
-import { daysFrom, fmtDate, nextOccurrence } from "@/items/kinds/contacts/model";
+import { daysFrom, fmtDate, mapsHref, nextOccurrence, smsHref, telHref } from "@/items/kinds/contacts/model";
 import { birthdayLabel, contactPath, photosPersonPath } from "@/items/kinds/contacts/photosLink";
 import { todayISO } from "@/items/ui";
 import { BOOTSTRAP_KEY } from "@/rooms/cache";
@@ -60,6 +66,7 @@ function usePersonRef(): PersonRef | null {
 export function PersonHubPage() {
   const ref = usePersonRef();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: p, isLoading, isError, error } = useQuery({
     queryKey: ["people-hub", "person", ref],
     queryFn: () => peopleHubApi.get(ref!),
@@ -71,10 +78,23 @@ export function PersonHubPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--bg)]">
-      <div className="mx-auto w-full max-w-3xl px-4 pb-10 pt-[max(1rem,env(safe-area-inset-top))]">
-        <button type="button" onClick={back} className="-ml-2 mb-2 inline-flex h-10 items-center gap-1.5 rounded-lg px-2 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </button>
+      {/* The same bar as Contacts and Faces: back, what this is, More. */}
+      <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--bg)] pt-[env(safe-area-inset-top)]">
+        <div className="mx-auto flex h-14 w-full max-w-3xl items-center gap-1 px-2">
+          <button
+            type="button"
+            onClick={back}
+            aria-label="Back"
+            title="Back"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <p className="min-w-0 flex-1 truncate px-1 text-[15px] font-semibold text-[var(--text)]">Person page</p>
+          {p?.user && !p.is_me && <HubMenu first={p.name.split(" ")[0] || p.name} blocked={!!p.blocked} onBlock={() => void blockPerson(qc, p.user!)} onUnblock={() => void unblockPerson(qc, p.user!)} />}
+        </div>
+      </header>
+      <div className="mx-auto w-full max-w-3xl px-4 pb-10 pt-4">
         {!ref || isError ? (
           <div className="rounded-2xl border border-dashed border-[var(--border)] p-8 text-center">
             <UserRound className="mx-auto mb-2 h-8 w-8 text-[var(--text-muted)]" />
@@ -84,10 +104,7 @@ export function PersonHubPage() {
             </p>
           </div>
         ) : isLoading || !p ? (
-          <div className="flex flex-col gap-3" aria-busy>
-            <div className="h-24 animate-pulse rounded-2xl bg-[var(--hover)]" />
-            <div className="h-32 animate-pulse rounded-2xl bg-[var(--hover)]" />
-          </div>
+          <HubSkeleton />
         ) : (
           <PersonBody p={p} />
         )}
@@ -112,6 +129,21 @@ function PersonBody({ p }: { p: PersonPage }) {
     });
   const first = p.name.split(" ")[0] || p.name;
   const other = p.user && !p.is_me ? p.user : null;
+  // Call / Text / Email / Directions from the contact card's first number,
+  // email and address.
+  const phone = c?.phones.find((x) => x.value.trim())?.value;
+  const email = c?.emails.find((x) => x.value.trim())?.value;
+  const address = c?.addresses.find((a) => a.street || a.city || a.region || a.postcode || a.country);
+  const reach: { icon: ReactNode; label: string; ariaLabel: string; href: string; internal?: boolean }[] = [
+    ...(phone
+      ? [
+          { icon: <Phone className="h-5 w-5" />, label: "Call", ariaLabel: `Call ${first}`, href: telHref(phone) },
+          { icon: <MessageSquare className="h-5 w-5" />, label: "Text", ariaLabel: `Text ${first}`, href: smsHref(phone) },
+        ]
+      : []),
+    ...(email ? [{ icon: <Mail className="h-5 w-5" />, label: "Email", ariaLabel: `Email ${first}`, href: `mailto:${email}` }] : []),
+    ...(address ? [{ icon: <Navigation className="h-5 w-5" />, label: "Directions", ariaLabel: `Directions to ${first}`, href: mapsHref(address), internal: true }] : []),
+  ];
 
   const message = async () => {
     if (!other) return;
@@ -204,17 +236,18 @@ function PersonBody({ p }: { p: PersonPage }) {
           <ActionTile icon={<Share2 className="h-5 w-5" />} label="Share my calendar" onClick={() => navigate("/calendar/?share=1")} />
         </section>
       )}
-      {other && (
-        <div className="-mt-2 flex flex-wrap items-center justify-center gap-x-2 text-xs text-[var(--text-muted)] sm:justify-start">
-          {p.blocked && <span>You've blocked {first}. You can't message each other one-to-one.</span>}
-          <button
-            type="button"
-            onClick={() => void (p.blocked ? unblockPerson(qc, other) : blockPerson(qc, other))}
-            className="inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 font-medium hover:bg-[var(--hover)] hover:text-[var(--text)]"
-          >
-            <Ban className="h-3.5 w-3.5" /> {p.blocked ? `Unblock ${first}` : `Block ${first}`}
-          </button>
-        </div>
+      {other && p.blocked && (
+        <p className="-mt-2 flex items-center justify-center gap-1.5 text-xs text-[var(--text-muted)] sm:justify-start">
+          <Ban className="h-3.5 w-3.5 shrink-0" aria-hidden /> You've blocked {first}. You can't message each other one-to-one. Unblock them from the More menu at the top.
+        </p>
+      )}
+      {/* Not on Promptly: reach them the ordinary way. */}
+      {!p.user && !p.is_me && reach.length > 0 && (
+        <section className={cn("grid gap-2", reach.length >= 4 ? "grid-cols-4" : reach.length === 3 ? "grid-cols-3" : reach.length === 2 ? "grid-cols-2" : "grid-cols-1")} aria-label={`Reach ${first}`}>
+          {reach.map((r) => (
+            <LinkTile key={r.label} {...r} />
+          ))}
+        </section>
       )}
 
       {/* Contact card */}
@@ -229,7 +262,7 @@ function PersonBody({ p }: { p: PersonPage }) {
             ))}
             {c.addresses.map((a, i) => {
               const line = [a.street, a.city, a.region, a.postcode, a.country].filter(Boolean).join(", ");
-              return line ? <DetailRow key={`a${i}`} icon={<MapPin className="h-4 w-4" />} label={a.label || "Address"} value={line} /> : null;
+              return line ? <DetailRow key={`a${i}`} icon={<MapPin className="h-4 w-4" />} label={a.label || "Address"} value={line} to={mapsHref(a)} hint="Open in Maps" /> : null;
             })}
             {c.phones.length + c.emails.length + c.addresses.length === 0 && (
               <p className="px-1 py-2 text-sm text-[var(--text-muted)]">No phone, email or address yet.</p>
@@ -493,23 +526,127 @@ function Empty({ text, action }: { text: string; action?: ReactNode }) {
   );
 }
 
-function DetailRow({ icon, label, value, href }: { icon: ReactNode; label: string; value: string; href?: string }) {
+function DetailRow({ icon, label, value, href, to, hint }: { icon: ReactNode; label: string; value: string; href?: string; /** A page inside Promptly (Maps). */ to?: string; hint?: string }) {
   const body = (
     <>
       <span className="text-[var(--text-muted)]">{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm text-[var(--text)]">{value}</span>
+        <span className={cn("block text-sm text-[var(--text)]", to ? "break-words" : "truncate")}>{value}</span>
         <span className="block text-xs capitalize text-[var(--text-muted)]">{label}</span>
       </span>
+      {hint && <span className="shrink-0 text-xs font-medium text-[var(--accent-text,var(--accent))]">{hint}</span>}
     </>
   );
   const cls = "flex min-h-12 items-center gap-3 rounded-lg px-1 py-1.5";
+  if (to)
+    return (
+      <Link to={to} className={cn(cls, "hover:bg-[var(--hover)]")}>
+        {body}
+      </Link>
+    );
   return href ? (
     <a href={href} className={cn(cls, "hover:bg-[var(--hover)]")}>
       {body}
     </a>
   ) : (
     <div className={cls}>{body}</div>
+  );
+}
+
+const TILE =
+  "flex min-h-[72px] flex-col items-center justify-center gap-1.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-2 text-center text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] sm:text-sm";
+
+/** A tile that is a link: phone, text, email, or Maps. */
+function LinkTile({ icon, label, ariaLabel, href, internal }: { icon: ReactNode; label: string; ariaLabel: string; href: string; internal?: boolean }) {
+  const body = (
+    <>
+      <span className="text-[var(--accent-text,var(--accent))]">{icon}</span>
+      {label}
+    </>
+  );
+  return internal ? (
+    <Link to={href} aria-label={ariaLabel} className={TILE}>
+      {body}
+    </Link>
+  ) : (
+    <a href={href} aria-label={ariaLabel} className={TILE}>
+      {body}
+    </a>
+  );
+}
+
+/** The header's More menu: blocking lives here, behind a confirm. */
+function HubMenu({ first, blocked, onBlock, onUnblock }: { first: string; blocked: boolean; onBlock: () => void; onUnblock: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  usePopoverDismiss(open, ref, close);
+  const unblock = async () => {
+    const ok = await confirm({
+      title: `Unblock ${first}?`,
+      message: `You and ${first} will be able to message and call each other one-to-one again.`,
+      confirmLabel: "Unblock",
+    });
+    if (ok) onUnblock();
+  };
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        aria-label="More"
+        title="More"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+      >
+        <MoreHorizontal className="h-5 w-5" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-11 z-30 w-56 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-lg)]">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              // Blocking asks first (blockPerson); so does unblocking.
+              if (blocked) void unblock();
+              else onBlock();
+            }}
+            className={cn("flex min-h-[44px] w-full items-center gap-2.5 px-3 text-left text-sm hover:bg-[var(--hover)]", blocked ? "text-[var(--text)]" : "text-[var(--danger)]")}
+          >
+            <Ban className="h-4 w-4 shrink-0" aria-hidden /> {blocked ? `Unblock ${first}` : `Block ${first}`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The page's shape while it loads: face and name, the tiles, two cards. */
+function HubSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" aria-busy aria-label="Loading this person">
+      <div className="flex flex-col items-center gap-3 sm:flex-row">
+        <Skeleton className="h-[88px] w-[88px] shrink-0 rounded-full" />
+        <div className="flex flex-1 flex-col items-center gap-2 sm:items-start">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-[72px] rounded-2xl" />
+        ))}
+      </div>
+      {[0, 1].map((i) => (
+        <div key={i} className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] p-4">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-3/4" />
+        </div>
+      ))}
+    </div>
   );
 }
 

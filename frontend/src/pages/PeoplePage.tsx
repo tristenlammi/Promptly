@@ -1,23 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, EyeOff, MoreHorizontal, PawPrint, Plus, UserRound, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, EyeOff, MoreHorizontal, PawPrint, Plus, ScanFace, UserRound, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { PersonContact, useLinkedContact } from "@/components/photos/PersonContact";
 import { usePhotosPath } from "@/components/photos/photosPath";
 import { peopleApi, reviewKey, type ReviewEntry, type Subject, type SubjectKind } from "@/api/people";
 import { personPath } from "@/api/peopleHub";
-import type { PhotoItem } from "@/api/photos";
+import { photosApi, type PhotoItem } from "@/api/photos";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { Skeleton } from "@/components/shared/Skeleton";
+import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { justify } from "@/lib/justify";
 import { toast } from "@/store/toastStore";
 import { birthdayLabel } from "@/items/kinds/contacts/photosLink";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
-/** People & Pets (PH-3): who's in your photos — name them once, and
+/* The three "people" screens have one name each: Contacts (the address
+ * book), Faces (this list, in Photos) and the person page (/people/…).
+ * They share a header shape: a 40px back button where there's somewhere to
+ * go back to, a 15–16px semibold title, and a 40px "More" on the right. */
+const HEAD_BTN = "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
+const PILL = "inline-flex h-10 items-center gap-1 rounded-full px-3 text-xs transition md:h-8";
+const PILL_ON = "bg-[var(--accent-soft)] font-medium text-[var(--accent-text)]";
+const PILL_OFF = "text-[var(--text-muted)] hover:bg-[var(--hover)]";
+
+/** Faces (PH-3): who's in your photos — name them once, and
  *  "Who is this?" for the ones not named yet. */
 export function PeoplePage() {
   const photosPath = usePhotosPath();
@@ -31,11 +44,29 @@ export function PeoplePage() {
   const { data: review } = useQuery({ queryKey: ["people", "review"], queryFn: peopleApi.review });
   const named = (list ?? []).filter((p) => p.name);
   const unnamed = (review ?? []).filter((r) => r.kind === kind);
+  const qc = useQueryClient();
+  // Nobody here yet: is face recognition simply off?
+  const nobody = !isLoading && named.length === 0 && unnamed.length === 0;
+  const { data: settings } = useQuery({ queryKey: ["photos", "settings"], queryFn: photosApi.settings, enabled: nobody && kind === "person" });
+  const [turningOn, setTurningOn] = useState(false);
+  const turnOnFaces = async () => {
+    setTurningOn(true);
+    try {
+      const next = await photosApi.saveSettings({ faces: true });
+      qc.setQueryData(["photos", "settings"], next);
+      void qc.invalidateQueries({ queryKey: ["people"] });
+      toast.success("Face recognition is on. People will show up here as your photos are looked through.");
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't turn that on."));
+    } finally {
+      setTurningOn(false);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <h1 className="mr-2 text-base font-semibold text-[var(--text)]">People &amp; pets</h1>
+      <header className="flex min-h-14 flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2">
+        <h1 className="mr-2 text-base font-semibold text-[var(--text)]">Faces</h1>
         <nav aria-label="People or pets" className="flex gap-1">
           {(
             [
@@ -48,16 +79,13 @@ export function PeoplePage() {
               type="button"
               aria-current={kind === k ? "page" : undefined}
               onClick={() => setParams(k === "person" ? {} : { kind: k }, { replace: true })}
-              className={cn(
-                "flex items-center gap-1 rounded-full px-3 py-1 text-xs transition",
-                kind === k ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
-              )}
+              className={cn(PILL, kind === k ? PILL_ON : PILL_OFF)}
             >
               <Icon className="h-3.5 w-3.5" /> {label}
             </button>
           ))}
         </nav>
-        <label className="ml-auto flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+        <label className="ml-auto flex min-h-10 items-center gap-1.5 text-xs text-[var(--text-muted)]">
           <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> Show hidden
         </label>
       </header>
@@ -73,13 +101,44 @@ export function PeoplePage() {
           </section>
         )}
         {isLoading ? (
-          <p className="text-sm text-[var(--text-muted)]">Loading…</p>
-        ) : named.length === 0 && unnamed.length === 0 ? (
-          <p className="text-sm text-[var(--text-muted)]">
-            {kind === "person"
-              ? "No people yet. Turn on Recognise faces in Photos settings; the people in your photos appear here as their faces are found."
-              : "No pets yet. Animals are found in your photos with the photos service running; name one and the rest of its photos follow."}
-          </p>
+          <ul aria-busy aria-label="Loading" className="grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-4">
+            {Array.from({ length: 12 }, (_, i) => (
+              <li key={i} className="flex flex-col items-center gap-2">
+                <Skeleton className="h-24 w-24 rounded-full" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-3 w-14" />
+              </li>
+            ))}
+          </ul>
+        ) : nobody ? (
+          kind === "pet" ? (
+            <EmptyState
+              icon={<PawPrint className="h-5 w-5" />}
+              title="No pets yet"
+              description="When a cat or dog turns up in your photos you'll be asked who it is. Name them once and the rest of their photos follow."
+            />
+          ) : settings && !settings.faces ? (
+            <EmptyState
+              icon={<ScanFace className="h-5 w-5" />}
+              title="Turn on face recognition"
+              description="Promptly can find the people in your photos, so you name someone once and see all their photos together. Your photos never leave your own server, and you can turn it off again in Photos settings."
+              action={
+                <Button variant="primary" loading={turningOn} onClick={() => void turnOnFaces()}>
+                  Turn on face recognition
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={<UserRound className="h-5 w-5" />}
+              title="No one here yet"
+              description={
+                showHidden
+                  ? "Nobody has been found in your photos yet. People show up here as your photos are looked through; it can take a while for a big library."
+                  : "People show up here as your photos are looked through; it can take a while for a big library. Anyone you've hidden is under Show hidden."
+              }
+            />
+          )
         ) : (
           <ul aria-label={kind === "person" ? "People" : "Pets"} className="grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-4">
             {named.map((p) => (
@@ -427,7 +486,11 @@ export function PersonPage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback(() => setMenu(false), []);
+  usePopoverDismiss(menu, menuRef, closeMenu);
   const [merging, setMerging] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
   const [view, setView] = useState<"photos" | "faces">("photos");
   const { data: others } = useQuery({ queryKey: ["people", kind, false], queryFn: () => peopleApi.list(kind), enabled: merging });
   // Their contact (when linked): the birthday shows by their name.
@@ -446,12 +509,100 @@ export function PersonPage() {
   };
 
   if (pages.error) return <p className="p-6 text-sm text-[var(--text-muted)]">They aren't in your photos any more.</p>;
-  if (!person) return <p className="p-6 text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (!person)
+    return (
+      <div className="flex h-full min-h-0 flex-col" aria-busy aria-label="Loading">
+        <div className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
+          <Skeleton className="h-10 w-10 rounded-lg" />
+          <Skeleton className="h-14 w-14 rounded-full" />
+          <div className="flex flex-1 flex-col gap-2">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-1 p-4 sm:grid-cols-5">
+          {Array.from({ length: 10 }, (_, i) => (
+            <Skeleton key={i} className="aspect-[4/3] w-full" />
+          ))}
+        </div>
+      </div>
+    );
+
+  // "Same person as…": show both faces and ask first; Undo straight after.
+  const mergeInto = async (o: Subject) => {
+    if (!o.id || mergeBusy) return;
+    const fromName = person.name ?? (kind === "pet" ? "This pet" : "This person");
+    // Undo puts their faces back under their old name, so it needs one.
+    const undoable = kind === "person" && !!person.name && person.name.trim().toLowerCase() !== (o.name ?? "").trim().toLowerCase();
+    const ok = await confirm({
+      title: kind === "pet" ? `Is this the same pet as ${o.name}?` : `Is this the same person as ${o.name}?`,
+      message: (
+        <span className="flex flex-col gap-3">
+          <span className="flex items-center justify-center gap-4">
+            <MergeFace subject={person} name={fromName} />
+            <ArrowRight className="h-5 w-5 shrink-0 text-[var(--text-muted)]" aria-hidden />
+            <MergeFace subject={o} name={o.name ?? ""} />
+          </span>
+          <span>
+            All {person.photos.toLocaleString()} {person.photos === 1 ? "photo" : "photos"} here will be filed under {o.name}
+            {person.name ? `, and “${person.name}” goes away` : ""}. {undoable ? "You can undo this straight after." : "This can't be undone in one tap, so check the faces match."}
+          </span>
+        </span>
+      ),
+      confirmLabel: "Merge",
+    });
+    if (!ok) return;
+    setMergeBusy(true);
+    try {
+      const before = undoable ? await facesOf(personId).catch(() => null) : null;
+      await peopleApi.merge(personId, o.id);
+      refresh();
+      setMerging(false);
+      const keep = { name: person.name!, relationship: person.relationship ?? null, me: person.me, hidden: person.hidden, memories: person.memories, contact: person.contact ?? null };
+      const into = o.id;
+      toast.success(
+        `Merged into ${o.name}.`,
+        before?.length
+          ? {
+              action: {
+                label: "Undo",
+                onClick: () => {
+                  void (async () => {
+                    try {
+                      const back = await peopleApi.split(into, before, { name: keep.name });
+                      // What they had besides photos: best effort, the photos matter most.
+                      if (keep.relationship) await peopleApi.setRelationship(back, keep.relationship).catch(() => {});
+                      const patch: Parameters<typeof peopleApi.update>[1] = {};
+                      if (keep.me) patch.me = true;
+                      if (keep.hidden) patch.hidden = true;
+                      if (keep.memories === false) patch.memories = false;
+                      if (keep.contact) patch.contact = keep.contact;
+                      if (Object.keys(patch).length) await peopleApi.update(back, patch).catch(() => {});
+                      refresh();
+                      toast.success(`${keep.name} is back.`);
+                      navigate(photosPath(`/people/${back}`), { replace: true });
+                    } catch (e) {
+                      toast.error(apiErrorMessage(e, "Couldn't undo that. Open Faces on their page to move the photos back."));
+                    }
+                  })();
+                },
+              },
+            }
+          : undefined,
+      );
+      navigate(photosPath(`/people/${into}`), { replace: true });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't merge them."));
+    } finally {
+      setMergeBusy(false);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
-        <Link to={photosPath(`/people${kind === "pet" ? "?kind=pet" : ""}`)} aria-label="Back to people" className="rounded p-1 hover:bg-[var(--hover)]">
-          <ArrowLeft className="h-4 w-4" />
+        <Link to={photosPath(`/people${kind === "pet" ? "?kind=pet" : ""}`)} aria-label="Back to Faces" title="Back to Faces" className={cn(HEAD_BTN, "-ml-2")}>
+          <ArrowLeft className="h-5 w-5" />
         </Link>
         <Avatar subject={person} size="md" />
         <div className="min-w-0 flex-1">
@@ -483,7 +634,7 @@ export function PersonPage() {
           <p className="text-xs text-[var(--text-muted)]">
             {person.photos.toLocaleString()} {person.photos === 1 ? "photo" : "photos"}
             {person.species ? ` · ${person.species}` : ""}
-            {person.hidden ? " · hidden from People" : ""}
+            {person.hidden ? " · hidden from Faces" : ""}
             {bday ? ` · ${bday.short}` : ""}
           </p>
           {kind === "person" && !person.me && <Relationship id={personId} value={person.relationship ?? null} onSaved={refresh} />}
@@ -496,12 +647,12 @@ export function PersonPage() {
             </Link>
           )}
         </div>
-        <div className="relative">
-          <button type="button" aria-label="More" onClick={() => setMenu((m) => !m)} className="rounded p-1.5 hover:bg-[var(--hover)]">
-            <MoreHorizontal className="h-4 w-4" />
+        <div className="relative" ref={menuRef}>
+          <button type="button" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} className={cn(HEAD_BTN, "-mr-2")}>
+            <MoreHorizontal className="h-5 w-5" />
           </button>
           {menu && (
-            <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-[var(--border)] bg-[var(--surface)] p-1 text-sm shadow-lg">
+            <div role="menu" className="absolute right-0 z-20 mt-1 w-60 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 text-sm shadow-lg [&>button]:min-h-10">
               {kind === "person" && (
                 <button type="button" role="menuitem" className="w-full rounded px-2 py-1.5 text-left hover:bg-[var(--hover)]"
                   onClick={() => { setMenu(false); void update({ me: !person.me }, person.me ? "Not you, then." : "That's you."); }}>
@@ -509,8 +660,8 @@ export function PersonPage() {
                 </button>
               )}
               <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[var(--hover)]"
-                onClick={() => { setMenu(false); void update({ hidden: !person.hidden }, person.hidden ? "Shown in People again." : "Hidden from People."); }}>
-                <EyeOff className="h-3.5 w-3.5" /> {person.hidden ? "Show in People" : "Hide from People"}
+                onClick={() => { setMenu(false); void update({ hidden: !person.hidden }, person.hidden ? "Shown in Faces again." : "Hidden from Faces."); }}>
+                <EyeOff className="h-3.5 w-3.5" /> {person.hidden ? "Show in Faces" : "Hide from Faces"}
               </button>
               <button type="button" role="menuitem" className="w-full rounded px-2 py-1.5 text-left hover:bg-[var(--hover)]"
                 onClick={() => {
@@ -530,30 +681,38 @@ export function PersonPage() {
       </header>
       {kind === "person" && <PersonContact personId={personId} person={person} />}
       {merging && (
-        <div className="border-b border-[var(--border)] px-4 py-2 text-sm">
-          <span className="mr-2 text-[var(--text-muted)]">Merge into:</span>
-          {(others ?? []).filter((o) => o.id !== personId && o.name).map((o) => (
-            <button key={o.id} type="button" className="mr-2 rounded-full border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]"
-              onClick={async () => {
-                try {
-                  await peopleApi.merge(personId, o.id!);
-                  refresh();
-                  toast.success(`Merged into ${o.name}.`);
-                  navigate(photosPath(`/people/${o.id}`), { replace: true });
-                } catch (e) {
-                  toast.error(apiErrorMessage(e, "Couldn't merge them."));
-                }
-              }}>
-              {o.name}
-            </button>
-          ))}
-          <button type="button" className="text-xs text-[var(--text-muted)] hover:underline" onClick={() => setMerging(false)}>Cancel</button>
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2 text-sm" role="group" aria-label="Who are they the same as?">
+          <span className="text-[var(--text-muted)]">Who are they the same as?</span>
+          {others === undefined ? (
+            <Skeleton className="h-8 w-40 rounded-full" />
+          ) : (
+            others
+              .filter((o) => o.id !== personId && o.name)
+              .map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  disabled={mergeBusy}
+                  onClick={() => void mergeInto(o)}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[var(--border)] pl-1 pr-3 text-xs hover:bg-[var(--hover)] disabled:opacity-50 md:h-8"
+                >
+                  {o.cover ? <img src={o.cover} alt="" className="h-6 w-6 rounded-full object-cover" /> : <span className="h-6 w-6 rounded-full bg-[var(--hover)]" />}
+                  {o.name}
+                </button>
+              ))
+          )}
+          {others !== undefined && others.filter((o) => o.id !== personId && o.name).length === 0 && (
+            <span className="text-xs text-[var(--text-muted)]">Nobody else has a name yet.</span>
+          )}
+          <button type="button" className="inline-flex h-10 items-center rounded-lg px-2 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)] md:h-8" onClick={() => setMerging(false)}>
+            Cancel
+          </button>
         </div>
       )}
       <nav aria-label="Photos or faces" className="flex gap-1 border-b border-[var(--border)] px-4 py-1.5">
         {(["photos", "faces"] as const).map((v) => (
           <button key={v} type="button" aria-current={view === v ? "page" : undefined} onClick={() => setView(v)}
-            className={cn("rounded-full px-3 py-1 text-xs", view === v ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]")}>
+            className={cn(PILL, view === v ? PILL_ON : PILL_OFF)}>
             {v === "photos" ? "Photos" : kind === "pet" ? "Each photo" : "Faces"}
           </button>
         ))}
@@ -589,6 +748,35 @@ export function PersonPage() {
       )}
     </div>
   );
+}
+
+/** One side of "same person?": their face, big enough to compare. */
+function MergeFace({ subject, name }: { subject: { cover: string | null; name: string | null }; name: string }) {
+  return (
+    <span className="flex w-24 flex-col items-center gap-1.5 text-center">
+      {subject.cover ? (
+        <img src={subject.cover} alt="" className="h-20 w-20 rounded-full object-cover" />
+      ) : (
+        <span className="flex h-20 w-20 items-center justify-center rounded-full bg-[var(--hover)] text-[var(--text-muted)]">
+          <UserRound className="h-7 w-7" />
+        </span>
+      )}
+      <span className="w-full truncate text-xs font-medium text-[var(--text)]">{name}</span>
+    </span>
+  );
+}
+
+/** Every face filed under someone (for undoing a merge). Null when there
+ *  are more than can be moved back in one go. */
+async function facesOf(id: string): Promise<string[] | null> {
+  const LIMIT = 2000;
+  const ids: string[] = [];
+  for (;;) {
+    const page = await peopleApi.faces(id, ids.length);
+    for (const f of page.faces) ids.push(f.id);
+    if (!page.more || page.faces.length === 0) return ids;
+    if (ids.length >= LIMIT) return null;
+  }
 }
 
 const RELATIONS = ["my wife", "my husband", "my partner", "my son", "my daughter", "Mum", "Dad", "my brother", "my sister",
