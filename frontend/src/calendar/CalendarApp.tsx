@@ -1,11 +1,12 @@
-import { ChevronDown, Loader2, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { ChevronDown, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type TouchEvent as ReactTouchEvent } from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 
 import { calendarApi, type CalEvent, type Calendar, type CalUser } from "@/api/calendar";
 import { peopleHubApi } from "@/api/peopleHub";
 import { extractError } from "@/components/files/helpers";
 import { NetworkStatusToast } from "@/components/layout/NetworkStatusToast";
+import { Skeleton } from "@/components/shared/Skeleton";
 import { InstallFromLink } from "@/components/pwa/InstallFromLink";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ItemButton, Sheet } from "@/items/ui";
@@ -25,6 +26,7 @@ import { Header } from "./components/Header";
 import { MiniMonth } from "./components/MiniMonth";
 import { MonthView } from "./components/MonthView";
 import { QuickAddBar, QuickAddSheet } from "./components/QuickAdd";
+import { QuickCreate, type NewSlot } from "./components/QuickCreate";
 import { SearchPanel } from "./components/SearchPanel";
 import { SidePanel } from "./components/SidePanel";
 import { SubscribeSheet } from "./components/SubscribeDialog";
@@ -32,13 +34,29 @@ import { TimeGridView } from "./components/TimeGridView";
 import { TravelNotice } from "./components/TravelNotice";
 import { Popover, ScopeHost } from "./components/ui";
 import { addUsers, useBootstrap, useCalendarsMap, useEvents, useExtras, useRefreshEventsAsync } from "./data";
-import { applyMoves, commitMove, useMoved, useTouchDragGuard } from "./drag";
+import { applyMoves, commitMove, dragging, useMoved, useTouchDragGuard } from "./drag";
 import { addDays, addMonths, fmt, monthGrid, sameDay, startOfDay, startOfMonth, startOfWeek, ymd } from "./dates";
 import { onDay, toView, type View, type ViewEvent } from "./model";
 import type { QuickEvent } from "./quickadd";
 
 const VIEW_KEY = "calendar:view";
 const AGENDA_DAYS = 28;
+/** A phone's "week" is three days from the one you're on: seven columns don't fit. */
+const PHONE_DAYS = 3;
+
+const KEYS: [string, string][] = [
+  ["t", "Go to today"],
+  ["n  or  →", "Next"],
+  ["p  or  ←", "Previous"],
+  ["d  w  m  a", "Day, week, month, schedule"],
+  ["c", "New event"],
+  ["q", "Quick add"],
+  ["/", "Search"],
+  ["e", "Edit the open event"],
+  ["Delete", "Delete the open event"],
+  ["Esc", "Close"],
+  ["?", "Show this list"],
+];
 
 function readView(phone: boolean): View {
   try {
@@ -92,6 +110,10 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   const [miniMonth, setMiniMonth] = useState(() => startOfMonth(new Date()));
   const [search, setSearch] = useState(false);
   const [quick, setQuick] = useState(false);
+  // The slot just clicked or drawn on the grid, with its quick-add bubble open.
+  const [slot, setSlot] = useState<NewSlot | null>(null);
+  const [keysHelp, setKeysHelp] = useState(false);
+  const weekDays = isPhone ? PHONE_DAYS : 7;
   const quickBox = useRef<HTMLInputElement>(null);
   const dragGuard = useTouchDragGuard();
   const meId = b?.me.id;
@@ -133,19 +155,21 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
         return { from: start, to: addDays(start, weeks * 7) };
       }
       case "week": {
-        const s = startOfWeek(cursor);
-        return { from: s, to: addDays(s, 7) };
+        const s = isPhone ? cursor : startOfWeek(cursor);
+        return { from: s, to: addDays(s, weekDays) };
       }
       case "day":
         return { from: cursor, to: addDays(cursor, 1) };
       case "agenda":
         return { from: cursor, to: addDays(cursor, agendaDays) };
     }
-  }, [view, cursor, agendaDays]);
+  }, [view, cursor, agendaDays, isPhone, weekDays]);
   const { events: fetched, isLoading: eventsLoading } = useEvents(range.from, range.to, b?.calendars);
   // Tasks and birthdays among the events; moved events at their new times while they save.
   const extras = useExtras(range.from, range.to, b?.prefs, !!b);
   const moved = useMoved((st) => st.moved);
+  // Nothing to show yet for this stretch: placeholder blocks.
+  const firstLoad = eventsLoading;
   const events = useMemo(() => [...applyMoves(fetched, moved), ...extras], [fetched, moved, extras]);
   const refreshAsync = useRefreshEventsAsync();
   const moveEvent = useCallback((v: ViewEvent, start: Date, end: Date) => void commitMove(v, start, end, refreshAsync), [refreshAsync]);
@@ -172,7 +196,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
         case "month":
           return startOfMonth(addMonths(c, dir));
         case "week":
-          return addDays(c, 7 * dir);
+          return addDays(c, weekDays * dir);
         case "day":
           return addDays(c, dir);
         case "agenda":
@@ -200,6 +224,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   );
   const openNew = (start: Date, allDay: boolean) => {
     setDetail(null);
+    setSlot(null);
     setEditor({ mode: "new", start, allDay });
   };
   // Jump to an event and open it (search results, a quick-added event).
@@ -233,9 +258,56 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   };
   // A click on an empty slot that just dismissed the popover doesn't also start an event.
   const popoverClosedAt = useRef(0);
-  const createAt = (start: Date, allDay: boolean) => {
+  // An empty slot was clicked (an hour) or drawn: the small bubble beside it.
+  const createAt = (start: Date, allDay: boolean, end?: Date, anchor?: DOMRect) => {
     if (Date.now() - popoverClosedAt.current < 500) return;
-    openNew(start, allDay);
+    setDetail(null);
+    setSlot({ start, end: end ?? (allDay ? addDays(start, 1) : new Date(start.getTime() + 60 * 60_000)), allDay, anchor: anchor ?? null });
+  };
+
+  // Stepping slides the view in from that side; switching view fades it in.
+  const viewBox = useRef<HTMLDivElement>(null);
+  const shownAs = useRef({ view, at: cursor.getTime() });
+  useEffect(() => {
+    const was = shownAs.current;
+    const at = cursor.getTime();
+    shownAs.current = { view, at };
+    const el = viewBox.current;
+    if (!el || typeof el.animate !== "function" || (was.view === view && was.at === at)) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (was.view !== view) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: "ease-out" });
+    else if (view !== "agenda") {
+      const dx = at > was.at ? 28 : -28;
+      el.animate(
+        [
+          { opacity: 0, transform: `translateX(${dx}px)` },
+          { opacity: 1, transform: "none" },
+        ],
+        { duration: 200, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+      );
+    }
+  }, [view, cursor]);
+  useEffect(() => setSlot(null), [view, cursor]);
+
+  // Phone: swipe left / right for the next / previous period.
+  const swipe = useRef<{ x: number; y: number; t: number; ok: boolean } | null>(null);
+  const onTouchStart = (e: ReactTouchEvent) => {
+    const t = e.touches[0];
+    swipe.current = e.touches.length === 1 ? { x: t.clientX, y: t.clientY, t: Date.now(), ok: true } : null;
+  };
+  const onTouchMove = () => {
+    // Not while an event is being dragged.
+    if (swipe.current && dragging()) swipe.current.ok = false;
+  };
+  const onTouchEnd = (e: ReactTouchEvent) => {
+    const s = swipe.current;
+    swipe.current = null;
+    if (!s || !s.ok || dragging()) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 2 || Date.now() - s.t > 600) return;
+    step(dx < 0 ? 1 : -1);
   };
 
   // Open one event by id (a notification's ``?event=``, an invitation).
@@ -322,7 +394,8 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantNew, b ? 1 : 0]);
 
-  // Keyboard (desktop): t d w m a ← → c, q quick add, / search.
+  // Keyboard (desktop): t d w m a ← → n p c, q quick add, / search, ? the list.
+  // (e and Delete act on the open event: see EventDetail.)
   useEffect(() => {
     if (isPhone) return;
     const onKey = (e: KeyboardEvent) => {
@@ -336,11 +409,16 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
         setSearch(false);
         return;
       }
+      if (k === "?") {
+        setKeysHelp(true);
+        e.preventDefault();
+        return;
+      }
       const views: Record<string, View> = { d: "day", w: "week", m: "month", a: "agenda" };
       if (k === "t") today();
       else if (views[k]) setView(views[k]);
-      else if (k === "ArrowLeft") step(-1);
-      else if (k === "ArrowRight") step(1);
+      else if (k === "ArrowLeft" || k === "p") step(-1);
+      else if (k === "ArrowRight" || k === "n") step(1);
       else if (k === "c") openNew(defaultStart(cursor), false);
       else if (k === "q") openQuick();
       else if (k === "/") setSearch(true);
@@ -361,8 +439,8 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
       case "agenda":
         return fmt(cursor, { month: isPhone ? "short" : "long", year: "numeric" });
       case "week": {
-        const s = startOfWeek(cursor);
-        const e = addDays(s, 6);
+        const s = isPhone ? cursor : startOfWeek(cursor);
+        const e = addDays(s, weekDays - 1);
         if (isPhone || s.getMonth() === e.getMonth()) return fmt(s, { month: isPhone ? "short" : "long", year: "numeric" });
         return `${fmt(s, { month: "short" })} – ${fmt(e, { month: "short", year: "numeric" })}`;
       }
@@ -410,20 +488,20 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
 
   let body;
   if (!b) {
-    body = (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--text-muted)]">
-        {isLoading ? (
-          <Loader2 className="h-6 w-6 animate-spin" aria-label="Loading Calendar" />
-        ) : isError ? (
-          <>
-            Couldn't reach Calendar.
-            <ItemButton variant="secondary" onClick={() => void refetch()}>
-              Try again
-            </ItemButton>
-          </>
-        ) : null}
-      </div>
-    );
+    body = isLoading ? (
+        <LoadingCalendar />
+      ) : (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--text-muted)]">
+          {isError && (
+            <>
+              Couldn't reach Calendar.
+              <ItemButton variant="secondary" onClick={() => void refetch()}>
+                Try again
+              </ItemButton>
+            </>
+          )}
+        </div>
+      );
   } else {
     const viewEl =
       view === "month" ? (
@@ -432,20 +510,24 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
           events={events}
           compact={isPhone}
           onOpen={openEvent}
-          onCreate={(d) => createAt(defaultStart(d), false)}
+          onCreate={(d, anchor) => createAt(defaultStart(d), false, undefined, anchor)}
           onDay={goDay}
           onMove={moveEvent}
+          draftDay={slot?.start ?? null}
+          loading={firstLoad}
         />
       ) : view === "week" || view === "day" ? (
         <TimeGridView
-          from={view === "week" ? startOfWeek(cursor) : cursor}
-          days={view === "week" ? 7 : 1}
+          from={view === "week" && !isPhone ? startOfWeek(cursor) : cursor}
+          days={view === "week" ? weekDays : 1}
           events={events}
           compact={isPhone}
           onOpen={openEvent}
           onCreate={createAt}
           onDay={goDay}
           onMove={moveEvent}
+          draft={slot}
+          loading={firstLoad}
           onPlanTask={(t, start, end) => void planTask(t, start, end)}
           secondTz={b.prefs.second_tz}
         />
@@ -504,9 +586,19 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
             searchOpen={search}
             quickAdd={!isPhone && <QuickAddBar ref={quickBox} b={b} onOpen={showEvent} onMore={quickMore} />}
             onQuickAdd={() => setQuick(true)}
+            weekLabel={isPhone ? `${PHONE_DAYS} days` : "Week"}
           />
           <TravelNotice b={b} />
-          {viewEl}
+          <div
+            ref={viewBox}
+            className="flex min-h-0 flex-1 flex-col"
+            onTouchStart={isPhone ? onTouchStart : undefined}
+            onTouchMove={isPhone ? onTouchMove : undefined}
+            onTouchEnd={isPhone ? onTouchEnd : undefined}
+            onTouchCancel={isPhone ? () => (swipe.current = null) : undefined}
+          >
+            {viewEl}
+          </div>
           <SearchPanel open={search} onClose={() => setSearch(false)} b={b} calMap={calMap} onPick={(v) => showEvent(v.ev)} phone={isPhone} />
           {isPhone && (
             <button
@@ -578,6 +670,40 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
       {b && (
         <>
           <EventEditor target={editor} b={b} onClose={() => setEditor(null)} onSaved={() => setEditor(null)} />
+          {slot && (
+            <QuickCreate
+              key={`${slot.start.getTime()}:${slot.end.getTime()}:${slot.allDay}`}
+              slot={slot}
+              b={b}
+              phone={isPhone}
+              onClose={() => {
+                popoverClosedAt.current = Date.now();
+                setSlot(null);
+              }}
+              onSaved={showEvent}
+              onMore={(s, d) => {
+                setSlot(null);
+                setEditor({
+                  mode: "new",
+                  start: s.start,
+                  allDay: s.allDay,
+                  prefill: { title: d.title || undefined, end: s.allDay ? addDays(s.end, -1) : s.end, calendarId: d.calendarId || undefined },
+                });
+              }}
+            />
+          )}
+          <Sheet open={keysHelp} onClose={() => setKeysHelp(false)} title="Keyboard shortcuts" size="sm">
+            <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 pb-2 pt-1 text-sm">
+              {KEYS.map(([k, what]) => (
+                <div key={k} className="contents">
+                  <dt>
+                    <kbd className="whitespace-pre rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-xs text-[var(--text)]">{k}</kbd>
+                  </dt>
+                  <dd className="text-[var(--text-muted)]">{what}</dd>
+                </div>
+              ))}
+            </dl>
+          </Sheet>
           <NewCalendarSheet open={newCal} onClose={() => setNewCal(false)} b={b} />
           <CalendarSettingsSheet cal={settingsCal} onClose={() => setSettingsId(null)} b={b} />
           <SubscribeSheet open={subscribe} onClose={() => setSubscribe(false)} b={b} />
@@ -600,6 +726,29 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   );
 }
 
+/** Placeholder header and month while Calendar first loads. */
+function LoadingCalendar() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" role="status" aria-label="Loading Calendar">
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border)] px-4 md:h-16">
+        <Skeleton className="h-9 w-28" />
+        <Skeleton className="h-6 w-40" />
+        <div className="flex-1" />
+        <Skeleton className="hidden h-9 w-64 md:block" />
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-5">
+        {Array.from({ length: 35 }, (_, i) => (
+          <div key={i} className="flex flex-col gap-1.5 border-b border-r border-[var(--border)] p-1.5">
+            <Skeleton className="h-4 w-5 self-center" />
+            {i % 3 !== 1 && <Skeleton className="h-4 w-full" />}
+            {i % 4 === 2 && <Skeleton className="h-4 w-2/3" />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** The phone's week strip over the schedule (tap a day to start there). */
 function WeekStrip({ cursor, onPick, events }: { cursor: Date; onPick: (d: Date) => void; events: ViewEvent[] }) {
   const s = startOfWeek(cursor);
@@ -613,7 +762,7 @@ function WeekStrip({ cursor, onPick, events }: { cursor: Date; onPick: (d: Date)
         const has = events.some((v) => onDay(v, d));
         return (
           <button key={i} type="button" onClick={() => onPick(d)} aria-label={fmt(d, { weekday: "long", month: "long", day: "numeric" })} className="flex flex-col items-center gap-0.5 py-0.5">
-            <span className="text-[10px] font-medium uppercase text-[var(--text-muted)]">{fmt(d, { weekday: "narrow" })}</span>
+            <span className="text-xs font-medium uppercase text-[var(--text-muted)]">{fmt(d, { weekday: "narrow" })}</span>
             <span
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold tabular-nums",

@@ -7,6 +7,7 @@ import { porchApi } from "@/api/porch";
 import { calendarApi, type CalEvent, type CalendarBootstrap, type CalUser, type EditScope, type EventPatch, type Repeat, type RsvpStatus } from "@/api/calendar";
 import { extractError } from "@/components/files/helpers";
 import { LocationInput } from "@/components/maps/LocationInput";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, Toggle } from "@/items/ui";
 import { PeoplePicker } from "@/rooms/components/PeoplePicker";
 import { UserAvatar } from "@/rooms/components/ui";
@@ -16,6 +17,7 @@ import { addDays, combine, dayDiff, hm, localZone, parseYmd, startOfDay, weekday
 import { addUsers, useCalUsers, useRefreshEvents } from "../data";
 import { REMINDER_OPTIONS, type ViewEvent } from "../model";
 import type { EventPrefill } from "../prefill";
+import { DateField, TimeField } from "./DateTimeFields";
 import { EmailGuestsField, type DraftEmailGuest } from "./EmailGuestsField";
 import { AvailabilityTag, availabilityText, FREE_COLOR, BUSY_COLOR, overlaps, useBusy } from "./Availability";
 import { FindTime } from "./FindTime";
@@ -107,6 +109,16 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
   const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
   const set = (patch: Partial<Draft>) => setD((x) => ({ ...x, ...patch }));
+  // A phone keeps its own date and time wheels; a mouse gets Promptly's pickers.
+  const phone = useIsMobile(767);
+  // What it opened with, to tell whether closing would lose anything.
+  const opened = useRef(JSON.stringify(d));
+  const [discard, setDiscard] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    // The sheet's scrolling body: Promptly's slim scrollbar instead of the system one.
+    form.current?.parentElement?.classList.add("promptly-scroll");
+  }, []);
   const ev = target.mode === "edit" ? target.v.ev : null;
 
   // Guests invited by email (people not on Promptly): saved ones load in.
@@ -138,6 +150,15 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
     } catch (err) {
       toast.error(`The event is saved, but: ${extractError(err)}`);
     }
+  };
+
+  const emailDirty = emailGuests.some((g) => !g.id) || (savedEmail?.guests ?? []).some((g) => !emailGuests.some((x) => x.id === g.id));
+  const dirty = JSON.stringify(d) !== opened.current || emailDirty;
+  /** Close, unless that would throw away changes: then ask first. */
+  const close = () => {
+    if (saving || discard) return;
+    if (dirty) setDiscard(true);
+    else onClose();
   };
 
   const writable = b.calendars.filter((c) => c.role === "owner" || c.role === "editor" || c.id === ev?.calendar_id);
@@ -351,12 +372,12 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
   return (
     <Sheet
       open
-      onClose={onClose}
+      onClose={close}
       title={ev ? "Edit event" : planned ? `Plan an event in ${planned.name}` : "New event"}
       size="lg"
       footer={
         <>
-          <ItemButton block onClick={onClose}>
+          <ItemButton block onClick={close}>
             Cancel
           </ItemButton>
           <ItemButton block variant="primary" type="submit" form="cal-event-form" disabled={saving || invalid || !d.title.trim()}>
@@ -367,6 +388,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
     >
       <form
         id="cal-event-form"
+        ref={form}
         className="flex flex-col gap-4 pt-1"
         onSubmit={(e) => {
           e.preventDefault();
@@ -391,19 +413,19 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
 
         <div className="grid grid-cols-[1fr_auto] gap-2">
           <Field label="Starts">
-            <TextInput type="date" value={d.startDate} onChange={(e) => e.target.value && moveStart(e.target.value, d.startTime)} required />
+            <DateField native={phone} label="Start date" value={d.startDate} onChange={(v) => moveStart(v, d.startTime)} />
           </Field>
           {!d.allDay && (
             <Field label="&nbsp;">
-              <TextInput type="time" value={d.startTime} onChange={(e) => e.target.value && moveStart(d.startDate, e.target.value)} aria-label="Start time" className="!w-32" />
+              <TimeField native={phone} label="Start time" value={d.startTime} onChange={(v) => moveStart(d.startDate, v)} />
             </Field>
           )}
           <Field label="Ends">
-            <TextInput type="date" value={d.endDate} min={d.startDate} onChange={(e) => e.target.value && set({ endDate: e.target.value })} required />
+            <DateField native={phone} label="End date" value={d.endDate} min={d.startDate} onChange={(v) => set({ endDate: v })} />
           </Field>
           {!d.allDay && (
             <Field label="&nbsp;">
-              <TextInput type="time" value={d.endTime} onChange={(e) => e.target.value && set({ endTime: e.target.value })} aria-label="End time" className="!w-32" />
+              <TimeField native={phone} label="End time" value={d.endTime} onChange={(v) => set({ endTime: v })} />
             </Field>
           )}
         </div>
@@ -541,6 +563,31 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         ) : (
           <PeoplePicker selected={d.guests} onChange={(next) => set({ guests: next })} exclude={[b.me.id, organiserId]} />
         )}
+      </Sheet>
+      <Sheet
+        open={discard}
+        onClose={() => setDiscard(false)}
+        title="Discard your changes?"
+        size="sm"
+        footer={
+          <>
+            <ItemButton block data-autofocus onClick={() => setDiscard(false)}>
+              Keep editing
+            </ItemButton>
+            <ItemButton
+              block
+              variant="danger"
+              onClick={() => {
+                setDiscard(false);
+                onClose();
+              }}
+            >
+              Discard
+            </ItemButton>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--text-muted)]">{ev ? "What you changed here hasn't been saved." : "This event hasn't been saved yet."}</p>
       </Sheet>
     </Sheet>
   );
