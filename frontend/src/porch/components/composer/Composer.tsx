@@ -542,7 +542,9 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
       if (step === "share") return null;
       return () => go(step === "pick" ? (picks.length ? "arrange" : "share") : "share");
     }
-    if (step === "pick") return () => go("share");
+    // Back to the words while nothing's picked; with photos picked, Pick is
+    // the first step (Share → Arrange → Pick), so it closes (keeping a draft).
+    if (step === "pick") return picks.length ? null : () => go("share");
     if (step === "arrange") return () => go("pick");
     return picks.length ? () => go("arrange") : null;
   };

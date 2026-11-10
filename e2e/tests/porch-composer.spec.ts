@@ -85,8 +85,11 @@ test("three photos, reordered, one cropped for this post only, to one group: men
   const lads = await groupWith(alice, aAuth, `Lads ${stamp}`, [[dana, dAuth]]);
   const [one, two, three] = [await libraryPhoto(alice, aAuth, "ONE"), await libraryPhoto(alice, aAuth, "TWO"), await libraryPhoto(alice, aAuth, "THREE")];
 
-  // Pick: three from the library, in this order.
+  // Pick: three from the library, in this order. (A new post starts with
+  // the words; "Add photos or videos" is the first button there.)
   await alice.goto("/porch/new");
+  await expect(alice.getByRole("heading", { name: "New post" })).toBeVisible();
+  await alice.getByRole("button", { name: "Add photos or videos" }).click();
   await expect(alice.getByRole("heading", { name: "Pick photos" })).toBeVisible();
   for (const id of [one, two, three]) await alice.locator(`[data-photo="${id}"]`).click();
   await expect(alice.locator(`[data-photo="${three}"]`)).toHaveAttribute("aria-pressed", "true");
@@ -200,6 +203,7 @@ test("a life event with a new upload (in Photos once), then its photos and place
   const file = wordPhoto(name, "NEW JOB");
 
   await alice.goto("/porch/new");
+  await alice.getByRole("button", { name: "Add photos or videos" }).click();
   await expect(alice.getByRole("heading", { name: "Pick photos" })).toBeVisible();
   const uploaded = alice.waitForResponse((r) => /\/api\/files\/?$/.test(new URL(r.url()).pathname) && r.request().method() === "POST");
   await alice.getByTestId("porch-upload").setInputFiles(file);
@@ -236,8 +240,9 @@ test("a life event with a new upload (in Photos once), then its photos and place
 
   // Edit: swap the photo for another and change the place.
   await alice.goto(`/porch/p/${post.id}`);
+  // On a computer the post's menu drops down from its button.
   await alice.getByRole("button", { name: "More for this post" }).click();
-  await alice.getByRole("button", { name: /Edit post/ }).click();
+  await alice.getByRole("menu", { name: /post$/ }).getByRole("menuitem", { name: /Edit post/ }).click();
   await expect(alice.getByRole("heading", { name: "Edit post" })).toBeVisible();
   await expect(alice.getByText(/A post's groups stay as they were/)).toBeVisible();
   await alice.getByRole("button", { name: "Edit photos" }).click();
@@ -290,6 +295,8 @@ test("on a phone: the composer is full screen and passes an accessibility scan; 
   await alice.getByRole("dialog", { name: "New" }).getByRole("button", { name: /^Post/ }).click();
   await expect(alice).toHaveURL(/\/porch\/new$/);
   await expect(alice.getByRole("navigation", { name: "Porch" })).toHaveCount(0);
+  await expect(alice.getByRole("heading", { name: "New post" })).toBeVisible();
+  await alice.getByRole("button", { name: "Add photos or videos" }).click();
   await expect(alice.getByRole("heading", { name: "Pick photos" })).toBeVisible();
   await expect(alice.getByRole("button", { name: "Camera" })).toBeVisible();
   await alice.locator(`[data-photo="${pic}"]`).click();
@@ -310,9 +317,12 @@ test("on a phone: the composer is full screen and passes an accessibility scan; 
   found.push(...(await scanDialog(alice, "phone audience sheet")));
   await alice.keyboard.press("Escape");
 
-  // Leaving keeps a draft, offered next time.
+  // Leaving keeps a draft, offered next time: Share, back to Arrange, back
+  // to Pick, then Close.
   await alice.getByRole("button", { name: "Back" }).click();
+  await expect(alice.getByRole("heading", { name: "Arrange" })).toBeVisible();
   await alice.getByRole("button", { name: "Back" }).click();
+  await expect(alice.getByRole("heading", { name: "Pick photos" })).toBeVisible();
   await alice.getByRole("button", { name: "Close" }).click();
   await alice.goto("/porch/new");
   await expect(alice.getByText("Here's the post you started before.")).toBeVisible();
