@@ -48,7 +48,6 @@ class IsolatedPeers:
                 logger.warning("ISOLATED_PEER_CIDRS: ignoring %r", c)
         self._ips: frozenset[str] = frozenset()
         self._at = 0.0
-        self._lock = asyncio.Lock()
 
     @staticmethod
     def _lookup(hosts: list[str]) -> frozenset[str]:
@@ -64,10 +63,10 @@ class IsolatedPeers:
     async def addresses(self) -> frozenset[str]:
         if time.monotonic() - self._at < _REFRESH_S:
             return self._ips
-        async with self._lock:
-            if time.monotonic() - self._at >= _REFRESH_S:
-                self._ips = await asyncio.to_thread(self._lookup, self.hosts)
-                self._at = time.monotonic()
+        # No lock: two requests refreshing at once just look the names up
+        # twice. (A lock made here would also be tied to one event loop.)
+        self._ips = await asyncio.to_thread(self._lookup, self.hosts)
+        self._at = time.monotonic()
         return self._ips
 
     async def is_isolated(self, peer: str | None) -> bool:
