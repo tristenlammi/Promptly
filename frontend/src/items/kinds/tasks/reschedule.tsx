@@ -152,6 +152,8 @@ export function ReschedulePopover({ anchor, task, weekStart, onPick, onClose }: 
     const back = document.activeElement as HTMLElement | null;
     const raf = window.requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>("[role=menuitem], input")?.focus());
     const onDown = (e: MouseEvent | TouchEvent) => {
+      // The button that opened it closes it itself (its own click).
+      if ((e.target as HTMLElement).closest?.('.tasks-row-action[aria-expanded="true"]')) return;
       if (!ref.current?.contains(e.target as Node)) closeRef.current();
     };
     const onKey = (e: KeyboardEvent) => {
