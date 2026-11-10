@@ -17,6 +17,7 @@ import { cn } from "@/utils/cn";
 
 import { BOOTSTRAP_KEY, LISTS, putPost } from "../../cache";
 import { usePorch } from "../../context";
+import { startPosting } from "../../posting";
 import { scrollPorchTo } from "../../scroll";
 import { ArrangeStep } from "./ArrangeStep";
 import { AudienceSheet, audienceIds } from "./AudienceSheet";
@@ -469,13 +470,37 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
     }
   }, [editing, navigate, people.data, qc, start?.group]);
 
+  /** A new post: back to the feed straight away; it goes up behind (the
+   *  status chip in Porch shows how far along it is). */
+  const handOver = () => {
+    const d = draftRef.current;
+    // Anyone named with @ who'll see it is mentioned, picked from the list or not.
+    const mentions: PorchUser[] = [...d.mentions];
+    for (const u of people.data ?? []) if (!mentions.some((m) => m.id === u.id) && mentionedIn(d.body, u)) mentions.push(u);
+    if (!startPosting(d, mentions, qc)) {
+      setError("Your last post is still going up. Give it a moment, then post this one.");
+      return;
+    }
+    finished.current = true;
+    clearDraft();
+    setDraft({ ...EMPTY });
+    const groups = d.audience ?? "all";
+    const one = Array.isArray(groups) && groups.length === 1 && start?.group === groups[0] ? groups[0] : null;
+    navigate(one ? `/porch/g/${one}` : "/porch/", { replace: true });
+    scrollPorchTo(0);
+  };
+
   const post = () => {
     if (failed.length) {
       setError(failed.length === 1 ? "One photo didn't upload. Take it out, or try again." : `${failed.length} photos didn't upload. Take them out, or try again.`);
       return;
     }
-    if (uploading) {
+    if (uploading && editing) {
       setWaiting(true);
+      return;
+    }
+    if (!editing) {
+      handOver();
       return;
     }
     void submit();
@@ -517,9 +542,9 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
       if (step === "share") return null;
       return () => go(step === "pick" ? (picks.length ? "arrange" : "share") : "share");
     }
-    if (step === "pick") return null;
+    if (step === "pick") return () => go("share");
     if (step === "arrange") return () => go("pick");
-    return () => go(picks.length ? "arrange" : "pick");
+    return picks.length ? () => go("arrange") : null;
   };
   const backFn = back();
   const nextLabel = step === "share" ? (editing ? "Save" : "Post") : "Next";
@@ -529,7 +554,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
     else if (step === "arrange") go("share");
     else post();
   };
-  const title = editing ? (step === "share" ? "Edit post" : STEP_TITLES[step]) : STEP_TITLES[step];
+  const title = editing ? (step === "share" ? "Edit post" : STEP_TITLES[step]) : step === "share" && !picks.length ? "New post" : STEP_TITLES[step];
   const stepNo = step === "pick" ? 1 : step === "arrange" ? 2 : 3;
 
   const headBtn =
@@ -549,10 +574,9 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
         )}
         <div className="flex min-w-0 flex-1 flex-col">
           <h1 className="truncate text-lg font-bold leading-tight text-[var(--text)]">{title}</h1>
-          {!editing && (
+          {!editing && (picks.length > 0 || step !== "share") && (
             <span className="text-xs text-[var(--text-muted)]">
-              {picks.length || step !== "share" ? `Step ${stepNo} of 3` : "A text post"}
-              {picks.length > 0 && ` · ${picks.length} of ${maxMedia}`}
+              {picks.length ? `Step ${stepNo} of 3 · ${picks.length} of ${maxMedia}` : "Pick some, or go back to post just words"}
             </span>
           )}
         </div>
@@ -594,7 +618,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
             onTextPost={() => go("share")}
             isPhone={isPhone}
             maxVideoMs={maxVideoMs}
-            showTextLink={!picks.length && !editing}
+            showTextLink={false}
           />
         )}
         {step === "arrange" && picks.length > 0 && (

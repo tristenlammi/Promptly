@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Archive, Bell, Bookmark, Cake, ContactRound, MessageCircle, MoreHorizontal, Pencil, Sparkles, UserX } from "lucide-react";
+import { Archive, Bell, Bookmark, Cake, ContactRound, MessageCircle, MoreHorizontal, Pencil, Search, Settings, Sparkles, UserX } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -16,6 +16,7 @@ import { BOOTSTRAP_KEY, listPosts, profileKey, userPostsKey, userStoriesKey } fr
 import { LIFE_EVENTS, PostCard, PostList } from "../components/PostCard";
 import { ActionSheet, Column, LoadError, PageHeader, PorchAvatar, PostSkeleton, dayWords, type MenuAction } from "../components/ui";
 import { usePorch } from "../context";
+import { usePorchStore } from "../store";
 import { AlertButton } from "../notify";
 import { useSentinel } from "../scroll";
 import { HighlightsRow } from "../components/stories/HighlightsRow";
@@ -126,7 +127,29 @@ export function ProfilePage({ userId }: { userId: string }) {
             >
               <MoreHorizontal className="h-5 w-5" />
             </button>
-          ) : undefined
+          ) : (
+            // Your own page: the places the bottom bar has no room for.
+            <>
+              {(
+                [
+                  ["Search Porch", Search, () => usePorchStore.getState().setSearchOpen(true)],
+                  ["Saved posts", Bookmark, () => navigate("/porch/saved")],
+                  ["Porch settings", Settings, () => navigate("/porch/settings")],
+                ] as const
+              ).map(([label, Icon, go]) => (
+                <button
+                  key={label}
+                  type="button"
+                  aria-label={label}
+                  title={label}
+                  onClick={go}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:hidden"
+                >
+                  <Icon className="h-5 w-5" aria-hidden />
+                </button>
+              ))}
+            </>
+          )
         }
       />
       <div className="flex flex-col gap-3 px-4 pt-2 md:px-0">
