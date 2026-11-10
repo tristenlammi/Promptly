@@ -117,9 +117,9 @@ test("a private group: invite, accept, posts in the feed live — and invisible 
   await bob.goto(`/porch/p/${p1}`);
   await expect(bob.getByText(first)).toBeVisible();
   await alice.goto(`/porch/p/${p1}`);
+  // Your own post goes at once, with Undo (no "are you sure").
   await alice.getByRole("button", { name: "More for this post" }).click();
-  await alice.getByRole("button", { name: "Delete post" }).click();
-  await alice.getByRole("button", { name: "Delete", exact: true }).click();
+  await alice.getByRole("menu", { name: /post$/ }).getByRole("menuitem", { name: "Delete post" }).click();
   await expect(alice.getByText("Post deleted.")).toBeVisible();
   await bob.reload();
   await expect(bob.getByText("This post isn't available")).toBeVisible();
@@ -273,14 +273,14 @@ test("first run on a one-person server, and Porch turned off", async ({ alice })
   await alice.route("**/api/porch/people/suggested", (route: Route) => route.fulfill({ json: [] }));
   await alice.route("**/api/porch/me/profile", (route: Route) => route.fulfill({ json: {} }));
   await alice.goto("/porch/");
-  const welcome = alice.getByRole("dialog", { name: "Welcome to Porch" });
+  // The welcome is the top of the feed the first time, with nothing to close.
+  const welcome = alice.getByRole("region", { name: "Welcome to Porch" });
   await expect(welcome).toBeVisible();
   await expect(welcome).toContainText("You're in Everyone (1 person).");
   await expect(welcome.getByRole("button", { name: "Make a group" })).toBeVisible();
-  await welcome.getByRole("button", { name: "Start" }).click();
-  await expect(alice.getByText("It's quiet on the Porch")).toBeVisible();
+  // Under it, with no posts, just the way to start (the welcome says the rest).
+  await expect(alice.getByText("You're the first one here. Say hello.")).toBeVisible();
   await expect(alice.getByRole("button", { name: "New post" }).last()).toBeVisible();
-  await expect(alice.getByRole("button", { name: "Make a group" })).toBeVisible();
   await alice.unrouteAll({ behavior: "ignoreErrors" });
 
   // Turned off for her: one plain message.

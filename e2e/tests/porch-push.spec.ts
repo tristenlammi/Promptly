@@ -38,7 +38,13 @@ const porch = (page: Page, auth: string) => ({
 
 async function porchReady(page: Page, auth: string): Promise<string> {
   const a = porch(page, auth);
-  const b = await a.get("/porch/bootstrap");
+  // Three people's pages load at once from one address here, which can run
+  // into nginx's per-address limit (a 429): wait a moment and ask again.
+  let b = await a.get("/porch/bootstrap");
+  for (let i = 0; i < 5 && b.status() === 429; i++) {
+    await page.waitForTimeout(2_000);
+    b = await a.get("/porch/bootstrap");
+  }
   expect(b.ok(), await b.text()).toBe(true);
   expect((await a.patch("/porch/me/profile", { welcomed: true })).ok()).toBe(true);
   return (await b.json()).me.id as string;
@@ -138,8 +144,9 @@ test("report a post in a group; the group's admin removes it from that group; th
 
   // Alice sees it in Mates and in Everyone: she reports it to Mates' admins.
   await alice.goto(`/porch/p/${post.id}`);
+  // On a computer the post's menu drops down from its button.
   await alice.getByRole("button", { name: /More for/ }).first().click();
-  await alice.getByRole("button", { name: "Report" }).click();
+  await alice.getByRole("menu", { name: /post$/ }).getByRole("menuitem", { name: /^Report/ }).click();
   const sheet = alice.getByRole("dialog", { name: "Report this post" });
   await expect(sheet.getByRole("checkbox", { name: "The people who run this Promptly" })).toBeVisible();
   await sheet.getByRole("checkbox", { name: `The admins of ${mates}` }).click();

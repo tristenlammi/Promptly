@@ -208,7 +208,7 @@ test("plan a BBQ in a group: everyone's invited, a member answers from the card 
   // Alice pins it: the Pinned strip on the group page (never the feed).
   await alice.goto(`/porch/p/${got.post.id}`);
   await alice.getByRole("button", { name: "More for this post" }).first().click();
-  await alice.getByRole("button", { name: new RegExp(`^Pin to ${fam}`) }).click();
+  await alice.getByRole("menu", { name: /post$/ }).getByRole("menuitem", { name: new RegExp(`^Pin to ${fam}`) }).click();
   await expect(alice.getByText(`Pinned to ${fam}.`)).toBeVisible();
   await alice.goto(`/porch/g/${famId}`);
   const pinned = alice.getByRole("region", { name: `Pinned in ${fam}` });
