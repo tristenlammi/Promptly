@@ -18,6 +18,7 @@ import {
   FolderInput,
   Home,
   Images,
+  Info,
   LayoutGrid,
   Pencil,
   Send,
@@ -43,6 +44,8 @@ import {
 } from "@/api/files";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
 import { DriveDetailsPanel } from "@/components/files/DriveDetailsPanel";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { Sheet } from "@/items/ui";
 import { useFilesShellStore } from "@/store/filesShellStore";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
@@ -344,6 +347,13 @@ export function FilesPage({
       ? data?.folders.find((f) => selFolders.has(f.id)) ?? null
       : null;
   const hasDetail = !!detailFile || !!detailFolder;
+  // Below the desktop width there is no side pane: "Details" in an item's
+  // menu opens the same panel as a sheet from the bottom.
+  const belowLg = useIsMobile(1023);
+  const [detailsSheet, setDetailsSheet] = useState(false);
+  useEffect(() => {
+    if (!hasDetail) setDetailsSheet(false);
+  }, [hasDetail]);
 
   // Anchor for shift-click range selection — the last item toggled
   // without shift. A ref so the toggle callbacks stay stable.
@@ -1043,6 +1053,10 @@ export function FilesPage({
               }}
               onShare={setShareGrantsFor}
               onSelectItem={handleSelectItem}
+              onDetails={(kind, id) => {
+                selectOnly(kind, id);
+                setDetailsSheet(true);
+              }}
               renameKey={renameKey}
               onRenameStarted={() => setRenameKey(null)}
               listRef={listRef}
@@ -1057,9 +1071,11 @@ export function FilesPage({
 
         {/* Right-hand details pane for a single selection. Desktop-only;
             on mobile a single selection still uses the top action bar. */}
-        {hasDetail && (
-          <aside className="hidden w-72 shrink-0 overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] lg:block">
+        {hasDetail && (() => {
+          const panel = (bare: boolean) => (
             <DriveDetailsPanel
+              bare={bare}
+              onAction={bare ? () => setDetailsSheet(false) : undefined}
               file={detailFile}
               folder={detailFolder}
               writable={writable}
@@ -1127,8 +1143,24 @@ export function FilesPage({
                   : undefined
               }
             />
-          </aside>
-        )}
+          );
+          return belowLg ? (
+            <Sheet
+              open={detailsSheet}
+              title="Details"
+              onClose={() => {
+                setDetailsSheet(false);
+                clearSelection();
+              }}
+            >
+              {panel(true)}
+            </Sheet>
+          ) : (
+            <aside className="w-72 shrink-0 overflow-hidden border-l border-[var(--border)] bg-[var(--surface)]">
+              {panel(false)}
+            </aside>
+          );
+        })()}
       </div>
 
       {/* Right-click-empty-space menu: every New action, into this folder
@@ -1429,6 +1461,7 @@ function ContentGrid({
   onPreview,
   onShare,
   onSelectItem,
+  onDetails,
   renameKey,
   onRenameStarted,
   listRef,
@@ -1464,6 +1497,8 @@ function ContentGrid({
     links?: boolean;
   }) => void;
   onSelectItem?: (kind: "file" | "folder", id: string, e: React.MouseEvent) => void;
+  /** "Details" in an item's menu: show its details (pane or sheet). */
+  onDetails?: (kind: "file" | "folder", id: string) => void;
   /** "file:<id>" / "folder:<id>" whose rename F2 asked for. */
   renameKey?: string | null;
   onRenameStarted?: () => void;
@@ -1499,8 +1534,8 @@ function ContentGrid({
 
   // The latest props for the controller's callbacks, so the controller
   // itself (and with it every memoised row) stays the same object.
-  const latest = useRef({ data, scope, onOpenFolder, onPreview, onSelectItem, onToggleFile, onToggleFolder, onShare, onOpenMove, onDropOnFolder, driveAi });
-  latest.current = { data, scope, onOpenFolder, onPreview, onSelectItem, onToggleFile, onToggleFolder, onShare, onOpenMove, onDropOnFolder, driveAi };
+  const latest = useRef({ data, scope, onOpenFolder, onPreview, onSelectItem, onDetails, onToggleFile, onToggleFolder, onShare, onOpenMove, onDropOnFolder, driveAi });
+  latest.current = { data, scope, onOpenFolder, onPreview, onSelectItem, onDetails, onToggleFile, onToggleFolder, onShare, onOpenMove, onDropOnFolder, driveAi };
   const mut = useRef({ renameFile, renameFolder, trashFile, trashFolder, starFile, unstarFile, starFolder, unstarFolder });
   mut.current = { renameFile, renameFolder, trashFile, trashFolder, starFile, unstarFile, starFolder, unstarFolder };
 
@@ -1614,6 +1649,11 @@ function ContentGrid({
           },
           { icon: <Pencil className="h-3.5 w-3.5" />, label: "Rename", onClick: () => startRename(entry), disabled: !writable },
           move,
+          {
+            icon: <Info className="h-3.5 w-3.5" />,
+            label: "Details",
+            onClick: () => L.onDetails?.(entry.kind, entryId(entry)),
+          },
         ];
         const trash: ContextMenuItem = {
           icon: <Trash2 className="h-3.5 w-3.5" />,

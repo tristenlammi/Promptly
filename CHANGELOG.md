@@ -33,6 +33,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - - Files: pictures in the preview zoom with the wheel, a pinch or a double-click, drag to look around, and swipe across for the next file.
 - - Files: the selection bar now floats at the bottom and slides in, so the list no longer jumps; on a phone it names its three main actions and keeps the rest under More.
 - - Files: the left list is grouped into Browse, Shared and Tools, and storage is one slim line that opens to show what is using the space and the last backup.
+- - Files: "Details" is in every item's menu; on a phone or tablet it opens as a sheet from the bottom.
 <!-- /Files UI -->
 
 ## [0.35.0] - 2026-11-09
