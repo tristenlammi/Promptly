@@ -1058,7 +1058,8 @@ services:
       # meant to be reachable. Keep it 7880: nginx and the backend look there.
       LIVEKIT_CONFIG: |
         port: 7880
-        prometheus_port: ${LIVEKIT_METRICS_PORT:-6789}
+        prometheus:
+          port: ${LIVEKIT_METRICS_PORT:-6789}
         rtc:
           tcp_port: ${LIVEKIT_TCP_PORT:-7881}
           udp_port: ${LIVEKIT_UDP_PORT:-7882}
@@ -1094,7 +1095,8 @@ services:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-}: ${LIVEKIT_API_SECRET:-}"
       LIVEKIT_CONFIG: |
         port: 7880
-        prometheus_port: ${LIVEKIT_METRICS_PORT:-6789}
+        prometheus:
+          port: ${LIVEKIT_METRICS_PORT:-6789}
         rtc:
           tcp_port: ${LIVEKIT_TCP_PORT:-7881}
           udp_port: ${LIVEKIT_UDP_PORT:-7882}

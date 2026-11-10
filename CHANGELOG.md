@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Calls: the calls service's config uses LiveKit's current name for the metrics port setting, so its log no longer warns that `prometheus_port` is deprecated.
+
 ## [0.36.2] - 2026-11-11
 
 ### Added
