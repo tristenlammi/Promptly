@@ -7,10 +7,14 @@ import {
   ArrowDown,
   ArrowDownUp,
   ArrowUp,
+  ChevronDown,
   ChevronRight,
+  CloudOff,
   Download,
   Eye,
   Folder as FolderClosedIcon,
+  FolderOpen,
+  Plus,
   FolderInput,
   Home,
   Images,
@@ -81,7 +85,7 @@ import {
 } from "@/components/files/DriveItemRow";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
-import { confirm } from "@/components/shared/ConfirmDialog";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { Modal } from "@/components/shared/Modal";
 import { Skeleton } from "@/components/shared/Skeleton";
 import {
@@ -510,13 +514,8 @@ export function FilesPage({
   const handleBulkTrash = useCallback(async () => {
     const count = selFiles.size + selFolders.size;
     if (count === 0) return;
-    const ok = await confirm({
-      title: "Move to trash?",
-      message: `${count} item${count === 1 ? "" : "s"} will be moved to the trash. You can restore ${count === 1 ? "it" : "them"} from the Trash view.`,
-      confirmLabel: "Move to trash",
-      danger: true,
-    });
-    if (!ok) return;
+    // No "are you sure": the toast offers Undo, and Trash keeps things
+    // for 30 days. Only "Delete forever" asks first.
     setBulkBusy(true);
     try {
       const ids = bulkIds();
@@ -545,7 +544,9 @@ export function FilesPage({
       if (selFiles.size + selFolders.size === 0) return;
       setBulkBusy(true);
       try {
+        const n = selFiles.size + selFolders.size;
         await bulkStar.mutateAsync({ ...bulkIds(), star });
+        toast.success(`${star ? "Starred" : "Unstarred"} ${n} item${n === 1 ? "" : "s"}`);
         clearSelection();
       } catch (e) {
         toast.error(extractError(e));
@@ -937,14 +938,17 @@ export function FilesPage({
             ))}
 
           {isError && (
-            <div
-              role="alert"
-              className="rounded-card border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger)]"
-            >
-              Failed to load files: {error instanceof Error ? error.message : "Unknown"}
-              <Button size="sm" variant="ghost" className="ml-3" onClick={() => refetch()}>
-                Retry
-              </Button>
+            <div role="alert" title={error instanceof Error ? error.message : undefined}>
+              <EmptyState
+                icon={<CloudOff className="h-5 w-5" />}
+                title="We couldn't open this folder"
+                description="Something got in the way. Check your connection and try again."
+                action={
+                  <Button size="sm" variant="primary" onClick={() => refetch()}>
+                    Try again
+                  </Button>
+                }
+              />
             </div>
           )}
 
@@ -1220,11 +1224,7 @@ export function FilesPage({
             void invalidateFileQueries(qc);
             setPreview(null);
           } catch (e) {
-            // Surface the message via a transient banner-style
-            // alert. We don't have a toast system on this page so
-            // a simple alert covers the rare error case.
-            // eslint-disable-next-line no-alert
-            alert(extractError(e));
+            toast.error(extractError(e));
           }
         }}
         onToggleStar={undefined}
@@ -1492,7 +1492,7 @@ function ContentGrid({
   const qcList = useQueryClient();
   const [menu, setMenu] = useState<{ entry: DriveEntry; x: number; y: number } | null>(null);
   const [renameDialog, setRenameDialog] = useState<{ entry: DriveEntry; value: string } | null>(null);
-  const [trashAsk, setTrashAsk] = useState<DriveEntry | null>(null);
+
   // "Send to…" a room or a person (a card in Rooms).
   const [sendTo, setSendTo] = useState<{ target: ShareTarget; own: boolean } | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -1619,7 +1619,12 @@ function ContentGrid({
           icon: <Trash2 className="h-3.5 w-3.5" />,
           label: "Trash",
           destructive: true,
-          onClick: () => setTrashAsk(entry),
+          // Straight to the trash: the toast offers Undo (no "are you sure").
+          onClick: () => {
+            const onError = (e: unknown) => toast.error(extractError(e));
+            if (entry.kind === "folder") mut.current.trashFolder.mutate({ id: entry.folder.id, scope: L.scope }, { onError });
+            else mut.current.trashFile.mutate({ id: entry.file.id, scope: L.scope }, { onError });
+          },
           disabled: !writable,
         };
         if (entry.kind === "file") {
@@ -1727,8 +1732,8 @@ function ContentGrid({
           <ChevronRight
             className={cn("h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform", systemOpen && "rotate-90")}
           />
-          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">System</span>
-          <span className="text-[10px] tabular-nums text-[var(--text-muted)]/70">{systemFolders.length}</span>
+          <span className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">System</span>
+          <span className="text-xs tabular-nums text-[var(--text-muted)]/70">{systemFolders.length}</span>
           {layout === "grid" && <span className="flex-1 border-t border-[var(--border)]" />}
         </button>
       ),
@@ -1744,10 +1749,24 @@ function ContentGrid({
   return (
     <DriveListProvider value={controller}>
       {nothingYours && (
-        <div className="mb-4">
+        <div className="mb-3">
           <EmptyFolder writable={data.writable} actions={newActions} />
+          {/* A fresh My files: one clean panel. The built-in folders stay
+              a tap away instead of sitting under it as a lone table. */}
+          {!systemOpen && (
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                onClick={() => setSystemOpen(true)}
+                className="rounded-md px-3 py-2 text-xs font-medium text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              >
+                Show built-in folders ({systemFolders.length})
+              </button>
+            </div>
+          )}
         </div>
       )}
+      {(!nothingYours || systemOpen) && (
       <DriveItemList
         ref={listRef}
         items={items}
@@ -1759,7 +1778,7 @@ function ContentGrid({
         hasMore={hasMore}
         loadingMore={loadingMore}
         onLoadMore={onLoadMore}
-        header={
+        header={nothingYours ? undefined :
           <DriveListHeader selectAll={selectAll}>
             <SortHeader className="flex-1" label="Name" col="name" sort={sort} onSort={onSort} />
             {/* Kind isn't a sort key, so it's a static label. */}
@@ -1769,6 +1788,7 @@ function ContentGrid({
           </DriveListHeader>
         }
       />
+      )}
 
       <ContextMenu
         open={menu !== null}
@@ -1797,26 +1817,6 @@ function ContentGrid({
         }}
       />
 
-      <ConfirmModal
-        open={!!trashAsk}
-        title={trashAsk?.kind === "folder" ? "Move folder to trash?" : "Move file to trash?"}
-        description={
-          trashAsk?.kind === "folder"
-            ? `"${trashAsk.folder.name}" and everything inside it will be moved to the trash. You can restore it from the Trash view.`
-            : trashAsk
-              ? `"${trashAsk.file.filename}" will be moved to the trash. You can restore it from the Trash view.`
-              : ""
-        }
-        confirmLabel="Move to trash"
-        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
-        onClose={() => setTrashAsk(null)}
-        onConfirm={async () => {
-          if (!trashAsk) return;
-          if (trashAsk.kind === "folder") await trashFolder.mutateAsync({ id: trashAsk.folder.id, scope });
-          else await trashFile.mutateAsync({ id: trashAsk.file.id, scope });
-          setTrashAsk(null);
-        }}
-      />
     </DriveListProvider>
   );
 }
@@ -1824,31 +1824,69 @@ function ContentGrid({
 /** An empty folder: say so, and offer what New offers — one click makes
  *  the thing here and opens it. */
 function EmptyFolder({ writable, actions }: { writable: boolean; actions: NewItemAction[] }) {
-  const quick = actions.filter((a) => a.group === "create" || a.key === "upload-files");
+  const upload = actions.find((a) => a.key === "upload-files");
+  const create = actions.filter((a) => a.group === "create");
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  usePopoverDismiss(open, ref, () => setOpen(false));
   return (
-    <div className="rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-10 text-center">
-      <h2 className="text-base font-semibold">Nothing here yet</h2>
-      <p className="mt-1 text-sm text-[var(--text-muted)]">
-        {writable
-          ? "Create something, or drop files here to upload them."
-          : "No files have been added to this pool yet."}
-      </p>
-      {writable && quick.length > 0 && (
-        <div className="mx-auto mt-5 flex max-w-2xl flex-wrap justify-center gap-2" aria-label="Create here">
-          {quick.map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              onClick={a.onSelect}
-              className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm font-medium transition hover:border-[var(--accent)]/50 hover:bg-[var(--hover)]"
-            >
-              {a.icon}
-              {a.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <EmptyState
+      icon={<FolderOpen className="h-5 w-5" />}
+      title="Nothing here yet"
+      description={
+        writable
+          ? "Upload something or make something new. You can also drop files anywhere on this page."
+          : "Nothing has been put here yet."
+      }
+      action={
+        writable && (upload || create.length > 0) ? (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {upload && (
+              <Button variant="primary" leftIcon={<Upload className="h-4 w-4" />} onClick={upload.onSelect}>
+                Upload
+              </Button>
+            )}
+            {create.length > 0 && (
+              <div ref={ref} className="relative">
+                <Button
+                  variant="secondary"
+                  leftIcon={<Plus className="h-4 w-4" />}
+                  rightIcon={<ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)]" />}
+                  aria-haspopup="menu"
+                  aria-expanded={open}
+                  onClick={() => setOpen((o) => !o)}
+                >
+                  New
+                </Button>
+                {open && (
+                  <div
+                    role="menu"
+                    aria-label="Create here"
+                    className="promptly-scroll absolute left-1/2 top-11 z-30 max-h-[50vh] w-52 -translate-x-1/2 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] py-1 text-left text-sm shadow-lg"
+                  >
+                    {create.map((a) => (
+                      <button
+                        key={a.key}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setOpen(false);
+                          a.onSelect();
+                        }}
+                        className="flex min-h-10 w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[var(--hover)]"
+                      >
+                        <span className="text-[var(--text-muted)]">{a.icon}</span>
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -2069,64 +2107,6 @@ function InlinePromptModal({
         }}
         className="w-full rounded-input border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
       />
-      {err && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{err}</p>}
-    </Modal>
-  );
-}
-
-function ConfirmModal({
-  open,
-  title,
-  description,
-  confirmLabel,
-  confirmIcon,
-  onConfirm,
-  onClose,
-}: {
-  open: boolean;
-  title: string;
-  description: string;
-  confirmLabel: string;
-  confirmIcon?: React.ReactNode;
-  onConfirm: () => Promise<void>;
-  onClose: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const run = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      await onConfirm();
-    } catch (e) {
-      setErr(extractError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={title}
-      footer={
-        <>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={run}
-            loading={busy}
-            leftIcon={confirmIcon}
-          >
-            {confirmLabel}
-          </Button>
-        </>
-      }
-    >
-      <p className="text-sm text-[var(--text-muted)]">{description}</p>
       {err && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{err}</p>}
     </Modal>
   );

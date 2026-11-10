@@ -25,6 +25,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Files UI (ui-files) -->
 - Files: Recent, Starred, Trash, Shared links, Home and Devices show placeholder rows while they load, like My files does, instead of the word "Loading".
 - Files: the search box says "Search Files" (it used to say "Search Drive"), and Trash says things there "still take up space" instead of talking about quota.
+- Files: an empty folder shows one clean panel with "Upload" and "New" (the list of things to make opens from New), without a table heading and a lone "System" row underneath; a fresh My files tucks its built-in folders behind "Show built-in folders".
+- Files: moving things to the trash no longer asks "are you sure" first. It just goes, with Undo on the message; only "Delete forever" still asks.
+- Files: when a folder can't be opened you get a plain message with "Try again" instead of "Failed to load files", and a failed "Save a copy" shows a normal message instead of a browser pop-up.
 <!-- /Files UI -->
 
 ## [0.35.0] - 2026-11-09
