@@ -21,6 +21,29 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- Maps UI pass (ui-maps) -->
+- Maps on a phone: the panel at the bottom now drags between three heights (just the handle, half the screen, nearly full) by its handle, so the map is never stuck behind it.
+- Maps: Undo after removing a saved place, a recent place, your parked car or a usual route, and after you stop sharing your location. A delete that fails now says so and puts the row back.
+- Maps search: your recent places show as soon as you tap the search box, the arrow keys and Enter pick a result, Esc closes the list, and "nothing found" suggests what to try.
+- Maps routes: each route shows when you would arrive, the quickest one is tagged "Fastest", a Swap button reverses the trip, and each step has a turn icon.
+- Maps place card: a Share button, how far the place is from you, and "Copy coordinates" in place of the raw numbers.
+- Maps: "Send to my phone" on a computer or iPhone shows a code to scan (or a link to copy) that opens the trip in Promptly on your Android phone.
+- Maps on a computer: zoom buttons, and a compass button that turns the map back to north when it has been rotated.
+- Places: "Open in Maps" on each place that is on the map.
+
+### Changed
+<!-- Maps UI pass (ui-maps) -->
+- Maps: the locate button shows when the map is following you and when location is blocked; charging stations and traffic are now under one Layers button.
+- Maps: placeholder rows while a route, a timeline day or your offline areas load; the Home, Place and Route panels slide between each other.
+- Maps: bigger tap targets on phones, terracotta for selected buttons, and switches and pill choices in place of tick boxes and drop-downs (avoid tolls, timeline, live location, offline areas).
+- Maps: when Maps is not set up, people who are not admins are told to ask their admin instead of seeing setup steps.
+- Places: a proper empty state, with a way back to all places when a filter or map spot has nothing.
+
+### Fixed
+<!-- Maps UI pass (ui-maps) -->
+- Maps: stopping live location sharing, pausing the timeline, changing how long history is kept and deleting a timeline day now say so when they fail instead of failing silently.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added
