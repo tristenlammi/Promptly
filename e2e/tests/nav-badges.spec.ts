@@ -63,6 +63,9 @@ test("an overdue task and an unread message badge the sidebar, then clear", asyn
     const dm = (await (
       await bob.request.post("/api/rooms/dms", { headers: { Authorization: b }, data: { user_ids: [run.users.alice.id] } })
     ).json()) as { id: string };
+    // Start with the conversation read: a run that stopped part way leaves
+    // its message unread, and reading the room would clear that one too.
+    expect((await alice.request.post(`/api/rooms/rooms/${dm.id}/read`, { headers: A, data: { seq: 1_000_000_000 } })).ok()).toBe(true);
     const sent = await bob.request.post(`/api/rooms/rooms/${dm.id}/messages`, {
       headers: { Authorization: b },
       data: { body: `Hi from bob ${stamp}` },
@@ -73,9 +76,11 @@ test("an overdue task and an unread message badge the sidebar, then clear", asyn
     expect(before.tasks).toBeGreaterThanOrEqual(1);
     expect(before.rooms).toBeGreaterThanOrEqual(1);
 
-    // Expanded sidebar.
-    await alice.goto("/files");
+    // Expanded sidebar (on a page that keeps it open: Files folds it to
+    // its icons by itself, beside its own side list).
+    await alice.goto("/chat");
     await ready(alice);
+    await expect(alice.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
     await expectBadge(alice, "tasks", before.tasks, "due");
     await expectBadge(alice, "rooms", before.rooms, "unread");
 
