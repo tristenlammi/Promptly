@@ -299,8 +299,8 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 
-# Outermost: requests from the containers that run untrusted input (the code
-# sandbox, the Office converter) never reach any route (security review M1).
+# Outermost: requests from the containers that run untrusted input (the
+# Office converter) never reach any route (security review M1).
 from app.isolated_peers import IsolatedPeerMiddleware  # noqa: E402
 
 app.add_middleware(IsolatedPeerMiddleware)
@@ -455,7 +455,6 @@ from app.files.share_router import router as file_share_router  # noqa: E402
 from app.local_models.router import router as local_models_router  # noqa: E402
 from app.billing.router import router as billing_router  # noqa: E402
 from app.research.router import router as research_router  # noqa: E402
-from app.code.router import router as code_router  # noqa: E402
 from app.mfa.router import router as mfa_router  # noqa: E402
 from app.feedback.router import router as feedback_router  # noqa: E402
 from app.models_config.router import router as models_router  # noqa: E402
@@ -619,7 +618,6 @@ app.include_router(
 app.include_router(voice_router, prefix="/api/voice", tags=["voice"])
 app.include_router(billing_router, prefix="/api/usage", tags=["usage"])
 app.include_router(research_router, prefix="/api", tags=["research"])
-app.include_router(code_router, prefix="/api", tags=["code"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
 app.include_router(files_router, prefix="/api/files", tags=["files"])
 # Drive Documents API (create doc, mint collab JWT, accept snapshot

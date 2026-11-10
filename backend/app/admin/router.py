@@ -169,8 +169,6 @@ async def create_user(
     )
     if payload.can_generate_images is not None:
         user.can_generate_images = payload.can_generate_images
-    if payload.can_execute_code is not None:
-        user.can_execute_code = payload.can_execute_code
     if payload.can_reach_private_network is not None:
         user.can_reach_private_network = payload.can_reach_private_network
     if payload.can_use_automations is not None:
@@ -486,8 +484,6 @@ async def update_user(
     if "can_generate_images" in fields and payload.can_generate_images is not None:
         target.can_generate_images = payload.can_generate_images
 
-    if "can_execute_code" in fields and payload.can_execute_code is not None:
-        target.can_execute_code = payload.can_execute_code
     if (
         "can_reach_private_network" in fields
         and payload.can_reach_private_network is not None

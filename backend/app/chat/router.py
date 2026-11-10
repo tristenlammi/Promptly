@@ -5304,9 +5304,6 @@ async def _stream_generator(
         else:
             if ctx.get("tools_enabled"):
                 enabled_categories.add("artefact")
-                # Phase 4 — the code interpreter rides on the same Tools
-                # toggle as the artefact generators.
-                enabled_categories.add("code")
                 # Batch 4.1 — workspace write-back *proposals*. Only in
                 # workspace chats. The tools never write; they file a
                 # pending proposal the user applies from a preview card,

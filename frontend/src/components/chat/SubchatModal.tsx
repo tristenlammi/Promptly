@@ -26,7 +26,7 @@ interface SubchatModalProps {
   modelName?: string | null;
   /** Whether AI tools are on for this turn. Mirrors the main composer's
    *  switch — without it the backend defaults to off, so a subchat
-   *  silently couldn't run code or fetch a page while the chat behind it
+   *  silently couldn't search or fetch a page while the chat behind it
    *  could. */
   toolsEnabled?: boolean;
   /** Discard the subchat (parent deletes the ephemeral conversation). */

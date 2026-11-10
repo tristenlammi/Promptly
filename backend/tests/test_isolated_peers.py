@@ -1,4 +1,4 @@
-"""Requests from the sandbox / converter containers never reach a route (M1)."""
+"""Requests from the isolated (converter) container never reach a route (M1)."""
 from __future__ import annotations
 
 import httpx
@@ -19,12 +19,12 @@ def _client(peers: IsolatedPeers, peer_ip: str) -> httpx.AsyncClient:
 
 @pytest.fixture
 def peers(monkeypatch):
-    p = IsolatedPeers(["sandbox", "convert"], ["172.31.250.0/24"])
+    p = IsolatedPeers(["convert"], ["172.31.250.0/24"])
     monkeypatch.setattr(IsolatedPeers, "_lookup", staticmethod(lambda hosts: frozenset({"172.20.5.2", "172.21.0.3"})))
     return p
 
 
-async def test_the_sandbox_and_converter_are_refused(peers):
+async def test_isolated_containers_are_refused(peers):
     for ip in ("172.20.5.2", "172.21.0.3", "172.31.250.9", "::ffff:172.20.5.2"):
         async with _client(peers, ip) as c:
             r = await c.post("/api/internal/tus-hook")

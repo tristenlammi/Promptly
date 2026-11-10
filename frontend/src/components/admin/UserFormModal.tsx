@@ -24,8 +24,6 @@ export interface UserFormValues {
   allowed_models: string[] | null;
   /** Whether the user can use the `generate_image` chat tool. */
   can_generate_images: boolean;
-  /** Whether the user can run code via the "Run" button on code artifacts. */
-  can_execute_code: boolean;
   can_reach_private_network: boolean;
   /** Whether the user may use Automations (off unless turned on). */
   can_use_automations: boolean;
@@ -85,7 +83,6 @@ export function UserFormModal({
   const [role, setRole] = useState<UserRole>("user");
   const [fullAccess, setFullAccess] = useState(true);
   const [canGenerateImages, setCanGenerateImages] = useState(true);
-  const [canExecuteCode, setCanExecuteCode] = useState(true);
   const [canReachPrivate, setCanReachPrivate] = useState(false);
   const [canUseAutomations, setCanUseAutomations] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -122,7 +119,6 @@ export function UserFormModal({
       setRole(user.role);
       setFullAccess(user.allowed_models === null);
       setCanGenerateImages(user.can_generate_images ?? true);
-      setCanExecuteCode(user.can_execute_code ?? true);
       setCanReachPrivate(user.can_reach_private_network ?? false);
       setCanUseAutomations(user.can_use_automations ?? false);
       setLocked(!!user.model_locked && user.allowed_models !== null);
@@ -150,7 +146,6 @@ export function UserFormModal({
       setRole("user");
       setFullAccess(true);
       setCanGenerateImages(true);
-      setCanExecuteCode(true);
       setCanReachPrivate(false);
       setCanUseAutomations(false);
       setLocked(false);
@@ -232,7 +227,6 @@ export function UserFormModal({
         allowed_models:
           role === "admin" || fullAccess ? null : Array.from(picked),
         can_generate_images: canGenerateImages,
-        can_execute_code: canExecuteCode,
         can_reach_private_network: canReachPrivate,
         can_use_automations: canUseAutomations,
         model_locked: role === "user" && !fullAccess && locked,
@@ -416,23 +410,6 @@ export function UserFormModal({
                 <span className="block text-[11px] text-[var(--text-muted)]">
                   Let this user ask the chat to generate or edit images. Off =
                   the image tool is withheld entirely for them.
-                </span>
-              </span>
-            </label>
-            <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={canExecuteCode}
-                onChange={(e) => setCanExecuteCode(e.target.checked)}
-              />
-              <span className="text-xs">
-                <span className="font-medium text-[var(--text)]">
-                  Code execution
-                </span>
-                <span className="block text-[11px] text-[var(--text-muted)]">
-                  Let this user run code with the “Run” button on code
-                  artifacts. Off = the Run button is hidden for them.
                 </span>
               </span>
             </label>

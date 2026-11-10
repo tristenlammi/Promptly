@@ -138,8 +138,8 @@ setup_calls() {
 # a real value are left alone. Runs before anything is rebuilt, so the new
 # containers start with them and the backend's boot check never trips.
 #   TUS_HOOK_SECRET      backend <-> tusd upload hooks
-#   CODE_SANDBOX_SECRET  backend <-> code sandbox (its own value: never
-#                        SECRET_KEY, which code in the sandbox could read)
+# (An old CODE_SANDBOX_SECRET line in .env is no longer read: the code
+# sandbox was removed. It's harmless to leave or delete.)
 ensure_secret() {
   local key="$1"
   if grep -qE "^${key}=." .env && ! grep -qE "^${key}=change-me" .env; then
@@ -161,7 +161,6 @@ ensure_secret() {
 ensure_secrets() {
   [[ -f .env ]] || return 0
   ensure_secret TUS_HOOK_SECRET
-  ensure_secret CODE_SANDBOX_SECRET
 }
 
 reload_nginx() {
@@ -260,7 +259,11 @@ ensure_secrets
 # ours build FROM, so security fixes in them actually arrive.
 docker compose pull --ignore-buildable --quiet || yellow "  Couldn't pull some images; continuing with what's here."
 docker compose build --pull
+# --remove-orphans also clears containers of services that no longer exist
+# (the old code sandbox, Promptly-Sandbox). Its empty network is left behind
+# by compose, so tidy that too; harmless when it isn't there.
 docker compose up -d --remove-orphans
+docker network rm promptly-sandbox >/dev/null 2>&1 || true
 
 bold "5/6  Reloading nginx config"
 reload_nginx

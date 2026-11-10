@@ -21,16 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Removed
+- Running code is gone: the AI can no longer run Python in chat, code blocks no longer have a Run button, and the code sandbox container is no longer installed (./update.sh removes it). HTML, React and SVG previews of code blocks still work, and old chats still show their past runs. The "Code execution" setting on users is gone with it.
+
 ### Security
 <!-- Security review fixes (sec-fixes) -->
-- The code sandbox no longer gets the server's main secret. Code the AI ran could read SECRET_KEY (which signs every login and encrypts stored keys) from the sandbox's own process. The sandbox now has its own secret, CODE_SANDBOX_SECRET, which ./update.sh and the installer create, and the AI's code runs as a separate, powerless user that can't see the sandbox server at all. Without the secret the code tool is off and says how to fix it.
-- A placeholder TUS_HOOK_SECRET or CODE_SANDBOX_SECRET (copied from .env.example) now stops Promptly starting on a public address, like a placeholder SECRET_KEY does. ./update.sh fills in both before it restarts anything.
+- A placeholder TUS_HOOK_SECRET (copied from .env.example) now stops Promptly starting on a public address, like a placeholder SECRET_KEY does. ./update.sh fills it in before it restarts anything.
 - After a SECRET_KEY change, mail account passwords, saved secrets, the breach-check key and the traffic key are also moved onto the new key at start-up (with SECRET_KEY_PREVIOUS set), not only MFA, provider and connector secrets.
 - Password-reset emails, single sign-on and feedback emails no longer take this server's address from the request. A forged Host header could make a real reset email link to someone else's site. Links now always use the public address set in Admin, or the one you're using when it's one of those.
 - Workspace search results in the Ctrl+K palette show their highlighted snippet as text, so words in a shared note can't turn into page markup.
 - Updated python-jose to 3.4.0 and cryptography to 44.0.1 for their security fixes.
-- After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"), and before it runs code. A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
-- The code sandbox and the Office converter can no longer call Promptly's own server directly over the internal network they share with it, and big-upload hooks need their secret (no more "it came from inside, so it's fine").
+- After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"). A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
+- The Office converter can no longer call Promptly's own server directly over the internal network it shares with it, and big-upload hooks need their secret (no more "it came from inside, so it's fine").
 - Fetching a web page (the AI's page reader, remote images in Mail, automations, link previews) connects to the exact address that was checked, so a site can't switch its DNS to an address inside your network between the check and the request.
 - nginx ignores the visitor address in CF-Connecting-IP when it arrives through Docker's gateway, so a device on your network can't pretend to be someone else to the rate limits. cloudflared should run as a container on Promptly's network (README, "Cloudflare Tunnel").
 - New optional NGINX_BIND in .env picks which address ports 8087/8488 open on (usually the server's LAN address). By default they now open on IPv4 only. The README has a new "Exposure" section: what should be reachable, and how to check from outside on IPv4 and IPv6.

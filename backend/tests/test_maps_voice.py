@@ -279,7 +279,7 @@ async def test_yes_with_nothing_waiting_does_nothing(db, user, monkeypatch):
     assert "nothing waiting" in (await talk.reply(db, user, "yes", trip()))["say"]
 
 
-@pytest.mark.parametrize("tool", ["run_agents", "post_to_room", "forget", "code_interpreter", "nonsense"])
+@pytest.mark.parametrize("tool", ["run_agents", "post_to_room", "forget", "nonsense"])
 async def test_tools_not_on_the_list_cant_run(db, user, monkeypatch, tool):
     _script(monkeypatch, {"do": "use", "tool": tool, "args": {}})
     assert (await talk.reply(db, user, "do it", trip()))["say"] == talk.FAILED

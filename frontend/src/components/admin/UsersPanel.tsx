@@ -146,7 +146,6 @@ export function UsersPanel() {
       // These were collected by the dialog and then dropped, so a user
       // meant to be locked down got every capability (R-260).
       can_generate_images: values.can_generate_images,
-      can_execute_code: values.can_execute_code,
       can_reach_private_network: values.can_reach_private_network,
       can_use_automations: values.can_use_automations,
       model_locked: values.model_locked,
@@ -183,10 +182,6 @@ export function UsersPanel() {
         can_generate_images:
           values.can_generate_images !== target.can_generate_images
             ? values.can_generate_images
-            : undefined,
-        can_execute_code:
-          values.can_execute_code !== target.can_execute_code
-            ? values.can_execute_code
             : undefined,
         can_reach_private_network:
           values.can_reach_private_network !== target.can_reach_private_network

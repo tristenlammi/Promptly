@@ -35,7 +35,7 @@
 Promptly is a **self-hosted, multi-user AI workspace**. It pairs a Claude.ai-style chat UI with a bring-your-own-key model layer, production-grade auth, and a set of differentiating features:
 
 - **Chat with any model** — Anthropic, OpenAI, Google, DeepSeek, Atlas Cloud, 300+ models via OpenRouter, local models via Ollama, and any OpenAI-compatible endpoint.
-- **Agentic tools & deep research** — the model can search the web, fetch/follow pages, run Python in a sandbox, generate PDFs and images, fan out to parallel research sub-agents, and call external **MCP** connectors.
+- **Agentic tools & deep research** — the model can search the web, fetch/follow pages, generate PDFs and images, fan out to parallel research sub-agents, and call external **MCP** connectors.
 - **Workspaces** — chats, notes, canvases, boards, sheets and rosters that all share one retrieval (RAG) layer, so any chat in a workspace is grounded in everything the workspace knows.
 - **Files / Drive** — a real drive experience (folders, trash, star, search, sharing) built on local disk, with collaborative rich-text documents.
 - **Voice** — self-hosted Whisper dictation and Kokoro read-aloud, plus a hands-free half-duplex voice mode.
@@ -72,7 +72,6 @@ It runs as a single `docker compose up -d` on a small Linux box, Unraid server, 
 
 ### Sidecar services
 - **collab** — Node ≥22 **Hocuspocus 4** Yjs websocket server for real-time notes/canvas/sheets.
-- **sandbox** — hardened Python execution worker (air-gapped network, read-only rootfs, rlimits).
 - **whisper** — `faster-whisper` STT shim; **tts** — Kokoro-82M (`kokoro-onnx`) read-aloud shim.
 - **searxng** — bundled metasearch engine for web search.
 - **ollama** (optional profile) — local model runtime for embeddings + optional local chat models.
@@ -133,7 +132,6 @@ Promptly/
 │
 ├── collab/                    # Node Hocuspocus Yjs server (src/server.js)
 ├── e2e/                       # Playwright safety net against the running stack (WP-1.1)
-├── sandbox/                   # code execution worker (server.py)
 ├── whisper/  tts/             # STT / TTS sidecar FastAPI shims
 ├── searxng/                   # SearXNG settings.yml
 ├── nginx/                     # nginx.conf + ssl/
@@ -153,7 +151,6 @@ Backend feature modules follow a consistent shape: `router.py` (endpoints), `mod
 Everything is defined in `docker-compose.yml` (compose project name `Promptly`). **Only nginx publishes host ports;** every other service talks over two internal Docker networks:
 
 - **`promptly`** — the main app network.
-- **`sandbox-net`** (`internal: true`) — an air-gapped network with **no route to the internet or host**. Only the backend and the code sandbox join it, so executed code can reach nothing except the backend that submitted the job.
 
 | Service | Role | Image / build | Notes |
 |---|---|---|---|
@@ -167,7 +164,6 @@ Everything is defined in `docker-compose.yml` (compose project name `Promptly`).
 | **redis** | Streaming state, rate limits, Arq queue | `redis:7.4-alpine` (pinned) | Internal only; volume `./data/redis`. |
 | **ollama** / **ollama-gpu** / **ollama-rocm** | Local LLM runtime — embeddings + optional local chat | `ollama/ollama:0.40.0` (`-rocm` variant; pinned) | Loopback-only host mapping by default (Ollama has no auth). Profiles `ollama` / `gpu` / `rocm` share the `ollama` network alias, so exactly one runs. Auto-pulls the embed model on first start. |
 | **searxng** | Bundled metasearch for web search | `searxng/searxng` (pinned) | `cap_drop: ALL`; profile `search`. |
-| **sandbox** | Code-interpreter execution worker | build `sandbox/Dockerfile` | `read_only: true`, tmpfs scratch, `cap_drop: ALL`, `no-new-privileges`, `pids_limit 256`; **only** on `sandbox-net`. |
 | **whisper** | Speech-to-text (faster-whisper) | build `whisper/Dockerfile` | int8/CPU default; weights cached to a volume. |
 | **tts** | Text-to-speech (Kokoro-82M) | build `tts/Dockerfile` | Emits 16-bit PCM WAV. |
 | **livekit** / **livekit-desktop** | Calls: LiveKit media server (voice channels) | `livekit/livekit-server:v1.13.11` (pinned) | Profiles `calls` (host networking, Linux) / `calls-desktop` (bridged, Docker Desktop); exactly one runs. Publishes UDP 7882 + TCP 7881 for media; signalling through nginx `/livekit/`. See "Calls". |
@@ -179,7 +175,7 @@ All stateful data is bind-mounted under `./data/` (postgres, redis, ollama, whis
 ### 4.2 Backend bootstrap (`app/main.py`, `config.py`, `bootstrap.py`)
 
 - **Fail-fast boot check** — on import, `settings.validate_boot_safety()` refuses to start (`InsecureProductionConfig`) if `SECRET_KEY` is the dev placeholder or < 32 chars, and on a public `DOMAIN` also rejects placeholder DB/Redis passwords and unsafe `SINGLE_USER_MODE`.
-- **Config** — `config.py` is a Pydantic-Settings class (`.env`, `lru_cache`d). It centralizes app identity, cookie flags, a trusted-proxy CIDR list for real-IP extraction, MFA + lockout tunables, the rate-limit DSL set, token TTLs, `DATABASE_URL`/`REDIS_URL`, sandbox/STT/TTS/search settings, an SSRF host allowlist, provider API-key seeds, and VAPID keys. One `SECRET_KEY` derives JWT signing, all Fernet at-rest encryption, avatar HMACs, and the sandbox bearer.
+- **Config** — `config.py` is a Pydantic-Settings class (`.env`, `lru_cache`d). It centralizes app identity, cookie flags, a trusted-proxy CIDR list for real-IP extraction, MFA + lockout tunables, the rate-limit DSL set, token TTLs, `DATABASE_URL`/`REDIS_URL`, STT/TTS/search settings, an SSRF host allowlist, provider API-key seeds, and VAPID keys. One `SECRET_KEY` derives JWT signing, all Fernet at-rest encryption, and avatar HMACs.
 - **Lifespan loops** (in-process, single-worker): the temporary-conversation **sweeper**, the automations **scheduler**, the **semantic indexer** (embeds messages for the search palette), and the **chat-upload sweeper**.
 - **Middleware** (outer→inner): app-wide blanket rate-limit dep → global exception handler (persists 500s to `error_events`) → optional `TrustedHostMiddleware` → `RequestContextMiddleware` (request-id, structured access log; every log line, error row, rate-limit audit row and the slowest-route metric carries the matched route's **template** (`logging_setup.route_label`: `GET /api/calendar/feed/{token}.ics`, `PROPFIND /dav/{path}`), never the raw path, and a path no route matched keeps at most two plain-word segments (`/api/nope/…`); `user_id` appears only on WARNING+ lines, and error rows keep it (admin privacy AP1). Warning/error messages and stored exception text go through `observability/scrub.py` (URL queries and quoted strings over 40 characters removed; AP2)) → **`DynamicCORSMiddleware`** (rebuilds the allow-set per request from localhost ∪ env `ALLOWED_ORIGINS` ∪ DB `app_settings.public_origins`, 15s cache, flushed on admin edit).
 - **Health** — `GET /api/health` (public) pings Postgres/Redis/(SearXNG) in parallel, returns per-component booleans only; it's the Docker healthcheck.
@@ -271,7 +267,7 @@ Optional, **off by default**, config in `app_settings` (client secret Fernet-enc
 - **`UserGroup`** — an admin-managed role bundle whose `allowed_models` are additively UNIONed into each member's own access, and which scopes MCP connector reach.
 - **`role`** — `admin` (full access, never gated) or `user`.
 - **`allowed_models`** (tri-state) — `NULL` = full curated pool, `[]` = none, `[...]` = subset.
-- **`can_generate_images`** / **`can_execute_code`** — per-user gates for the image tool and the user-facing Run button.
+- **`can_generate_images`** — per-user gate for the image tool.
 - **Quota overrides** — `storage_cap_bytes`, `daily_token_budget`, `monthly_token_budget` (NULL falls back to instance default).
 
 ### 5.7 Admin console (`admin/`, `require_admin`)
@@ -341,7 +337,7 @@ Up to **`MAX_TOOL_HOPS = 8`**. Each hop streams `stream_chat_events`; deltas dis
 
 ### 6.7 Artifacts
 
-- **Code artifacts with a Run button** (`sandbox_exec.py`) — ships code to the hardened sandbox; output files pass a MIME allowlist + extension deny-list before landing in Drive. Shared by the `code_interpreter` tool and the user-facing `POST /api/code/run`.
+- **Code artifacts** — code blocks open in a side panel with a Code tab and, for HTML / React / SVG / Markdown / JSON / CSV, a Preview tab that renders in the browser (sandboxed iframe). Nothing runs on the server: the Run button, the `code_interpreter` tool and the code sandbox container were removed (migration `0420_drop_code_exec`).
 - **In-place artifact editing** (`artifact_edit.py`) — applies an NL instruction and returns the **complete** updated source so the side panel patches in place.
 - **Workspace write-back proposals** (`proposals_router.py`) — workspace tools never write directly; they file a `WorkspaceProposal` that a human applies from a preview card (re-validated against current state).
 
@@ -515,7 +511,7 @@ Count badges on the sidebar's pinned app rows (`app/badges`, `frontend/src/hooks
 
 Every server-side function subclasses **`Tool`** (`base.py`): `name`, `description`, `parameters` (JSON Schema), `category`, optional `max_per_turn`/`timeout_seconds`/`max_content_chars`. A **`ToolContext`** carries the same DB session as the chat router (so rows a tool creates are visible to the follow-up model call) plus a progress channel. A **`ToolResult`** returns `content` (fed back to the model), `attachment_ids` (→ chips), `sources` (→ inline `[n]` citations), and `meta` (→ `tool_finished` event). `validation.py` enforces each tool's JSON Schema server-side and `clean_model_text` scrubs adversarial control/bidi/zero-width chars from fetched content.
 
-**Registry** (`registry.py`) — the live tools: `echo`, `generate_pdf`, `generate_image`, `code_interpreter`, `web_search`, `fetch_url`, `run_agents`, `deep_research`, `propose_workspace_note`, `propose_board_cards`, `propose_board_updates`, `read_workspace_item`, `query_board_cards`. (`attach_demo_file` is retired/unregistered.)
+**Registry** (`registry.py`) — the live tools: `echo`, `generate_pdf`, `generate_image`, `web_search`, `fetch_url`, `run_agents`, `deep_research`, `propose_workspace_note`, `propose_board_cards`, `propose_board_updates`, `read_workspace_item`, `query_board_cards`. (`attach_demo_file` is retired/unregistered.)
 
 **Dispatch** (`_dispatch_tools`) — two-phase: validate/account/launch native tools as concurrent tasks (own session, `asyncio.timeout`, `_TOOL_CONCURRENCY=4`), then drain **in model-call order**. Features: per-turn caps, cross-hop dedup cache (replays cached content instead of re-executing), MCP routing, `tool_started`/`tool_progress`/`tool_finished` SSE events, and a compact **Tool Activity Card** record persisted onto `messages.tool_calls`.
 
@@ -528,7 +524,6 @@ Every server-side function subclasses **`Tool`** (`base.py`): `name`, `descripti
 | `echo` | artefact | Diagnostic |
 | `generate_pdf` | artefact | Markdown → PDF (+ editable `.md` sidecar) via xhtml2pdf |
 | `generate_image` | artefact | Generate/edit an image via OpenRouter |
-| `code_interpreter` | code | Run Python in the sandbox (auto-pulls data attachments; persists working dir per conversation) |
 | `web_search` | search | Web search → numbered citations (via failover chain) |
 | `fetch_url` | search | Fetch + extract one page (trafilatura; Tavily-Extract fallback for walled sites; surfaces in-content links for citation chains) |
 | `run_agents` | agents | Fan out to 1–4 parallel research sub-agents (own model↔tool loop, depth-1, merged & renumbered citations) |
@@ -552,9 +547,9 @@ Provider adapters normalize to `SearchResult`; every request is SSRF-guarded. Pr
 
 **DeepSeek's own Search & Fetch** (`search/deepseek.py`) — only when the turn's model comes from a `deepseek` ModelProvider: `mark_turn(turn, provider)` puts `deepseek_provider_id` in `ToolContext.turn` (chat stream, `run_agents` sub-agents, scheduled tasks, Deep Research). `web_search` then calls `POST https://api.deepseek.com/v1/tools/search` (query clipped to 128 chars, `summary` used as the snippet) with the provider's key **before** the failover chain — a DeepSeek chat searches even with no search provider configured; an error or empty answer falls through to the chain. `fetch_url` keeps the free direct fetch first and uses `POST /v1/tools/fetch` (Markdown) as the first rescue for a blocked page, ahead of Tavily/Ollama (`recovered_via="deepseek"`); SSRF refusals never reach it. The activity card shows "via DeepSeek". DeepSeek bills $0.75 / 1,000 successful requests each (errors and empty results free). Test `test_deepseek_search.py`.
 
-### 8.5 Code sandbox (`sandbox_exec.py`, `code/`)
+### 8.5 Code sandbox (removed)
 
-The **sandbox container** does the real isolation (internal-only network, read-only rootfs, dropped caps, CPU/mem/time/file rlimits). `run_python_in_sandbox` (the trusted client) base64-encodes input files (≤64 MB), POSTs to `{sandbox}/execute` with a shared-secret header, and gates outputs (extension deny-list + MIME allow-list) before persisting to Drive. `session_id` = conversation id, so a working dir **persists across calls** in a conversation. The user-facing `POST /api/code/run` (Python, one-shot) gates on `can_execute_code` server-side (migration 0159).
+Promptly no longer runs code on the server. The `code_interpreter` tool, `POST /api/code/run`, the `sandbox` container with its `sandbox-net` network, the `CODE_SANDBOX_*` settings and `users.can_execute_code` are gone (migration `0420_drop_code_exec`). Old chats still show past `code_interpreter` runs in their activity cards. Browser-side artifact previews (§6.7) are unaffected.
 
 ### 8.6 Image generation
 
@@ -819,7 +814,7 @@ Component domains: **chat** (~55 files — window/bubble, composer, model select
 
 ### 18.1 Key config surface (`backend/app/config.py`)
 
-`SECRET_KEY` (one key: JWT signing + all Fernet at-rest + avatar HMAC + sandbox bearer), `DOMAIN`, `DEBUG`, `SINGLE_USER_MODE` (legacy dev bypass), `ALLOWED_ORIGINS`, `COOKIE_SECURE=True`/`COOKIE_SAMESITE=strict`, `TRUSTED_PROXY_IPS`, `LOCKOUT_THRESHOLD=5`/`LOCKOUT_COOLDOWN_MINUTES=15`, `ACCESS_TOKEN_TTL_MINUTES=15`/`REFRESH_TOKEN_TTL_DAYS=3`, the MFA tunables, the rate-limit DSL set, `DATABASE_URL`, `REDIS_URL`, `CODE_SANDBOX_URL`/`_SECRET`/`_TIMEOUT_S`, `STT_BACKEND`/`WHISPER_URL`, `TTS_URL`/`TTS_VOICE`, `SEARXNG_URL`/`_ENABLED`, `SSRF_ALLOWED_HOSTS=searxng`, provider key seeds, and `VAPID_*`.
+`SECRET_KEY` (one key: JWT signing + all Fernet at-rest + avatar HMAC), `DOMAIN`, `DEBUG`, `SINGLE_USER_MODE` (legacy dev bypass), `ALLOWED_ORIGINS`, `COOKIE_SECURE=True`/`COOKIE_SAMESITE=strict`, `TRUSTED_PROXY_IPS`, `LOCKOUT_THRESHOLD=5`/`LOCKOUT_COOLDOWN_MINUTES=15`, `ACCESS_TOKEN_TTL_MINUTES=15`/`REFRESH_TOKEN_TTL_DAYS=3`, the MFA tunables, the rate-limit DSL set, `DATABASE_URL`, `REDIS_URL`, `STT_BACKEND`/`WHISPER_URL`, `TTS_URL`/`TTS_VOICE`, `SEARXNG_URL`/`_ENABLED`, `SSRF_ALLOWED_HOSTS=searxng`, provider key seeds, and `VAPID_*`.
 
 ### 18.2 Database tables (56)
 
