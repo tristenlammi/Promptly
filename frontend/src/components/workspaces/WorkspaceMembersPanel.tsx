@@ -18,6 +18,7 @@ import type {
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
 import { UserAvatar } from "@/components/shared/UserAvatar";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /**
  * Members + sharing UI, shared by the owner's quick "Share" dialog and the
@@ -192,7 +193,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
           People with access
         </h3>
         {isLoading ? (
-          <div className="text-xs text-[var(--text-muted)]">Loading…</div>
+          <SkeletonRows count={3} label="Loading" />
         ) : isError ? (
           <div className="text-xs text-[var(--danger)]">
             Couldn't load existing shares. Try again in a moment.

@@ -138,6 +138,7 @@ function LifeEventCard({ post }: { post: PorchPost }) {
  */
 export function PostCard({ post, full = false, media = true, className }: { post: PorchPost; full?: boolean; media?: boolean; className?: string }) {
   const [menu, setMenu] = useState(false);
+  const moreBtn = useRef<HTMLButtonElement>(null);
   const [saving, setSaving] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [planning, setPlanning] = useState(false);
@@ -349,9 +350,11 @@ export function PostCard({ post, full = false, media = true, className }: { post
         </div>
         <button
           type="button"
+          ref={moreBtn}
           aria-label="More for this post"
-          aria-haspopup="dialog"
-          onClick={() => setMenu(true)}
+          aria-haspopup={isPhone ? "dialog" : "menu"}
+          aria-expanded={menu}
+          onClick={() => setMenu((m) => !m)}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
         >
           <MoreHorizontal className="h-5 w-5" />
@@ -394,7 +397,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
       {!full && talk && !isPhone && <InlineComments post={post} focusBox={talk.focus} className="mx-4 rounded-xl bg-[var(--surface-1)] p-3 md:mx-0" />}
       {!full && isPhone && <CommentsSheet post={post} open={!!talk} onClose={() => setTalk(null)} />}
 
-      <ActionSheet open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
+      <ActionSheet anchor={moreBtn.current} open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
       {!post.mine && <ReportSheet open={reporting} onClose={() => setReporting(false)} target="post" id={post.id} who={who} authorId={author?.id} groups={post.groups} />}
       {!post.mine && b?.me?.is_admin && inEveryone && (
         <RemoveFromEveryoneSheet

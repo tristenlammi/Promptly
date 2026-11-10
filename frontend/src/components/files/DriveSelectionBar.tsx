@@ -77,6 +77,17 @@ export function DriveSelectionBar({
     return () => cancelAnimationFrame(id);
   }, [visible]);
 
+  // The uploads panel shares the bottom of the screen: while this bar is
+  // up it sits above it (``--selection-bar-lift``, read by the panel).
+  useEffect(() => {
+    if (!visible) return;
+    const root = document.documentElement;
+    root.style.setProperty("--selection-bar-lift", isPhone ? "8.5rem" : "4.75rem");
+    return () => {
+      root.style.removeProperty("--selection-bar-lift");
+    };
+  }, [visible, isPhone]);
+
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement | null>(null);
   usePopoverDismiss(moreOpen, moreRef, () => setMoreOpen(false));

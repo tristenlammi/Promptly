@@ -358,7 +358,7 @@ export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?:
           <VoicePanel variant="rooms" />
           <SideFooter />
         </div>
-        <main id={embedded ? undefined : "main"} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]">
+        <main id={embedded ? undefined : "main"} data-toast-anchor className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]">
           {sel === "calls" ? (
             callKey ? (
               <CallDetail key={callKey} b={b} callKey={callKey} isPhone={false} />

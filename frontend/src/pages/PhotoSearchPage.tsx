@@ -121,9 +121,6 @@ export function PhotoSearchPage() {
                           photo={p}
                           width={r.widths[k]}
                           height={r.height}
-                          selected={false}
-                          selecting={false}
-                          onToggle={() => {}}
                           onOpen={(ph: PhotoItem) => setViewing(ph.id)}
                         />
                       );

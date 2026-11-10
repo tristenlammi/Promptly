@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Circle, Copy, Download, FlipHorizontal2, Grid3x3, Highlighter, ImagePlus, Minus, MousePointer2, MoveUpRight, Pencil,
+  Circle, Copy, Download, FlipHorizontal2, Grid3x3, Highlighter, ImagePlus, Loader2, Minus, MousePointer2, MoveUpRight, Pencil,
   Redo2, RotateCcw, RotateCw, Share2, Smile, Square, Sticker, Trash2, Type, Undo2, X,
 } from "lucide-react";
 
@@ -735,7 +735,7 @@ export function PhotoEditor({
       </div>
       <div ref={stage} className="relative flex min-h-0 flex-1 items-center justify-center" onPointerMove={onMove} onPointerUp={onUp}>
         {!img ? (
-          <p className="text-sm text-white/60">Loading…</p>
+          <Loader2 role="status" aria-label="Loading the photo" className="h-6 w-6 animate-spin text-white/60" />
         ) : (
           <div className="relative" style={{ width: box.w, height: box.h }}>
             {/* The dimming outside the crop stays on the picture. */}

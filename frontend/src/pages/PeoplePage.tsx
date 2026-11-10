@@ -727,8 +727,8 @@ export function PersonPage() {
               {r.items.map((idx, k) => {
                 const p = items[idx];
                 return (
-                  <PhotoTile key={p.id} photo={p} width={r.widths[k]} height={r.height} selected={false} selecting={false}
-                    onToggle={() => {}} onOpen={(ph: PhotoItem) => setViewing(ph.id)} />
+                  <PhotoTile key={p.id} photo={p} width={r.widths[k]} height={r.height}
+                    onOpen={(ph: PhotoItem) => setViewing(ph.id)} />
                 );
               })}
             </div>

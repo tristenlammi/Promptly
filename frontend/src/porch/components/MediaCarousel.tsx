@@ -67,14 +67,14 @@ export function MediaCarousel({
     }
     const now = Date.now();
     if (opening.current) window.clearTimeout(opening.current);
-    if (now - lastTap.current < 320) {
+    if (now - lastTap.current < 250) {
       lastTap.current = 0;
       opening.current = null;
       setBurst((b) => b + 1);
       onDoubleTap();
     } else {
       lastTap.current = now;
-      opening.current = window.setTimeout(show, 320);
+      opening.current = window.setTimeout(show, 250);
     }
   };
   /** Bring the carousel to the photo the full-screen view moved to. */

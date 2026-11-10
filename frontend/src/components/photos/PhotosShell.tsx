@@ -1,5 +1,5 @@
 import { Suspense, useLayoutEffect, useRef, useState } from "react";
-import { Archive, BookImage, ChevronDown, Eraser, Heart, Home, Images, Loader2, MapPin, Search, Settings2, Upload, UsersRound } from "lucide-react";
+import { Archive, BookImage, ChevronDown, Eraser, Heart, Home, Images, MapPin, Search, Settings2, Upload, UsersRound } from "lucide-react";
 import { Link, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { PhotoSettingsDialog } from "@/components/photos/PhotoSettingsDialog";
@@ -14,6 +14,7 @@ import { UnderstandingStatus } from "@/components/photos/UnderstandingStatus";
 import { useUploadStore } from "@/store/uploadStore";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { SkeletonTileGrid } from "@/components/shared/Skeleton";
 
 /** The Photos menu, on every Photos page (the timeline, albums, people,
  *  places and the map, clean-up, search…) — it stays put while you move
@@ -234,10 +235,7 @@ export function PhotosShell({ app = false }: { app?: boolean } = {}) {
           <RouteBoundary>
             <Suspense
               fallback={
-                <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Loading…
-                </div>
+<SkeletonTileGrid count={24} className="p-4" label="Loading" />
               }
             >
               <Outlet />

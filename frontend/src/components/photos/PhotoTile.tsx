@@ -30,17 +30,18 @@ export function PhotoTile({
   photo,
   width,
   height,
-  selected,
-  selecting,
+  selected = false,
+  selecting = false,
   onToggle,
   onOpen,
 }: {
   photo: PhotoItem;
   width: number;
   height: number;
-  selected: boolean;
-  selecting: boolean;
-  onToggle: (p: PhotoItem, range: boolean) => void;
+  selected?: boolean;
+  selecting?: boolean;
+  /** Leave it out where photos can't be picked: no tick, a tap just opens. */
+  onToggle?: (p: PhotoItem, range: boolean) => void;
   onOpen: (p: PhotoItem) => void;
 }) {
   const blur = useMemo(() => placeholder(photo.thumbhash), [photo.thumbhash]);
@@ -83,7 +84,7 @@ export function PhotoTile({
             press.current = null;
             return;
           }
-          if (selecting || e.shiftKey || e.metaKey || e.ctrlKey) onToggle(photo, e.shiftKey);
+          if (onToggle && (selecting || e.shiftKey || e.metaKey || e.ctrlKey)) onToggle(photo, e.shiftKey);
           else onOpen(photo);
         }}
         onKeyDown={(e) => {
@@ -91,13 +92,13 @@ export function PhotoTile({
             e.preventDefault();
             onOpen(photo);
           }
-          if (e.key === " ") {
+          if (e.key === " " && onToggle) {
             e.preventDefault();
             onToggle(photo, e.shiftKey);
           }
         }}
         onPointerDown={(e) => {
-          if (e.pointerType !== "touch") return;
+          if (e.pointerType !== "touch" || !onToggle) return;
           const start = { x: e.clientX, y: e.clientY };
           const timer = window.setTimeout(() => {
             if (press.current) press.current.fired = true;
@@ -149,7 +150,7 @@ export function PhotoTile({
           aria-label="Favourite"
         />
       )}
-      <button
+      {onToggle && <button
         type="button"
         aria-label={selected ? "Deselect" : "Select"}
         tabIndex={-1}
@@ -174,7 +175,7 @@ export function PhotoTile({
         >
           <Check className="h-3.5 w-3.5" strokeWidth={3} />
         </span>
-      </button>
+      </button>}
     </div>
   );
 }

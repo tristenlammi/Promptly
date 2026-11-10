@@ -724,7 +724,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   );
 
   const main = (
-    <div className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]", editorPage && "hidden")}>
+    <div data-toast-anchor className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]", editorPage && "hidden")}>
       {selectionBar || header}
       {isPhone && (searching || syncNote) && (
         <div className="flex items-center gap-2 px-4 pb-1">

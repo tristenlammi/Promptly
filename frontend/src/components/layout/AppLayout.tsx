@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -9,6 +10,7 @@ import { SearchPalette } from "@/components/chat/SearchPalette";
 import { UploadProgressPanel } from "@/components/files/UploadProgressPanel";
 import { UploadQueueWatcher } from "@/components/files/UploadQueueWatcher";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { mailApi } from "@/mail/api";
 import { appKeyFor } from "@/lib/appLaunch";
 import { useComposerStore } from "@/store/composerStore";
 import { authApi } from "@/api/auth";
@@ -51,7 +53,12 @@ export function AppLayout({ children }: { children?: ReactNode } = {}) {
   const location = useLocation();
   // Inside an app with its own side list the sidebar is the icon rail unless
   // you've opened it there yourself; everywhere else it's as you left it.
-  const inListApp = !isMobile && LIST_APP_ROUTE.test(location.pathname);
+  // Mail with no mailbox connected is one welcome screen, no side list yet,
+  // so the sidebar stays as it is. (The same query Mail itself runs, so it's one request.)
+  const onMail = /^\/mail(\/|$)/.test(location.pathname);
+  const mailOverview = useQuery({ queryKey: ["mail-overview"], queryFn: mailApi.overview, enabled: onMail, staleTime: 15_000 }).data;
+  const mailEmpty = onMail && !!mailOverview && (mailOverview.accounts?.length ?? 0) === 0;
+  const inListApp = !isMobile && !mailEmpty && LIST_APP_ROUTE.test(location.pathname);
   const [listAppChoice, setListAppChoice] = useState<"expanded" | null>(readListAppChoice);
   const railed = inListApp ? listAppChoice !== "expanded" : collapsed;
   const toggleCollapsed = () => {

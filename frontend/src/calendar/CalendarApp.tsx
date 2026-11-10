@@ -570,7 +570,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
             {sidePanel}
           </aside>
         )}
-        <main id={embedded ? undefined : "main"} className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]">
+        <main id={embedded ? undefined : "main"} data-toast-anchor className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]">
           <Header
             title={title}
             view={view}

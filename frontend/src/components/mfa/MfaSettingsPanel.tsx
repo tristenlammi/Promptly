@@ -22,6 +22,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 
 import { BackupCodesPanel } from "./BackupCodesPanel";
 import { EnrollmentWizard } from "./EnrollmentWizard";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /** Self-service MFA settings panel.
  *
@@ -72,7 +73,7 @@ export function MfaSettingsPanel({ defaultEmail }: { defaultEmail?: string }) {
 
   if (loading) {
     return (
-      <div className="text-sm text-[var(--text-muted)]">Loading…</div>
+      <SkeletonRows count={3} label="Loading" />
     );
   }
 

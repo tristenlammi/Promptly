@@ -13,6 +13,7 @@ import { requestStart } from "./PlayTab";
 import { gameStats } from "./stats";
 import type { Data, Game } from "./types";
 import { PAD_LABELS, WIN_LABELS } from "./types";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /* The Games tab: your library (with real scoring setups) and the built-in templates. */
 
@@ -453,7 +454,7 @@ function TemplatesSheet({ open, onClose, item, onAdded }: { open: boolean; onClo
           <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search templates" aria-label="Search templates" className="pl-9" />
         </div>
         {error && <p className="text-sm text-[var(--danger)]">Couldn't load the templates — check your connection.</p>}
-        {!rows && !error && <p className="text-sm text-[var(--text-muted)]">Loading…</p>}
+        {!rows && !error && <SkeletonRows count={3} label="Loading" />}
         {real.length > 0 && <div className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">{real.map(row)}</div>}
         {generic.length > 0 && (
           <>

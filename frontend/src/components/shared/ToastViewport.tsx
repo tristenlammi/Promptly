@@ -21,7 +21,10 @@ import { prefersReducedMotion } from "./usePresence";
  * - Phone: bottom-centre, above the safe area and above any bottom bar the
  *   page declares with ``useBottomBarInset`` (a tab bar, a composer).
  * - Desktop: bottom-left of the content area, just right of the sidebar
- *   (measured from ``#main``, so it follows the sidebar collapsing).
+ *   (measured from ``#main``, so it follows the sidebar collapsing). An
+ *   app with a sidebar of its own marks its content column with
+ *   ``data-toast-anchor`` and toasts start there instead, in a browser tab
+ *   and on its own alike.
  *
  * The newest toast sits lowest. Toasts auto-expire on their own timer,
  * pause while hovered, can be dismissed manually, and can carry one action
@@ -58,14 +61,20 @@ export function ToastViewport() {
     return () => window.clearTimeout(t);
   }, [anyLeaving, shown.length]);
 
-  // Desktop: start just right of the sidebar. ``#main`` is the app
-  // layout's content column; pages without it (sign-in, shared links)
-  // get the plain bottom-left corner.
-  const active = shown.length > 0;
+  // Desktop: start just right of the sidebar(s). An app's own content
+  // column (``data-toast-anchor``) wins over ``#main``, the app layout's;
+  // pages with neither (sign-in, shared links) get the plain bottom-left
+  // corner. Looked up again for each new toast: the page may have changed.
+  const count = shown.length;
   useEffect(() => {
-    if (!active) return;
-    const main = document.getElementById("main");
-    const measure = () => setLeft(Math.max(0, Math.round(main?.getBoundingClientRect().left ?? 0)));
+    if (count === 0) return;
+    // The innermost one that's showing (a hidden column has no box).
+    const anchors = [...document.querySelectorAll<HTMLElement>("[data-toast-anchor]")].filter(
+      (el) => el.getClientRects().length > 0,
+    );
+    const main = anchors[anchors.length - 1] ?? document.getElementById("main");
+    const measure = () =>
+      setLeft(main?.isConnected ? Math.max(0, Math.round(main.getBoundingClientRect().left)) : 0);
     measure();
     window.addEventListener("resize", measure);
     const ro = main && typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
@@ -74,7 +83,7 @@ export function ToastViewport() {
       window.removeEventListener("resize", measure);
       ro?.disconnect();
     };
-  }, [active]);
+  }, [count]);
 
   // The live region is always mounted (empty when idle): one that appears
   // together with its first toast isn't announced by many screen readers

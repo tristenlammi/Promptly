@@ -248,7 +248,7 @@ export function PorchApp({ embedded = false, promptlyNav = false }: { embedded?:
         ) : (
           <div className="flex min-h-0 flex-1">
             <SideNav b={b} route={route} />
-            <div className="relative flex min-w-0 flex-1 flex-col">
+            <div data-toast-anchor className="relative flex min-w-0 flex-1 flex-col">
               <Main id={SCROLLER_ID} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
                 <div className="px-2 pt-2 lg:px-6">{page}</div>
               </Main>

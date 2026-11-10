@@ -395,7 +395,7 @@ export function PhotosPage() {
           ) : (
             <>
             {showMemories && (
-              <div ref={setStrip}>
+              <div ref={setStrip} className={cn("transition-opacity", selected.size > 0 && !addTo && "pointer-events-none opacity-30")} aria-hidden={selected.size > 0 && !addTo ? true : undefined}>
                 <SetupBanner />
                 <MemoriesStrip />
               </div>

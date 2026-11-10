@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { GroupLabel, PorchGroup, PorchUser } from "@/api/porch";
 import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { Callout } from "@/components/shared/Callout";
+import { Menu, type MenuItem } from "@/components/shared/Menu";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { defaultColorForUserId } from "@/components/shared/UserAvatar";
 import { ItemButton, Sheet } from "@/items/ui";
@@ -251,8 +252,23 @@ export interface MenuAction {
   hint?: string;
 }
 
-/** A short list of actions ("…"): a bottom sheet on a phone, a small dialog on desktop. */
-export function ActionSheet({ open, onClose, title, actions }: { open: boolean; onClose: () => void; title: string; actions: MenuAction[] }) {
+/** A short list of actions ("…"): a bottom sheet on a phone. On a bigger
+ *  screen, a menu that drops from the button when ``anchor`` is given (the
+ *  button itself), or a small dialog when it isn't. */
+export function ActionSheet({
+  open,
+  onClose,
+  title,
+  actions,
+  anchor,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  actions: MenuAction[];
+  anchor?: HTMLElement | null;
+}) {
+  const { isPhone } = useContext(PorchContext);
   const row = (a: MenuAction) => {
     const Icon = a.icon;
     return (
@@ -282,6 +298,30 @@ export function ActionSheet({ open, onClose, title, actions }: { open: boolean; 
     { id: "none", title: "", rows: actions.filter((a) => !a.group) },
     ...MENU_GROUPS.map((g) => ({ id: g.id as string, title: g.title, rows: actions.filter((a) => a.group === g.id) })),
   ].filter((p) => p.rows.length > 0);
+  if (anchor && !isPhone) {
+    const items: MenuItem[] = parts.flatMap((p, i) => [
+      i > 0 ? ({ type: "divider" } as const) : null,
+      p.title && parts.length > 1 ? ({ type: "label", label: p.title } as const) : null,
+      ...p.rows.map(
+        (a): MenuItem => ({
+          id: a.label,
+          text: a.label,
+          icon: a.icon,
+          danger: a.danger,
+          onSelect: a.onClick,
+          label: a.hint ? (
+            <span className="flex flex-col">
+              <span>{a.label}</span>
+              <span className="text-xs font-normal text-[var(--text-muted)]">{a.hint}</span>
+            </span>
+          ) : (
+            a.label
+          ),
+        }),
+      ),
+    ]);
+    return <Menu open={open} onClose={onClose} anchor={anchor} items={items} label={title} placement="bottom-end" className="max-w-[320px]" />;
+  }
   return (
     <Sheet open={open} onClose={onClose} title={title} size="sm">
       <div className="-mx-2 flex flex-col">

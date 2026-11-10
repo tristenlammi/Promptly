@@ -8,6 +8,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { SettingsCard } from "./SettingsCard";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 const KEY = ["porch", "admin"];
 const REPORTS_KEY = ["porch", "admin", "reports"];
@@ -233,7 +234,7 @@ function ReportsCard({ everyone }: { everyone: string }) {
           Reports made in other groups go to those groups' own admins. They never show here, and you only see what's in a group you're in yourself.
         </p>
         {open.isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">Loading…</p>
+          <SkeletonRows count={3} label="Loading" />
         ) : open.isError ? (
           <p className="text-sm text-[var(--text-muted)]">Couldn't load the reports.</p>
         ) : open.data.length === 0 ? (

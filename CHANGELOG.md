@@ -28,6 +28,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
 
 ### Changed
+- Porch: on a computer a post's ⋯ menu drops down from the button instead of opening a sheet in the middle of the screen. Double-tap to like answers a little faster.
+- Photos: in search, Faces, Places and memories, where photos can't be picked, tiles no longer show a tick that did nothing. While you're picking photos, the set-up banner and memories fade back out of the way.
+- Messages at the bottom of the screen start beside the app's own side list in Porch, Rooms, Calendar and Notes, instead of sitting on top of it.
+- Mail with no mailbox connected keeps the Promptly sidebar open: there's no mail list yet for it to make room for.
+- Files: the uploads panel moves up out of the way while the selection bar is showing, so neither covers the other.
+- More lists show an outline while they load in place of the word "Loading…": Photos pages, the family library, Archive, Trash, a task, an import, sharing dialogs, workspace members and several Settings and Admin panels.
 - Apps from the Apps page (Contacts, Tasks & Reminders and the rest) keep their own colour for the icon in the header only. Buttons, tabs and selection are Promptly's terracotta, the same as everywhere else.
 - An app whose name is also its title no longer says the name twice under the header; it says Saved.
 - Opening an app shows the outline of a list while it loads, not a spinner.
