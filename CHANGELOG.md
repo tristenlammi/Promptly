@@ -21,6 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+<!-- Notes look and feel (ui-notes) -->
+- Notes: "Delete forever" now asks first, on a note in the Trash, on several selected notes and inside an open note.
+
+### Fixed
+<!-- Notes (ui-notes) -->
+- Notes: Close in the "Take a note…" box works on the first click. The formatting buttons keep their place under the text (quieter until you're typing) instead of appearing and pushing Close down.
+- Notes: pressing Enter in a note's title starts a new line under the text that's already there, instead of putting what you type next in front of it.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added
