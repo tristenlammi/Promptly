@@ -21,6 +21,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- UI polish, shared foundations (ui-polish) -->
+- Dialogs, sheets and menus now open and close with a short, soft movement instead of snapping in and out (off when your device asks for reduced motion).
+- Icon buttons in the Item Store apps show a quick themed tooltip on hover or keyboard focus, in place of the slow browser one.
+- Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
+
+### Changed
+<!-- UI polish, shared foundations (ui-polish) -->
+- Messages such as "Saved" and "Undo" now appear at the bottom of the screen (bottom-left on a computer, bottom-centre on a phone, above the tab bar) so they no longer cover the top of the page.
+- The Ask panel in Item Store apps starts closed, and each app remembers on its own whether you left it open.
+- Automations now live at /automations. Old /tasks links and bookmarks still work.
+- Bottom sheets close on Esc, keep keyboard focus inside while open, and can be dragged down to close.
+- Empty lists and pages share one look across the Item Store apps and the rest of Promptly.
+- A confirmation asked from inside a sheet now appears in front of it.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added

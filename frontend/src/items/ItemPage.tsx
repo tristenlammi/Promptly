@@ -25,6 +25,7 @@ import { VersionHistoryPanel } from "@/components/files/VersionHistoryPanel";
 import { ErrorState } from "@/components/shared/Callout";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
+import { useBottomBarInset } from "@/components/shared/ToastViewport";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
@@ -104,11 +105,12 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
   const tabParam = params.get("tab");
   const [tab, setTabState] = useState<string>(() => (tabParam && (tabs.some((t) => t.id === tabParam) || tabParam === "ask") ? tabParam : tabs[0]?.id ?? "ask"));
   const [aiOpen, setAiOpen] = useState<boolean>(() => {
+    // Closed until asked for, and remembered app by app: opening it in
+    // Budget doesn't open it in Recipes.
     try {
-      const saved = localStorage.getItem(AI_OPEN_KEY);
-      return narrowDesktop ? saved === "1" : saved !== "0";
+      return localStorage.getItem(`${AI_OPEN_KEY}.${doc.kind}`) === "1";
     } catch {
-      return true;
+      return false;
     }
   });
   const [pending, setPending] = useState<{ text: string; send: boolean } | null>(null);
@@ -146,7 +148,7 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
   const toggleAi = (open: boolean) => {
     setAiOpen(open);
     try {
-      localStorage.setItem(AI_OPEN_KEY, open ? "1" : "0");
+      localStorage.setItem(`${AI_OPEN_KEY}.${doc.kind}`, open ? "1" : "0");
     } catch {
       /* private mode */
     }
@@ -234,6 +236,9 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
 
   const showAskTab = isPhone && spec;
   const phoneTabs = [...tabs.map((t) => ({ id: t.id, label: t.label, icon: t.icon })), ...(showAskTab ? [{ id: "ask", label: "Ask", icon: Sparkles }] : [])];
+
+  // Toasts sit above the phone tab bar, not on top of it.
+  useBottomBarInset(64, isPhone && !onboarding && phoneTabs.length > 1);
 
   return (
     <div style={style} className="flex h-full min-h-0 flex-col bg-[var(--bg)]">
