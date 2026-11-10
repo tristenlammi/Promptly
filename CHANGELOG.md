@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Photo widget for Android: put a photo from one of your albums on your home screen. Pick the album and a shape (rounded, circle, soft square, flower, heart or arch) when you add it, and it shows a different photo from that album every half hour. Tap it for another photo, or set it to open the album instead. Add as many as you like, each with its own album and shape, at any size. It keeps a few small copies on the phone so it still changes with no signal.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added

@@ -37,6 +37,8 @@ object Widgets {
         // Notes (W1.3).
         Kind(NotesWidgetReceiver::class.java, { NotesWidget() }, listOf("notes")),
         Kind(OneNoteWidgetReceiver::class.java, { OneNoteWidget() }, listOf("notes")),
+        // Photo: its pictures come from /api/widgets/photos (PhotoSync), not the snapshot.
+        Kind(PhotoWidgetReceiver::class.java, { PhotoWidget() }, emptyList()),
     )
 
     /** For work that outlives a widget action (the redraw after a tick's moment). */
@@ -91,6 +93,8 @@ object Widgets {
 
     /** Draw every widget again from the saved copy (no network). */
     suspend fun redraw(ctx: Context) {
+        // Photo widgets move on to their next photo when the half hour is up.
+        runCatching { PhotoWidget.rotate(ctx, System.currentTimeMillis()) }
         WidgetStore.bump()
         for (k in ALL) if (ids(ctx, k).isNotEmpty()) runCatching { k.widget().updateAll(ctx) }
         Boundaries.schedule(ctx)
@@ -194,7 +198,11 @@ object Boundaries {
 
     fun schedule(ctx: Context) {
         if (!Widgets.placed(ctx)) return
-        val at = next(WidgetStore.state.value.snapshot, System.currentTimeMillis(), ZoneId.systemDefault())
+        val now = System.currentTimeMillis()
+        var at = next(WidgetStore.state.value.snapshot, now, ZoneId.systemDefault())
+        // … and when a Photo widget's next photo is due.
+        val photo = PhotoWidget.nextAt(ctx)
+        if (photo > 0) at = minOf(at, maxOf(photo, now + MIN_GAP))
         // A plain set() may be put off by 20 minutes or more; a 10-minute window (the
         // shortest Android allows without the exact-alarm permission) keeps it close.
         ctx.getSystemService(AlarmManager::class.java)?.setWindow(AlarmManager.RTC, at, WINDOW, intent(ctx))
