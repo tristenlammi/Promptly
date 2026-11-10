@@ -14,7 +14,7 @@ export function SettingsView({ item }: ItemViewProps<TasksData>) {
   const push = usePushSubscription();
   const ro = !item.canEdit;
   return (
-    <Page className="max-w-2xl">
+    <Page className="tasks-scope max-w-2xl">
       <h1 className="text-xl font-semibold text-[var(--text)]">Settings</h1>
 
       <Section title="Reminders">
@@ -64,24 +64,59 @@ export function SettingsView({ item }: ItemViewProps<TasksData>) {
         </Card>
       </Section>
 
-      <Section title="Typing tasks" hint="Quick add understands plain words — these come out of the title.">
-        <Card className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+      <Section title="Typing tasks" hint="Just type it the way you'd say it. The day, time and list come out of the title.">
+        <Card className="flex flex-col gap-4">
+          <ul className="flex flex-col gap-2">
+            {[
+              ["Call mum tomorrow 6pm", "Due tomorrow at 6pm, with a reminder"],
+              ["Bins out every Tuesday 7pm", "Comes back every Tuesday"],
+              ["Milk #shopping", "Goes on your Shopping list"],
+              ["Pay rego in March !!!", "Due in March, flagged high priority"],
+            ].map(([eg, what]) => (
+              <li key={eg} className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
+                <span className="text-sm font-medium text-[var(--text)]">“{eg}”</span>
+                <span className="text-xs text-[var(--text-muted)]">{what}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="grid grid-cols-1 gap-x-6 gap-y-2 border-t border-[var(--border)] pt-3 text-sm sm:grid-cols-2">
+            {[
+              ["Days", "today, tomorrow, Fri, next week, 12 Mar, in 3 days, in March"],
+              ["Times", "9am, 6:30pm, 17:00, at 5, tonight, tomorrow morning"],
+              ["Repeats", "every day, every weekday, every Mon and Thu, every 2 weeks, every month on the 1st, every 3 days after done"],
+              ["Lists", "#shopping, #work. A # that isn't a list becomes a tag"],
+              ["Tags", "@calls, @errands"],
+              ["Priority", "! low, !! medium, !!! high"],
+            ].map(([k, v]) => (
+              <div key={k}>
+                <p className="text-xs font-semibold text-[var(--text)]">{k}</p>
+                <p className="text-xs text-[var(--text-muted)]">{v}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </Section>
+
+      <Section title="On a phone">
+        <Card className="flex flex-col gap-1.5 text-sm text-[var(--text)]">
+          <p>Swipe a task right to tick it off.</p>
+          <p>Swipe it left to move it to tomorrow, next week or a day you pick.</p>
+        </Card>
+      </Section>
+
+      <Section title="On a keyboard">
+        <Card className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
           {[
-            ["Days", "today, tomorrow, Fri, next week, 12 Mar, in 3 days, in March"],
-            ["Times", "9am, 6:30pm, 17:00, at 5, tonight, tomorrow morning"],
-            ["Repeats", "every day, every weekday, every Mon and Thu, every 2 weeks, every month on the 1st, every 3 days after done"],
-            ["Lists", "#shopping, #work — a # that isn't a list becomes a tag"],
-            ["Tags", "@calls, @errands"],
-            ["Priority", "!1 low, !2 medium, !3 high (or p1 = high)"],
+            ["Q", "Start a new task"],
+            ["↑ ↓", "Move between tasks"],
+            ["Enter or E", "Open the task"],
+            ["T", "Move the task to today"],
           ].map(([k, v]) => (
-            <div key={k}>
-              <p className="text-xs font-semibold text-[var(--text)]">{k}</p>
-              <p className="text-xs text-[var(--text-muted)]">{v}</p>
+            <div key={k} className="flex items-center gap-2 text-sm text-[var(--text)]">
+              <kbd className="min-w-[2rem] rounded border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 text-center text-xs font-medium">{k}</kbd>
+              <span>{v}</span>
             </div>
           ))}
-          <p className="text-xs text-[var(--text-muted)] sm:col-span-2">
-            On a computer, press <kbd className="rounded border border-[var(--border)] px-1">q</kbd> to jump to the box.
-          </p>
         </Card>
       </Section>
     </Page>

@@ -21,6 +21,26 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Tasks: swipe a task right on a phone to tick it off, or left to move it to tomorrow, next week or a day you pick. On a computer the same choices sit on a button that shows when you point at a task.
+- Tasks: drag a task onto another day in Upcoming to move it there (with a mouse), with Undo.
+- Tasks: steps inside a task can be renamed where they sit, dragged into order, and brought back with Undo after removing one.
+- Tasks: tap a task in the Completed list to put it back on your list.
+- Tasks: keyboard keys. Up and Down move between tasks, Enter or E opens one, T moves it to today, Q starts a new one.
+
+### Changed
+- Tasks: ticking a task now draws the tick, strikes the title through and folds the row away before it moves to Done. Tap the circle again while it plays to call it off; Undo still works after.
+- Tasks: "Move all to today" says how many tasks it moved and offers Undo.
+- Tasks: deleting a list asks in the app's own dialog (not the browser's), and can be undone, putting its tasks back.
+- Tasks: the list editor has a grid of icons to pick from instead of a text box, and colours have names.
+- Tasks: buttons, selection and the tick use the suite's terracotta; red is kept for the app's mark and the high-priority flag.
+- Tasks: new tasks ease into place, and a task being reordered follows your pointer.
+- Tasks: Settings explains typing tasks with plain examples first, and shows priority as !, !! and !!!.
+- Tasks: bigger tap targets on phones for the day "+", send, new list and the reorder grip.
+
+### Fixed
+- Tasks: the Completed list shows each task's time in your own time format and under the right local day.
+
 ## [0.35.0] - 2026-11-09
 
 ### Added
