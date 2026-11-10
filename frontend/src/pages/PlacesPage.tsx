@@ -1,12 +1,15 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, ChevronRight, Contact, Images, List, Map as MapIcon, MapPin, Plane, X } from "lucide-react";
+import { CalendarDays, ChevronRight, Contact, Images, List, Map as MapIcon, MapPin, Navigation, Plane, X } from "lucide-react";
 
 import { placesApi, type Place, type PlaceSource } from "@/api/places";
 import { ClusterMap, type MapPick } from "@/components/maps/ClusterMap";
 import { TopNav } from "@/components/layout/TopNav";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { Skeleton } from "@/components/shared/Skeleton";
+import { mapsPinLink } from "@/maps/links";
+import { useMapsReady } from "@/maps/useMapsReady";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
@@ -38,6 +41,7 @@ export function PlacesPage() {
   const [picked, setPicked] = useState<MapPick | null>(null);
   const [focus, setFocus] = useState<{ lat: number; lon: number } | null>(null);
   const [view, setView] = useState<"list" | "map">("list");
+  const mapsReady = useMapsReady();
 
   const places = useMemo(
     () => (data?.places ?? []).filter((p) => !only || p.counts[only] > 0),
@@ -117,18 +121,40 @@ export function PlacesPage() {
                 {apiErrorMessage(error, "Couldn't load your places.")}
               </p>
             ) : !shown.length ? (
-              <p className="p-6 text-center text-sm text-[var(--text-muted)]">
-                No places yet. Trips with destinations, photos with a location, events with a place and contacts with an address show up here.
-              </p>
+              only || picked ? (
+                <EmptyState
+                  icon={<MapPin className="h-5 w-5" />}
+                  title={picked ? "Nothing at that spot" : `No places from ${SOURCES.find((s) => s.key === only)?.label ?? "this"} yet`}
+                  description={picked ? "Pick another spot on the map, or go back to all of your places." : "Your other places are still here."}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOnly(null);
+                        setPicked(null);
+                      }}
+                      className="inline-flex h-10 items-center rounded-lg bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90"
+                    >
+                      Show all places
+                    </button>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={<MapPin className="h-5 w-5" />}
+                  title="No places yet"
+                  description="Trips with destinations, photos with a location, events with a place and contacts with an address show up here."
+                />
+              )
             ) : (
               <ul className="divide-y divide-[var(--border)]">
                 {shown.map((p) => (
-                  <PlaceRow key={p.key} place={p} open={open === p.key} onToggle={() => choose(p)} />
+                  <PlaceRow key={p.key} place={p} open={open === p.key} onToggle={() => choose(p)} mapsReady={mapsReady} />
                 ))}
               </ul>
             )}
             {data && (
-              <p className="px-3 py-3 text-[11px] text-[var(--text-muted)]">
+              <p className="px-3 py-3 text-xs text-[var(--text-muted)]">
                 {unmapped ? `${unmapped} ${unmapped === 1 ? "place isn't" : "places aren't"} on the map — written as text Promptly couldn't place. ` : ""}
                 {data.attribution ?? (data.gazetteer ? "" : "Town names load the first time Photos needs them; until then only pinned places are on the map.")}
               </p>
@@ -164,7 +190,7 @@ export function PlacesPage() {
   );
 }
 
-function PlaceRow({ place: p, open, onToggle }: { place: Place; open: boolean; onToggle: () => void }) {
+function PlaceRow({ place: p, open, onToggle, mapsReady }: { place: Place; open: boolean; onToggle: () => void; mapsReady: boolean }) {
   return (
     <li>
       <button type="button" aria-expanded={open} onClick={onToggle} className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--hover)]">
@@ -184,6 +210,15 @@ function PlaceRow({ place: p, open, onToggle }: { place: Place; open: boolean; o
       </button>
       {open && (
         <ul className="pb-2">
+          {mapsReady && p.lat != null && p.lon != null && (
+            <li>
+              <Link to={mapsPinLink(p.lat, p.lon, p.name)} className="flex min-h-10 items-center gap-2.5 px-3 py-1.5 pl-10 hover:bg-[var(--hover)] md:min-h-0">
+                <Navigation className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
+                <span className="min-w-0 flex-1 truncate text-sm">Open in Maps</span>
+                <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+              </Link>
+            </li>
+          )}
           {p.photos && (
             <li>
               <Link to={p.photos.url} className="flex items-center gap-2.5 px-3 py-1.5 pl-10 hover:bg-[var(--hover)]">
