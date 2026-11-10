@@ -4,7 +4,7 @@ import type { CalTask } from "@/api/calendar";
 import { cn } from "@/utils/cn";
 
 import { beginPress, snap15 } from "../drag";
-import { addDays, fmt, hourLabel, localZone, sameDay, shortTime, startOfDay, timeRange, zoneCity, zoneNote, zoneShort } from "../dates";
+import { addDays, fmt, hourLabel, localZone, sameDay, shortTime, startOfDay, timeRange, uses12h, zoneCity, zoneNote, zoneShort } from "../dates";
 import { layoutDay, layoutSpans, lookStyle, onDay, withTimes, type ViewEvent } from "../model";
 import { EventChip, openFrom, type OpenEvent } from "./EventChip";
 import { AppointmentMarker, TaskMarker } from "./ExtrasChips";
@@ -29,11 +29,12 @@ interface GridDrag {
   over?: boolean;
 }
 
-/** "9am" / "9:30am" as the clock reads in ``tz``. */
+/** "9 am" / "09:00" as the clock reads in ``tz`` (a half-hour zone shows its minutes). */
 function hourIn(d: Date, tz: string): string {
   try {
-    const s = new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(d);
-    return s.replace(/:00(?=\D|$)/, "").replace(/\s?([AP])M$/i, (_m, p: string) => p.toLowerCase() + "m");
+    if (!uses12h()) return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+    const s = new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "numeric", minute: "2-digit", hourCycle: "h12" }).format(d);
+    return s.replace(/:00(?=\D|$)/, "").replace(/\s?([AP])M$/i, (_m, p: string) => " " + p.toLowerCase() + "m");
   } catch {
     return "";
   }
@@ -527,8 +528,8 @@ function DayColumn({
       )}
       {isToday && (
         <div className="pointer-events-none absolute left-0 right-0 z-20" style={{ top: (nowMin / 60) * HOUR }}>
-          <div className="relative h-[2px] bg-[#EA4335]">
-            <span className="absolute -left-[5px] -top-[4px] h-[10px] w-[10px] rounded-full bg-[#EA4335]" />
+          <div className="relative h-[2px] bg-[var(--danger)]">
+            <span className="absolute -left-[5px] -top-[4px] h-[10px] w-[10px] rounded-full bg-[var(--danger)]" />
           </div>
         </div>
       )}

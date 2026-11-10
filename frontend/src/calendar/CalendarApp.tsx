@@ -34,7 +34,7 @@ import { Popover, ScopeHost } from "./components/ui";
 import { addUsers, useBootstrap, useCalendarsMap, useEvents, useExtras, useRefreshEventsAsync } from "./data";
 import { applyMoves, commitMove, useMoved, useTouchDragGuard } from "./drag";
 import { addDays, addMonths, fmt, monthGrid, sameDay, startOfDay, startOfMonth, startOfWeek, ymd } from "./dates";
-import { CAL_ACCENT, onDay, toView, type View, type ViewEvent } from "./model";
+import { onDay, toView, type View, type ViewEvent } from "./model";
 import type { QuickEvent } from "./quickadd";
 
 const VIEW_KEY = "calendar:view";
@@ -112,7 +112,9 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   // Accent for the whole page (sheets render in a portal) + item touch sizing.
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--item-accent", CAL_ACCENT);
+    // Buttons, selection and today markers use Promptly's terracotta; the
+    // blue stays on the app mark and on each calendar's own colour.
+    root.style.setProperty("--item-accent", "var(--accent)");
     root.dataset.itemApp = "";
     const before = document.title;
     document.title = "Calendar";
@@ -552,7 +554,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <div
       ref={dragGuard}
-      style={embedded ? undefined : ({ "--item-accent": CAL_ACCENT } as CSSProperties)}
+      style={embedded ? undefined : ({ "--item-accent": "var(--accent)" } as CSSProperties)}
       className={cn("flex flex-col overflow-hidden bg-[var(--bg)] text-[var(--text)]", embedded ? "h-full min-h-0" : "h-[100dvh] pl-safe pr-safe pt-safe")}
     >
       {body}
