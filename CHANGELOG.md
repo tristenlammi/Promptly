@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+<!-- Files UI (ui-files) -->
+- Files: Recent, Starred, Trash, Shared links, Home and Devices show placeholder rows while they load, like My files does, instead of the word "Loading".
+- Files: the search box says "Search Files" (it used to say "Search Drive"), and Trash says things there "still take up space" instead of talking about quota.
+<!-- /Files UI -->
+
 ## [0.35.0] - 2026-11-09
 
 ### Added

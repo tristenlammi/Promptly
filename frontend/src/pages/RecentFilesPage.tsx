@@ -6,6 +6,7 @@ import { Clock } from "lucide-react";
 import { type FileItem, supportsEditGrant, shareRolesFor, shareLinksAllowed } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveSimpleList } from "@/components/files/DriveSimpleList";
+import { DriveListSkeleton } from "@/components/files/DriveListSkeleton";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { TopNav } from "@/components/layout/TopNav";
@@ -55,9 +56,7 @@ export function RecentFilesPage() {
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="w-full px-6 py-6">
-          {isLoading && (
-            <div className="text-sm text-[var(--text-muted)]">Loading…</div>
-          )}
+          {isLoading && <DriveListSkeleton />}
 
           {!isLoading && files.length === 0 && (
             <DriveEmptyState

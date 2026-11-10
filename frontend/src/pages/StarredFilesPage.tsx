@@ -7,6 +7,7 @@ import { filesApi, type FileItem, type ShareLinkRole, shareRolesFor, shareLinksA
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveSimpleList } from "@/components/files/DriveSimpleList";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
+import { DriveListSkeleton } from "@/components/files/DriveListSkeleton";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
@@ -104,9 +105,7 @@ export function StarredFilesPage() {
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="w-full px-6 py-6">
-          {isLoading && (
-            <div className="text-sm text-[var(--text-muted)]">Loading…</div>
-          )}
+          {isLoading && <DriveListSkeleton />}
 
           {!isLoading && empty && (
             <DriveEmptyState
