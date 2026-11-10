@@ -22,6 +22,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Fixed
+- Passwords extension: bookmark sync no longer says "synced" when your server couldn't be reached. It says the other browsers don't have the latest yet, and keeps trying.
 - Passwords bookmark sync: a bookmark deleted in one browser now stays deleted. A browser with no record of its last sync (first sync, sync turned off and on, or the extension reinstalled) used to send its own copy back as a new bookmark, so it stayed there and came back everywhere; it now removes a copy that matches one in Recently deleted and was there before the deletion. A removal the browser refuses is tried again instead of being re-uploaded, and a deleted bookmark is no longer brought back because another device reordered it at the same time. "Keep them everywhere" still brings everything back.
 - Solid accent buttons with white text now meet WCAG AA in light and dark: the fill is the deeper terracotta (white on it is 4.95:1, was 3.1:1) and hover darkens (6.0:1) instead of fading. Accent text, borders, tints, switches and progress bars are unchanged, and the e2e accessibility checks no longer skip accent buttons.
 

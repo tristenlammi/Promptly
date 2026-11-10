@@ -141,7 +141,7 @@ function Access({ onDone }: { onDone: () => void }) {
 
 /** Bookmarks in this browser, kept the same as every other browser this vault is connected in. */
 function BookmarkSettings() {
-  type Shown = { on: boolean; granted: boolean; at?: string; total?: number; unsynced?: number; failed?: number; held?: { fromBrowser: number; fromVault: number }; error?: string; inBrowser?: number };
+  type Shown = { on: boolean; granted: boolean; at?: string; total?: number; unsynced?: number; failed?: number; away?: boolean; held?: { fromBrowser: number; fromVault: number }; error?: string; inBrowser?: number };
   const [s, setS] = useState<Shown | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
@@ -204,6 +204,7 @@ function BookmarkSettings() {
           {s.unsynced ? ` ${s.unsynced} stay in this browser only, because they aren't web addresses.` : ""}
           {s.failed ? ` ${s.failed} couldn't be changed in this browser, and will be tried again.` : ""}
           {s.error ? ` Last problem: ${s.error}` : ""}
+          {s.away ? " Your server couldn't be reached, so your other browsers don't have the latest yet. It'll keep trying." : ""}
         </p>
       )}
       {s.on && s.held && (
