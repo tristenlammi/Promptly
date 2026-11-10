@@ -143,6 +143,15 @@ Docker's gateway, so a device on your LAN can't pretend to be someone else.
 cloudflared running on the host instead arrives through that gateway: it
 works, but every visitor then looks like one address to the rate limits.
 
+**One tunnel for several services** (cloudflared on the host, or a container
+with host networking, pointed at `http://<server>:8087`): set
+`TUNNEL_ON_HOST=1` in `.env` and restart nginx (`docker compose up -d nginx`).
+nginx then trusts the visitor address from the gateway too. On a Linux server
+that's safe: devices on your LAN reach the port with their own address, so
+only programs on the server itself come through the gateway. Don't set it on
+Docker Desktop (Windows or Mac), where every LAN connection comes through the
+gateway.
+
 ## Talking to Promptly
 
 **Talk** is a live spoken conversation with Promptly: you talk, it answers out

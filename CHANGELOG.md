@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-11-11
+
+### Added
+
+- `TUNNEL_ON_HOST=1` in `.env`: one Cloudflare Tunnel shared with other services, running on the server with host networking, works with Promptly again. nginx trusts the visitor address it sends, so each visitor keeps their own rate limit instead of everyone sharing one. Linux servers only (README, "Cloudflare Tunnel").
+
 ## [0.36.0] - 2026-11-11
 
 ### Added

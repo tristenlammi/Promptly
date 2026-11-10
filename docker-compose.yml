@@ -75,6 +75,10 @@ services:
     image: nginx:1.31-alpine
     container_name: Promptly-Nginx
     logging: *default-logging
+    environment:
+      # 1 = your tunnel runs on this machine with host networking and is
+      # shared with other services (README, "Cloudflare Tunnel").
+      - TUNNEL_ON_HOST=${TUNNEL_ON_HOST:-0}
     # Only nginx publishes ports to the host — everything else
     # (frontend, backend, Postgres, Redis, SearXNG) stays on the
     # internal "promptly" docker network and is reached through
@@ -100,6 +104,9 @@ services:
         protocol: tcp
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # .env settings written into nginx's config at start (the image's
+      # envsubst step): TUNNEL_ON_HOST, see nginx.conf "Real client IP".
+      - ./nginx/templates:/etc/nginx/templates:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
       # Operator server blocks (TLS, server_name…), gitignored — see the
       # include at the end of nginx.conf.
