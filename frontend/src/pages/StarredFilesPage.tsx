@@ -7,6 +7,7 @@ import { filesApi, type FileItem, type ShareLinkRole, shareRolesFor, shareLinksA
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveSimpleList } from "@/components/files/DriveSimpleList";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
+import { DriveListSkeleton } from "@/components/files/DriveListSkeleton";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
@@ -20,6 +21,7 @@ import {
   useUnstarFile,
   useUnstarFolder,
   invalidateFileQueries,
+  undoToast,
 } from "@/hooks/useFiles";
 import { useDriveSelection } from "@/hooks/useDriveSelection";
 import { downloadAuthed, extractError, openFile as openInEditor } from "@/components/files/helpers";
@@ -104,9 +106,7 @@ export function StarredFilesPage() {
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="w-full px-6 py-6">
-          {isLoading && (
-            <div className="text-sm text-[var(--text-muted)]">Loading…</div>
-          )}
+          {isLoading && <DriveListSkeleton />}
 
           {!isLoading && empty && (
             <DriveEmptyState
@@ -129,12 +129,17 @@ export function StarredFilesPage() {
                 "Unstarred"
               )
             }
-            onTrash={() =>
-              void runBulk(
-                () => bulkTrash.mutateAsync(bulkIds()),
-                `Moved ${sel.count} item${sel.count === 1 ? "" : "s"} to trash`
-              )
-            }
+            onTrash={() => {
+              const ids = bulkIds();
+              const n = sel.count;
+              void runBulk(async () => {
+                await bulkTrash.mutateAsync(ids);
+                undoToast(`Moved ${n} item${n === 1 ? "" : "s"} to trash`, async () => {
+                  await filesApi.bulkRestore(ids);
+                  void invalidateFileQueries(qc);
+                });
+              });
+            }}
           />
 
           {!empty && (

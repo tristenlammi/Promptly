@@ -351,6 +351,15 @@ async def test_only_tools_that_change_something_are_audited(db, user):
     assert tools == ["mcp__github__open_issue", "remember"]
 
 
+def test_every_audited_tool_is_a_real_tool():
+    """A renamed or removed tool would quietly stop being audited, and a
+    stale name would hide that (code_interpreter went with 0420)."""
+    from app.auth.audit import AUDITED_TOOLS
+    from app.chat.tools.registry import get_tool
+
+    assert sorted(t for t in AUDITED_TOOLS if get_tool(t) is None) == []
+
+
 async def test_a_login_for_no_account_is_masked(db, client, user):  # an admin exists: set up
     from app.auth.utils import hash_password
 
@@ -413,8 +422,8 @@ async def test_migration_scrubs_stored_audit_rows(db, user, caplog):
     import logging
 
     with caplog.at_level(logging.INFO, logger="alembic.runtime.migration"):
-        await _run_upgrade("0405_scrub_audit_details")
-        await _run_upgrade("0405_scrub_audit_details")  # twice: no change the second time
+        await _run_upgrade("0423_scrub_audit_details")
+        await _run_upgrade("0423_scrub_audit_details")  # twice: no change the second time
 
     from app.auth.events import AuthEvent
 
@@ -437,7 +446,7 @@ async def test_migration_scrubs_stored_audit_rows(db, user, caplog):
     everything = " ".join((e.detail or "") + e.identifier for e in rows)
     for secret in ("Biopsy", "Lump", "Family", "Divorce", "Tom's", "Tristen", "BANK_LOGIN", "Secret-pass"):
         assert secret not in everything
-    assert "0405_scrub_audit_details: 8 details rewritten, 2 tool rows removed, 1 identifiers masked" in caplog.text
+    assert "0423_scrub_audit_details: 8 details rewritten, 2 tool rows removed, 1 identifiers masked" in caplog.text
 
 
 def _migration(name: str):

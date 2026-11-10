@@ -290,17 +290,16 @@ def _safe_next(nxt: str | None) -> str:
     return nxt
 
 
-def _oidc_redirect_uri(request: Request) -> str:
-    """The callback URL, built from the public host/proto the browser used so
-    it matches what's registered at the IdP. Computed identically in the login
-    and callback routes so the two OIDC ``redirect_uri`` values agree."""
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = (
-        request.headers.get("x-forwarded-host")
-        or request.headers.get("host")
-        or request.url.netloc
-    )
-    return f"{proto}://{host}".rstrip("/") + "/api/auth/oidc/callback"
+async def _oidc_redirect_uri(db: AsyncSession, request: Request) -> str | None:
+    """The callback URL on one of the server's configured public origins
+    (the one the browser is on, when it's one of them), never a host taken
+    from request headers alone (app/public_origin.py). Computed identically
+    in the login and callback routes so the two ``redirect_uri`` values
+    agree. ``None`` when no public address is configured."""
+    from app.public_origin import link_origin
+
+    origin = await link_origin(db, request)
+    return f"{origin}/api/auth/oidc/callback" if origin else None
 
 
 def _sign_oidc_tx(state: str, nonce: str, next_path: str) -> str:
@@ -349,12 +348,18 @@ async def oidc_login(
     cfg = await load_oidc_config(db)
     if cfg is None:
         raise HTTPException(status_code=404, detail="SSO is not enabled.")
+    redirect_uri = await _oidc_redirect_uri(db, request)
+    if redirect_uri is None:
+        from app.public_origin import NOT_CONFIGURED_HINT
+
+        logger.warning("SSO sign-in refused: %s", NOT_CONFIGURED_HINT)
+        return _sso_fail("no_public_address")
     state = secrets.token_urlsafe(24)
     nonce = secrets.token_urlsafe(24)
     try:
         url = await build_authorize_url(
             cfg,
-            redirect_uri=_oidc_redirect_uri(request),
+            redirect_uri=redirect_uri,
             state=state,
             nonce=nonce,
         )
@@ -395,11 +400,14 @@ async def oidc_callback(
     if cfg is None:
         return _sso_fail("sso_disabled")
 
+    redirect_uri = await _oidc_redirect_uri(db, request)
+    if redirect_uri is None:
+        return _sso_fail("no_public_address")
     try:
         claims = await exchange_and_verify(
             cfg,
             code=code,
-            redirect_uri=_oidc_redirect_uri(request),
+            redirect_uri=redirect_uri,
             nonce=tx.get("nonce", ""),
         )
     except OidcError:
@@ -963,6 +971,10 @@ async def refresh(
         token_tv = int(payload.get("tv", 0))
         if await _refresh_revoked(payload.get("jti")):
             raise TokenError("signed out")
+        from app.auth.revoked_sessions import session_revoked
+
+        if await session_revoked(payload.get("sid")):
+            raise TokenError("signed out")
     except (TokenError, ValueError, KeyError) as e:
         _clear_refresh_cookie(response)
         await record_event(
@@ -1067,6 +1079,11 @@ async def logout(
             # Signing out used to only clear the cookie — a copy of it
             # stayed usable for 30 days (R-191).
             await _revoke_refresh(payload.get("jti"), payload.get("exp"))
+            # ...and the access token it last minted stopped working only
+            # when it expired, up to 15 minutes later (L3).
+            from app.auth.revoked_sessions import revoke_session
+
+            await revoke_session(payload.get("sid"))
         except (TokenError, ValueError, KeyError):
             user_id = None
     if user_id is not None:
@@ -1185,7 +1202,8 @@ async def forgot_password(
 ) -> dict:
     """Email a single-use, 30-minute reset link. Always answers the same
     way, so it can't be used to find out which addresses have accounts."""
-    from app.auth.reset_link import send_reset_link
+    from app.auth.reset_link import NoPublicOriginError, send_reset_link
+    from app.public_origin import NOT_CONFIGURED_HINT
     from app.redis_client import redis
 
     email = payload.email.strip().lower()
@@ -1198,8 +1216,14 @@ async def forgot_password(
         if sends == 1:
             await redis.expire(sends_key, 3600)
         if sends <= _RESET_SENDS_PER_HOUR:
+            # The link's origin is never the request's Host/X-Forwarded-Host
+            # (app/public_origin.py, inside send_reset_link). No configured
+            # address: no email, same answer.
             try:
                 await send_reset_link(db, request, user)
+            except NoPublicOriginError:
+                logger.warning("password reset email not sent: %s", NOT_CONFIGURED_HINT)
+                return {"sent": True}
             except Exception:  # noqa: BLE001 — SMTP missing or failing: same answer
                 logger.info("password reset email not sent for user %s", user.id)
             await record_event(

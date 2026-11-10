@@ -1,5 +1,5 @@
-import { AlignLeft, Bell, Check, ChevronRight, Flag, Hash, ListChecks, Plus, Repeat as RepeatIcon, SendHorizontal } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AlignLeft, Bell, CalendarClock, ChevronRight, Flag, Hash, ListChecks, Plus, Repeat as RepeatIcon, SendHorizontal } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import type { ItemHandle } from "@/items/useItem";
 import { Chip, Sheet, fmtDay, todayISO } from "@/items/ui";
@@ -9,6 +9,8 @@ import { cn } from "@/utils/cn";
 import { completeChange, fmtClock, fmtDue, isLate, listOf, newTask, nowClock, PRIORITY, reopenChange } from "./logic";
 import { parseQuick, type Parsed } from "./quickadd";
 import { describeRepeat } from "./recur";
+import { ReschedulePopover, RescheduleSheet } from "./reschedule";
+import { SwipeRow } from "./swipe";
 import { INBOX, type Task, type TasksData } from "./types";
 
 /* ------------------------------------------------------------ requests */
@@ -39,9 +41,16 @@ export function useQuickAddRequest(open: () => void) {
     }
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
-      if (e.key !== "q" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
-      if (document.querySelector("[role=dialog]")) return;
+      if (document.querySelector("[role=dialog], [role=menu]")) return;
+      // Nothing focused yet: Down / Up step into the task rows.
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && (!el || el === document.body)) {
+        e.preventDefault();
+        stepRowFocus(null, e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (e.key !== "q") return;
       e.preventDefault();
       f();
     };
@@ -55,57 +64,169 @@ export function useQuickAddRequest(open: () => void) {
 
 /* ------------------------------------------------------------ completing */
 
-/** Tick a task off (or re-open it), with an Undo toast. */
-export function useToggle(item: ItemHandle<TasksData>) {
+/* Ticking a task plays out before it's written: the tick draws and the
+ * title strikes through ("tick"), the row folds away ("fold"), and only
+ * then does the task move to Done and the Undo toast appear. A task in
+ * the middle of that is "leaving". Tapping its circle again calls it off;
+ * leaving a view, hiding the tab or closing the page writes it at once,
+ * so a tick is never lost to the animation. */
+type Phase = "tick" | "fold";
+const TICK_MS = 380;
+const FOLD_MS = 230;
+const leaving = new Map<string, { phase: Phase; commit: () => void; timers: number[] }>();
+const leavingSubs = new Set<() => void>();
+const emitLeaving = () => leavingSubs.forEach((f) => f());
+const subscribeLeaving = (f: () => void) => {
+  leavingSubs.add(f);
+  return () => void leavingSubs.delete(f);
+};
+
+function finishLeaving(id: string, write: boolean) {
+  const e = leaving.get(id);
+  if (!e) return;
+  e.timers.forEach((t) => window.clearTimeout(t));
+  leaving.delete(id);
+  if (write) e.commit();
+  emitLeaving();
+}
+
+function flushLeaving() {
+  for (const id of [...leaving.keys()]) finishLeaving(id, true);
+}
+
+function useLeaving(id: string): Phase | null {
+  return useSyncExternalStore(
+    subscribeLeaving,
+    () => leaving.get(id)?.phase ?? null,
+    () => null,
+  );
+}
+
+const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/** Tick a task off (or re-open it), with an Undo toast. ``instant`` skips
+ *  the row animation (the editor's own circle: there's no row to fold). */
+export function useToggle(item: ItemHandle<TasksData>, { instant = false }: { instant?: boolean } = {}) {
+  const itemRef = useRef(item);
+  itemRef.current = item;
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") flushLeaving();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", flushLeaving);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", flushLeaving);
+      flushLeaving();
+    };
+  }, []);
   return (t: Task) => {
     if (!item.canEdit) return;
     if (t.done) {
       item.update(reopenChange(t.id));
       return;
     }
-    const c = completeChange(t);
-    item.update(c.apply);
+    if (leaving.has(t.id)) {
+      // A second tap while it's still on screen: never mind.
+      finishLeaving(t.id, false);
+      return;
+    }
+    const commit = () => {
+      const c = completeChange(t);
+      itemRef.current.update(c.apply);
+      const when = c.next ? fmtDay(c.next) : "";
+      toast.success(c.next ? `“${t.title}” done — next due ${/^(Today|Tomorrow)$/.test(when) ? when.toLowerCase() : when}` : `Completed “${t.title}”`, {
+        duration: 4000,
+        action: { label: "Undo", onClick: () => itemRef.current.update(c.undo) },
+      });
+    };
     try {
       navigator.vibrate?.(12);
     } catch {
       /* not supported */
     }
-    const when = c.next ? fmtDay(c.next) : "";
-    toast.success(c.next ? `“${t.title}” done — next due ${/^(Today|Tomorrow)$/.test(when) ? when.toLowerCase() : when}` : `Completed “${t.title}”`, {
-      duration: 4000,
-      action: { label: "Undo", onClick: () => item.update(c.undo) },
-    });
+    if (instant || reducedMotion()) {
+      commit();
+      return;
+    }
+    const entry = { phase: "tick" as Phase, commit, timers: [] as number[] };
+    entry.timers.push(
+      window.setTimeout(() => {
+        entry.phase = "fold";
+        emitLeaving();
+      }, TICK_MS),
+      window.setTimeout(() => finishLeaving(t.id, true), TICK_MS + FOLD_MS),
+    );
+    leaving.set(t.id, entry);
+    emitLeaving();
   };
 }
 
 /* ------------------------------------------------------------ the row */
 
-export function TaskCheck({ task, onToggle, disabled }: { task: Task; onToggle: () => void; disabled?: boolean }) {
+export function TaskCheck({ task, onToggle, disabled, ticking }: { task: Task; onToggle: () => void; disabled?: boolean; ticking?: boolean }) {
   const color = PRIORITY[task.priority]?.color ?? "var(--text-muted)";
+  // Draw the tick only for a completion made here, not for a task that
+  // was already done when it came on screen.
+  const [drawn, setDrawn] = useState(false);
+  const done = task.done || !!ticking;
   return (
     <button
       type="button"
       role="checkbox"
-      aria-checked={task.done}
-      aria-label={task.done ? `Mark “${task.title}” not done` : `Complete “${task.title}”`}
+      aria-checked={done}
+      aria-label={done ? `Mark “${task.title}” not done` : `Complete “${task.title}”`}
       disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
+        setDrawn(!task.done);
         onToggle();
       }}
-      className="tasks-check group flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] disabled:cursor-default"
+      className={cn(
+        "tasks-check group flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] disabled:cursor-default",
+        done && "is-done",
+        (ticking || (drawn && task.done)) && "is-drawing",
+      )}
     >
       <span
         className={cn(
-          "flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 transition",
-          task.done ? "border-transparent bg-[var(--item-accent)] text-white" : "group-hover:bg-[color-mix(in_srgb,currentColor_12%,transparent)]",
+          "tasks-check-ring flex h-[22px] w-[22px] items-center justify-center rounded-full border-2",
+          done ? "border-transparent bg-[var(--item-accent)] text-white" : "group-hover:bg-[color-mix(in_srgb,currentColor_12%,transparent)]",
         )}
-        style={task.done ? undefined : { borderColor: color, color, background: task.priority ? `color-mix(in srgb, ${color} 10%, transparent)` : undefined }}
+        style={done ? undefined : { borderColor: color, color, background: task.priority ? `color-mix(in srgb, ${color} 10%, transparent)` : undefined }}
       >
-        <Check className={cn("h-3.5 w-3.5 transition", task.done ? "opacity-100" : "opacity-0 group-hover:opacity-60")} strokeWidth={3} />
+        <TickMark className="h-3.5 w-3.5" />
       </span>
     </button>
   );
+}
+
+/** The tick as one stroke, so it can be drawn (see tasks.css). */
+export function TickMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path className="tasks-tick" pathLength={1} d="M5 12.5l4.5 4.5L19 7.5" />
+    </svg>
+  );
+}
+
+/** Just made (or just ticked off): the row eases in rather than popping. */
+function isFresh(t: Task): boolean {
+  const at = t.done ? t.done_at : t.created_at;
+  if (!at) return false;
+  const age = Date.now() - new Date(at).getTime();
+  return age >= 0 && age < 1500;
+}
+
+/** Up / Down walk the task rows on the page, in the order they're shown. */
+function stepRowFocus(from: HTMLElement | null, dir: 1 | -1) {
+  const rows = [...document.querySelectorAll<HTMLElement>("[data-task-open]")];
+  if (!rows.length) return;
+  const at = from ? rows.indexOf(from) : -1;
+  const next = at < 0 ? (dir > 0 ? rows[0] : rows[rows.length - 1]) : rows[at + dir];
+  next?.focus();
+  next?.scrollIntoView({ block: "nearest" });
 }
 
 export function TaskRow({
@@ -117,6 +238,7 @@ export function TaskRow({
   showList = true,
   showDue = true,
   handle,
+  onReschedule,
 }: {
   task: Task;
   data: TasksData;
@@ -126,8 +248,16 @@ export function TaskRow({
   showList?: boolean;
   showDue?: boolean;
   handle?: ReactNode;
+  /** Move it to another day: turns on the left swipe, the row's
+   *  "another day" button and the T key. */
+  onReschedule?: (due: string) => void;
 }) {
   const today = todayISO();
+  const phase = useLeaving(task.id);
+  const [fresh, setFresh] = useState(() => isFresh(task));
+  const [menuAt, setMenuAt] = useState<DOMRect | null>(null);
+  const [later, setLater] = useState(false);
+  const canMove = canEdit && !task.done && !!onReschedule;
   const late = isLate(task, today, nowClock());
   const list = listOf(data, task.list_id);
   const stepsDone = task.steps.filter((s) => s.done).length;
@@ -162,19 +292,71 @@ export function TaskRow({
         {list.name}
       </span>,
     );
-  return (
-    <div className={cn("tasks-row flex items-start gap-0.5 pl-1 pr-2", task.done && "opacity-60")}>
+  const body = (
+    <div className={cn("flex items-start gap-0.5 pl-1 pr-2", task.done && "opacity-60")}>
       {handle}
-      <TaskCheck task={task} onToggle={onToggle} disabled={!canEdit} />
+      <TaskCheck task={task} onToggle={onToggle} disabled={!canEdit} ticking={!!phase} />
       <button
         type="button"
+        data-task-open
         onClick={onOpen}
+        onKeyDown={(e) => {
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          const k = e.key.toLowerCase();
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            stepRowFocus(e.currentTarget, e.key === "ArrowDown" ? 1 : -1);
+          } else if (k === "e") {
+            e.preventDefault();
+            onOpen();
+          } else if (k === "t" && canMove) {
+            e.preventDefault();
+            onReschedule?.(today);
+          }
+        }}
         className="flex min-h-[44px] min-w-0 flex-1 flex-col justify-center py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]"
       >
-        <span className={cn("break-words text-[15px] leading-snug text-[var(--text)] md:text-sm", task.done && "line-through decoration-[var(--text-muted)]")}>{task.title}</span>
+        <span className={cn("break-words text-[15px] leading-snug text-[var(--text)] md:text-sm", task.done && "line-through decoration-[var(--text-muted)]")}>
+          <span className="tasks-title">{task.title}</span>
+        </span>
         {meta.length > 0 && <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[var(--text-muted)]">{meta}</span>}
       </button>
+      {canMove && (
+        <button
+          type="button"
+          aria-label={`Move “${task.title}” to another day`}
+          title="Move to another day"
+          aria-haspopup="menu"
+          aria-expanded={!!menuAt}
+          onClick={(e) => setMenuAt(menuAt ? null : e.currentTarget.getBoundingClientRect())}
+          className="tasks-row-action mt-1.5 h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+        >
+          <CalendarClock className="h-4 w-4" />
+        </button>
+      )}
       {task.priority === 3 && !task.done && <Flag className="mt-3.5 h-3.5 w-3.5 shrink-0 text-[#DB4C3F]" aria-label="High priority" />}
+    </div>
+  );
+  return (
+    <div
+      className={cn("tasks-row", phase && "is-ticking", phase === "fold" && "is-folding", fresh && "is-new")}
+      onAnimationEnd={fresh ? (e) => e.target === e.currentTarget && setFresh(false) : undefined}
+    >
+      <div className="tasks-row-inner">
+        {canEdit && !task.done ? (
+          <SwipeRow enabled={!phase} onDone={onToggle} onLater={canMove ? () => setLater(true) : onOpen}>
+            {body}
+          </SwipeRow>
+        ) : (
+          body
+        )}
+      </div>
+      {canMove && (
+        <>
+          <ReschedulePopover anchor={menuAt} task={task} weekStart={data.settings.week_start} onPick={(d) => onReschedule?.(d)} onClose={() => setMenuAt(null)} />
+          <RescheduleSheet open={later} task={task} weekStart={data.settings.week_start} onPick={(d) => onReschedule?.(d)} onClose={() => setLater(false)} />
+        </>
+      )}
     </div>
   );
 }
@@ -280,7 +462,7 @@ export function QuickAdd({
           onClick={add}
           disabled={!parsed.title}
           aria-label="Add task"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white transition disabled:opacity-30"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white transition disabled:opacity-30"
         >
           <SendHorizontal className="h-4 w-4" />
         </button>
@@ -298,7 +480,7 @@ export function Fold({ title, count, children, open: initial = false, action }: 
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-center justify-between px-1">
-        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex min-h-[36px] items-center gap-1 text-sm font-semibold text-[var(--text-muted)] hover:text-[var(--text)]">
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex min-h-[40px] items-center gap-1 text-sm font-semibold text-[var(--text-muted)] hover:text-[var(--text)]">
           <ChevronRight className={cn("h-4 w-4 transition", open && "rotate-90")} />
           {title} <span className="tabular-nums">({count})</span>
         </button>
@@ -313,7 +495,7 @@ export function SectionHead({ title, hint, action, tone }: { title: ReactNode; h
   return (
     <div className="flex items-end justify-between gap-2 px-1">
       <div className="min-w-0">
-        <h2 className={cn("truncate text-sm font-semibold", tone === "danger" ? "text-[var(--danger)]" : tone === "accent" ? "text-[var(--item-accent)]" : "text-[var(--text)]")}>{title}</h2>
+        <h2 className={cn("truncate text-sm font-semibold", tone === "danger" ? "text-[var(--danger)]" : tone === "accent" ? "text-[var(--accent-text)]" : "text-[var(--text)]")}>{title}</h2>
         {hint && <p className="text-xs text-[var(--text-muted)]">{hint}</p>}
       </div>
       {action && <div className="flex shrink-0 items-center gap-1">{action}</div>}
@@ -335,7 +517,7 @@ export function AddSheet({ item, open, onClose, due, listId }: { item: ItemHandl
       <div className="flex flex-col gap-2 pb-2">
         <QuickAdd item={item} due={due} listId={listId} autoFocus={open} onAdded={() => setN((x) => x + 1)} />
         <p className="px-1 text-xs text-[var(--text-muted)]" aria-live="polite">
-          {n ? `Added ${n} — keep typing, or close when you're done.` : "Try “Bins out every Tue 7pm”, “Rego in March !3”, “Milk #shopping”."}
+          {n ? `Added ${n} — keep typing, or close when you're done.` : "Try “Bins out every Tue 7pm”, “Rego in March !!!”, “Milk #shopping”."}
         </p>
       </div>
     </Sheet>

@@ -39,7 +39,8 @@ test("alike faces become a person who's named once", async ({ bob: page }) => {
 
   await page.goto("/files/photos");
   await ready(page);
-  await page.getByRole("link", { name: "People" }).click();
+  // The People tab is called Faces.
+  await page.getByRole("navigation", { name: "Photos", exact: true }).getByRole("link", { name: "Faces" }).click();
   const review = page.getByRole("region", { name: "Who is this?" });
   const name = `Ada ${stamp}`;
   await review.getByRole("combobox", { name: "Who is this?" }).first().fill(name);

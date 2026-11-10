@@ -31,6 +31,7 @@ import {
 import { cn } from "@/utils/cn";
 
 import { extractError, formatRelativeTime } from "./helpers";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 type Resource =
   | { kind: "file"; id: string; name: string; roles?: ShareLinkRole[] }
@@ -306,7 +307,7 @@ export function ShareLinkDialog({ open, resource, onClose }: ShareLinkDialogProp
             </div>
           </div>
           {isLoading && (
-            <div className="text-sm text-[var(--text-muted)]">Loading…</div>
+            <SkeletonRows count={3} label="Loading" />
           )}
           {!isLoading && activeLinks.length === 0 && (
             <div className="rounded-md border border-dashed border-[var(--border)] px-3 py-4 text-center text-sm text-[var(--text-muted)]">

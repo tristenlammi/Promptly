@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press P Porch: New story, New post. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="porch_new_story" android:enabled="true" android:icon="@mipmap/ic_porch"
+        android:shortcutShortLabel="@string/porch_new_story">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.app.PorchLauncher">
+            <extra android:name="org.promptly.app.URL_PATH" android:value="/porch/story/new" />
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="porch_new_post" android:enabled="true" android:icon="@mipmap/ic_porch"
+        android:shortcutShortLabel="@string/porch_new_post">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.app.PorchLauncher">
+            <extra android:name="org.promptly.app.URL_PATH" android:value="/porch/new" />
+        </intent>
+    </shortcut>
+</shortcuts>

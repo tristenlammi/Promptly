@@ -227,6 +227,8 @@ export const DriveItemList = forwardRef<
               key={v.key}
               data-index={v.index}
               ref={virtualizer.measureElement}
+              // Last in the list, its own background would square off the card's rounded corners.
+              className="overflow-hidden last:rounded-b-card"
               style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${top}px)` }}
             >
               {it.node}

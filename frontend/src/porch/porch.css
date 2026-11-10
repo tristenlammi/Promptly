@@ -43,3 +43,46 @@ html.dark[data-porch] {
   border-radius: 0.75rem;
   animation: porchFlash 2s ease-out;
 }
+
+/* A photo opened full screen fades in. */
+@keyframes porchFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.porch-lightbox {
+  animation: porchFade 160ms ease-out;
+}
+
+/* Liking a post: the heart gives a small pop. */
+@keyframes porchPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); }
+  70% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+.porch-pop {
+  animation: porchPop 320ms ease-out;
+}
+
+/* "3 new posts" and the posting chip slide into place. */
+@keyframes porchDrop {
+  from { opacity: 0; transform: translateY(-14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.porch-drop {
+  animation: porchDrop 220ms ease-out;
+}
+@keyframes porchRise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.porch-rise {
+  animation: porchRise 220ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .porch-lightbox,
+  .porch-pop,
+  .porch-drop,
+  .porch-rise { animation: none; }
+}

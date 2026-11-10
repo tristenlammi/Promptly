@@ -11,6 +11,7 @@ import { UserPicker, type UserPickerValue } from "@/components/shared/UserPicker
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+import { SkeletonAvatarRows } from "@/components/shared/Skeleton";
 
 /** The family library (PH-5): start one, add people, and choose what of
  *  yours goes in — nothing, all of it, from a date, or photos with certain
@@ -34,7 +35,7 @@ export function FamilyDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal open onClose={onClose} title={family ? family.name : "Family library"} widthClass="max-w-lg">
       {isLoading ? (
-        <p className="text-sm text-[var(--text-muted)]">Loading…</p>
+        <SkeletonAvatarRows count={3} label="Loading the family library" />
       ) : !family ? (
         <Start onStart={(name) => void run(() => familyApi.create(name), "Family library started.")} />
       ) : (

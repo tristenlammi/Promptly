@@ -119,7 +119,7 @@ export function PeoplePicker({
           })}
         </div>
       )}
-      {!debounced && people.length > 0 && <p className="px-1 text-xs font-medium text-[var(--text-muted)]">Suggested</p>}
+      {!debounced && people.length > 0 && <p className="px-1 text-xs font-medium text-[var(--text-muted)]">People on Promptly</p>}
       <ul
         ref={listRef}
         id={listId}
@@ -131,7 +131,7 @@ export function PeoplePicker({
         {isError && <li className="p-4 text-center text-sm text-[var(--danger)]">Couldn't load people.</li>}
         {!isLoading && !isError && people.length === 0 && (
           <li className="p-4 text-center text-sm text-[var(--text-muted)]">
-            {debounced ? (debounced.length < 2 ? "Keep typing…" : "Nobody by that name.") : "Search for someone by name."}
+            {debounced ? (debounced.length < 2 ? "Keep typing…" : "Nobody by that name.") : "Nobody else is on this Promptly yet."}
           </li>
         )}
         {people.map((p, i) => {

@@ -98,7 +98,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
                       <PorchAvatar user={r.author} size={20} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-medium text-[var(--text)]">{r.author?.name ?? "Someone"}</span>
-                        {r.thumb && <span className="block truncate text-[11px] text-[var(--text-muted)]">{r.title}</span>}
+                        {r.thumb && <span className="block truncate text-xs text-[var(--text-muted)]">{r.title}</span>}
                       </span>
                     </span>
                   </button>

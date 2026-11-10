@@ -37,8 +37,6 @@ class AdminUserResponse(BaseModel):
     # Whether the ``generate_image`` chat tool is available to this user.
     # Admins are never gated by it (always effectively True for them).
     can_generate_images: bool = True
-    # Whether the user may run code via the "Run" button on code artifacts.
-    can_execute_code: bool = True
     # Whether the user's automation HTTP steps may reach the local network.
     can_reach_private_network: bool = False
     # Whether the user may use Automations (off unless an admin turns it on).
@@ -71,6 +69,12 @@ class AdminUserResponse(BaseModel):
     storage_cap_bytes: int | None = None
     daily_token_budget: int | None = None
     monthly_token_budget: int | None = None
+
+    # ----- Storage, for the Users list -----
+    # A total and the limit that applies (theirs, else the app's; NULL =
+    # no limit). Numbers only: never what the files are.
+    storage_used_bytes: int = 0
+    storage_limit_bytes: int | None = None
 
 
 class AdminUserUsageDay(BaseModel):
@@ -389,7 +393,6 @@ class AdminUserCreate(BaseModel):
     # Capability toggles from the create dialog — previously dropped on the
     # floor, so a user meant to be locked down got everything (R-260).
     can_generate_images: bool | None = None
-    can_execute_code: bool | None = None
     can_reach_private_network: bool | None = None
     can_use_automations: bool | None = None
     model_locked: bool | None = None
@@ -429,8 +432,6 @@ class AdminUserUpdate(BaseModel):
     allowed_models: list[str] | None = None
     # Omit to leave unchanged; send a bool to toggle image-gen access.
     can_generate_images: bool | None = None
-    # Omit to leave unchanged; send a bool to toggle code-execution access.
-    can_execute_code: bool | None = None
     # Omit to leave unchanged; send a bool to allow/deny local-network
     # access for the user's automation HTTP steps.
     can_reach_private_network: bool | None = None

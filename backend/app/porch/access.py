@@ -103,6 +103,89 @@ async def load_post(db: AsyncSession, user: User, post_id: uuid.UUID) -> PorchPo
     return row
 
 
+# ------------------------------------------------------------------ stories (WP-P2.1)
+
+
+def visible_story(me: Any, story: Any = None, *, live: bool = True):  # noqa: ANN001, ANN201 — SQL
+    """SQL: ``me`` may see ``story`` — the post rule (not deleted, no block
+    either way, they wrote it or are a current member of one of its live
+    groups), plus **not expired** unless they wrote it (``live=False``: a
+    highlight, where an old story still shows to the people it went to).
+    A photo or video story whose file went to the trash is gone too."""
+    from app.files.models import UserFile
+
+    from .models import PorchStory, PorchStoryGroup
+
+    s = story if story is not None else PorchStory
+    in_a_group = exists().where(
+        PorchStoryGroup.story_id == s.id,
+        PorchGroup.id == PorchStoryGroup.group_id,
+        PorchGroup.deleted_at.is_(None),
+        or_(PorchGroup.kind == "everyone", PorchGroup.id.in_(member_groups(me))),
+    )
+    theirs = and_(in_a_group, s.expires_at > func.now()) if live else in_a_group
+    file_ok = or_(
+        s.kind == "text",
+        exists().where(UserFile.id == s.file_id, UserFile.trashed_at.is_(None)),
+    )
+    return and_(
+        s.deleted_at.is_(None),
+        or_(s.author_id == me, theirs),
+        file_ok,
+        not_(blocks.either_sql(me, s.author_id)),
+    )
+
+
+async def can_see_story(db: AsyncSession, user: User, story_id: uuid.UUID, *, live: bool = True) -> bool:
+    """One story, the whole rule (Porch on for them included)."""
+    from .models import PorchStory
+
+    if not await deps.allowed(db, user):
+        return False
+    q = select(exists().where(PorchStory.id == story_id, visible_story(user.id, live=live)))
+    return bool((await db.execute(q)).scalar())
+
+
+async def load_story(db: AsyncSession, user: User, story_id: uuid.UUID, *, live: bool = True) -> Any:
+    """The story if ``user`` may see it, else 404 (whatever the reason)."""
+    from .models import PorchStory
+
+    row = (await db.execute(select(PorchStory).where(PorchStory.id == story_id, visible_story(user.id, live=live)))).scalar_one_or_none()
+    if row is None:
+        raise core.not_found("Story")
+    return row
+
+
+async def story_audience_ids(db: AsyncSession, story: Any) -> set[uuid.UUID]:
+    """Everyone who'd see ``story`` while it's live: its author plus the
+    members of its live groups who may use Porch, less blocks either way."""
+    from .models import PorchStoryGroup
+
+    if story.deleted_at is not None:
+        return set()
+    gids = list((await db.execute(select(PorchStoryGroup.group_id).where(PorchStoryGroup.story_id == story.id))).scalars())
+    groups = list((await db.execute(select(PorchGroup).where(PorchGroup.id.in_(gids), PorchGroup.deleted_at.is_(None)))).scalars()) if gids else []
+    return await groups_audience(db, groups, author_id=story.author_id)
+
+
+async def story_labels(db: AsyncSession, user: User, story_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[dict[str, Any]]]:
+    """Each story's groups that are also *your* groups (as :func:`labels`)."""
+    from .models import PorchStoryGroup
+
+    if not story_ids:
+        return {}
+    mine = {m.group.id: m.group for m in await my_groups(db, user)}
+    q = select(PorchStoryGroup.story_id, PorchStoryGroup.group_id).where(PorchStoryGroup.story_id.in_(story_ids))
+    out: dict[uuid.UUID, list[dict[str, Any]]] = {sid: [] for sid in story_ids}
+    for sid, gid in (await db.execute(q)).all():
+        g = mine.get(gid)
+        if g is not None:
+            out[sid].append(group_label(g))
+    for sid in out:
+        out[sid].sort(key=lambda d: (d["kind"] == "everyone", d["name"].lower()))
+    return out
+
+
 # ------------------------------------------------------------------ groups
 
 
@@ -297,8 +380,8 @@ def group_label(g: PorchGroup) -> dict[str, Any]:
 
 
 __all__ = [
-    "INVITED", "MEMBER", "OUTLINE", "Mine", "audience_ids", "can_see_group", "can_see_post", "group_label", "group_member_ids",
-    "groups_audience", "is_admin", "is_owner", "labels", "load_group", "load_post", "member_count", "member_counts",
-    "member_groups", "membership", "my_group_ids", "my_groups", "ticked_group_ids", "view_of", "visible_post",
-    "visible_post_sql",
+    "INVITED", "MEMBER", "OUTLINE", "Mine", "audience_ids", "can_see_group", "can_see_post", "can_see_story", "group_label",
+    "group_member_ids", "groups_audience", "is_admin", "is_owner", "labels", "load_group", "load_post", "load_story", "member_count",
+    "member_counts", "member_groups", "membership", "my_group_ids", "my_groups", "story_audience_ids", "story_labels",
+    "ticked_group_ids", "view_of", "visible_post", "visible_post_sql", "visible_story",
 ]

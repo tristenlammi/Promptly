@@ -77,9 +77,14 @@ async function scan(page: Page, what: string, selector?: string): Promise<string
     .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
 }
 
+/** The post's ⋯ menu: on a computer it drops down from the button (a menu
+ *  of menuitems); on a phone it's a sheet (a dialog of buttons). */
 async function openMenu(page: Page) {
   await page.getByRole("button", { name: "More for this post" }).first().click();
-  return page.getByRole("dialog", { name: /post$/ });
+  const menu = page.getByRole("menu", { name: /post$/ }).or(page.getByRole("dialog", { name: /post$/ }));
+  return Object.assign(menu, {
+    item: (name: RegExp) => menu.getByRole("menuitem", { name }).or(menu.getByRole("button", { name })),
+  });
 }
 
 test("Ctrl+K and Porch search find a post you can see, never one you can't", async ({ alice, bob, dana }) => {
@@ -137,7 +142,7 @@ test("make an event from a post: filled in, inviting only people who can see it"
 
   await bob.goto(`/porch/p/${post}`);
   const menu = await openMenu(bob);
-  await menu.getByRole("button", { name: /^Make this an event/ }).click();
+  await menu.item(/^Make this an event/).click();
   const editor = bob.getByRole("dialog", { name: "New event" });
   await expect(editor.getByRole("textbox", { name: "Title" })).toHaveValue(new RegExp(`BBQ at ours ${stamp}`));
   await expect(editor.getByPlaceholder("Add a place")).toHaveValue("Noosa Heads");
@@ -183,7 +188,7 @@ test("share to a Room: an outsider in the room sees it isn't shared with them; r
 
   // Alice shares it to the room from the post's menu.
   await alice.goto(`/porch/p/${post}`);
-  await (await openMenu(alice)).getByRole("button", { name: /^Share to a Room/ }).click();
+  await (await openMenu(alice)).item(/^Share to a Room/).click();
   const send = alice.getByRole("dialog", { name: "Send to…" });
   await expect(send.getByText("Only people who can see this post in Porch can open it.", { exact: false })).toBeVisible();
   await send.getByRole("button", { name: new RegExp(`#general.*Porch room ${stamp}`) }).click();
@@ -201,7 +206,7 @@ test("share to a Room: an outsider in the room sees it isn't shared with them; r
 
   // Bob replies privately: his conversation with Alice, the post attached.
   await bob.goto(`/porch/p/${post}`);
-  await (await openMenu(bob)).getByRole("button", { name: /^Reply privately/ }).click();
+  await (await openMenu(bob)).item(/^Reply privately/).click();
   await expect(bob).toHaveURL(/\/rooms\/r\/[0-9a-f-]+\?share=porch_post:/);
   const attached = bob.getByRole("group", { name: "Attached to your message" });
   await expect(attached.getByText(words)).toBeVisible();
@@ -265,7 +270,7 @@ test("Photos warns before trashing a photo that's in a Porch post; a phone and a
   await bob.setViewportSize({ width: 390, height: 844 });
   await bob.goto(`/porch/p/${post}`);
   const menu = await openMenu(bob);
-  for (const name of [/^Reply privately/, /^Share to a Room/, /^Make this an event/]) await expect(menu.getByRole("button", { name })).toBeVisible();
+  for (const name of [/^Reply privately/, /^Share to a Room/, /^Make this an event/]) await expect(menu.item(name)).toBeVisible();
   const box = await menu.boundingBox();
   expect(box && box.width).toBeLessThanOrEqual(390);
   expect(await scan(bob, "post menu (phone)", '[role="dialog"]')).toEqual([]);

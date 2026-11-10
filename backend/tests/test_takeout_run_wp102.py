@@ -107,7 +107,14 @@ async def client(db, root, monkeypatch):
     from app.main import app
     from app.tasks import queue
 
-    monkeypatch.setattr(get_settings(), "TUS_HOOK_SECRET", None)
+    # Not about who may call the hooks (that needs TUS_HOOK_SECRET,
+
+    # test_only_tusd_can_call_the_hooks): let the test client through.
+
+    from app.files import tus_hooks as _tus
+
+
+    monkeypatch.setattr(_tus, "_caller_ok", lambda request, key: True)
 
     async def index_inline(job_id):
         await jobs.index(job_id)

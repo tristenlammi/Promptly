@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { VoicePanel } from "@/rtc/ui/VoicePanel";
 import {
   Archive,
   EyeOff,
@@ -90,6 +89,8 @@ import { FolderEditModal } from "./FolderEditModal";
 import { useChatFoldersQuery, useDeleteFolder } from "@/hooks/useChatFolders";
 import { useFolderUiStore } from "@/store/folderUiStore";
 import { useNavApps } from "@/items/navApps";
+import { Dock, DockRail } from "./dock/Dock";
+import { useOpenApp } from "./useOpenApp";
 import { useNavBadges } from "@/hooks/useNavBadges";
 import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -120,8 +121,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { pathname } = useLocation();
   // While a pinned app is open, its own row lights up — not "Apps" too.
   const inNavApp = navApps.some((a) => pathname === a.to || pathname.startsWith(`${a.to}/`));
-  // Calls: Rooms shows the voice panel in its own channel column.
-  const voiceHere = !pathname.startsWith("/rooms");
+  // "Where am I": an app that's open but not pinned gets its own row under
+  // Apps while it's open (Photos, Mail, an Item Store app...).
+  const openApp = useOpenApp(pathname, navApps);
+  const appsRowIdle = inNavApp || openApp !== null;
   const {
     isLoading: convLoading,
     hasNextPage: moreChats,
@@ -202,7 +205,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 to={item.to}
                 icon={<Icon className="h-4 w-4" />}
                 label={item.label}
-                inactive={inNavApp && item.to === "/apps"}
+                inactive={appsRowIdle && item.to === "/apps"}
               />
             );
           })}
@@ -215,12 +218,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               badge={{ app: app.id, n: badges[app.id] ?? 0 }}
             />
           ))}
+          {openApp && (
+            <SideIcon key={`open-${openApp.id}`} to={openApp.to} icon={<AppIcon app={openApp} style={iconStyle} />} label={openApp.name} />
+          )}
           {RAIL_MORE_ITEMS.filter((it) => !it.adminOnly || isAdmin).map((item) => {
             const Icon = item.icon;
             return <SideIcon key={item.to} to={item.to} icon={<Icon className="h-4 w-4" />} label={item.label} />;
           })}
         </nav>
-        {voiceHere && <VoicePanel variant="collapsed" />}
+        {/* Happening now: a call you're in, uploads, what's up next. */}
+        <DockRail />
       </aside>
     );
   }
@@ -255,7 +262,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               icon={<Icon className="h-4 w-4" />}
               label={item.label}
               end={item.exact}
-              inactive={inNavApp && item.to === "/apps"}
+              inactive={appsRowIdle && item.to === "/apps"}
             />
           );
         })}
@@ -268,6 +275,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             badge={{ app: app.id, n: badges[app.id] ?? 0 }}
           />
         ))}
+        {openApp && (
+          <NavItem key={`open-${openApp.id}`} to={openApp.to} icon={<AppIcon app={openApp} style={iconStyle} />} label={openApp.name} />
+        )}
       </nav>
 
       {/* Conversation list */}
@@ -341,8 +351,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
       </div>
 
-      {/* Calls: you're in voice — Mute, Deafen, Disconnect wherever you are. */}
-      {voiceHere && <VoicePanel variant="sidebar" />}
+      {/* Happening now: the voice channel or call you're in, uploads,
+          what's up next and the like, in one place above your account. */}
+      <Dock />
       {/* Footer */}
       <UserFooter onNewFolder={() => setFolderModal("new")} />
 

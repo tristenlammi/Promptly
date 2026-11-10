@@ -79,7 +79,8 @@ export interface Draft {
 }
 
 export const EMPTY: Draft = {
-  step: "pick",
+  // A new post starts at the words; photos are one tap away ("Add photos").
+  step: "share",
   picks: [],
   body: "",
   mentions: [],

@@ -636,7 +636,7 @@ type BookmarkRow = { id: string; title: string; url?: string; parent: string; po
 const ROOT_NAMES: [string, string][] = [["root:bar", "Bookmarks bar"], ["root:other", "Other bookmarks"], ["root:menu", "Bookmarks menu"], ["root:mobile", "Mobile bookmarks"]];
 
 /** Works from the vault, so it shows the same list in any browser, whether or not this one syncs. */
-type BookmarkStatus = { on: boolean; granted: boolean; held?: unknown; at?: string; total?: number; failed?: number; error?: string; inBrowser?: number };
+type BookmarkStatus = { on: boolean; granted: boolean; held?: unknown; at?: string; total?: number; failed?: number; away?: boolean; error?: string; inBrowser?: number };
 
 function BookmarksTab({ query }: { query: string }) {
   const [rows, setRows] = useState<BookmarkRow[] | null>(null);
@@ -690,7 +690,7 @@ function BookmarksTab({ query }: { query: string }) {
   ) : (
     <div data-testid="bookmarks-status" className="flex flex-col gap-2 rounded-lg bg-[var(--surface-1)] p-3 text-xs">
       <p>
-        {state.error ? <span className="err">Bookmarks didn't sync: {state.error}</span> : syncing ? "Syncing your bookmarks…" : state.at ? `Sync is on. Last synced ${new Date(state.at).toLocaleTimeString()}.` : "Sync is on, and waiting for its first run."}
+        {state.error ? <span className="err">Bookmarks didn't sync: {state.error}</span> : state.away && !syncing ? <span className="err" data-testid="bookmarks-away">Your server couldn't be reached, so your other browsers don't have the latest bookmarks yet. It'll keep trying.</span> : syncing ? "Syncing your bookmarks…" : state.at ? `Sync is on. Last synced ${new Date(state.at).toLocaleTimeString()}.` : "Sync is on, and waiting for its first run."}
         {state.inBrowser !== undefined && ` This browser has ${state.inBrowser} ${state.inBrowser === 1 ? "bookmark" : "bookmarks"}.`}
         {state.failed ? ` ${state.failed} couldn't be changed, and will be tried again.` : ""}
       </p>

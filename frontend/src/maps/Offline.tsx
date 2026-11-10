@@ -11,6 +11,7 @@ import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
+import { RowsSkeleton, Switch } from "./ui";
 import { mapsApi, type OfflineArea, type OfflineEstimate, type OfflineOverview, type OfflinePhone, type Route, type Spot } from "./api";
 
 /** P Maps offline areas on the web (maps-offline WP-M8). The areas are saved
@@ -220,12 +221,12 @@ export function OfflinePanel({ view, moves, onClose, onSquares, onShowArea }: {
             The map, search and directions on your Android phone when there&apos;s no signal.
           </p>
         </div>
-        <button type="button" onClick={onClose} aria-label="Close" title="Close" className="rounded-full p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]">
+        <button type="button" onClick={onClose} aria-label="Close" title="Close" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] md:h-8 md:w-8">
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      {isLoading && <p className="flex items-center gap-2 px-4 pt-4 text-sm text-[var(--text-muted)]"><Loader2 className="h-4 w-4 animate-spin" />Loading your areas…</p>}
+      {isLoading && <RowsSkeleton rows={3} label="Loading your areas" />}
       {error && (
         <div className="px-4 pt-3">
           <Callout tone="danger">
@@ -276,12 +277,14 @@ export function OfflinePanel({ view, moves, onClose, onSquares, onShowArea }: {
             placeholder="Mudgee"
             className="mt-1 h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
           />
-          <label htmlFor={houseId} className="mt-2 flex items-center gap-2 text-sm text-[var(--text)]">
-            <input id={houseId} type="checkbox" checked={withAddresses} onChange={(e) => setWithAddresses(e.target.checked)} />
-            House numbers
-            {estimate?.addresses_bytes ? <span className="text-xs text-[var(--text-muted)]">(+{formatSize(estimate.addresses_bytes)})</span> : null}
-          </label>
-          <p className="ml-6 text-xs text-[var(--text-muted)]">Finds addresses like &quot;12 Smith St&quot; with no signal.</p>
+          <div className="mt-2 flex min-h-10 items-center justify-between gap-3">
+            <label htmlFor={houseId} className="min-w-0 flex-1 text-sm text-[var(--text)]">
+              House numbers
+              {estimate?.addresses_bytes ? <span className="text-xs text-[var(--text-muted)]"> (+{formatSize(estimate.addresses_bytes)})</span> : null}
+              <span className="block text-xs text-[var(--text-muted)]">Finds addresses like &quot;12 Smith St&quot; with no signal.</span>
+            </label>
+            <Switch id={houseId} checked={withAddresses} onChange={setWithAddresses} />
+          </div>
 
           <p role="status" aria-live="polite" className="mt-3 min-h-5 text-sm" data-testid="offline-estimate">
             {estimateError ? (
@@ -489,11 +492,11 @@ function AreaRow({ area, focused, onShow, onChanged, onDeleted }: {
             <button type="button" onClick={() => {
               setDraft(area.name);
               setRenaming(true);
-            }} aria-label={`Rename ${area.name}`} title="Rename" className="rounded-full p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]">
+            }} aria-label={`Rename ${area.name}`} title="Rename" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] md:h-8 md:w-8">
               <Pencil className="h-4 w-4" />
             </button>
             {isAndroidDevice() && (
-              <button type="button" onClick={() => void openOnPhone(area.id).catch((e) => toast.error(apiErrorMessage(e, "Couldn't open the Promptly app.")))} aria-label={`Download ${area.name} on this phone`} title="Download on this phone" className="rounded-full p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]">
+              <button type="button" onClick={() => void openOnPhone(area.id).catch((e) => toast.error(apiErrorMessage(e, "Couldn't open the Promptly app.")))} aria-label={`Download ${area.name} on this phone`} title="Download on this phone" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] md:h-8 md:w-8">
                 <CloudDownload className="h-4 w-4" />
               </button>
             )}
@@ -518,10 +521,12 @@ function AreaRow({ area, focused, onShow, onChanged, onDeleted }: {
           ))
         )}
       </ul>
-      <label htmlFor={houseId} className="mt-1.5 flex items-center gap-2 text-xs text-[var(--text-muted)]">
-        <input id={houseId} type="checkbox" checked={houses} disabled={busy} onChange={(e) => void setHouseNumbers(e.target.checked)} />
-        House numbers{area.addresses_bytes ? ` (${formatSize(area.addresses_bytes)})` : ""}
-      </label>
+      <div className="mt-1.5 flex min-h-10 items-center justify-between gap-3">
+        <label htmlFor={houseId} className="min-w-0 flex-1 text-xs text-[var(--text-muted)]">
+          House numbers{area.addresses_bytes ? ` (${formatSize(area.addresses_bytes)})` : ""}
+        </label>
+        <Switch id={houseId} checked={houses} disabled={busy} onChange={(on) => void setHouseNumbers(on)} />
+      </div>
     </li>
   );
 }

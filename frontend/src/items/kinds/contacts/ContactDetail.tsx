@@ -118,7 +118,7 @@ export function ContactDetail({
       <div className="flex h-full items-center justify-center p-6 text-sm text-[var(--text-muted)]">
         {onBack ? (
           <ItemButton variant="ghost" icon={<ArrowLeft className="h-4 w-4" />} onClick={onBack}>
-            This contact is gone — back to People
+            This contact is gone — back to Contacts
           </ItemButton>
         ) : (
           "Pick someone from the list."
@@ -215,7 +215,7 @@ export function ContactDetail({
             className="flex h-11 items-center gap-0.5 rounded-xl pl-1 pr-3 text-[15px] font-medium text-[var(--item-accent)] hover:bg-[var(--hover)]"
           >
             <ChevronLeft className="h-6 w-6" aria-hidden />
-            People
+            Contacts
           </button>
           <span className="flex-1" />
           {favButton}
@@ -946,7 +946,7 @@ function NoteList({
           type="button"
           aria-label={`Delete ${n.text}`}
           onClick={() => remove(n.id)}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--danger)] md:opacity-0 md:focus:opacity-100 md:group-hover:opacity-100"
+          className="flex h-10 w-10 md:h-9 md:w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--danger)] md:opacity-40 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:hover:opacity-100"
         >
           <X className="h-4 w-4" />
         </button>
@@ -1072,7 +1072,7 @@ function Timeline({ item, c, first, onLog }: { item: Handle; c: Contact; first: 
                           x.interactions = x.interactions.filter((y) => y.id !== i.id);
                         })
                       }
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--danger)] md:opacity-0 md:focus:opacity-100 md:group-hover:opacity-100"
+                      className="flex h-10 w-10 md:h-8 md:w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--danger)] md:opacity-40 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:hover:opacity-100"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>

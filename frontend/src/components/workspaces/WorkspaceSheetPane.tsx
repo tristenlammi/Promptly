@@ -36,6 +36,7 @@ import { PresenceChips } from "./PresenceChips";
 import { useSheetCollabProvider } from "./useSheetCollabProvider";
 import { workspaceSheetBackend, type SheetBackend } from "./sheetBackend";
 import { useSheetCollab } from "./useSheetCollab";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -890,7 +891,7 @@ function SheetHistory({
         {err ? (
           <p className="p-3 text-xs text-[var(--danger)]">{err}</p>
         ) : rows === null ? (
-          <p className="p-3 text-xs text-[var(--text-muted)]">Loading…</p>
+          <SkeletonRows count={3} className="p-3" label="Loading" />
         ) : rows.length === 0 ? (
           <p className="p-3 text-xs text-[var(--text-muted)]">
             No earlier versions yet — they're kept as the sheet is edited.

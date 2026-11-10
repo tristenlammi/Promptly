@@ -125,7 +125,7 @@ export function ExtraChip({
   if (x.kind === "task") {
     const t = x.task;
     return (
-      <div className={cn("flex h-full w-full min-w-0 items-center gap-1 rounded-md px-1 hover:bg-[var(--hover)]", compact ? "text-[10px]" : "text-[11px]", t.planned && "opacity-55")}>
+      <div className={cn("flex h-full w-full min-w-0 items-center gap-1 rounded-md px-1 hover:bg-[var(--hover)]", "text-xs", t.planned && "opacity-55")}>
         <TaskCheck task={t} size={compact ? 11 : 13} />
         <button
           type="button"
@@ -152,7 +152,7 @@ export function ExtraChip({
         title={label}
         className={cn(
           "flex h-full w-full min-w-0 items-center gap-1 px-1 text-left text-[var(--text)] hover:brightness-95",
-          compact ? "text-[10px]" : "text-[11px]",
+          "text-xs",
           bar ? cn("font-medium", continuesLeft ? "rounded-l-none" : "rounded-l-md", continuesRight ? "rounded-r-none" : "rounded-r-md") : "rounded-md",
           x.kind === "workout" && x.w.kind === "day" && "border border-dashed",
           done && "opacity-60",
@@ -173,7 +173,7 @@ export function ExtraChip({
       aria-label={birthdayLabel(b)}
       className={cn(
         "flex h-full w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-[var(--text)] hover:brightness-95",
-        compact ? "text-[10px]" : "text-[11px]",
+        "text-xs",
       )}
       style={{ background: `color-mix(in srgb, ${v.color} 12%, var(--surface))` }}
     >
@@ -192,7 +192,7 @@ export function TaskMarker({ v, onOpen, top, narrow }: { v: ViewEvent; onOpen: O
   return (
     <div
       onClick={(e) => e.stopPropagation()}
-      className="absolute left-[1px] right-[3px] z-[5] flex h-[18px] items-center gap-1 rounded-md border-l-2 pl-1 pr-1 text-[11px] leading-none shadow-[0_0_0_1px_var(--bg)]"
+      className="absolute left-[1px] right-[3px] z-[5] flex h-[18px] items-center gap-1 rounded-md border-l-2 pl-1 pr-1 text-xs leading-none shadow-[0_0_0_1px_var(--bg)]"
       style={{ top, borderColor: t.color, background: `color-mix(in srgb, ${t.color} 14%, var(--surface))` }}
     >
       <TaskCheck task={t} size={12} />
@@ -215,7 +215,7 @@ export function AppointmentMarker({ v, onOpen, top, narrow }: { v: ViewEvent; on
       onClick={(e: MouseEvent<HTMLElement>) => openFrom(e, v, onOpen)}
       title={label}
       className={cn(
-        "absolute left-[1px] right-[3px] z-[5] flex h-[18px] items-center gap-1 rounded-md border-l-2 pl-1 pr-1 text-left text-[11px] leading-none text-[var(--text)] shadow-[0_0_0_1px_var(--bg)]",
+        "absolute left-[1px] right-[3px] z-[5] flex h-[18px] items-center gap-1 rounded-md border-l-2 pl-1 pr-1 text-left text-xs leading-none text-[var(--text)] shadow-[0_0_0_1px_var(--bg)]",
         done && "opacity-60",
       )}
       style={{ top, borderColor: v.color, background: `color-mix(in srgb, ${v.color} 14%, var(--surface))` }}

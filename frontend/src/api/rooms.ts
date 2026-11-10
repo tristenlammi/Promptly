@@ -250,6 +250,11 @@ export const roomsApi = {
   async deleteMessage(id: string): Promise<void> {
     await apiClient.delete(`/rooms/messages/${id}`);
   },
+  /** Undo a delete, for a minute after it: the message comes back as it was. */
+  async restoreMessage(id: string): Promise<Message> {
+    const { data } = await apiClient.post<Message>(`/rooms/messages/${id}/restore`);
+    return data;
+  },
   async addReaction(id: string, emoji: string): Promise<void> {
     await apiClient.put(`/rooms/messages/${id}/reactions`, { emoji });
   },

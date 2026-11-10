@@ -56,6 +56,18 @@
   },
   "shortcuts": [
     {
+      "name": "New story",
+      "short_name": "New story",
+      "url": "/porch/story/new?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/item-icons/porch-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
       "name": "New post",
       "short_name": "New post",
       "url": "/porch/new?source=pwa-shortcut",

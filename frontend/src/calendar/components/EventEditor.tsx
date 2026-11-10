@@ -3,9 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { calendarReachApi } from "@/api/calendarReach";
+import { porchApi } from "@/api/porch";
 import { calendarApi, type CalEvent, type CalendarBootstrap, type CalUser, type EditScope, type EventPatch, type Repeat, type RsvpStatus } from "@/api/calendar";
 import { extractError } from "@/components/files/helpers";
 import { LocationInput } from "@/components/maps/LocationInput";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, Toggle } from "@/items/ui";
 import { PeoplePicker } from "@/rooms/components/PeoplePicker";
 import { UserAvatar } from "@/rooms/components/ui";
@@ -15,6 +17,7 @@ import { addDays, combine, dayDiff, hm, localZone, parseYmd, startOfDay, weekday
 import { addUsers, useCalUsers, useRefreshEvents } from "../data";
 import { REMINDER_OPTIONS, type ViewEvent } from "../model";
 import type { EventPrefill } from "../prefill";
+import { DateField, TimeField } from "./DateTimeFields";
 import { EmailGuestsField, type DraftEmailGuest } from "./EmailGuestsField";
 import { AvailabilityTag, availabilityText, FREE_COLOR, BUSY_COLOR, overlaps, useBusy } from "./Availability";
 import { FindTime } from "./FindTime";
@@ -106,6 +109,16 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
   const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
   const set = (patch: Partial<Draft>) => setD((x) => ({ ...x, ...patch }));
+  // A phone keeps its own date and time wheels; a mouse gets Promptly's pickers.
+  const phone = useIsMobile(767);
+  // What it opened with, to tell whether closing would lose anything.
+  const opened = useRef(JSON.stringify(d));
+  const [discard, setDiscard] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    // The sheet's scrolling body: Promptly's slim scrollbar instead of the system one.
+    form.current?.parentElement?.classList.add("promptly-scroll");
+  }, []);
   const ev = target.mode === "edit" ? target.v.ev : null;
 
   // Guests invited by email (people not on Promptly): saved ones load in.
@@ -139,6 +152,15 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
     }
   };
 
+  const emailDirty = emailGuests.some((g) => !g.id) || (savedEmail?.guests ?? []).some((g) => !emailGuests.some((x) => x.id === g.id));
+  const dirty = JSON.stringify(d) !== opened.current || emailDirty;
+  /** Close, unless that would throw away changes: then ask first. */
+  const close = () => {
+    if (saving || discard) return;
+    if (dirty) setDiscard(true);
+    else onClose();
+  };
+
   const writable = b.calendars.filter((c) => c.role === "owner" || c.role === "editor" || c.id === ev?.calendar_id);
   const canMove = !ev || (ev.on_my_calendar && ev.can_delete);
   const statusOf = useMemo(() => new Map<string, RsvpStatus>((ev?.attendees ?? []).map((a) => [a.user_id, a.status])), [ev]);
@@ -150,6 +172,10 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
 
   // Planned in a room: everyone there is invited, and a card is posted in it.
   const room = target.mode === "new" ? target.prefill?.room ?? null : null;
+  // Porch (WP-P3.2): planned in a group, a post there carries it.
+  const porchGroup = target.mode === "new" ? target.prefill?.porchGroup ?? null : null;
+  const [inviteAll, setInviteAll] = useState(porchGroup?.inviteAll ?? false);
+  const planned = room ?? porchGroup;
   // Made from something (a Porch post): saved with it, and guests only from its pool.
   const source = target.mode === "new" ? target.prefill?.source ?? null : null;
   const pool = target.mode === "new" ? target.prefill?.guestPool ?? null : null;
@@ -222,6 +248,27 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
     const guestIds = d.guests.map((g) => g.id);
     setSaving(true);
     try {
+      if (!ev && porchGroup) {
+        const r = await porchApi.planGroupEvent(porchGroup.id, {
+          title: d.title.trim(),
+          description: d.description,
+          location: d.location.trim(),
+          all_day: d.allDay,
+          ...wireTimes(start, end, d.allDay),
+          tz: localZone(),
+          calendar_id: d.calendarId || null,
+          repeat: d.repeat,
+          reminders: d.reminders,
+          invite_all: inviteAll,
+          body: porchGroup.body ?? "",
+        });
+        addUsers(r.users);
+        toast.success(`Event posted in ${porchGroup.name}`);
+        refresh();
+        porchGroup.onPosted?.(r.post.id);
+        onSaved(r.event);
+        return;
+      }
       if (!ev) {
         const r = await calendarApi.create({
           title: d.title.trim(),
@@ -325,22 +372,23 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
   return (
     <Sheet
       open
-      onClose={onClose}
-      title={ev ? "Edit event" : room ? `Plan an event in ${room.name}` : "New event"}
+      onClose={close}
+      title={ev ? "Edit event" : planned ? `Plan an event in ${planned.name}` : "New event"}
       size="lg"
       footer={
         <>
-          <ItemButton block onClick={onClose}>
+          <ItemButton block onClick={close}>
             Cancel
           </ItemButton>
           <ItemButton block variant="primary" type="submit" form="cal-event-form" disabled={saving || invalid || !d.title.trim()}>
-            {saving ? "Saving…" : room ? "Post" : "Save"}
+            {saving ? "Saving…" : planned ? "Post" : "Save"}
           </ItemButton>
         </>
       }
     >
       <form
         id="cal-event-form"
+        ref={form}
         className="flex flex-col gap-4 pt-1"
         onSubmit={(e) => {
           e.preventDefault();
@@ -365,19 +413,19 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
 
         <div className="grid grid-cols-[1fr_auto] gap-2">
           <Field label="Starts">
-            <TextInput type="date" value={d.startDate} onChange={(e) => e.target.value && moveStart(e.target.value, d.startTime)} required />
+            <DateField native={phone} label="Start date" value={d.startDate} onChange={(v) => moveStart(v, d.startTime)} />
           </Field>
           {!d.allDay && (
             <Field label="&nbsp;">
-              <TextInput type="time" value={d.startTime} onChange={(e) => e.target.value && moveStart(d.startDate, e.target.value)} aria-label="Start time" className="!w-32" />
+              <TimeField native={phone} label="Start time" value={d.startTime} onChange={(v) => moveStart(d.startDate, v)} />
             </Field>
           )}
           <Field label="Ends">
-            <TextInput type="date" value={d.endDate} min={d.startDate} onChange={(e) => e.target.value && set({ endDate: e.target.value })} required />
+            <DateField native={phone} label="End date" value={d.endDate} min={d.startDate} onChange={(v) => set({ endDate: v })} />
           </Field>
           {!d.allDay && (
             <Field label="&nbsp;">
-              <TextInput type="time" value={d.endTime} onChange={(e) => e.target.value && set({ endTime: e.target.value })} aria-label="End time" className="!w-32" />
+              <TimeField native={phone} label="End time" value={d.endTime} onChange={(v) => set({ endTime: v })} />
             </Field>
           )}
         </div>
@@ -402,13 +450,23 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[var(--text-muted)]">Guests</span>
-            {!room && (
-              <ItemButton size="sm" variant="ghost" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setPicking(true)}>
-                Add guests
-              </ItemButton>
+            {!planned && (
+              <span className="flex items-center gap-1">
+                {/* "Make this an event" on a Porch post: everyone who can see it, at once (WP-P3.2). */}
+                {pool && pool.people.length > 1 && pool.people.some((p) => !d.guests.some((g) => g.id === p.id)) && (
+                  <ItemButton size="sm" variant="ghost" icon={<Users className="h-3.5 w-3.5" />} onClick={() => set({ guests: pool.people })}>
+                    Invite everyone ({pool.people.length})
+                  </ItemButton>
+                )}
+                <ItemButton size="sm" variant="ghost" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setPicking(true)}>
+                  Add guests
+                </ItemButton>
+              </span>
             )}
           </div>
-          {room ? (
+          {porchGroup ? (
+            <PorchGroupGuests name={porchGroup.name} members={porchGroup.members} count={porchGroup.count} me={b.me} on={inviteAll} onChange={setInviteAll} />
+          ) : room ? (
             <RoomGuests roomName={room.name} me={b.me} guests={d.guests} busyAt={busyAt} />
           ) : d.guests.length === 0 ? (
             <p className="text-xs text-[var(--text-muted)]">{pool ? pool.note : "Invite people on this Promptly — they'll be notified and can answer."}</p>
@@ -432,7 +490,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
               ))}
             </ul>
           )}
-          {!room && !pool && (!ev || ev.can_edit) && (
+          {!planned && !pool && (!ev || ev.can_edit) && (
             <EmailGuestsField
               guests={emailGuests}
               onChange={setEmailGuests}
@@ -506,6 +564,31 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
           <PeoplePicker selected={d.guests} onChange={(next) => set({ guests: next })} exclude={[b.me.id, organiserId]} />
         )}
       </Sheet>
+      <Sheet
+        open={discard}
+        onClose={() => setDiscard(false)}
+        title="Discard your changes?"
+        size="sm"
+        footer={
+          <>
+            <ItemButton block data-autofocus onClick={() => setDiscard(false)}>
+              Keep editing
+            </ItemButton>
+            <ItemButton
+              block
+              variant="danger"
+              onClick={() => {
+                setDiscard(false);
+                onClose();
+              }}
+            >
+              Discard
+            </ItemButton>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--text-muted)]">{ev ? "What you changed here hasn't been saved." : "This event hasn't been saved yet."}</p>
+      </Sheet>
     </Sheet>
   );
 }
@@ -547,6 +630,37 @@ function PoolPicker({ pool, selected, onChange }: { pool: { people: CalUser[]; n
           </ul>
         </>
       )}
+    </div>
+  );
+}
+
+/** Porch group mode (WP-P3.2): invite the whole group, or not — anyone in
+ *  it can still answer from the post's card. */
+function PorchGroupGuests({ name, members, count, me, on, onChange }: { name: string; members: CalUser[]; count: number; me: CalUser; on: boolean; onChange: (v: boolean) => void }) {
+  const people = [me, ...members.filter((m) => m.id !== me.id)];
+  const shown = people.slice(0, 8);
+  const more = people.length - shown.length;
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-[var(--text)]">
+          Invite everyone in <b className="font-semibold">{name}</b> ({Math.max(count, people.length)})
+        </span>
+        <Toggle checked={on} onChange={onChange} label={`Invite everyone in ${name}`} />
+      </div>
+      <div className="flex items-center">
+        <div className="flex -space-x-2">
+          {shown.map((u) => (
+            <span key={u.id} className="rounded-full ring-2 ring-[var(--surface)]" title={u.id === me.id ? "You" : u.username}>
+              <UserAvatar user={u} size={28} />
+            </span>
+          ))}
+        </div>
+        {more > 0 && <span className="ml-2 text-xs font-medium text-[var(--text-muted)]">+{more}</span>}
+      </div>
+      <p className="text-xs text-[var(--text-muted)]">
+        {on ? "It goes on everyone's calendar, and they can answer Going, Maybe or Can't go." : `Nobody's invited, but anyone in ${name} can answer from the post and it goes on their calendar.`}
+      </p>
     </div>
   );
 }

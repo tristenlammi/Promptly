@@ -230,3 +230,35 @@ async def test_edit_and_delete(client, db, people):
     ev = await everyone_id(client, bob)
     hi = (await say(client, bob, [ev], "hi all"))["id"]
     await ok(await client.delete(f"/api/porch/posts/{hi}", headers=H(ann)), 204)
+
+
+async def test_undo_a_delete(client, db, people):
+    """Deleting hides a post from everyone at once; Undo brings it back as
+    it was, for a short while, for whoever could delete it."""
+    from datetime import timedelta
+
+    from app.porch.models import PorchPost
+
+    ann, bob, cat, _dan = people
+    fam = await members_of(client, ann, "Family", [bob, cat])
+    pid = (await say(client, ann, [fam], "back soon"))["id"]
+
+    await ok(await client.delete(f"/api/porch/posts/{pid}", headers=H(ann)), 204)
+    assert not await sees(client, bob, pid)
+    # Someone who couldn't delete it can't bring it back.
+    assert (await client.post(f"/api/porch/posts/{pid}/restore", headers=H(bob))).status_code == 404
+    await ok(await client.post(f"/api/porch/posts/{pid}/restore", headers=H(ann)), 204)
+    assert await sees(client, bob, pid)
+    assert (await ok(await client.get(f"/api/porch/posts/{pid}", headers=H(bob))))["body"] == "back soon"
+    # Nothing to undo: fine.
+    await ok(await client.post(f"/api/porch/posts/{pid}/restore", headers=H(ann)), 204)
+
+    # A while later it's too late.
+    await ok(await client.delete(f"/api/porch/posts/{pid}", headers=H(ann)), 204)
+    row = await db.get(PorchPost, uuid.UUID(pid))
+    await db.refresh(row)
+    row.deleted_at = row.deleted_at - timedelta(minutes=5)
+    await db.commit()
+    assert (await client.post(f"/api/porch/posts/{pid}/restore", headers=H(ann))).status_code == 409
+    assert not await sees(client, bob, pid)
+    assert (await client.post(f"/api/porch/posts/{uuid.uuid4()}/restore", headers=H(ann))).status_code == 404

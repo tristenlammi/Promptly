@@ -19,6 +19,10 @@ from app.auth.models import User
 RESET_TTL_S = 30 * 60
 
 
+class NoPublicOriginError(RuntimeError):
+    """No configured public address, so there's no safe origin for the link."""
+
+
 def reset_key(token: str) -> str:
     return "promptly:pw-reset:" + hashlib.sha256(token.encode()).hexdigest()
 
@@ -27,14 +31,20 @@ async def send_reset_link(db: AsyncSession, request: Request, user: User, *, by_
     """Make a link for ``user`` and email it to their current address.
 
     Raises ``SmtpNotConfiguredError`` / ``SmtpSendError`` (app.mfa.smtp);
-    the token is only stored once the email went."""
+    the token is only stored once the email went. Raises
+    :class:`NoPublicOriginError` when the server has no configured public
+    address: the link's origin never comes from the request's
+    Host/X-Forwarded-Host, since a forged one would mail a live token to
+    someone else's site (app/public_origin.py)."""
     from app.mfa.smtp import send_message
+    from app.public_origin import link_origin
     from app.redis_client import redis
 
+    origin = await link_origin(db, request)
+    if origin is None:
+        raise NoPublicOriginError
     token = secrets.token_urlsafe(32)
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-    link = f"{proto}://{host}/reset-password?token={token}"
+    link = f"{origin}/reset-password?token={token}"
     if by_admin:
         intro = (
             "An administrator of your Promptly server sent you this link to choose a new "

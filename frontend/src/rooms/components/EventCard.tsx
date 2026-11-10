@@ -56,7 +56,7 @@ function DateTile({ date, color }: { date: Date; color: string }) {
       aria-hidden
       className="flex h-[52px] w-12 shrink-0 flex-col items-center justify-center overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg)]"
     >
-      <span className="text-[10px] font-bold uppercase leading-none tracking-wide" style={{ color }}>
+      <span className="text-xs font-bold uppercase leading-none tracking-wide" style={{ color }}>
         {fmt(date, { month: "short" })}
       </span>
       <span className="mt-0.5 text-xl font-semibold leading-none tabular-nums text-[var(--text)]">{date.getDate()}</span>
@@ -201,9 +201,9 @@ export function EventCard({ eventId, fallback, meId, users }: { eventId: string;
               <RsvpButtons value={ev.my_status === "invited" ? null : ev.my_status} busy={rsvp.isPending} onAnswer={(s) => rsvp.mutate(s)} />
               <p
                 className={cn(
-                  "flex h-4 items-center gap-1 text-[11px] font-medium transition-opacity",
+                  "flex h-4 items-center gap-1 text-xs font-medium transition-opacity",
                   confirm ? "opacity-100" : "opacity-0",
-                  confirm?.startsWith("Got it") ? "text-[var(--text-muted)]" : "text-[#2f7a48] dark:text-[#7fd09a]",
+                  confirm?.startsWith("Got it") ? "text-[var(--text-muted)]" : "text-[var(--success)]",
                 )}
                 aria-live="polite"
               >

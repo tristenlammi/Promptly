@@ -41,6 +41,7 @@ import type {
 } from "@/api/customModels";
 import type { Provider } from "@/api/types";
 import { apiErrorMessage } from "@/utils/apiError";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /** Ollama implicitly tags untagged pulls as ``:latest``; the installed
  * list echoes that tag back. Normalise both sides so a config value of
@@ -233,7 +234,7 @@ export function EmbeddingConfigCard() {
                 : "No embedding provider configured"}
             </div>
             {isLoading ? (
-              <div className="text-xs text-[var(--text-muted)]">Loading...</div>
+              <SkeletonRows count={3} label="Loading" />
             ) : configured ? (
               <div className="text-xs text-[var(--text-muted)]">
                 Using{" "}

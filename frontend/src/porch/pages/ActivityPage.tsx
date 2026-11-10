@@ -1,3 +1,4 @@
+import { RowsSkeleton } from "../components/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AtSign, Bell, ChevronRight, Flag, Heart, MessageCircle, Reply, ShieldAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType } from "react";
@@ -48,7 +49,7 @@ function itemWords(it: ActivityItem): { lead: string; rest: string; quote: strin
 /** An admin took down your comment, or your post out of Everyone or one
  *  of your groups: what, and the reason they gave. Only you see this. */
 function RemovedRow({ it }: { it: ActivityItem }) {
-  const what = it.target === "comment" ? "comment" : "post";
+  const what = it.target === "comment" ? "comment" : it.target === "story" ? "story" : "post";
   const scope = it.removed?.scope;
   const group = it.removed?.group;
   const where = scope === "everyone" ? " from Everyone" : scope === "group" ? ` from ${group ?? "a group"}` : "";
@@ -244,7 +245,7 @@ export function ActivityPage() {
 
   const refetch = () => void q.refetch();
   let body;
-  if (q.isPending) body = <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (q.isPending) body = <RowsSkeleton rows={6} className="px-4 md:px-0" />;
   else if (q.isError) body = <LoadError what="Couldn't load your activity." onRetry={refetch} />;
   else if (data && !data.items.length && !data.invites.length && !data.tag_requests.length && !data.reports?.length) {
     body = <EmptyState className="mx-4 mt-4 md:mx-0" icon={Bell} title="Nothing new" text="Comments, reactions and invites show up here." />;

@@ -193,7 +193,7 @@ export interface ActivityItem {
   post: PostRef | null;
   text: string | null;
   emoji: string[] | null;
-  target: "post" | "comment";
+  target: "post" | "comment" | "story";
   comment_id: string | null;
   unseen: boolean;
   /** ``removed``: an admin took your comment down (``all``), or your post
@@ -308,6 +308,50 @@ export interface PorchPost {
   poll: Poll | null;
   /** In your saved posts. */
   saved: boolean;
+  /** The groups you run that it's in, and whether it's pinned there (WP-P3.1). */
+  pin_groups?: (GroupLabel & { pinned: boolean })[];
+  /** The Calendar event it carries (WP-P3.2), read live. */
+  event?: PostEvent | null;
+}
+
+/** A post's event card: when, where, who's going, and your answer. */
+export type PostEvent =
+  | { cancelled: true; title: string }
+  | {
+      cancelled: false;
+      event_id: string;
+      title: string;
+      /** The next occurrence (or the last, once it's over): ISO, or a day for all-day. */
+      start: string;
+      end: string;
+      all_day: boolean;
+      repeats: boolean;
+      location: string;
+      /** A few of the people going (the organiser first). */
+      going: PorchUser[];
+      going_count: number;
+      maybe_count: number;
+      my_status: "going" | "maybe" | "declined" | null;
+      /** You're invited and haven't answered. */
+      invited: boolean;
+      organiser: boolean;
+      past: boolean;
+    };
+
+/** What the event editor sends to plan an event in a group. */
+export interface PlanEventIn {
+  title: string;
+  description: string;
+  location: string;
+  all_day: boolean;
+  start: string;
+  end: string;
+  tz: string;
+  calendar_id: string | null;
+  repeat: unknown;
+  reminders: number[];
+  invite_all: boolean;
+  body?: string;
 }
 
 export interface MyProfile {
@@ -319,6 +363,8 @@ export interface MyProfile {
   activity_seen_at: string | null;
   welcomed: boolean;
   last_groups: "all" | string[] | null;
+  /** The story maker's own starting choice (stories remember theirs apart from posts). */
+  last_story_groups?: "all" | string[] | null;
 }
 
 export interface Bootstrap {
@@ -328,7 +374,7 @@ export interface Bootstrap {
   groups: PorchGroup[];
   invites: PorchGroup[];
   everyone: { id: string; name: string; emoji: string; member_count: number };
-  limits: { max_media: number; video_max_seconds: number; video_max_mb: number };
+  limits: { max_media: number; video_max_seconds: number; video_max_mb: number; story_video_max_seconds: number };
   /** The Activity badge: new since you last looked, plus invites and tag requests waiting. */
   activity_unseen: number;
 }
@@ -383,7 +429,119 @@ export type PorchEvent =
   | { type: "group"; group_id: string }
   | { type: "invite"; group_id: string }
   | { type: "comment"; post_id: string; comment_id: string }
-  | { type: "activity" };
+  | { type: "activity" }
+  /** Someone's stories changed (a new one, or one deleted). */
+  | { type: "story"; user_id: string }
+  /** Someone saw one of your stories. */
+  | { type: "story_view"; story_id: string };
+
+// ---- stories (WP-P2.1, P2.2)
+
+/** The six text-story backgrounds (``stories.BACKGROUNDS``). */
+export const STORY_BACKGROUNDS = ["sunset", "ocean", "forest", "berry", "night", "sand"] as const;
+export type StoryBackground = (typeof STORY_BACKGROUNDS)[number];
+export type StoryTextStyle = "classic" | "bold" | "box";
+
+/** A sticker on a story: where its middle sits (shares of the 9:16 frame), its size and turn. */
+interface OverlayBase {
+  x: number;
+  y: number;
+  scale: number;
+  rotate: number;
+  style: StoryTextStyle;
+}
+export type StoryOverlay =
+  | (OverlayBase & { type: "text"; text: string })
+  | (OverlayBase & { type: "mention"; user: PorchUser })
+  | (OverlayBase & { type: "place"; place: PostPlace });
+
+/** A sticker as sent: a mention names the person by id. */
+export type StoryOverlayIn =
+  | (OverlayBase & { type: "text"; text: string })
+  | (OverlayBase & { type: "mention"; user_id: string })
+  | (OverlayBase & { type: "place"; place: PostPlace });
+
+export interface StoryMedia {
+  kind: "image" | "video";
+  thumb: string | null;
+  preview: string | null;
+  poster: string | null;
+  video: string | null;
+  state: string;
+  duration_ms: number | null;
+  width: number | null;
+  height: number | null;
+  thumbhash: string | null;
+}
+
+export interface PorchStory {
+  id: string;
+  author: PorchUser | null;
+  kind: "photo" | "video" | "text";
+  created_at: string;
+  expires_at: string;
+  /** Past its 24 hours (only ever yours, or in a highlight). */
+  expired: boolean;
+  /** Its groups that are also yours. */
+  groups: GroupLabel[];
+  media: StoryMedia | null;
+  text: string;
+  background: StoryBackground | null;
+  overlays: StoryOverlay[];
+  alt_text: string;
+  mine: boolean;
+  /** You've seen it (your own always count as seen). */
+  seen: boolean;
+  /** Yours only: how many people saw it. */
+  view_count?: number;
+  file_id?: string | null;
+}
+
+/** One circle in the stories row. */
+export interface StoryRing {
+  user: PorchUser;
+  count: number;
+  unseen: number;
+  latest_at: string;
+  /** Every story of theirs you see is in this one group of yours: its emoji goes on the ring. */
+  ring_group: GroupLabel | null;
+  thumb: { image: string | null; background: StoryBackground | null; kind: PorchStory["kind"] };
+  /** Your own circle: everyone who's seen your live stories. */
+  views?: number;
+}
+
+export interface StoriesRow {
+  me: StoryRing | null;
+  people: StoryRing[];
+}
+
+export interface NewStory {
+  kind: PorchStory["kind"];
+  groups: "all" | string[];
+  file_id?: string;
+  /** Its 9:16 crop for this story only. */
+  edit?: Pick<EditOps, "crop"> | null;
+  text?: string;
+  background?: StoryBackground;
+  overlays?: StoryOverlayIn[];
+  alt_text?: string;
+}
+
+export interface StoryViewer {
+  user: PorchUser;
+  seen_at: string;
+}
+
+/** A highlight (WP-P2.4): stories kept on a profile, each only for the people in its groups. */
+export interface Highlight {
+  id: string;
+  name: string;
+  cover: { story_id: string; image: string | null; background: StoryBackground | null; kind: PorchStory["kind"] } | null;
+  count: number;
+  /** Only the stories you may see (yours: all of them). */
+  stories: PorchStory[];
+  mine: boolean;
+}
 
 export interface NewGroup {
   name: string;
@@ -438,8 +596,13 @@ export const porchApi = {
     const { data } = await apiClient.patch<PorchPost>(`/porch/posts/${id}`, patch);
     return data;
   },
-  async deletePost(id: string): Promise<void> {
-    await apiClient.delete(`/porch/posts/${id}`);
+  /** ``cancelEvent``: the event it carries is cancelled too (its organiser only). */
+  async deletePost(id: string, cancelEvent = false): Promise<void> {
+    await apiClient.delete(`/porch/posts/${id}`, { params: cancelEvent ? { cancel_event: true } : undefined });
+  },
+  /** Undo a delete, for a minute after it: the post comes back as it was. */
+  async restorePost(id: string): Promise<void> {
+    await apiClient.post(`/porch/posts/${id}/restore`);
   },
   async groupPosts(groupId: string, before: string | null, photos: boolean): Promise<PostPage> {
     const { data } = await apiClient.get<PostPage>(`/porch/groups/${groupId}/posts`, { params: { before: before || undefined, photos: photos || undefined } });
@@ -664,7 +827,7 @@ export const porchApi = {
   },
   /** Report a post or comment to the admins of the groups picked (yours
    *  that it's in; Everyone's admins are the people who run this Promptly). */
-  async report(targetType: "post" | "comment", targetId: string, reason: string, groups: string[]): Promise<{ id: string; groups: GroupLabel[] }> {
+  async report(targetType: "post" | "comment" | "story", targetId: string, reason: string, groups: string[]): Promise<{ id: string; groups: GroupLabel[] }> {
     const { data } = await apiClient.post<{ id: string; groups: GroupLabel[] }>("/porch/reports", { target_type: targetType, target_id: targetId, reason, groups });
     return data;
   },
@@ -679,6 +842,97 @@ export const porchApi = {
   },
   async decideGroupReport(groupId: string, reportId: string, action: "remove" | "keep", reason: string): Promise<{ deleted?: boolean; already_gone?: boolean }> {
     const { data } = await apiClient.post<{ deleted?: boolean; already_gone?: boolean }>(`/porch/groups/${groupId}/reports/${reportId}`, { action, reason });
+    return data;
+  },
+
+  // ---- stories (WP-P2.1)
+  /** The stories row: you, then people with live stories in your ticked groups. */
+  async storiesRow(): Promise<StoriesRow> {
+    const { data } = await apiClient.get<StoriesRow>("/porch/stories");
+    return data;
+  },
+  /** Someone's live stories you can see, oldest first (``feed``: as the row shows them). */
+  async userStories(userId: string, feed: boolean): Promise<{ user: PorchUser; stories: PorchStory[] }> {
+    const { data } = await apiClient.get<{ user: PorchUser; stories: PorchStory[] }>(`/porch/stories/u/${userId}`, { params: { feed: feed || undefined } });
+    return data;
+  },
+  async story(id: string): Promise<PorchStory> {
+    const { data } = await apiClient.get<PorchStory>(`/porch/stories/${id}`);
+    return data;
+  },
+  async createStory(body: NewStory): Promise<PorchStory> {
+    const { data } = await apiClient.post<PorchStory>("/porch/stories", body);
+    return data;
+  },
+  async deleteStory(id: string): Promise<void> {
+    await apiClient.delete(`/porch/stories/${id}`);
+  },
+  async viewStory(id: string): Promise<void> {
+    await apiClient.post(`/porch/stories/${id}/view`);
+  },
+  /** Who saw your story (yours only). */
+  async storyViewers(id: string): Promise<{ count: number; viewers: StoryViewer[] }> {
+    const { data } = await apiClient.get<{ count: number; viewers: StoryViewer[] }>(`/porch/stories/${id}/viewers`);
+    return data;
+  },
+  /** Reply or react to someone's story: a message in your 1:1 Rooms conversation, with the story attached. */
+  async replyStory(id: string, body: { text?: string; emoji?: string }): Promise<{ room_id: string; url: string; message_id: string }> {
+    const { data } = await apiClient.post<{ room_id: string; url: string; message_id: string }>(`/porch/stories/${id}/reply`, body);
+    return data;
+  },
+  // ---- pins (WP-P3.1)
+  async groupPins(groupId: string): Promise<PorchPost[]> {
+    const { data } = await apiClient.get<PorchPost[]>(`/porch/groups/${groupId}/pins`);
+    return data;
+  },
+  async setPin(groupId: string, postId: string, pinned: boolean): Promise<void> {
+    if (pinned) await apiClient.put(`/porch/groups/${groupId}/pins/${postId}`);
+    else await apiClient.delete(`/porch/groups/${groupId}/pins/${postId}`);
+  },
+
+  // ---- group events (WP-P3.2)
+  /** Plan an event in a group: in your calendar, the group invited (or not), and a post carrying it. */
+  async planGroupEvent(groupId: string, body: PlanEventIn): Promise<{ event: import("@/api/calendar").CalEvent; users: Record<string, import("@/api/calendar").CalUser>; post: PorchPost }> {
+    const { data } = await apiClient.post(`/porch/groups/${groupId}/events`, body);
+    return data;
+  },
+  async groupEvents(groupId: string): Promise<{ upcoming: PorchPost[]; past: PorchPost[] }> {
+    const { data } = await apiClient.get<{ upcoming: PorchPost[]; past: PorchPost[] }>(`/porch/groups/${groupId}/events`);
+    return data;
+  },
+
+  // ---- highlights (WP-P2.4)
+  async myHighlights(): Promise<Highlight[]> {
+    const { data } = await apiClient.get<Highlight[]>("/porch/me/highlights");
+    return data;
+  },
+  /** Someone's highlights, each with only the stories you may see. */
+  async userHighlights(userId: string): Promise<Highlight[]> {
+    const { data } = await apiClient.get<Highlight[]>(`/porch/users/${userId}/highlights`);
+    return data;
+  },
+  async createHighlight(body: { name: string; story_ids: string[]; cover_story_id?: string | null }): Promise<Highlight> {
+    const { data } = await apiClient.post<Highlight>("/porch/me/highlights", body);
+    return data;
+  },
+  async updateHighlight(id: string, body: { name?: string; story_ids?: string[]; cover_story_id?: string | null }): Promise<Highlight> {
+    const { data } = await apiClient.patch<Highlight>(`/porch/me/highlights/${id}`, body);
+    return data;
+  },
+  async deleteHighlight(id: string): Promise<void> {
+    await apiClient.delete(`/porch/me/highlights/${id}`);
+  },
+  async addToHighlight(id: string, storyId: string): Promise<Highlight> {
+    const { data } = await apiClient.post<Highlight>(`/porch/me/highlights/${id}/stories`, { story_id: storyId });
+    return data;
+  },
+  async removeFromHighlight(id: string, storyId: string): Promise<{ deleted: boolean; highlight?: Highlight }> {
+    const { data } = await apiClient.delete<{ deleted: boolean; highlight?: Highlight }>(`/porch/me/highlights/${id}/stories/${storyId}`);
+    return data;
+  },
+  /** Every story you've posted, newest first (private to you). */
+  async storyArchive(before: string | null): Promise<{ stories: PorchStory[]; next: string | null }> {
+    const { data } = await apiClient.get<{ stories: PorchStory[]; next: string | null }>("/porch/stories/archive", { params: { before: before || undefined } });
     return data;
   },
 };
@@ -722,13 +976,16 @@ export interface PorchAdminSettings {
 }
 
 export interface ReportTarget {
-  type: "post" | "comment";
+  type: "post" | "comment" | "story";
   id: string;
   /** Deleted, or no longer in this group: nothing more is shown. */
   gone: boolean;
   author?: PorchUser | null;
   post_id?: string;
-  kind?: PostKind;
+  /** A story: its id, and a text story's colour. */
+  story_id?: string;
+  background?: StoryBackground | null;
+  kind?: PostKind | "text";
   created_at?: string;
   body?: string;
   /** A comment's post, a few words of it. */
@@ -751,7 +1008,7 @@ export interface ReportItem {
 
 export interface HandledReport {
   id: string;
-  target_type: "post" | "comment";
+  target_type: "post" | "comment" | "story";
   status: "removed" | "kept";
   note: string;
   handled_at: string | null;
@@ -817,6 +1074,8 @@ export interface PostCardSummary {
   subtitle: string;
   thumb: string | null;
   href: string;
+  /** The post's groups that are yours ("Family · Fishing"), for "Posted in …". */
+  where?: string;
 }
 
 /**

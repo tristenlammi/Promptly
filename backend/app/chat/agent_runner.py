@@ -111,6 +111,7 @@ async def run_agent(
     temperature: float = 0.4,
     max_tokens: int | None = None,
     on_progress: Callable[[str], None] | None = None,
+    parent_turn: dict[str, Any] | None = None,
 ) -> AgentResult:
     """Run one focused task to completion on its own DB session.
 
@@ -152,6 +153,23 @@ async def run_agent(
         running_history: list[ChatMessage | dict[str, Any]] = [
             ChatMessage(role="user", content=task)
         ]
+        # One turn for the whole run (security review H2). The task was
+        # written by the parent chat's model, so when that chat had already
+        # read outside content the agent starts the same way: a page can't
+        # get past the parent's outbound holds by handing the agent a URL.
+        # Here a hold is a refusal (nobody to ask); the addresses the person
+        # gave the parent and its search found stay openable.
+        from app.chat.tools.base import TurnState, allow_urls
+        from app.search.deepseek import mark_turn
+
+        sub_turn = TurnState(untrusted=False, own_attachments_only=False)
+        if parent_turn:
+            before = parent_turn.get("before_step")
+            seen = before if isinstance(before, dict) else parent_turn
+            if seen.get("untrusted"):
+                sub_turn["untrusted"] = True
+            allow_urls(sub_turn, parent_turn.get("allowed_urls") or ())
+        mark_turn(sub_turn, provider)  # DeepSeek's Search/Fetch on a DeepSeek model
         text_parts: list[str] = []
         sources: list[dict[str, Any]] = []
         cost_usd = 0.0
@@ -252,10 +270,6 @@ async def run_agent(
                     }
                 )
 
-                from app.search.deepseek import mark_turn
-
-                sub_turn: dict = {}
-                mark_turn(sub_turn, provider)  # DeepSeek's Search/Fetch on a DeepSeek model
                 tool_ctx = ToolContext(
                     db=db,
                     user=user,

@@ -186,7 +186,7 @@ def ext_of(filename: str | None) -> str:
 
 
 #: Native chat tools that change something or reach someone (add an event,
-#: post, send mail, save to memory, make a file, run code). Only these, and
+#: post, send mail, save to memory, make a file). Only these, and
 #: every connector (``mcp__…``) tool, get an audit row per call: a row for
 #: each read-only call (search photos, read mail, look at the map) told the
 #: admin what someone was doing and when (admin privacy G10). The person's
@@ -210,7 +210,6 @@ AUDITED_TOOLS: frozenset[str] = frozenset(
         "mail_draft_reply",
         "generate_pdf",
         "generate_image",
-        "code_interpreter",
     }
 )
 

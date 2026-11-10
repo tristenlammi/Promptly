@@ -29,7 +29,6 @@ export interface UserImportResult {
 
 export interface CreateUserPayload {
   can_generate_images?: boolean;
-  can_execute_code?: boolean;
   can_reach_private_network?: boolean;
   can_use_automations?: boolean;
   model_locked?: boolean;
@@ -148,8 +147,6 @@ export interface UpdateUserPayload {
   allowed_models?: string[] | null;
   /** Toggle image-gen access. Omit to leave unchanged. */
   can_generate_images?: boolean;
-  /** Toggle code-execution (Run button) access. Omit to leave unchanged. */
-  can_execute_code?: boolean;
   /** Toggle local-network access for automations. Omit to leave unchanged. */
   can_reach_private_network?: boolean;
   /** Turn Automations on/off for the user. Omit to leave unchanged. */
@@ -368,6 +365,10 @@ export const adminApi = {
   async createUser(payload: CreateUserPayload): Promise<AdminUser> {
     const { data } = await apiClient.post<AdminUser>("/admin/users", payload);
     return data;
+  },
+  /** Email a new member the "Send them this" card through the server's SMTP. */
+  async sendWelcomeEmail(id: string, body: { address: string; password?: string }): Promise<void> {
+    await apiClient.post(`/admin/users/${id}/welcome-email`, body);
   },
   async updateUser(id: string, payload: UpdateUserPayload): Promise<AdminUser> {
     const { data } = await apiClient.patch<AdminUser>(`/admin/users/${id}`, payload);

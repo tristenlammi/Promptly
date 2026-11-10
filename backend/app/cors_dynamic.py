@@ -113,9 +113,17 @@ async def _resolve_allowed_origins() -> frozenset[str]:
         now = time.monotonic()
         if now < float(_cache["expires_at"]):
             return _cache["origins"]  # type: ignore[return-value]
-        env_origins = frozenset(get_settings().allowed_origins_list)
+        settings = get_settings()
+        env_origins = frozenset(settings.allowed_origins_list)
         db_origins = await _load_origins_from_db()
-        origins = frozenset(_ALWAYS_ALLOWED_ORIGINS) | env_origins | db_origins
+        origins = env_origins | db_origins
+        # The localhost defaults only until a public address is set (or in
+        # DEBUG): once Promptly is on a real domain, a page some other
+        # program serves on this machine's localhost has no business making
+        # credentialed requests to it (security review L4).
+        public = {o for o in origins if o not in _ALWAYS_ALLOWED_ORIGINS}
+        if settings.DEBUG or not public:
+            origins = origins | frozenset(_ALWAYS_ALLOWED_ORIGINS)
         _cache["origins"] = origins
         _cache["expires_at"] = now + _CACHE_TTL_SECONDS
         return origins

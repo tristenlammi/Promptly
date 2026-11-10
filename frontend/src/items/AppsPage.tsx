@@ -132,7 +132,7 @@ export function AppsPage() {
         <>
         <ul className="grid grid-cols-4 gap-x-2 gap-y-6 sm:grid-cols-5 md:grid-cols-6" aria-label="Built-in apps">
           {builtIn.map((app) => (
-            <BuiltInTile key={app.id} name={app.name} icon={app.icon} onOpen={() => navigate(`${app.to}/`)} onLongPress={() => setEditing(true)} {...pinProps(app.id)} />
+            <BuiltInTile key={app.id} name={app.name} blurb={app.blurb} icon={app.icon} onOpen={() => navigate(`${app.to}/`)} onLongPress={() => setEditing(true)} {...pinProps(app.id)} />
           ))}
         </ul>
         <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-[var(--border)] px-6 py-16 text-center">
@@ -160,7 +160,7 @@ export function AppsPage() {
           <SortableContext items={order.map((a) => a.kind)} strategy={rectSortingStrategy}>
             <ul className="grid grid-cols-4 gap-x-2 gap-y-6 sm:grid-cols-5 md:grid-cols-6" aria-label="Your apps">
               {builtIn.map((app) => (
-                <BuiltInTile key={app.id} name={app.name} icon={app.icon} onOpen={() => navigate(`${app.to}/`)} onLongPress={() => setEditing(true)} {...pinProps(app.id)} />
+                <BuiltInTile key={app.id} name={app.name} blurb={app.blurb} icon={app.icon} onOpen={() => navigate(`${app.to}/`)} onLongPress={() => setEditing(true)} {...pinProps(app.id)} />
               ))}
               {order.map((app) => (
                 <Tile
@@ -307,13 +307,14 @@ function PinButton({ name, pinned, onTogglePin }: { name: string; pinned: boolea
  *  there, not arrangeable or removable — but it can be pinned. */
 function BuiltInTile({
   name,
+  blurb,
   icon,
   onOpen,
   onLongPress,
   editing,
   pinned,
   onTogglePin,
-}: { name: string; icon: string; onOpen: () => void; onLongPress: () => void } & PinProps) {
+}: { name: string; blurb?: string; icon: string; onOpen: () => void; onLongPress: () => void } & PinProps) {
   return (
     <li className="relative flex flex-col items-center gap-2">
       <button
@@ -331,7 +332,10 @@ function BuiltInTile({
       >
         <img src={icon} alt="" className="h-16 w-16 select-none rounded-[22px] md:h-[72px] md:w-[72px]" draggable={false} />
       </button>
-      <span className="w-full truncate px-1 text-center text-xs font-medium text-[var(--text)]">{name}</span>
+      <span className="flex w-full flex-col items-center px-1 text-center">
+        <span className="w-full truncate text-xs font-medium text-[var(--text)]">{name}</span>
+        {blurb && <span className="line-clamp-2 text-[11px] leading-tight text-[var(--text-muted)]">{blurb}</span>}
+      </span>
       {editing && <PinButton name={name} pinned={pinned} onTogglePin={onTogglePin} />}
     </li>
   );
@@ -395,7 +399,15 @@ function Tile({
       >
         <img src={`/item-icons/${app.kind}-192.png`} alt="" className="h-16 w-16 select-none rounded-[22px] md:h-[72px] md:w-[72px]" draggable={false} />
       </button>
-      <span className="w-full truncate px-1 text-center text-xs font-medium text-[var(--text)]">{app.name}</span>
+      <span className="flex w-full flex-col items-center px-1 text-center">
+        <span className="w-full truncate text-xs font-medium text-[var(--text)]">{app.name}</span>
+        {/* Store taglines are a sentence: only where the tiles are wide. */}
+        {app.tagline && (
+          <span className="hidden w-full truncate text-[11px] leading-tight text-[var(--text-muted)] md:block" title={app.tagline}>
+            {app.tagline}
+          </span>
+        )}
+      </span>
       {editing && (
         <button
           type="button"

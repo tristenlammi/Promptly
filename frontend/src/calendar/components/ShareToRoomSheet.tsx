@@ -115,7 +115,7 @@ export function ShareToRoomSheet({ ev, open, onClose, sharedIds }: { ev: CalEven
           ) : (
             groups.map(([group, items]) => (
               <section key={group} className="flex flex-col gap-0.5">
-                <h3 className="px-2 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{group}</h3>
+                <h3 className="px-2 pb-0.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{group}</h3>
                 {items.map((c) => {
                   const sel = picked === c.room.id;
                   const already = sharedIds.includes(c.room.id);
@@ -135,7 +135,7 @@ export function ShareToRoomSheet({ ev, open, onClose, sharedIds }: { ev: CalEven
                         {c.room.space_id ? <Hash className="h-3.5 w-3.5" /> : <MessagesSquare className="h-3.5 w-3.5" />}
                       </span>
                       <span className="min-w-0 flex-1 truncate">{c.room.space_id ? c.room.name : c.label}</span>
-                      {already && <span className="shrink-0 text-[11px] text-[var(--text-muted)]">Shared</span>}
+                      {already && <span className="shrink-0 text-xs text-[var(--text-muted)]">Shared</span>}
                       {sel && <Check className="h-4 w-4 shrink-0 text-[var(--item-accent)]" />}
                     </button>
                   );

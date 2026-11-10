@@ -319,6 +319,10 @@ async def serve(db: AsyncSession, claim: media_urls.MediaClaim, user: User, requ
 
     if claim.rendition == "porch_cover":
         return await _serve_cover(db, claim, user, request)
+    if claim.rendition in media_urls.PORCH_STORY_RENDITIONS:
+        from . import stories
+
+        return await stories.serve(db, claim, user, request)
     pm = await db.get(PorchPostMedia, claim.file_id)
     if pm is None:
         raise _not_found()

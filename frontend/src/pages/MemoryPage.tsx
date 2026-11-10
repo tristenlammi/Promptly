@@ -13,6 +13,7 @@ import { Button } from "@/components/shared/Button";
 import { justify } from "@/lib/justify";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
+import { SkeletonTileGrid } from "@/components/shared/Skeleton";
 
 /** One memory (PH-5): its photos, played from the start or opened one by
  *  one; kept as an album, or put away. */
@@ -54,7 +55,7 @@ export function MemoryPage() {
   };
 
   if (error) return <p className="p-6 text-sm text-[var(--text-muted)]">This memory isn't there any more.</p>;
-  if (!data) return <p className="p-6 text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (!data) return <SkeletonTileGrid count={12} className="p-6" label="Loading the memory" />;
   const name = data.kind === "together" ? data.title.replace(/^You & /, "") : data.kind === "first_year" ? data.title.replace(/[’']s? first year$/, "") : null;
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -119,8 +120,8 @@ export function MemoryPage() {
                 {r.items.map((idx, k) => {
                   const p = items[idx];
                   return (
-                    <PhotoTile key={p.id} photo={p} width={r.widths[k]} height={r.height} selected={false} selecting={false}
-                      onToggle={() => {}} onOpen={(ph: PhotoItem) => {
+                    <PhotoTile key={p.id} photo={p} width={r.widths[k]} height={r.height}
+                      onOpen={(ph: PhotoItem) => {
                       setPlaying(false);
                       setViewing(ph.id);
                     }} />
