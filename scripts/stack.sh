@@ -16,14 +16,13 @@
 #                           ollama     local embeddings/models (pulls ~270 MB first start)
 #                           maps       a stub map, so the Maps screen opens
 #                           maps-full  the real maps container (~1 h and ~15 GB on first start)
-#                           sandbox    code interpreter
 #                           voice      whisper + tts
 #                           convert    Office previews (Gotenberg)
 #                           search     SearXNG
 #                           calls      LiveKit (voice channels), bridged; media ports not published
 #                           all        everything above except maps-full
 #         --e2e           add what the e2e suite exercises (media, photos-ml, maps, convert)
-#         --build-extras  build sandbox/whisper/tts/photos-ml/maps from this worktree
+#         --build-extras  build whisper/tts/photos-ml/maps from this worktree
 #                         too (default: reuse the main app's promptly-<svc>:latest
 #                         image when there is one, read-only)
 #         --no-build      start with the images already built for this stack

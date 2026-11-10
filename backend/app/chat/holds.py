@@ -38,12 +38,11 @@ HOLDABLE: dict[str, str] = {
     "timeline_day": "Look at your timeline",
     "timeline_visits": "Look at your timeline",
     # Outbound (security review H2): what a page could use to send your
-    # data somewhere, or to run code over your files.
+    # data somewhere.
     "fetch_url": "Open a web page",
-    "code_interpreter": "Run code",
 }
 # Of those, the ones whose result is the point: shown on the card after a yes.
-SHOWS_RESULT = frozenset({"timeline_day", "timeline_visits", "fetch_url", "code_interpreter"})
+SHOWS_RESULT = frozenset({"timeline_day", "timeline_visits", "fetch_url"})
 RESULT_CHARS = 3_000
 
 WHY = (
@@ -105,12 +104,6 @@ def question(name: str, args: dict[str, Any]) -> str:
         except ValueError:
             site = "a website"
         return f"Promptly wants to open {site}: {url[:300]}. Open it?"
-    if name == "code_interpreter":
-        code = str(args.get("code") or "").strip()
-        lines = [ln for ln in code.splitlines() if ln.strip()]
-        shown = "\n".join(lines[:6])[:400]
-        more = f" (and {len(lines) - 6} more lines)" if len(lines) > 6 else ""
-        return f"Promptly wants to run this Python code{more}:\n{shown}\nRun it?"
     from app.talk.readback import question as read_back_question
 
     return read_back_question(name, args)

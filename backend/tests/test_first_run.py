@@ -141,14 +141,13 @@ async def test_creating_a_user_keeps_the_capability_toggles_and_flags_the_passwo
 
     r = await client.post("/api/admin/users", headers=_auth(user), json={
         "email": "new.person@example.com", "username": "newperson", "password": "Handed-0ver-Pw!",
-        "can_generate_images": False, "can_execute_code": False,
+        "can_generate_images": False,
     })
     assert r.status_code in (200, 201), r.text
     from sqlalchemy import select
 
     created = (await db.execute(select(User).where(User.username == "newperson"))).scalar_one()
     assert created.can_generate_images is False
-    assert created.can_execute_code is False
     assert created.must_change_password is True
 
 

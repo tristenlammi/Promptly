@@ -25,7 +25,7 @@ tusd treats any non-2xx hook reply as an internal error (the client sees a
 The endpoint is internal — nginx refuses ``/api/internal/`` from outside —
 and needs ``TUS_HOOK_SECRET`` (``?key=``). Without one every call is refused
 (security review M1): a "call from the internal network" isn't proof it's
-tusd, since the code sandbox and the Office converter share networks with
+tusd, since other containers (the Office converter) share networks with
 the backend. ./update.sh and the installer generate the secret.
 """
 from __future__ import annotations

@@ -72,11 +72,11 @@ class Settings(BaseSettings):
     TRUSTED_HOSTS: str = ""
 
     # ---- Containers that run untrusted input (security review M1) ----
-    # Requests from these compose services are refused outright: the code
-    # sandbox and the Office converter never call the backend, and both
-    # share an internal network with it. Matched by their addresses, looked
-    # up by name; ISOLATED_PEER_CIDRS adds ranges (comma list) on top.
-    ISOLATED_PEER_HOSTS: str = "sandbox,convert"
+    # Requests from these compose services are refused outright: the
+    # Office converter never calls the backend, and it shares an internal
+    # network with it. Matched by their addresses, looked up by name;
+    # ISOLATED_PEER_CIDRS adds ranges (comma list) on top.
+    ISOLATED_PEER_HOSTS: str = "convert"
     ISOLATED_PEER_CIDRS: str = ""
 
     @property
@@ -239,15 +239,6 @@ class Settings(BaseSettings):
 
     # ---- Redis ----
     REDIS_URL: str = "redis://redis:6379/0"
-
-    # ---- Code interpreter sandbox (Phase 4) ----
-    # Base URL of the isolated execution worker. Empty disables the
-    # ``code_interpreter`` tool entirely (it'll report itself as
-    # unavailable rather than silently failing). The shared secret is
-    # sent on every job so only the backend can submit work.
-    CODE_SANDBOX_URL: str = "http://sandbox:8000"
-    CODE_SANDBOX_SECRET: str = ""
-    CODE_SANDBOX_TIMEOUT_S: int = 30
 
     # ---- Speech-to-text (Voice Phase 1) ----
     # ``STT_BACKEND`` selects how dictation clips are transcribed:
@@ -417,35 +408,6 @@ class Settings(BaseSettings):
             return False
         return self.DOMAIN.strip().lower() not in {"", "localhost", "127.0.0.1"}
 
-    def code_sandbox_secret_problem(self) -> str | None:
-        """Why the code sandbox's job secret can't be used, or ``None``.
-
-        It must be its own value. It used to fall back to ``SECRET_KEY``,
-        and code running in the sandbox could read it there, which gave
-        away the key that signs every login and encrypts stored secrets.
-        There's deliberately no fallback any more: missing means the code
-        tool is off, with this message for the admin.
-        """
-        secret = (self.CODE_SANDBOX_SECRET or "").strip()
-        fix = (
-            "Run ./update.sh (or update.ps1) to generate one, or add "
-            "CODE_SANDBOX_SECRET=<output of: openssl rand -hex 32> to .env "
-            "and restart Promptly."
-        )
-        if not secret:
-            return "The code sandbox is turned off: CODE_SANDBOX_SECRET isn't set. " + fix
-        lowered = secret.lower()
-        if "change-me" in lowered or "changeme" in lowered:
-            return "The code sandbox is turned off: CODE_SANDBOX_SECRET is still a placeholder. " + fix
-        if secret == (self.SECRET_KEY or "").strip():
-            return (
-                "The code sandbox is turned off: CODE_SANDBOX_SECRET must not be "
-                "the same as SECRET_KEY. " + fix
-            )
-        if len(secret) < 32:
-            return "The code sandbox is turned off: CODE_SANDBOX_SECRET is too short (32+ characters). " + fix
-        return None
-
     def validate_boot_safety(self) -> list[str]:
         """Return a list of fatal-config errors that prevent boot.
 
@@ -510,11 +472,11 @@ class Settings(BaseSettings):
                     "REDIS_URL contains a 'change-me' placeholder password. "
                     "Set a real REDIS_PASSWORD in .env."
                 )
-            # The other shared secrets: a placeholder copied from
+            # The other shared secret: a placeholder copied from
             # .env.example is a publicly known value. Unset is fine here
-            # (the tus hook then refuses every call, the code tool is off);
-            # ./update.sh and the installer generate both.
-            for name in ("TUS_HOOK_SECRET", "CODE_SANDBOX_SECRET"):
+            # (the tus hook then refuses every call); ./update.sh and the
+            # installer generate it.
+            for name in ("TUS_HOOK_SECRET",):
                 value = (getattr(self, name, None) or "").lower()
                 if "change-me" in value or "changeme" in value:
                     errors.append(

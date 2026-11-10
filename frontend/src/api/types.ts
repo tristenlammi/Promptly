@@ -215,10 +215,6 @@ export interface User {
   /** Enrolled MFA method or null. Mirrored from the user_mfa_secrets row. */
   mfa_enrolled_method?: "totp" | "email" | null;
   mfa_enrolled_at?: string | null;
-  /** Whether the user can run code via the "Run" affordance on code
-   *  artifacts. Admins are never gated. Optional for backward-compat with
-   *  older cached sessions; treated as allowed unless explicitly `false`. */
-  can_execute_code?: boolean;
   /** May this user's automation HTTP steps reach the local network?
    *  Admins always may. */
   can_reach_private_network?: boolean;
@@ -238,9 +234,6 @@ export interface AdminUser {
   /** Whether the `generate_image` chat tool is available to this user.
    *  Admins are never gated (effectively always true for them). */
   can_generate_images: boolean;
-  /** Whether user-invoked code execution (the "Run" button on code
-   *  artifacts) is allowed. Admins are never gated. */
-  can_execute_code: boolean;
   /** Whether the user's automation HTTP steps may reach the local network
    *  (LAN, Tailscale, the Docker host). Admins are never gated. */
   can_reach_private_network: boolean;

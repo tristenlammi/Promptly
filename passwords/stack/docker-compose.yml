@@ -19,8 +19,6 @@ x-backend-env: &backend-env
   - SINGLE_USER_MODE=false
   - SEARXNG_ENABLED=false
   - OLLAMA_URL=http://127.0.0.1:9
-  - CODE_SANDBOX_URL=http://sandbox:8000
-  - CODE_SANDBOX_SECRET=${SECRET_KEY}
   - WHISPER_URL=http://127.0.0.1:9
   - TTS_URL=http://127.0.0.1:9
   - CONVERT_URL=

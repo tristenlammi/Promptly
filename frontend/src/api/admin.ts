@@ -29,7 +29,6 @@ export interface UserImportResult {
 
 export interface CreateUserPayload {
   can_generate_images?: boolean;
-  can_execute_code?: boolean;
   can_reach_private_network?: boolean;
   can_use_automations?: boolean;
   model_locked?: boolean;
@@ -148,8 +147,6 @@ export interface UpdateUserPayload {
   allowed_models?: string[] | null;
   /** Toggle image-gen access. Omit to leave unchanged. */
   can_generate_images?: boolean;
-  /** Toggle code-execution (Run button) access. Omit to leave unchanged. */
-  can_execute_code?: boolean;
   /** Toggle local-network access for automations. Omit to leave unchanged. */
   can_reach_private_network?: boolean;
   /** Turn Automations on/off for the user. Omit to leave unchanged. */

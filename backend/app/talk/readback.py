@@ -195,7 +195,6 @@ _DONE = {
     "calendar_change_event": "Done.",
     "mail_reply": "Sent.",
     "fetch_url": "Here's the page.",
-    "code_interpreter": "Ran it.",
     "remember": "Saved.",
     "use_item": "Done.",
     # Held on a chat turn that read outside content (chat/holds.py).
