@@ -258,6 +258,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Dialogs, sheets and menus now open and close with a short, soft movement instead of snapping in and out (off when your device asks for reduced motion).
 - Icon buttons in the Item Store apps show a quick themed tooltip on hover or keyboard focus, in place of the slow browser one.
 - Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
+- Photo widget for Android: put a photo from one of your albums on your home screen. Pick the album and a shape (rounded, circle, soft square, flower, heart or arch) when you add it, and it shows a different photo from that album every half hour. Tap it for another photo, or set it to open the album instead. Add as many as you like, each with its own album and shape, at any size. It keeps a few small copies on the phone so it still changes with no signal.
 
 ## [0.35.0] - 2026-11-09
 

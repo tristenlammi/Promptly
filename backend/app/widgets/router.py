@@ -15,6 +15,8 @@ without ``widgets`` gets 403; a file or task that isn't yours is 404.
     POST /widgets/notes/{id}/items        {client_id, text} — One note's + (client_id is the item's id)
     PATCH /widgets/notes/{id}/items/{iid} {client_id, checked}
     GET  /widgets/notes/pick?q=   your notes, for the One note widget's settings
+    GET  /widgets/photos/albums                 the albums the Photo widget can show (photos.py)
+    GET  /widgets/photos/albums/{id}?n=&have=…  a few of its photos at random, with signed links
 
 Pictures and recordings come up first through tus (``route=note``, with the
 phone's ``upload`` scope) and are attached here by their file id.
@@ -542,6 +544,35 @@ async def pick_note(
             for n, p in rows
         ]
     }
+
+
+# ------------------------------------------------------------------ photos
+
+
+@router.get("/photos/albums")
+async def photo_albums(db: AsyncSession = Depends(get_db), user: User = Depends(widget_user)) -> dict[str, Any]:
+    """The albums the Photo widget can show: yours and the ones shared with you."""
+    from . import photos
+
+    return {"albums": await photos.albums(db, user)}
+
+
+@router.get("/photos/albums/{album_id}")
+async def photo_album_pick(
+    album_id: uuid.UUID,
+    n: int = Query(6, ge=1, le=12),
+    have: list[uuid.UUID] = Query(default_factory=list),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(widget_user),
+) -> dict[str, Any]:
+    """A few of the album's photos at random (no videos), with links to them.
+    ``have``: the ones the phone holds already — others come first."""
+    from . import photos
+
+    out = await photos.pick(db, user, album_id, n, list(dict.fromkeys(have)))
+    if out is None:
+        raise _gone("That album isn't there any more.")
+    return out
 
 
 __all__ = ["router", "widget_user"]
