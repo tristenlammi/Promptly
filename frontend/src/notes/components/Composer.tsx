@@ -1,5 +1,5 @@
 import { ListChecks, Mic } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { PhotoItem } from "@/api/photos";
 
@@ -61,6 +61,24 @@ export function Composer({ label }: { label?: NoteLabel | null }) {
       window.removeEventListener("keydown", onKey);
     };
   }, [draft]);
+
+  // Opening: the bar grows into the note instead of jumping.
+  const expanded = !!(draft && note);
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (!expanded || !el || typeof el.animate !== "function") return;
+    if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const to = el.offsetHeight;
+    if (to <= 48) return;
+    el.style.overflow = "hidden";
+    const a = el.animate([{ height: "48px" }, { height: `${to}px` }], { duration: 170, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+    const free = () => {
+      el.style.overflow = "";
+    };
+    a.onfinish = free;
+    a.oncancel = free;
+    return () => a.cancel();
+  }, [expanded]);
 
   const done = () => {
     if (draft) closeDraft(draft.id);

@@ -131,6 +131,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Fixed
 <!-- Maps UI pass (ui-maps) -->
 - Maps: stopping live location sharing, pausing the timeline, changing how long history is kept and deleting a timeline day now say so when they fail instead of failing silently.
+### Changed
+<!-- Notes look and feel (ui-notes) -->
+- Notes: "Delete forever" now asks first, on a note in the Trash, on several selected notes and inside an open note.
+- Notes on a phone: swipe a card sideways to archive it (or bring it back from the Archive), and press and hold a card for everything you can do with it: colour, select, pin, remind, share, labels, archive, delete. Press and hold used to select the note; Select is now the first choice in that list.
+- Notes on a phone: with notes selected, the actions sit along the bottom with their names (Pin, Colour, Labels, Archive, Delete).
+- Notes: a note opens by growing out of its card and closes back into it, cards glide to their new places when you add, pin, archive or move one, and "Take a note…" opens smoothly. Menus, sheets and the phone's side menu ease in. All of it stays still if your device asks for less motion.
+- Notes: while your notes load you see the shape of the cards instead of a spinner, and the columns no longer jump on first paint.
+- Notes: with only a few notes the cards sit centred under "Take a note…", and in dark mode a plain card is a touch lighter than the page with an edge you can see.
+- Notes: "Edit labels" opens in place: rename a label, change its colour or delete it without leaving Notes. Labels are shared with your other apps, so the change shows everywhere.
+- Notes: bigger buttons on cards and bigger colour swatches, easier to hit with a finger.
+
+### Fixed
+<!-- Notes (ui-notes) -->
+- Notes: Close in the "Take a note…" box works on the first click. The formatting buttons keep their place under the text (quieter until you're typing) instead of appearing and pushing Close down.
+- Notes: pressing Enter in a note's title starts a new line under the text that's already there, instead of putting what you type next in front of it.
 
 ## [0.35.0] - 2026-11-09
 

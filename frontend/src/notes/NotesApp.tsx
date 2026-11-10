@@ -35,13 +35,15 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
-import { noteOps } from "./actions";
+import { askingToDelete, noteOps } from "./actions";
 import { AddImageButton } from "./components/AddImage";
 import { attachPhotos, Composer } from "./components/Composer";
 import type { CardActions } from "./components/NoteCard";
 import { NoteDialog } from "./components/NoteDialog";
 import { NoteEditor } from "./components/NoteEditor";
-import { NoteGrid } from "./components/NoteGrid";
+import { CardSheet } from "./components/CardSheet";
+import { LabelsSheet } from "./components/LabelsSheet";
+import { NoteGrid, NoteGridSkeleton } from "./components/NoteGrid";
 import { ColorGrid, LabelChooser } from "./components/pickers";
 import { Pop } from "./components/Pop";
 import { ReminderPicker, reminderMoment, reminderWhen } from "./components/Reminder";
@@ -328,7 +330,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   useEffect(() => {
     if (!selected.size || noteId) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) setSelected(new Set());
+      if (e.key === "Escape" && !e.defaultPrevented && !askingToDelete()) setSelected(new Set());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -348,6 +350,8 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const [labelFor, setLabelFor] = useState<{ ids: string[]; anchor: HTMLElement } | null>(null);
   const [remindFor, setRemindFor] = useState<{ id: string; anchor: HTMLElement } | null>(null);
   const [shareFor, setShareFor] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [editLabels, setEditLabels] = useState(false);
   const actions: CardActions = useMemo(
     () => ({
       open: (id) => openNote(id),
@@ -369,9 +373,10 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       trash: (id) => noteOps.trash([id]),
       labels: (id, el) => setLabelFor({ ids: [id], anchor: el }),
       restore: (id) => noteOps.restore([id]),
-      forever: (id) => noteOps.forever([id]),
+      forever: (id) => void noteOps.forever([id]),
       remind: (id, el) => setRemindFor({ id, anchor: el }),
       share: (id) => setShareFor(id),
+      menu: (id) => setMenuFor(id),
     }),
     [openNote, order],
   );
@@ -474,9 +479,17 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
           {l.name}
         </RailLink>
       ))}
-      <RailLink to="/tags" icon={Pencil} active={false} onNavigate={() => setDrawer(false)}>
-        Edit labels
-      </RailLink>
+      <button
+        type="button"
+        onClick={() => {
+          setDrawer(false);
+          setEditLabels(true);
+        }}
+        className="mr-2 flex h-11 w-[calc(100%-0.5rem)] items-center gap-4 rounded-r-full pl-5 pr-3 text-left text-sm text-[var(--text)] transition-colors hover:bg-[var(--hover)]"
+      >
+        <Pencil className="h-[18px] w-[18px] shrink-0 text-[var(--text-muted)]" />
+        <span className="min-w-0 flex-1 truncate">Edit labels</span>
+      </button>
       <div className="my-2 border-t border-[var(--border)]" />
       <RailLink to="/notes/archive" active={!searching && place.view === "archive"} icon={Archive} onNavigate={() => setDrawer(false)}>
         Archive
@@ -572,7 +585,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
               aria-pressed={colorFilter === c}
               title={COLOR_NAMES[c]}
               onClick={() => setParam("color", colorFilter === c ? null : c)}
-              className={cn("note-c note-swatch h-7 w-7 rounded-full border-2", colorFilter === c ? "border-[var(--accent)]" : "border-[var(--border)]")}
+              className={cn("note-c note-swatch h-8 w-8 rounded-full border-2 max-md:h-10 max-md:w-10", colorFilter === c ? "border-[var(--accent)]" : "border-[var(--border)]")}
             />
           ))}
         </div>
@@ -590,6 +603,29 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const selLabelBtn = useRef<HTMLButtonElement>(null);
   const done = () => setSelected(new Set());
   const selBtn = "flex h-10 w-10 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
+  // On a phone the same actions sit along the bottom, each with its name.
+  const selTab = "flex h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-xs text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] active:bg-[var(--hover)]";
+  const selAct = (labelled: boolean, Icon: typeof Pin, label: string, run: () => void, ref?: React.RefObject<HTMLButtonElement>) => (
+    <button key={label} ref={ref} type="button" aria-label={label} title={labelled ? undefined : label} className={labelled ? selTab : selBtn} onClick={run}>
+      <Icon className="h-5 w-5 shrink-0" />
+      {labelled && <span className="max-w-full truncate px-0.5">{label}</span>}
+    </button>
+  );
+  const selActs = (labelled: boolean) =>
+    place.view === "trash"
+      ? [
+          selAct(labelled, RotateCcw, "Restore", () => (noteOps.restore(selIds), done())),
+          selAct(labelled, Trash2, "Delete forever", async () => {
+            if (await noteOps.forever(selIds)) done();
+          }),
+        ]
+      : [
+          selAct(labelled, allPinned ? PinOff : Pin, allPinned ? "Unpin" : "Pin", () => (noteOps.pin(selIds, !allPinned), done())),
+          selAct(labelled, Palette, "Colour", () => setSelPop("color"), selColorBtn),
+          selAct(labelled, Tag, "Labels", () => selLabelBtn.current && setLabelFor({ ids: selIds, anchor: selLabelBtn.current }), selLabelBtn),
+          selAct(labelled, allArchived ? ArchiveRestore : Archive, allArchived ? "Unarchive" : "Archive", () => (noteOps.archive(selIds, !allArchived), done())),
+          selAct(labelled, Trash2, "Delete", () => (noteOps.trash(selIds), done())),
+        ];
   const selectionBar = selected.size > 0 && (
     <div role="toolbar" aria-label="Selected notes" className="flex h-14 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--surface)] px-2 pt-safe">
       <button type="button" onClick={done} aria-label="Clear selection" className={selBtn}>
@@ -598,36 +634,9 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       <span className="min-w-0 flex-1 truncate px-1 text-[15px] font-semibold" aria-live="polite">
         {selected.size} selected
       </span>
-      {place.view === "trash" ? (
-        <>
-          <button type="button" aria-label="Restore" title="Restore" className={selBtn} onClick={() => (noteOps.restore(selIds), done())}>
-            <RotateCcw className="h-5 w-5" />
-          </button>
-          <button type="button" aria-label="Delete forever" title="Delete forever" className={selBtn} onClick={() => (noteOps.forever(selIds), done())}>
-            <Trash2 className="h-5 w-5" />
-          </button>
-        </>
-      ) : (
-        <>
-          <button type="button" aria-label={allPinned ? "Unpin" : "Pin"} title={allPinned ? "Unpin" : "Pin"} className={selBtn} onClick={() => (noteOps.pin(selIds, !allPinned), done())}>
-            {allPinned ? <PinOff className="h-5 w-5" /> : <Pin className="h-5 w-5" />}
-          </button>
-          <button ref={selColorBtn} type="button" aria-label="Colour" title="Colour" className={selBtn} onClick={() => setSelPop("color")}>
-            <Palette className="h-5 w-5" />
-          </button>
-          <button ref={selLabelBtn} type="button" aria-label="Labels" title="Labels" className={selBtn} onClick={() => selLabelBtn.current && setLabelFor({ ids: selIds, anchor: selLabelBtn.current })}>
-            <Tag className="h-5 w-5" />
-          </button>
-          <button type="button" aria-label={allArchived ? "Unarchive" : "Archive"} title={allArchived ? "Unarchive" : "Archive"} className={selBtn} onClick={() => (noteOps.archive(selIds, !allArchived), done())}>
-            {allArchived ? <ArchiveRestore className="h-5 w-5" /> : <Archive className="h-5 w-5" />}
-          </button>
-          <button type="button" aria-label="Delete" title="Delete" className={selBtn} onClick={() => (noteOps.trash(selIds), done())}>
-            <Trash2 className="h-5 w-5" />
-          </button>
-        </>
-      )}
+      {!isPhone && selActs(false)}
       {selPop === "color" && (
-        <Pop anchor={selColorBtn.current} label="Colour" onClose={() => setSelPop(null)} width={248}>
+        <Pop anchor={selColorBtn.current} label="Colour" onClose={() => setSelPop(null)} width={272}>
           <ColorGrid
             value={selNotes.every((n) => n.color === selNotes[0]?.color) ? selNotes[0]?.color ?? null : null}
             onPick={(c) => {
@@ -658,16 +667,12 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     if (!ready || (!loaded.main && !all.length)) {
       if (loadError) return <Empty icon={CloudOff} title="Couldn't load your notes" body={loadError} action={<button type="button" className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white" onClick={() => void loadLists()}>Try again</button>} />;
       if (ready && typeof navigator !== "undefined" && navigator.onLine === false) return <Empty icon={CloudOff} title="You're offline" body="Your notes will show once you're connected. Notes you write now are kept on this device." />;
-      return (
-        <div className="flex items-center justify-center gap-2 py-24 text-sm text-[var(--text-muted)]" role="status">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading your notes…
-        </div>
-      );
+      return <NoteGridSkeleton layout={layout} />;
     }
     if (visible.length) return null;
     if (searching) return <Empty icon={Search} title={q.trim() ? `Nothing matches “${q.trim()}”` : "No notes match"} body="Try other words, or clear the filters." />;
     if (place.view === "trash") {
-      if (!loaded.trash) return <div className="flex items-center justify-center gap-2 py-24 text-sm text-[var(--text-muted)]" role="status"><Loader2 className="h-4 w-4 animate-spin" /> Loading the Trash…</div>;
+      if (!loaded.trash) return <NoteGridSkeleton layout={layout} label="Loading the Trash…" />;
       return <Empty icon={Trash2} title="No notes in the Trash" body="Notes you delete stay here for 30 days." />;
     }
     if (place.view === "archive") return <Empty icon={Archive} title="Archived notes appear here" body="Archive a note to put it away without deleting it." />;
@@ -763,6 +768,11 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
           />
         )}
       </div>
+      {isPhone && selected.size > 0 && (
+        <div role="toolbar" aria-label="What to do with the selected notes" className="absolute inset-x-0 bottom-0 z-20 flex h-[calc(56px+env(safe-area-inset-bottom,0px))] items-start gap-1 border-t border-[var(--border)] bg-[var(--surface)] px-2 pb-safe pt-1">
+          {selActs(true)}
+        </div>
+      )}
       {isPhone && !selected.size && place.view !== "trash" && (
         <div className="absolute inset-x-0 bottom-0 z-20 flex h-[calc(56px+env(safe-area-inset-bottom,0px))] items-start gap-1 border-t border-[var(--border)] bg-[var(--surface)] px-3 pb-safe pt-1">
           <button type="button" onClick={() => newOnPhone("list")} aria-label="New list" className="flex h-12 w-12 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)]">
@@ -809,6 +819,10 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
         <NoteMissingDialog state={openState} onBack={closeNote} lost={!!(noteId && lost[noteId])} onKeep={() => keep(noteId)} />
       )}
       {narrow && drawer && <Drawer onClose={() => setDrawer(false)}>{rail}</Drawer>}
+      {menuFor && (notes[menuFor] ?? visible.find((n) => n.id === menuFor)) && (
+        <CardSheet note={(notes[menuFor] ?? visible.find((n) => n.id === menuFor))!} trash={place.view === "trash" && !searching} actions={actions} onClose={() => setMenuFor(null)} />
+      )}
+      {editLabels && <LabelsSheet labels={labels} onClose={() => setEditLabels(false)} />}
       {labelPop}
       {remindFor && notes[remindFor.id] && <ReminderPicker note={notes[remindFor.id]} anchor={remindFor.anchor} onClose={() => setRemindFor(null)} />}
       {shareFor && notes[shareFor] && <ShareDialog note={notes[shareFor]} onClose={() => setShareFor(null)} />}
@@ -971,8 +985,8 @@ function Drawer({ onClose, children }: { onClose: () => void; children: ReactNod
   }, [onClose]);
   return (
     <div className="fixed inset-0 z-50">
-      <button type="button" aria-label="Close menu" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-black/40" />
-      <div ref={ref} role="dialog" aria-modal="true" aria-label="Notes menu" className="absolute inset-y-0 left-0 w-72 max-w-[85vw] overflow-y-auto bg-[var(--surface)] pt-safe shadow-xl">
+      <button type="button" aria-label="Close menu" tabIndex={-1} onClick={onClose} className="note-fade-in absolute inset-0 bg-black/40" />
+      <div ref={ref} role="dialog" aria-modal="true" aria-label="Notes menu" className="note-drawer-in absolute inset-y-0 left-0 w-72 max-w-[85vw] overflow-y-auto bg-[var(--surface)] pt-safe shadow-xl">
         <p className="px-5 pb-1 pt-4 text-lg font-semibold">Notes</p>
         {children}
       </div>
