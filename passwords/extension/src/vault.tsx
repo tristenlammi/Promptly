@@ -194,7 +194,7 @@ function BookmarkSettings() {
         Keep my bookmarks the same in every browser
       </label>
       <p className="text-xs text-[var(--text-muted)]">
-        Bookmarks are encrypted in your vault, so your server can't read them. Turn this on in each browser you use. They sync about once a minute while the vault's unlocked, and catch up when you next unlock. The first sync only adds: nothing in this browser is removed, and exact duplicates in a folder become one. If you also use a browser's own bookmark sync, turn that off to avoid surprises.
+        Bookmarks are encrypted in your vault, so your server can't read them. Turn this on in each browser you use. They sync about once a minute while the vault's unlocked, and catch up when you next unlock. The first sync only adds: nothing in this browser is removed apart from bookmarks you deleted in another browser, and exact duplicates in a folder become one. If you also use a browser's own bookmark sync, turn that off to avoid surprises.
       </p>
       {problem && <Callout kind="danger">{problem}</Callout>}
       {s.on && !s.held && (

@@ -335,7 +335,9 @@ async function bookmarkPass(allowUpTo: number | undefined) {
     const base = (await store.getMeta<Base>("bookmark_base")) ?? {};
     const now = Date.now();
     const recent = ((await store.getMeta<{ at: number; n: number }[]>("bookmark_deletes")) ?? []).filter((d) => now - d.at < DELETION_WINDOW_MS);
-    const r = await reconcile(browser, new VaultBookmarks(client, vaultId), base, { hash: bookmarkHash(salt), newId: () => crypto.randomUUID(), deletedLately: recent.reduce((sum, d) => sum + d.n, 0), allowUpTo });
+    // "Keep them everywhere" was the answer: this run brings back what was deleted elsewhere too.
+    const keepAll = !!(await store.getMeta<boolean>("bookmark_keep"));
+    const r = await reconcile(browser, new VaultBookmarks(client, vaultId), base, { hash: bookmarkHash(salt), newId: () => crypto.randomUUID(), deletedLately: recent.reduce((sum, d) => sum + d.n, 0), allowUpTo, keepAll });
     // Turned off while that ran: what it was doing has finished, and off stays off.
     if (!(await bookmarkState()).on) return;
     if (r.status === "held") {
@@ -344,6 +346,7 @@ async function bookmarkPass(allowUpTo: number | undefined) {
       return;
     }
     await store.setMeta("bookmark_base", r.base);
+    if (keepAll) await store.setMeta("bookmark_keep", false);
     // A person's yes starts the count again.
     await store.setMeta("bookmark_deletes", allowMassDelete ? [] : r.deleted ? [...recent, { at: now, n: r.deleted }] : recent);
     await store.setMeta("bookmark_sync", { on: true, at: new Date().toISOString(), total: r.total, unsynced: browser.unsynced, failed: r.counts.failed });
@@ -1240,9 +1243,11 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       return bookmarkStateForScreen();
     case "setBookmarks": {
       if (!m.on) {
-        // What's in the vault stays. Turning it on again is a fresh merge, which only adds.
+        // What's in the vault stays. Turning it on again is a fresh merge, which only adds, apart
+        // from taking away what was deleted in another browser since.
         await store.setMeta("bookmark_sync", { on: false });
         await store.setMeta("bookmark_base", {});
+        await store.setMeta("bookmark_keep", false);
         return { ok: true };
       }
       // A permission just given can take a moment to reach a service worker.
@@ -1268,6 +1273,7 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       }
       // No: nothing goes. Starting the comparison again brings each side's back to the other.
       await store.setMeta("bookmark_base", {});
+      await store.setMeta("bookmark_keep", true);
       await store.setMeta("bookmark_sync", { on: true });
       await runBookmarks();
       return { ok: true };

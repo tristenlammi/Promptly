@@ -11,13 +11,8 @@ async function scan(page: Page, what: string, include?: string) {
   let builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]);
   if (include) builder = builder.include(include);
   const { violations } = await builder.analyze();
-  const accent = (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent"))).trim().toLowerCase();
   const bad = violations
     .filter((v) => v.impact === "serious" || v.impact === "critical")
-    // The accent buttons' contrast is the app's brand colour — a design
-    // decision tracked on its own, not a Photos bug.
-    .map((v) => (v.id === "color-contrast" ? { ...v, nodes: v.nodes.filter((n) => !n.any.some((c) => c.message.includes(`background color: ${accent}`))) } : v))
-    .filter((v) => v.nodes.length)
     .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
   return bad;
 }
