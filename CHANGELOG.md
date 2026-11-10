@@ -21,6 +21,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.36.2] - 2026-11-11
+
+### Added
+
+- Porch: the "New post" button has a photo button on its right that opens straight onto picking photos and videos; "New post" itself opens on the words. On a phone the + menu has "Photo post" too.
+
+### Fixed
+
+- Calls on Unraid: new optional `LIVEKIT_INTERFACES` in `.env` (e.g. `br0`) limits the calls service to your LAN interface. With "host access to custom networks" on, Unraid adds a second interface with the same address, and the calls service kept restarting with "address already in use".
+
+### Changed
+
+- Solid terracotta buttons (New chat, New post, Save…) are the real brand terracotta again, not the deeper shade v0.36.0 gave them. White on it is below the WCAG AA contrast ratio for small text (3.1:1); the owner chose the brand colour, and the e2e accessibility checks skip those buttons again.
+
 ## [0.36.1] - 2026-11-11
 
 ### Added

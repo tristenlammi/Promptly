@@ -45,6 +45,8 @@ export interface ComposerStart {
   forUser?: string | null;
   /** ``?file=<library file id>``: a video too long for a story, posted instead. */
   file?: string | null;
+  /** ``?photos=1``: "New photo post", straight to picking photos. */
+  photos?: boolean;
 }
 
 const STEP_TITLES: Record<Step, string> = { pick: "Pick photos", arrange: "Arrange", share: "Share" };
@@ -247,6 +249,8 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   useEffect(() => {
     if (began.current || editing) return;
     began.current = true;
+    // A kept draft that already has photos carries on where it was.
+    if (start?.photos) setDraft((d) => (d.picks.length ? d : { ...d, step: "pick" }));
     if (start?.memory) {
       void memoriesApi
         .get(start.memory)

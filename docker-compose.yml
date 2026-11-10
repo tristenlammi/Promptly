@@ -1064,6 +1064,13 @@ services:
           udp_port: ${LIVEKIT_UDP_PORT:-7882}
           use_external_ip: true
           advertise_internal_ip: true
+          # LIVEKIT_INTERFACES (optional, .env): only these network
+          # interfaces, comma-separated (e.g. br0). Unraid's "host access
+          # to custom networks" adds shim-br0 with the same address as br0;
+          # LiveKit then opens its UDP port twice on one address and stops
+          # with "address already in use". Empty = every interface.
+          interfaces:
+            includes: [${LIVEKIT_INTERFACES:-}]
         room:
           empty_timeout: 300
           departure_timeout: 20
