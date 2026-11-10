@@ -46,6 +46,7 @@ import { setMissed } from "@/rtc/call/live";
 import { useCallStore } from "@/rtc/call/store";
 import { CALL_GREEN } from "@/rtc/call/ui/bits";
 import { historyWords } from "@/rtc/call/words";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -53,9 +54,9 @@ import { cn } from "@/utils/cn";
 import { dayLabel, shortWhen, timeOf } from "../format";
 import { Popover, UserAvatar } from "./ui";
 
-const rowFocus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]";
+const rowFocus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]";
 const roundBtn =
-  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--item-accent)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)] disabled:opacity-50 md:h-9 md:w-9";
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--accent-text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)] disabled:opacity-50 md:h-9 md:w-9";
 
 type Users = Record<string, RoomUser>;
 
@@ -263,7 +264,15 @@ export function CallsList({
 
   const clearAll = async () => {
     setMenu(false);
-    if (!window.confirm("Clear your call history? This removes every call from your list. Nobody else's list changes.")) return;
+    if (
+      !(await confirm({
+        title: "Clear your call history?",
+        message: "This removes every call from your list. Nobody else's list changes.",
+        confirmLabel: "Clear history",
+        danger: true,
+      }))
+    )
+      return;
     qc.setQueryData<HistoryData>(CALL_HISTORY_KEY, (d) => (d ? { ...d, pages: d.pages.map((p) => ({ ...p, calls: p.calls.filter((c) => c.live) })) } : d));
     try {
       await dmCallsApi.clearHistory();
@@ -431,7 +440,7 @@ function CallRow({ g, users, active }: { g: CallGroup; users: Users; active: boo
               {title}
               {n > 1 && <span className="font-normal"> ({n})</span>}
             </span>
-            <span className={cn("shrink-0 text-[11px]", isNew ? "font-semibold text-[var(--danger)]" : "text-[var(--text-muted)]")}>
+            <span className={cn("shrink-0 text-xs", isNew ? "font-semibold text-[var(--danger)]" : "text-[var(--text-muted)]")}>
               {shortWhen(e.started_at)}
             </span>
           </span>
@@ -448,7 +457,7 @@ function CallRow({ g, users, active }: { g: CallGroup; users: Users; active: boo
         <button
           type="button"
           onClick={() => void calls.start(e.room_id, e.media)}
-          className="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2"
+          className="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
           style={{ background: CALL_GREEN }}
         >
           Join
@@ -601,7 +610,7 @@ export function CallDetail({ b, callKey, isPhone, onBack }: { b: Bootstrap; call
                             if (ok && ids.has(x.id) && ids.size === 1) navigate("/rooms/calls", { replace: true });
                           });
                         }}
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:h-9 md:w-9"
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:h-9 md:w-9"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -701,7 +710,7 @@ export function NewCallSheet({ open, onClose, b }: { open: boolean; onClose: () 
           value={text}
           onChange={(ev) => setText(ev.target.value)}
           placeholder="Name, or what you call them (Mum)"
-          className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] pl-9 pr-3 text-sm text-[var(--text)] outline-none focus:border-[var(--item-accent)] focus:ring-2 focus:ring-[var(--item-accent)]/30"
+          className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] pl-9 pr-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/30"
           data-testid="new-call-search"
         />
       </label>

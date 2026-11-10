@@ -1,16 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Download, Loader2, MessageSquarePlus, MessagesSquare, Phone, PhoneCall, Plus, Search, Settings, X } from "lucide-react";
+import { Bell, Download, MessageSquarePlus, MessagesSquare, Phone, PhoneCall, Plus, Search, Settings, X } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
 
 import { roomsApi, type Bootstrap, type Space } from "@/api/rooms";
 import { NetworkStatusToast } from "@/components/layout/NetworkStatusToast";
+import { Skeleton } from "@/components/shared/Skeleton";
 import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { InstallFromLink } from "@/components/pwa/InstallFromLink";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { EmptyState, ItemButton, Segmented, Sheet } from "@/items/ui";
 import "@/items/ui/items.css";
+import "./rooms.css";
 import { useInstallPrompt } from "@/lib/installPrompt";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
@@ -19,6 +21,7 @@ import { BOOTSTRAP_KEY, findRoom, totals } from "./cache";
 import { useRoomsEvents } from "./live";
 import { useRoomsStore } from "./store";
 import { CallDetail, CallsHome, CallsList, NewCallSheet } from "./components/Calls";
+import { ConfirmSheetHost } from "./components/ConfirmSheet";
 import { DmList, SpaceRoomList } from "./components/Lists";
 import { SearchPanel } from "./components/Panels";
 import { CreateRoomSheet, NewDmSheet } from "./components/RoomSheets";
@@ -32,6 +35,8 @@ import { seedFromBootstrap } from "@/rtc/ui/directory";
 import { VoicePanel } from "@/rtc/ui/VoicePanel";
 import { VoicePill } from "@/rtc/ui/VoicePill";
 
+/** Rooms' own colour. Only the app mark wears it; buttons, selection and
+ *  bubbles use the theme accent like the rest of Promptly. */
 export const ROOMS_ACCENT = "#5865F2";
 const LAST_ROOM_KEY = "rooms:last-room";
 const LAST_IN_SPACE_KEY = "rooms:last-in-space";
@@ -124,13 +129,11 @@ export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?:
   useVoiceLive();
   useEffect(() => seedFromBootstrap(b), [b]);
 
-  // Accent for the whole page (sheets render in a portal) + own touch sizing.
+  // Rooms does its own touch sizing.
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--item-accent", ROOMS_ACCENT);
     root.dataset.itemApp = "";
     return () => {
-      root.style.removeProperty("--item-accent");
       delete root.dataset.itemApp;
     };
   }, []);
@@ -261,18 +264,15 @@ export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?:
   // Calls are off for you: no Calls tab.
   if (onCallsPath && b && !callsOn) return <Navigate replace to="/rooms/dm" />;
 
-  const rootStyle: CSSProperties = {
-    "--item-accent": ROOMS_ACCENT,
-    ...(vv ? { position: "fixed", left: 0, right: 0, top: vv.top, height: vv.h } : {}),
-  } as CSSProperties;
+  const rootStyle: CSSProperties = vv ? { position: "fixed", left: 0, right: 0, top: vv.top, height: vv.h } : {};
 
   let body: ReactNode;
   if (!b) {
-    body = (
+    body = isLoading ? (
+      <RoomsSkeleton isPhone={isPhone} />
+    ) : (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--text-muted)]">
-        {isLoading ? (
-          <Loader2 className="h-6 w-6 animate-spin" aria-label="Loading Rooms" />
-        ) : isError ? (
+        {isError ? (
           <>
             Couldn't reach Rooms.
             <ItemButton variant="secondary" onClick={() => void refetch()}>
@@ -389,6 +389,7 @@ export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?:
       )}
     >
       {body}
+      <ConfirmSheetHost />
       <CreateSpaceSheet open={createSpace} onClose={() => setCreateSpace(false)} />
       {b && <NewDmSheet open={newDm} onClose={() => setNewDm(false)} b={b} />}
       {b && callsOn && <NewCallSheet open={newCall} onClose={() => setNewCall(false)} b={b} />}
@@ -467,8 +468,8 @@ function RailButton({
         aria-current={active ? "page" : undefined}
         onClick={onClick}
         className={cn(
-          "relative flex h-12 w-12 items-center justify-center rounded-2xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-2)]",
-          active ? "ring-2 ring-[var(--item-accent)] ring-offset-2 ring-offset-[var(--surface-2)]" : "hover:brightness-95",
+          "relative flex h-12 w-12 items-center justify-center rounded-2xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-2)]",
+          active ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface-2)]" : "hover:brightness-95",
         )}
       >
         {children}
@@ -501,14 +502,14 @@ function Rail({
 }) {
   const promptlyNav = useContext(PromptlyNavContext);
   const plainBtn =
-    "flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface)] text-[var(--text-muted)] transition hover:bg-[var(--item-accent)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]";
+    "flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface)] text-[var(--text-muted)] transition hover:bg-[var(--accent)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
   return (
     <nav className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-[var(--surface-2)] py-3" aria-label="Spaces">
       <RailButton label="Messages" active={sel === "dms"} onClick={onMessages} badge={t.dmUnread}>
         <span
           className={cn(
             "flex h-12 w-12 items-center justify-center rounded-2xl",
-            sel === "dms" ? "bg-[var(--item-accent)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
+            sel === "dms" ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
           )}
         >
           <MessagesSquare className="h-6 w-6" />
@@ -519,7 +520,7 @@ function Rail({
           <span
             className={cn(
               "flex h-12 w-12 items-center justify-center rounded-2xl",
-              sel === "calls" ? "bg-[var(--item-accent)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
+              sel === "calls" ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
             )}
           >
             <Phone className="h-6 w-6" />
@@ -594,45 +595,118 @@ function SideFooter() {
           onClick={() => void install.prompt()}
           className="flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
         >
-          <Download className="h-4 w-4 text-[var(--item-accent)]" /> Install Rooms
+          <Download className="h-4 w-4 text-[var(--accent-text)]" /> Install Rooms
         </button>
       )}
     </div>
   );
 }
 
+/** The app mark: the one place Rooms keeps its own colour. */
+function RoomsMark({ size = 28 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden
+      className="inline-flex shrink-0 items-center justify-center text-white"
+      style={{ width: size, height: size, borderRadius: size * 0.3, background: ROOMS_ACCENT }}
+    >
+      <MessagesSquare style={{ width: size * 0.58, height: size * 0.58 }} />
+    </span>
+  );
+}
+
+/** The shape of Rooms while it loads: spaces, a room list, a conversation. */
+function RoomsSkeleton({ isPhone }: { isPhone: boolean }) {
+  const rows = ["w-32", "w-24", "w-36", "w-28", "w-20", "w-32"];
+  const list = (
+    <div className="flex flex-col gap-1 p-3">
+      <Skeleton className="mb-2 h-4 w-20" />
+      {rows.map((w, i) => (
+        <div key={i} className="flex h-11 items-center gap-2.5 px-1 md:h-9">
+          <Skeleton className="h-4 w-4 shrink-0" />
+          <Skeleton className={cn("h-4", w)} />
+        </div>
+      ))}
+    </div>
+  );
+  if (isPhone) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col" role="status" aria-label="Loading Rooms">
+        <div className="flex h-14 shrink-0 items-center gap-2 px-4">
+          <RoomsMark />
+          <Skeleton className="h-5 w-24" />
+        </div>
+        <div className="flex shrink-0 gap-3 px-3 pb-2 pt-1">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-[52px] w-[52px] shrink-0 !rounded-[16px]" />
+          ))}
+        </div>
+        {list}
+      </div>
+    );
+  }
+  return (
+    <div className="flex min-h-0 flex-1" role="status" aria-label="Loading Rooms">
+      <div className="flex w-[72px] shrink-0 flex-col items-center gap-2 bg-[var(--surface-2)] py-3">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} className="h-12 w-12 !rounded-2xl" />
+        ))}
+      </div>
+      <div className="w-60 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] lg:w-64">
+        <div className="flex h-14 items-center border-b border-[var(--border)] px-4">
+          <Skeleton className="h-4 w-28" />
+        </div>
+        {list}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col justify-end gap-4 bg-[var(--bg)] p-6">
+        {["w-64", "w-40", "w-52"].map((w, i) => (
+          <div key={i} className="mx-auto flex w-full max-w-[760px] gap-3">
+            <Skeleton className="h-9 w-9 shrink-0 !rounded-full" />
+            <div className="flex flex-col gap-1.5">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className={cn("h-8 !rounded-2xl", w)} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DesktopEmpty({ b, onCreateSpace, onNewDm, dms }: { b: Bootstrap; onCreateSpace: () => void; onNewDm: () => void; dms: boolean }) {
+  // Brand new: one invitation, one button. (The list column stays quiet.)
+  const brandNew = b.spaces.length === 0 && b.dms.length === 0;
   return (
     <div className="flex flex-1 items-center justify-center p-8">
-      {dms || b.spaces.length > 0 ? (
+      {brandNew || (!dms && b.spaces.length === 0) ? (
+        <EmptyState
+          icon={Plus}
+          title="Create a space for your family or friends"
+          text="A space holds a few rooms, like #general, #holidays and #photos, for the people you add. Mention @promptly in any message to ask Promptly."
+          action={
+            <ItemButton variant="primary" onClick={onCreateSpace} icon={<Plus className="h-4 w-4" />}>
+              Create a space
+            </ItemButton>
+          }
+          className="max-w-md"
+        />
+      ) : dms && b.dms.length === 0 ? (
         <EmptyState
           icon={MessagesSquare}
-          title={dms ? "Start a conversation" : "Pick a room"}
-          text={dms ? "Message one person or a small group. Only the people in it can read it." : "Choose a room on the left to start chatting."}
+          title="Start a conversation"
+          text="Message one person or a small group. Only the people in it can read it."
           action={
-            dms ? (
-              <ItemButton variant="primary" onClick={onNewDm} icon={<MessageSquarePlus className="h-4 w-4" />}>
-                New message
-              </ItemButton>
-            ) : undefined
+            <ItemButton variant="primary" onClick={onNewDm} icon={<MessageSquarePlus className="h-4 w-4" />}>
+              New message
+            </ItemButton>
           }
           className="max-w-md"
         />
       ) : (
         <EmptyState
-          icon={Plus}
-          title="Create a space for your family or friends"
-          text="A space holds a few rooms — #general, #holidays, #photos — for the people you add. Mention @promptly in any message to ask Promptly."
-          action={
-            <div className="flex flex-wrap justify-center gap-2">
-              <ItemButton variant="primary" onClick={onCreateSpace} icon={<Plus className="h-4 w-4" />}>
-                Create a space
-              </ItemButton>
-              <ItemButton variant="secondary" onClick={onNewDm} icon={<MessageSquarePlus className="h-4 w-4" />}>
-                Message someone
-              </ItemButton>
-            </div>
-          }
+          icon={MessagesSquare}
+          title={dms ? "Pick a conversation" : "Pick a room"}
+          text={dms ? "Choose a conversation on the left to carry on." : "Choose a room on the left to start chatting."}
           className="max-w-md"
         />
       )}
@@ -680,7 +754,10 @@ function PhoneHome({
       {pill}
       <header className="flex h-14 shrink-0 items-center gap-1 px-2">
         {promptlyNav && <PromptlyMenuButton className="h-11 w-11 rounded-xl" />}
-        <h1 className="flex-1 px-2 text-lg font-bold text-[var(--text)]">Rooms</h1>
+        <h1 className="flex flex-1 items-center gap-2 px-2 text-lg font-bold text-[var(--text)]">
+          <RoomsMark />
+          Rooms
+        </h1>
         <button type="button" aria-label="Search all rooms" onClick={onSearch} className={iconBtn}>
           <Search className="h-5 w-5" />
         </button>
@@ -764,7 +841,7 @@ function PhoneHome({
                   onClick={() => onSelectSpace(s)}
                   className="flex w-16 shrink-0 flex-col items-center gap-1"
                 >
-                  <span className={cn("relative rounded-[16px]", active && "ring-2 ring-[var(--item-accent)] ring-offset-2 ring-offset-[var(--bg)]")}>
+                  <span className={cn("relative rounded-[16px]", active && "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--bg)]")}>
                     <SpaceIcon space={s} size={52} />
                     {st?.mentions ? (
                       <CountBadge n={st.mentions} className="absolute -right-1 -top-1 ring-2 ring-[var(--bg)]" />
@@ -772,7 +849,7 @@ function PhoneHome({
                       <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-[var(--text)] ring-2 ring-[var(--bg)]" aria-label="Unread" />
                     ) : null}
                   </span>
-                  <span className={cn("w-full truncate text-center text-[11px]", active ? "font-semibold text-[var(--text)]" : "text-[var(--text-muted)]")}>
+                  <span className={cn("w-full truncate text-center text-xs", active ? "font-semibold text-[var(--text)]" : "text-[var(--text-muted)]")}>
                     {s.name}
                   </span>
                 </button>
@@ -782,7 +859,7 @@ function PhoneHome({
               <span className="flex h-[52px] w-[52px] items-center justify-center rounded-[16px] border-2 border-dashed border-[var(--border)] text-[var(--text-muted)]">
                 <Plus className="h-6 w-6" />
               </span>
-              <span className="text-[11px] text-[var(--text-muted)]">New</span>
+              <span className="text-xs text-[var(--text-muted)]">New</span>
             </button>
           </div>
           <div className="flex shrink-0 items-center gap-1 border-y border-[var(--border)] px-3 py-1">

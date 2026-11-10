@@ -1,10 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { BellOff, ChevronDown, Hash, LogOut, MessageSquarePlus, Plus, Settings, Sparkles, Users, Volume2 } from "lucide-react";
+import { BellOff, ChevronDown, Hash, LogOut, MessageSquarePlus, Plus, Settings, Sparkles, UserPlus, Users, Volume2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { roomsApi, type Bootstrap, type NotifyLevel, type Room, type Space } from "@/api/rooms";
 import { EmptyState, ItemButton } from "@/items/ui";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -15,7 +16,7 @@ import { CountBadge, Popover, UserAvatar } from "./ui";
 import { RoomSettingsSheet } from "./RoomSheets";
 import { VoiceChannelRow } from "@/rtc/ui/ChannelRow";
 
-const rowFocus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]";
+const rowFocus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]";
 
 export function SpaceRoomList({
   b,
@@ -57,7 +58,15 @@ export function SpaceRoomList({
       toast.info("You own this space — make someone else the owner or delete it from its settings.");
       return;
     }
-    if (!window.confirm(`Leave ${space.name}?`)) return;
+    if (
+      !(await confirm({
+        title: `Leave ${space.name}?`,
+        message: "You'll need someone to add you back.",
+        confirmLabel: "Leave space",
+        danger: true,
+      }))
+    )
+      return;
     try {
       await roomsApi.removeSpaceMember(space.id, b.me.id);
       updateBootstrap(qc, (cur) => ({ ...cur, spaces: cur.spaces.filter((s) => s.id !== space.id) }));
@@ -126,10 +135,10 @@ export function SpaceRoomList({
             </button>
           )}
           <div className="my-1 border-t border-[var(--border)]" />
-          <p className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Notify me about</p>
+          <p className="px-3 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Notify me about</p>
           {(["all", "mentions", "none"] as NotifyLevel[]).map((n) => (
             <button key={n} type="button" role="menuitemradio" aria-checked={space.notify === n} className={menuItem} onClick={() => setNotify(n)}>
-              <span className={cn("h-2 w-2 rounded-full", space.notify === n ? "bg-[var(--item-accent)]" : "bg-transparent")} />
+              <span className={cn("h-2 w-2 rounded-full", space.notify === n ? "bg-[var(--accent)]" : "bg-transparent")} />
               {n === "all" ? "All messages" : n === "mentions" ? "Only @mentions" : "Nothing"}
             </button>
           ))}
@@ -146,7 +155,7 @@ export function SpaceRoomList({
 
       <nav className="min-h-0 flex-1 overflow-y-auto py-2" aria-label={`Rooms in ${space.name}`}>
         <div className="flex items-center justify-between px-3 pb-1 pt-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Rooms</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Rooms</span>
           {isAdmin && (
             <button
               type="button"
@@ -189,7 +198,7 @@ export function SpaceRoomList({
                 >
                   <Hash className="h-4 w-4 shrink-0 opacity-70" />
                   <span className={cn("min-w-0 flex-1 truncate", (unread || active) && "font-semibold")}>{r.name}</span>
-                  {r.ai_context && <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--item-accent)] opacity-70" aria-label="AI can read this room" />}
+                  {r.ai_context && <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)] opacity-70" aria-label="AI can read this room" />}
                   {r.notify === "none" && <BellOff className="h-3.5 w-3.5 shrink-0 opacity-60" aria-label="Muted" />}
                   <CountBadge n={r.mentions} />
                   {unread && r.mentions === 0 && <span className="sr-only">unread</span>}
@@ -208,12 +217,19 @@ export function SpaceRoomList({
           </button>
         )}
         {space.member_ids.length <= 1 && isAdmin && (
-          <div className="m-3 rounded-2xl border border-dashed border-[var(--border)] p-3 text-xs text-[var(--text-muted)]">
-            It's just you here.{" "}
-            <button type="button" onClick={onSettings} className="font-semibold text-[var(--item-accent)] underline">
+          <div className="m-3 flex flex-col items-start gap-2.5 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-3.5 shadow-[var(--shadow-sm)]">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent-text)]">
+              <Users className="h-[18px] w-[18px]" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-[var(--text)]">It's just you here</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-muted)]">
+                Add the people you want in {space.name}. They'll see its rooms straight away.
+              </p>
+            </div>
+            <ItemButton variant="primary" size="sm" onClick={onSettings} icon={<UserPlus className="h-3.5 w-3.5" />}>
               Add people
-            </button>{" "}
-            to {space.name}.
+            </ItemButton>
           </div>
         )}
       </nav>
@@ -253,7 +269,7 @@ export function DmRow({ b, room, active }: { b: Bootstrap; room: Room; active: b
           <span className={cn("min-w-0 flex-1 truncate text-[15px] md:text-sm", unread ? "font-bold text-[var(--text)]" : "font-medium text-[var(--text)]")}>
             {dmTitle(b, room)}
           </span>
-          <span className={cn("shrink-0 text-[11px]", unread ? "font-semibold text-[var(--item-accent)]" : "text-[var(--text-muted)]")}>
+          <span className={cn("shrink-0 text-xs", unread ? "font-semibold text-[var(--accent-text)]" : "text-[var(--text-muted)]")}>
             {shortWhen(room.last_message_at)}
           </span>
         </span>
@@ -298,7 +314,10 @@ export function DmList({
         </div>
       )}
       <nav className="min-h-0 flex-1 overflow-y-auto p-2" aria-label="Messages">
-        {dms.length === 0 ? (
+        {dms.length === 0 && !isPhone ? (
+          // The big invitation is in the main pane; saying it twice is noise.
+          <p className="px-2.5 py-3 text-sm text-[var(--text-muted)]">No messages yet.</p>
+        ) : dms.length === 0 ? (
           <EmptyState
             icon={Users}
             title="Start a conversation"

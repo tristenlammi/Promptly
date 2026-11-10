@@ -40,15 +40,49 @@ export async function togglePin(m: Message) {
   }
 }
 
-export async function deleteMessage(m: Message, skipConfirm = false) {
-  if (!skipConfirm && !window.confirm("Delete this message for everyone?")) return;
+/** How long "Undo" stays on offer before a delete really happens. */
+const DELETE_GRACE_MS = 10_000;
+const pendingDeletes = new Map<string, { original: Message; timer: number }>();
+
+function reallyDelete(id: string) {
+  const p = pendingDeletes.get(id);
+  if (!p) return;
+  window.clearTimeout(p.timer);
+  pendingDeletes.delete(id);
+  roomsApi.deleteMessage(id).catch((err) => {
+    useRoomsStore.getState().patchMessage(p.original.room_id, id, () => p.original);
+    toast.error(apiErrorMessage(err, "Couldn't delete that message, so it's back."));
+  });
+}
+
+// Closing the tab inside the grace period still deletes what was asked for.
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    for (const id of [...pendingDeletes.keys()]) reallyDelete(id);
+  });
+}
+
+/** Delete at once, with a few seconds to change your mind. The message
+ *  disappears here straight away; everyone else loses it when Undo runs out. */
+export function deleteMessage(m: Message) {
+  if (m.deleted || pendingDeletes.has(m.id)) return;
   const store = useRoomsStore.getState();
-  try {
-    await roomsApi.deleteMessage(m.id);
-    store.patchMessage(m.room_id, m.id, (cur) => ({ ...cur, deleted: true, body: "", attachments: [], reactions: [] }));
-  } catch (err) {
-    toast.error(apiErrorMessage(err, "Couldn't delete that message."));
-  }
+  store.patchMessage(m.room_id, m.id, (cur) => ({ ...cur, deleted: true, body: "", attachments: [], reactions: [] }));
+  const timer = window.setTimeout(() => reallyDelete(m.id), DELETE_GRACE_MS);
+  pendingDeletes.set(m.id, { original: m, timer });
+  toast.success("Message deleted", {
+    duration: DELETE_GRACE_MS,
+    action: {
+      label: "Undo",
+      onClick: () => {
+        const p = pendingDeletes.get(m.id);
+        if (!p) return;
+        window.clearTimeout(p.timer);
+        pendingDeletes.delete(m.id);
+        store.patchMessage(m.room_id, m.id, () => p.original);
+      },
+    },
+  });
 }
 
 export async function editMessage(m: Message, body: string): Promise<boolean> {

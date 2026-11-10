@@ -31,7 +31,7 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
               type="button"
               onClick={() => setOpen(i)}
               aria-label={`Open ${a.filename}`}
-              className="group relative block overflow-hidden bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+              className="group relative block overflow-hidden bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               style={
                 images.length === 1 && a.width && a.height
                   ? { aspectRatio: `${a.width} / ${a.height}`, maxHeight: 340 }
@@ -57,7 +57,7 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
           rel="noopener noreferrer"
           className="flex w-fit max-w-full items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 hover:bg-[var(--hover)]"
         >
-          <FileText className="h-5 w-5 shrink-0 text-[var(--item-accent)]" />
+          <FileText className="h-5 w-5 shrink-0 text-[var(--accent-text)]" />
           <span className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-medium text-[var(--text)]">{a.filename}</span>
             <span className="text-xs text-[var(--text-muted)]">{fileSize(a.size)}</span>
