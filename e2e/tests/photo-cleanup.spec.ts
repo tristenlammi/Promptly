@@ -53,7 +53,9 @@ test("a duplicate is found and its extra copy moved to the trash", async ({ dana
 
   await page.goto("/files/photos");
   await ready(page);
-  await page.getByRole("link", { name: "Clean up" }).click();
+  // Clean up is under the menu's "More places".
+  await page.getByRole("navigation", { name: "Photos", exact: true }).getByRole("button", { name: "More places" }).click();
+  await page.getByRole("menuitem", { name: "Clean up" }).click();
   await expect(page.getByRole("button", { name: /^Duplicates · \d+/ })).toBeVisible();
   const group = page.getByRole("list", { name: "Duplicate groups" }).getByRole("listitem").filter({ has: page.locator(`[data-photo="${ids[0]}"]`) });
   await expect(group.locator("[data-photo]")).toHaveCount(2);

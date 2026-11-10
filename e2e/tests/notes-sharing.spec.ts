@@ -191,7 +191,7 @@ test.describe("notes: sharing and reminders", () => {
 
     // On the card, and in the Reminders view.
     await expect(card(alice, title).locator("[data-note-reminder]")).toContainText("Tomorrow");
-    await alice.getByRole("link", { name: "Reminders" }).click();
+    await alice.getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Reminders" }).click();
     await expect(alice.getByRole("heading", { name: "Upcoming" })).toBeVisible();
     await expect(card(alice, title)).toBeVisible();
     await alice.screenshot({ path: shots("reminders-view") });

@@ -841,11 +841,13 @@ test.describe("files", () => {
     // flooded; it's turned off again at the end (which wipes the index).
     const folder = `E2E private ${stamp}`;
     await openDrive(page);
-    await page.getByRole("button", { name: "New", exact: true }).click();
+    // The rail's New: an empty folder also offers New in its empty state.
+    const newMenu = page.getByRole("complementary", { name: "Files" }).getByRole("button", { name: "New", exact: true });
+    await newMenu.click();
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("menuitem", { name: "Upload files" }).click();
     await (await chooser).setFiles(pdf(`e2e-ai-${stamp}.pdf`, `Boiler service quote ${stamp}`));
-    await page.getByRole("button", { name: "New", exact: true }).click();
+    await newMenu.click();
     await page.getByRole("menuitem", { name: "Folder", exact: true }).click();
     await page.getByRole("dialog").getByRole("textbox").fill(folder);
     await page.getByRole("dialog").getByRole("button", { name: /Create/ }).click();
