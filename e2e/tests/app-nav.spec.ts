@@ -147,7 +147,8 @@ test.describe("app navigation", () => {
     expect(Math.round((await side.boundingBox())!.width)).toBe(288);
     await expect(side.getByText("Promptly", { exact: true })).toBeVisible();
     await expect(side.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
-    await expect(side.getByRole("link", { name: "New chat", exact: true })).toHaveAttribute("href", "/chat");
+    // .first(): chats from other specs can be called "New chat" too.
+    await expect(side.getByRole("link", { name: "New chat", exact: true }).first()).toHaveAttribute("href", "/chat");
     await expect(side.getByRole("link", { name: "Search", exact: true })).toHaveAttribute("href", "/chat?search=1");
     const rail = vaultRail(page);
     for (const [name, href] of [
