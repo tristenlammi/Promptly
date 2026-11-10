@@ -44,6 +44,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - The voice panel in the sidebar is now a card in the "happening now" spot. Deafen, camera, sharing your screen and voice settings are in the channel itself, one tap away.
 - On a computer, uploads away from Files and Photos show in the sidebar instead of as a floating pill.
 - The sidebar's Automations link goes to /automations.
+### Changed
+<!-- Files UI (ui-files) -->
+- Files: Recent, Starred, Trash, Shared links, Home and Devices show placeholder rows while they load, like My files does, instead of the word "Loading".
+- Files: the search box says "Search Files" (it used to say "Search Drive"), and Trash says things there "still take up space" instead of talking about quota.
+- Files: an empty folder shows one clean panel with "Upload" and "New" (the list of things to make opens from New), without a table heading and a lone "System" row underneath; a fresh My files tucks its built-in folders behind "Show built-in folders".
+- Files: moving things to the trash no longer asks "are you sure" first. It just goes, with Undo on the message; only "Delete forever" still asks.
+- Files: when a folder can't be opened you get a plain message with "Try again" instead of "Failed to load files", and a failed "Save a copy" shows a normal message instead of a browser pop-up.
+- Files: starring is instant. The star fills the moment you tap it (and comes back off with a message if it couldn't be saved), and starring several things at once says how many.
+- Files: "Move to…" on Recent opens the move dialog (it used to just open the folder; that is now "Show in folder"), and trashing several starred things offers Undo.
+- - Files: pictures in the preview zoom with the wheel, a pinch or a double-click, drag to look around, and swipe across for the next file.
+- - Files: the selection bar now floats at the bottom and slides in, so the list no longer jumps; on a phone it names its three main actions and keeps the rest under More.
+- - Files: the left list is grouped into Browse, Shared and Tools, and storage is one slim line that opens to show what is using the space and the last backup.
+- - Files: "Details" is in every item's menu; on a phone or tablet it opens as a sheet from the bottom.
+<!-- /Files UI -->
 
 ## [0.35.0] - 2026-11-09
 

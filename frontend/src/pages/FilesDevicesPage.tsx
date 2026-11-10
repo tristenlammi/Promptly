@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 
 import { appPasswordsApi } from "@/api/appPasswords";
 import { devicesApi, type PairStart } from "@/api/devices";
+import { DriveListSkeleton } from "@/components/files/DriveListSkeleton";
 import { formatRelativeTime } from "@/components/files/helpers";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -58,7 +59,7 @@ export function FilesDevicesPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-[var(--text-muted)]">Loading…</p>
+        <DriveListSkeleton rows={2} card />
       ) : devices.length === 0 ? (
         <div className="rounded-card border border-dashed border-[var(--border)] px-6 py-10 text-center">
           <Smartphone className="mx-auto mb-2 h-8 w-8 text-[var(--text-muted)]" />

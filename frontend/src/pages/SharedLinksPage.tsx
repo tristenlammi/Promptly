@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { filesApi, type OwnedShareLink } from "@/api/files";
 import { DriveEmptyState } from "@/components/files/DriveSimpleList";
+import { DriveListSkeleton } from "@/components/files/DriveListSkeleton";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { extractError, formatRelativeTime } from "@/components/files/helpers";
@@ -53,7 +54,7 @@ export function SharedLinksPage() {
       <DriveSubNav />
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
-          {isLoading && <div className="text-sm text-[var(--text-muted)]">Loading…</div>}
+          {isLoading && <DriveListSkeleton rows={4} card />}
           {!isLoading && links.length === 0 && (
             <DriveEmptyState
               icon={<Globe className="h-5 w-5" />}

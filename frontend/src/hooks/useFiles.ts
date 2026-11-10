@@ -395,40 +395,73 @@ export function useEmptyTrash() {
 // --------------------------------------------------------------------
 // Drive stage 1 — Starred / Recent / Search
 // --------------------------------------------------------------------
-export function useStarFile() {
+const STAR_LISTS: string[] = [BROWSE_KEY, RECENT_KEY, STARRED_KEY, SEARCH_KEY];
+
+/** Flip the star on one item in every cached list right away, so the
+ *  star fills the moment it's tapped instead of after the server answers.
+ *  Returns a function that puts the lists back (used when the save fails). */
+function patchStar(qc: QueryClient, kind: "file" | "folder", id: string, starred: boolean): () => void {
+  const lists = STAR_LISTS;
+  const at = starred ? new Date().toISOString() : null;
+  const field = kind === "file" ? "files" : "folders";
+  const snapshots = qc.getQueriesData<unknown>({ predicate: (q) => lists.includes(String(q.queryKey[0])) });
+  type Row = { id: string; starred_at?: string | null };
+  const patchList = (list: unknown, drop: boolean): unknown => {
+    if (!list || typeof list !== "object") return list;
+    const rows = (list as Record<string, unknown>)[field];
+    if (!Array.isArray(rows) || !rows.some((r: Row) => r?.id === id)) return list;
+    const next = drop
+      ? rows.filter((r: Row) => r.id !== id)
+      : rows.map((r: Row) => (r.id === id ? { ...r, starred_at: at } : r));
+    return { ...(list as object), [field]: next };
+  };
+  for (const [key, data] of snapshots) {
+    if (!data || typeof data !== "object") continue;
+    // Unstarring on the Starred page takes the row away.
+    const drop = !starred && key[0] === STARRED_KEY;
+    const pages = (data as { pages?: unknown[] }).pages;
+    const next = Array.isArray(pages)
+      ? { ...(data as object), pages: pages.map((pg) => patchList(pg, drop)) }
+      : patchList(data, drop);
+    qc.setQueryData(key, next);
+  }
+  return () => {
+    for (const [key, data] of snapshots) qc.setQueryData(key, data);
+  };
+}
+
+function useStarMutation(kind: "file" | "folder", starred: boolean, save: (id: string) => Promise<unknown>) {
+  const qc = useQueryClient();
   const invalidate = useInvalidateFiles();
   return useMutation({
-    mutationFn: (args: { id: string; scope: FileScope }) =>
-      filesApi.starFile(args.id),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
+    mutationFn: (args: { id: string; scope: FileScope }) => save(args.id),
+    onMutate: async (args) => {
+      // A refetch already on its way would put the old star back.
+      await qc.cancelQueries({ predicate: (q) => STAR_LISTS.includes(String(q.queryKey[0])) });
+      return { undo: patchStar(qc, kind, args.id, starred) };
+    },
+    onError: (_e, _vars, ctx) => {
+      ctx?.undo();
+      toast.error(starred ? "Couldn't add the star. Please try again." : "Couldn't remove the star. Please try again.");
+    },
+    onSettled: (_d, _e, vars) => invalidate(vars.scope),
   });
+}
+
+export function useStarFile() {
+  return useStarMutation("file", true, (id) => filesApi.starFile(id));
 }
 
 export function useUnstarFile() {
-  const invalidate = useInvalidateFiles();
-  return useMutation({
-    mutationFn: (args: { id: string; scope: FileScope }) =>
-      filesApi.unstarFile(args.id),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
-  });
+  return useStarMutation("file", false, (id) => filesApi.unstarFile(id));
 }
 
 export function useStarFolder() {
-  const invalidate = useInvalidateFiles();
-  return useMutation({
-    mutationFn: (args: { id: string; scope: FileScope }) =>
-      filesApi.starFolder(args.id),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
-  });
+  return useStarMutation("folder", true, (id) => filesApi.starFolder(id));
 }
 
 export function useUnstarFolder() {
-  const invalidate = useInvalidateFiles();
-  return useMutation({
-    mutationFn: (args: { id: string; scope: FileScope }) =>
-      filesApi.unstarFolder(args.id),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
-  });
+  return useStarMutation("folder", false, (id) => filesApi.unstarFolder(id));
 }
 
 export function useStarredFiles(scope: FileScope) {

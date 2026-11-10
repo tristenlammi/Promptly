@@ -134,7 +134,7 @@ export function SearchResultsPage() {
     <>
       <TopNav
         title="Search"
-        subtitle={q ? `Results for "${q}"` : "Search Drive by filename or content."}
+        subtitle={q ? `Results for "${q}"` : "Search Files by filename or content."}
         actions={<FilesTopNavSearch />}
       />
       <DriveSubNav />
