@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Archive, ArchiveRestore, BookImage, Download, Heart, ImagePlus, Images, Sparkles, Trash2, X, UsersRound } from "lucide-react";
+import { Archive, ArchiveRestore, BookImage, Check, Download, Heart, HeartOff, ImagePlus, Images, Sparkles, Trash2, X, UsersRound } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { usePhotosPath } from "@/components/photos/photosPath";
@@ -10,13 +10,18 @@ import { albumsApi } from "@/api/albums";
 import { photosApi, type PhotoBucket, type PhotoItem, type PhotoView } from "@/api/photos";
 import { AddToAlbumDialog } from "@/components/photos/AlbumDialogs";
 import { MemoriesStrip } from "@/components/photos/MemoriesStrip";
+import { PhoneScrubber } from "@/components/photos/PhoneScrubber";
+import { TileGridSkeleton, TimelineSkeleton } from "@/components/photos/PhotoSkeletons";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
+import { SelectionBar, type SelectionAction } from "@/components/photos/SelectionBar";
 import { TimelineScrubber, type TimelinePosition } from "@/components/photos/TimelineScrubber";
 import { FamilyDialog } from "@/components/photos/FamilyDialog";
 import { justify, rowsHeight, type JustifiedRow } from "@/lib/justify";
 import { porchTrashWarning } from "@/api/porch";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { cn } from "@/utils/cn";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -211,6 +216,20 @@ export function PhotosPage() {
     [loadedInOrder],
   );
 
+  // A day's tick: all of that day in, or (when they all are) all out.
+  const toggleDay = useCallback((items: PhotoItem[]) => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      const all = items.every((p) => next.has(p.id));
+      for (const p of items) {
+        if (all) next.delete(p.id);
+        else next.add(p.id);
+      }
+      if (!all && items[0]) anchor.current = items[0].id;
+      return next;
+    });
+  }, []);
+
   const [open, setOpen] = useState<{ id: string; items: PhotoItem[] } | null>(null);
   const openPhoto = useCallback((p: PhotoItem) => setOpen({ id: p.id, items: loadedInOrder() }), [loadedInOrder]);
   // The viewer reached the end of what's loaded: the next (older, dir 1) or
@@ -235,39 +254,89 @@ export function PhotosPage() {
     void qc.invalidateQueries({ queryKey: ["photos"] });
   }, [qc]);
 
+  // Show a change in the grid straight away; the server catches up.
+  const patchLoaded = useCallback(
+    (ids: Set<string>, change: Partial<PhotoItem>) => {
+      qc.setQueriesData<PhotoItem[]>({ queryKey: ["photos", "month", view] }, (items) =>
+        items?.map((p) => (ids.has(p.id) ? { ...p, ...change } : p)),
+      );
+    },
+    [qc, view],
+  );
+
   const act = async (what: "favorite" | "unfavorite" | "archive" | "unarchive" | "download" | "trash") => {
     const ids = [...selected];
     if (!ids.length) return;
+    const n = ids.length;
     const bulk = { file_ids: ids, folder_ids: [] };
+    const failed = (e: unknown) => toast.error(apiErrorMessage(e, "That didn't work."));
     try {
-      if (what === "favorite") await filesApi.bulkStar(bulk);
-      else if (what === "unfavorite") await filesApi.bulkUnstar(bulk);
-      else if (what === "archive" || what === "unarchive") {
-        await photosApi.archive(ids, what === "archive");
-        toast.success(what === "archive" ? `Archived ${ids.length} — find them under Archive.` : `Back in Photos.`);
+      if (what === "favorite" || what === "unfavorite") {
+        // The hearts flip now; if the server says no, they flip back.
+        patchLoaded(new Set(ids), { favorite: what === "favorite" });
+        setSelected(new Set());
+        try {
+          if (what === "favorite") await filesApi.bulkStar(bulk);
+          else await filesApi.bulkUnstar(bulk);
+        } finally {
+          refresh();
+        }
+        return;
+      } else if (what === "archive" || what === "unarchive") {
+        const archived = what === "archive";
+        await photosApi.archive(ids, archived);
+        toast.success(archived ? `Archived ${n === 1 ? "1 photo" : `${n} photos`}. Find ${n === 1 ? "it" : "them"} under Archive.` : "Back in Photos.", {
+          action: { label: "Undo", onClick: () => void photosApi.archive(ids, !archived).then(refresh).catch(failed) },
+        });
       } else if (what === "download") await filesApi.bulkZipDownload(bulk);
       else if (what === "trash") {
         const warn = await porchTrashWarning(ids);
-        if (warn && !(await confirm({ title: ids.length === 1 ? "Move this photo to the trash?" : `Move ${ids.length} photos to the trash?`, message: warn, confirmLabel: "Move to trash", danger: true }))) return;
+        if (warn && !(await confirm({ title: n === 1 ? "Move this photo to the trash?" : `Move ${n} photos to the trash?`, message: warn, confirmLabel: "Move to trash", danger: true }))) return;
         await filesApi.bulkTrash(bulk);
-        toast.success(`${ids.length} moved to the trash.`);
+        toast.success(n === 1 ? "Moved to the trash." : `${n} moved to the trash.`, {
+          action: {
+            label: "Undo",
+            onClick: () =>
+              void Promise.allSettled(ids.map((id) => filesApi.restoreFile(id))).then((r) => {
+                const lost = r.filter((x) => x.status === "rejected").length;
+                if (lost) toast.error(lost === n ? "Couldn't bring them back. Look in the trash." : `${lost} couldn't be brought back. Look in the trash.`);
+                refresh();
+              }),
+          },
+        });
       }
       setSelected(new Set());
       refresh();
     } catch (e) {
-      toast.error(apiErrorMessage(e, "That didn't work."));
+      failed(e);
     }
   };
 
+  const actions: SelectionAction[] =
+    view === "family"
+      ? // Others' photos: look, keep a copy. Changing them is theirs to do.
+        [{ key: "download", label: "Download", icon: <Download />, onClick: () => void act("download") }]
+      : [
+          view === "favorites"
+            ? { key: "fav", label: "Unfavourite", icon: <HeartOff />, onClick: () => void act("unfavorite") }
+            : { key: "fav", label: "Favourite", icon: <Heart />, onClick: () => void act("favorite") },
+          view === "archive"
+            ? { key: "archive", label: "Unarchive", icon: <ArchiveRestore />, onClick: () => void act("unarchive") }
+            : { key: "archive", label: "Archive", icon: <Archive />, onClick: () => void act("archive") },
+          { key: "album", label: "Add to album", icon: <BookImage />, onClick: () => setAlbumPick(true) },
+          { key: "download", label: "Download", icon: <Download />, onClick: () => void act("download") },
+          { key: "trash", label: "Move to trash", icon: <Trash2 />, onClick: () => void act("trash") },
+        ];
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* The Photos menu is the shell's (PhotosShell); this bar is for
-          picking photos — for an album, or a selection's actions. */}
-      {(addTo || selected.size > 0) && (
-      <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        {addTo ? (
+      {/* The Photos menu is the shell's (PhotosShell). Picking for an album
+          has its own bar; a selection's actions float over the grid, so
+          ticking the first photo doesn't move the page. */}
+      {addTo && (
+        <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2">
           <div role="toolbar" aria-label="Adding to an album" className="flex w-full flex-wrap items-center gap-2">
-            <button type="button" aria-label="Cancel" onClick={() => navigate(photosPath(`/albums/${addTo}`))} className="rounded-md p-1 hover:bg-[var(--hover)]">
+            <button type="button" aria-label="Cancel" onClick={() => navigate(photosPath(`/albums/${addTo}`))} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[var(--hover)] sm:h-8 sm:w-8">
               <X className="h-4 w-4" />
             </button>
             <span className="flex-1 text-sm text-[var(--text)]">
@@ -286,25 +355,22 @@ export function PhotosPage() {
                   toast.error(apiErrorMessage(e, "Couldn't add them."));
                 }
               }}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--accent)] h-10 px-4 text-sm font-medium text-white disabled:opacity-50 sm:h-8"
             >
               <ImagePlus className="h-3.5 w-3.5" /> Add
             </button>
           </div>
-        ) : (
-          <SelectionBar count={selected.size} view={view} onClear={() => setSelected(new Set())} onAct={act} onAlbum={() => setAlbumPick(true)} />
-        )}
-      </header>
+        </header>
       )}
 
       {/* The family library's own settings live here, not in the menu. */}
-      {view === "family" && !addTo && selected.size === 0 && months.length > 0 && (
+      {view === "family" && !addTo && months.length > 0 && (
         <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2 text-xs text-[var(--text-muted)]">
           <span className="flex-1">Photos you and your family share with each other.</span>
           <button
             type="button"
             onClick={() => setFamilyOpen(true)}
-            className="flex items-center gap-1 rounded-full px-3 py-1 text-[var(--text)] hover:bg-[var(--hover)]"
+            className="flex min-h-10 items-center gap-1 rounded-full px-3 text-[var(--text)] hover:bg-[var(--hover)] sm:min-h-8"
           >
             <UsersRound className="h-3.5 w-3.5" /> Family settings
           </button>
@@ -323,7 +389,7 @@ export function PhotosPage() {
           data-photos-scroller
         >
           {isLoading ? (
-            <p className="p-6 text-sm text-[var(--text-muted)]">Loading…</p>
+            <TimelineSkeleton phone={phone} />
           ) : months.length === 0 ? (
             <Empty view={view} onFamily={() => setFamilyOpen(true)} />
           ) : (
@@ -349,6 +415,7 @@ export function PhotosPage() {
                       selecting={selected.size > 0}
                       onMeasured={(h) => setMeasured((m) => (m[b.month] === h ? m : { ...m, [b.month]: h }))}
                       onToggle={toggle}
+                      onToggleDay={toggleDay}
                       onOpen={openPhoto}
                     />
                   </div>
@@ -359,6 +426,10 @@ export function PhotosPage() {
           )}
         </div>
         {hasScrubber && <TimelineScrubber months={months} scroller={scrollRef} label={monthLabel} position={position} onSeek={seek} />}
+        {phone && months.length > 0 && <PhoneScrubber months={months} scroller={scrollRef} label={monthLabel} position={position} />}
+        {!addTo && (
+          <SelectionBar count={selected.size} onClear={() => setSelected(new Set())} actions={actions} escape={!open && !albumPick && !familyOpen} />
+        )}
       </div>
 
       {familyOpen && <FamilyDialog onClose={() => setFamilyOpen(false)} />}
@@ -399,6 +470,7 @@ function MonthSection({
   selecting,
   onMeasured,
   onToggle,
+  onToggleDay,
   onOpen,
 }: {
   view: PhotoView;
@@ -410,6 +482,7 @@ function MonthSection({
   selecting: boolean;
   onMeasured: (h: number) => void;
   onToggle: (p: PhotoItem, range: boolean) => void;
+  onToggleDay: (items: PhotoItem[]) => void;
   onOpen: (p: PhotoItem) => void;
 }) {
   const { data: items } = useQuery({
@@ -427,11 +500,13 @@ function MonthSection({
     <section aria-label={monthLabel(bucket.month)} data-month={bucket.month}>
       <h2 className="flex h-11 items-end pb-2 text-sm font-semibold text-[var(--text)]">{monthLabel(bucket.month)}</h2>
       {!layout ? (
-        <div className="animate-pulse rounded-md bg-[var(--hover)]" style={{ height: estimate - HEADER - 12 }} />
+        <div role="status" aria-label={`Loading ${monthLabel(bucket.month)}`}>
+          <TileGridSkeleton rows={Math.min(12, Math.max(1, Math.ceil((estimate - HEADER - 12) / (target + GAP))))} tile={target} height={Math.max(estimate - HEADER - 12, target)} />
+        </div>
       ) : (
         layout.days.map((d) => (
-          <div key={d.day} className="mb-3">
-            <h3 className="flex h-8 items-center text-xs font-medium text-[var(--text-muted)]">{dayLabel(d.day)}</h3>
+          <div key={d.day} className="group/day mb-3">
+            <DayHeader day={d.day} items={d.items} selected={selected} selecting={selecting} onToggleDay={onToggleDay} />
             <div className="flex flex-col" style={{ gap: GAP }}>
               {d.rows.map((r, ri) => (
                 <div key={ri} className="flex" style={{ gap: GAP, height: r.height }}>
@@ -460,52 +535,47 @@ function MonthSection({
   );
 }
 
-function SelectionBar({
-  count,
-  view,
-  onClear,
-  onAct,
-  onAlbum,
+/** A day's date, with a tick that picks (or lets go of) the whole day. */
+function DayHeader({
+  day,
+  items,
+  selected,
+  selecting,
+  onToggleDay,
 }: {
-  count: number;
-  view: PhotoView;
-  onClear: () => void;
-  onAct: (what: "favorite" | "unfavorite" | "archive" | "unarchive" | "download" | "trash") => void;
-  onAlbum: () => void;
+  day: string;
+  items: PhotoItem[];
+  selected: Set<string>;
+  selecting: boolean;
+  onToggleDay: (items: PhotoItem[]) => void;
 }) {
-  const btn = "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--text)] hover:bg-[var(--hover)]";
+  const all = selecting && items.every((p) => selected.has(p.id));
+  const label = dayLabel(day);
   return (
-    <div role="toolbar" aria-label="Selected photos" className="flex w-full flex-wrap items-center gap-1">
-      <button type="button" onClick={onClear} aria-label="Clear selection" className="rounded-md p-1 hover:bg-[var(--hover)]">
-        <X className="h-4 w-4" />
+    <h3 className="flex h-8 items-center text-xs font-medium text-[var(--text-muted)]">
+      <button
+        type="button"
+        aria-pressed={all}
+        aria-label={all ? `Deselect ${label}` : `Select all of ${label}`}
+        title={all ? "Deselect this day" : "Select this whole day"}
+        onClick={() => onToggleDay(items)}
+        className="-ml-1 flex h-8 items-center gap-1.5 rounded-full pl-1 pr-2 outline-none hover:text-[var(--text)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+      >
+        <span
+          className={cn(
+            "flex h-5 w-5 items-center justify-center rounded-full border-2 transition",
+            !selecting && "photos-day-idle",
+            all
+              ? "border-[var(--accent)] bg-[var(--accent)] text-white opacity-100"
+              : "border-[var(--text-muted)] text-transparent opacity-0 group-hover/day:opacity-100 group-focus-within/day:opacity-100",
+            selecting && "opacity-100",
+          )}
+        >
+          <Check className="h-3 w-3" strokeWidth={3} />
+        </span>
+        {label}
       </button>
-      <span className="mr-2 text-sm font-medium text-[var(--text)]">{count} selected</span>
-      {view === "family" ? (
-        // Others' photos: look, keep a copy — changing them is theirs to do.
-        <button type="button" className={btn} onClick={() => onAct("download")}>
-          <Download className="h-3.5 w-3.5" /> Download
-        </button>
-      ) : (
-      <>
-      <button type="button" className={btn} onClick={() => onAct(view === "favorites" ? "unfavorite" : "favorite")}>
-        <Heart className="h-3.5 w-3.5" /> {view === "favorites" ? "Unfavourite" : "Favourite"}
-      </button>
-      <button type="button" className={btn} onClick={() => onAct(view === "archive" ? "unarchive" : "archive")}>
-        {view === "archive" ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
-        {view === "archive" ? "Unarchive" : "Archive"}
-      </button>
-      <button type="button" className={btn} onClick={onAlbum}>
-        <BookImage className="h-3.5 w-3.5" /> Add to album
-      </button>
-      <button type="button" className={btn} onClick={() => onAct("download")}>
-        <Download className="h-3.5 w-3.5" /> Download
-      </button>
-      <button type="button" className={btn} onClick={() => onAct("trash")}>
-        <Trash2 className="h-3.5 w-3.5" /> Move to trash
-      </button>
-      </>
-      )}
-    </div>
+    </h3>
   );
 }
 
@@ -532,29 +602,40 @@ function SetupBanner() {
 
 function Empty({ view, onFamily }: { view: PhotoView; onFamily: () => void }) {
   const photosPath = usePhotosPath();
+  const primary = "flex min-h-10 items-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white hover:bg-[var(--accent-hover)]";
   const text =
     view === "family"
-      ? "A family library pools photos with people on this server — each chooses what of theirs goes in."
+      ? "A shared place for your family's photos. Everyone chooses which of theirs go in."
       : view === "favorites"
-      ? "Star a photo and it shows up here."
-      : view === "archive"
-        ? "Archived photos are kept but left out of the timeline."
-        : "Upload photos or videos (they go in your Photos folder), back up a phone into it (Account → Devices), or share photos to the Promptly Files app.";
+        ? "Favourite a photo and it shows up here."
+        : view === "archive"
+          ? "Archived photos are kept safe, just left out of your timeline."
+          : "Upload some, drop them anywhere on this page, or back up your phone.";
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-      <Images className="h-10 w-10 text-[var(--text-muted)]" />
-      <p className="text-sm font-medium text-[var(--text)]">{view === "all" ? "No photos yet" : "Nothing here yet"}</p>
-      <p className="max-w-sm text-xs text-[var(--text-muted)]">{text}</p>
-      {view === "all" && (
-        <Link to={photosPath("/setup")} className="mt-2 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white">
-          Set up Photos
-        </Link>
-      )}
-      {view === "family" && (
-        <button type="button" onClick={onFamily} className="mt-2 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white">
-          Family library…
-        </button>
-      )}
+    <div className="flex min-h-full items-center justify-center p-6">
+      <div className="w-full max-w-lg">
+        <EmptyState
+          icon={view === "favorites" ? <Heart className="h-5 w-5" /> : view === "archive" ? <Archive className="h-5 w-5" /> : <Images className="h-5 w-5" />}
+          title={view === "all" ? "No photos yet" : view === "favorites" ? "No favourites yet" : view === "archive" ? "Nothing archived" : "Nothing here yet"}
+          description={text}
+          action={
+            view === "all" ? (
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Link to="/files/devices" className={primary}>
+                  Set up phone backup
+                </Link>
+                <Link to={photosPath("/setup")} className="flex min-h-10 items-center rounded-md px-4 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]">
+                  Bring photos in
+                </Link>
+              </div>
+            ) : view === "family" ? (
+              <button type="button" onClick={onFamily} className={primary}>
+                Set up family library
+              </button>
+            ) : undefined
+          }
+        />
+      </div>
     </div>
   );
 }
