@@ -32,6 +32,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - An app whose name is also its title no longer says the name twice under the header; it says Saved.
 - Opening an app shows the outline of a list while it loads, not a spinner.
 - Photos: the People tab is called Faces.
+- Notes, Calendar and Maps fold the main sidebar down to its icons, like Mail and Files do, so their own side list has room.
 - Calendar: the quick add box has a pen, not the assistant's sparkle. It doesn't use the assistant.
 - Files: with things selected, the list can be scrolled clear of the bar at the bottom.
 <!-- UI polish, shared foundations (ui-polish) -->

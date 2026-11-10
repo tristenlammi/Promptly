@@ -24,7 +24,7 @@ import { Sidebar } from "./Sidebar";
 /** Apps with their own side list. With the main sidebar open as well that
  *  makes three columns, so the sidebar folds to its icon rail while one of
  *  them is open and comes back when you leave. */
-const LIST_APP_ROUTE = /^\/(rooms|porch|mail|files)(\/|$)/;
+const LIST_APP_ROUTE = /^\/(rooms|porch|mail|files|notes|calendar|maps)(\/|$)/;
 /** Pages that show the full upload list themselves. */
 const DRIVE_ROUTE = /^\/(files|workspaces|photos)(\/|$)/;
 /** "expanded" once you've opened the sidebar inside one of those apps: it
