@@ -1,6 +1,6 @@
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import { AlarmClock, Search, Star, Upload, UserPlus, Users, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlarmClock, Check, Mail, Phone, Search, Star, Upload, UserPlus, Users, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { Chip, EmptyState, Fab, ItemButton, todayISO } from "@/items/ui";
@@ -10,15 +10,20 @@ import { cn } from "@/utils/cn";
 import { ContactDetail } from "./ContactDetail";
 import { ContactForm } from "./ContactForm";
 import { ImportSheet } from "./ImportSheet";
-import { buildIndex, displayName, dueOn, letterOf, matches, sortContacts, tagCounts, workLine } from "./model";
-import { ContactAvatar, sheetOpen, takePendingFilter, typingTarget, useNewContactRequests, useWidth, type PeopleFilter } from "./shared";
+import { buildIndex, displayName, dueOn, letterOf, matches, sortContacts, tagCounts, telHref, workLine } from "./model";
+import { SelectionBar } from "./Selection";
+import { ContactAvatar, editContact, sheetOpen, takePendingFilter, typingTarget, useHomeCountry, useNewContactRequests, useWidth, type PeopleFilter } from "./shared";
+import { ToolsMenu } from "./ToolsMenu";
 import type { Contact, ContactsData } from "./types";
 
 /*
- * People — the A–Z book. Virtualised (thousands of people stay smooth),
+ * Contacts — the A–Z book. Virtualised (thousands of people stay smooth),
  * sticky letter headers, a fast-scroll letter strip, search across every
  * field, filters by favourites / due / group / tag. Desktop: list + person
  * side by side with j/k, / and n. Phone: list → person (back returns).
+ * "More" holds import / export / duplicates / settings; rows show quick
+ * actions on hover; several people can be picked at once (More → Select
+ * contacts, Ctrl/Shift-click, or a long press on a phone).
  */
 
 type Row = { kind: "header"; label: string; key: string } | { kind: "contact"; c: Contact; key: string } | { kind: "favs"; list: Contact[]; key: string };
@@ -26,11 +31,14 @@ type Row = { kind: "header"; label: string; key: string } | { kind: "contact"; c
 // Where the list was, so coming back from a person (phone) lands in the same place.
 const lastOffset = new Map<string, number>();
 
+const QUICK =
+  "flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]";
+
 const HEADER_H = 30;
 const ROW_H = 60;
 const FAVS_H = 104;
 
-export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) {
+export function PeopleView({ item, isPhone, ask, doc }: ItemViewProps<ContactsData>) {
   const data = item.data;
   const [params, setParams] = useSearchParams();
   const selected = params.get("c");
@@ -44,6 +52,52 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
   const rootW = useWidth(rootRef, isPhone);
   const scrollRef = useRef<HTMLDivElement>(null);
   const today = todayISO();
+  const cc = useHomeCountry(item);
+
+  // Picking several: null when off, the picked ids when on.
+  const [pickedRaw, setPicked] = useState<Set<string> | null>(null);
+  const picked = useMemo(() => {
+    if (!pickedRaw) return null;
+    const live = new Set(data.contacts.map((c) => c.id));
+    const kept = [...pickedRaw].filter((id) => live.has(id));
+    return kept.length === pickedRaw.size ? pickedRaw : new Set(kept);
+  }, [pickedRaw, data.contacts]);
+  const togglePicked = useCallback((id: string) => {
+    setPicked((cur) => {
+      const next = new Set(cur ?? []);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  // A long press on a phone starts picking.
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const swallowClick = useRef(false);
+  const pressEnd = useCallback(() => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+  }, []);
+  useEffect(() => pressEnd, [pressEnd]);
+  const pressStart = (id: string, e: ReactPointerEvent) => {
+    if (!isPhone || pickedRaw || e.pointerType === "mouse") return;
+    pressEnd();
+    const timer = window.setTimeout(() => {
+      press.current = null;
+      swallowClick.current = true;
+      window.setTimeout(() => (swallowClick.current = false), 800);
+      setPicked(new Set([id]));
+      try {
+        navigator.vibrate?.(8);
+      } catch {
+        /* not allowed */
+      }
+    }, 500);
+    press.current = { timer, x: e.clientX, y: e.clientY };
+  };
+  const pressMove = (e: ReactPointerEvent) => {
+    const p = press.current;
+    if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) pressEnd();
+  };
 
   const select = useCallback(
     (id: string | null, { push = isPhone }: { push?: boolean } = {}) => {
@@ -162,7 +216,9 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
         }
         return;
       }
-      if (e.key === "/") {
+      if (e.key === "Escape" && pickedRaw) {
+        setPicked(null);
+      } else if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
       } else if (e.key === "n" && item.canEdit) {
@@ -186,7 +242,7 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isPhone, contactRows, rows, selected, select, virtualizer, item.canEdit]);
+  }, [isPhone, contactRows, rows, selected, select, virtualizer, item.canEdit, pickedRaw]);
 
   // Links from other apps (Photos, Calendar) may say ?contact=<id>: the same as ?c=.
   useEffect(() => {
@@ -222,11 +278,26 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
   }).length, [data.contacts, today]);
 
   const empty = data.contacts.length === 0;
+  const filtered = !!query || filter.kind !== "all";
+  const clearFilters = () => {
+    setQuery("");
+    setFilter({ kind: "all" });
+  };
+  const rowClick = (id: string, e: ReactMouseEvent) => {
+    if (swallowClick.current) {
+      swallowClick.current = false;
+      return;
+    }
+    if (picked) togglePicked(id);
+    else if (!isPhone && (e.ctrlKey || e.metaKey || e.shiftKey)) setPicked(new Set([id]));
+    else select(id);
+  };
 
   const list = (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 flex-col gap-2 px-4 pb-2 pt-3">
-        <div className="relative">
+        <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             ref={searchRef}
@@ -244,6 +315,8 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
           ) : (
             !isPhone && <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-[var(--border)] px-1.5 text-[10px] text-[var(--text-muted)]">/</kbd>
           )}
+        </div>
+        <ToolsMenu item={item} title={doc.title} ask={ask} onSelectMode={() => setPicked(new Set())} />
         </div>
         {!empty && (
           <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none]">
@@ -295,9 +368,14 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
           />
         </div>
       ) : visible.length === 0 ? (
-        <p className="px-6 py-10 text-center text-sm text-[var(--text-muted)]" aria-live="polite">
-          {query ? `No one matches “${query}”.` : "No one here yet."}
-        </p>
+        <div className="flex flex-col items-center gap-3 px-6 py-10 text-center" aria-live="polite">
+          <p className="text-sm text-[var(--text-muted)]">{query ? `No one matches “${query}”.` : "No one here yet."}</p>
+          {filtered && (
+            <ItemButton size="sm" onClick={clearFilters}>
+              Clear filters
+            </ItemButton>
+          )}
+        </div>
       ) : (
         <div className="relative min-h-0 flex-1">
           <div ref={scrollRef} className={cn("h-full overflow-y-auto overscroll-contain", isPhone && "pb-24")} role="list" aria-label="Contacts">
@@ -331,25 +409,76 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
                 const due = dueOn(c, today);
                 const overdue = !!due && due <= today;
                 const on = c.id === selected;
+                const isPicked = picked?.has(c.id) ?? false;
+                const name = displayName(c, data.settings.name_order);
                 return (
-                  <div key={v.key} style={style} role="listitem" className={cn(isPhone ? "pr-9" : "pr-6")}>
+                  <div key={v.key} style={style} role="listitem" className={cn("group/row", isPhone ? "pr-9" : "pr-6")}>
                     <button
                       type="button"
-                      onClick={() => select(c.id)}
-                      aria-current={on ? "true" : undefined}
+                      onClick={(e) => rowClick(c.id, e)}
+                      onPointerDown={(e) => pressStart(c.id, e)}
+                      onPointerMove={pressMove}
+                      onPointerUp={pressEnd}
+                      onPointerCancel={pressEnd}
+                      onPointerLeave={pressEnd}
+                      onContextMenu={(e) => {
+                        if (isPhone) e.preventDefault();
+                      }}
+                      aria-current={on && !picked ? "true" : undefined}
+                      aria-pressed={picked ? isPicked : undefined}
                       className={cn(
-                        "flex h-full w-full items-center gap-3 px-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]",
-                        on && !isPhone ? "bg-[color-mix(in_srgb,var(--item-accent)_12%,transparent)]" : "hover:bg-[var(--hover)] active:bg-[var(--hover)]",
+                        "flex h-full w-full select-none items-center gap-3 px-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]",
+                        (picked ? isPicked : on && !isPhone) ? "bg-[color-mix(in_srgb,var(--item-accent)_12%,transparent)]" : "hover:bg-[var(--hover)] active:bg-[var(--hover)]",
                       )}
                     >
+                      {picked && (
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition",
+                            isPicked ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-transparent",
+                          )}
+                        >
+                          <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                        </span>
+                      )}
                       <ContactAvatar contact={c} size={40} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[15px] font-medium text-[var(--text)] md:text-sm">{displayName(c, data.settings.name_order)}</span>
-                        <span className="block truncate text-xs text-[var(--text-muted)]">{workLine(c) || c.emails[0]?.value || c.phones[0]?.value || " "}</span>
+                        <span className="block truncate text-[15px] font-medium text-[var(--text)] md:text-sm">{name}</span>
+                        <span className="block truncate text-xs text-[var(--text-muted)]">{workLine(c) || c.emails[0]?.value || c.phones[0]?.value || " "}</span>
                       </span>
                       {overdue && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--item-accent)]" title="Due to reconnect" aria-label="Due to reconnect" />}
                       {c.favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-current text-[var(--text-muted)]" aria-label="Favourite" />}
                     </button>
+                    {!isPhone && !picked && (
+                      <div className="pointer-events-none absolute right-8 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-0.5 opacity-0 shadow-[var(--shadow-sm)] transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
+                        {c.phones[0]?.value && (
+                          <a href={telHref(c.phones[0].value, cc)} aria-label={`Call ${name}`} title="Call" className={QUICK}>
+                            <Phone className="h-4 w-4" />
+                          </a>
+                        )}
+                        {c.emails[0]?.value && (
+                          <a href={`mailto:${c.emails[0].value}`} aria-label={`Email ${name}`} title="Email" className={QUICK}>
+                            <Mail className="h-4 w-4" />
+                          </a>
+                        )}
+                        {item.canEdit && (
+                          <button
+                            type="button"
+                            aria-label={c.favorite ? `Take ${name} out of favourites` : `Add ${name} to favourites`}
+                            aria-pressed={c.favorite}
+                            title={c.favorite ? "Remove from favourites" : "Favourite"}
+                            onClick={() => {
+                              const to = !c.favorite;
+                              editContact(item, c.id, (x) => void (x.favorite = to));
+                            }}
+                            className={QUICK}
+                          >
+                            <Star className={cn("h-4 w-4", c.favorite && "fill-current text-[var(--item-accent)]")} />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -366,6 +495,7 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
           )}
         </div>
       )}
+      {picked && <SelectionBar item={item} title={doc.title} picked={picked} allIds={visible.map((c) => c.id)} onPick={setPicked} onDone={() => setPicked(null)} />}
     </div>
   );
 
@@ -388,7 +518,7 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
     return (
       <div className="h-full">
         {list}
-        {item.canEdit && !empty && <Fab label="Add" icon={UserPlus} onClick={() => setAdding(true)} />}
+        {item.canEdit && !empty && !picked && <Fab label="Add" icon={UserPlus} onClick={() => setAdding(true)} />}
         {sheets}
       </div>
     );

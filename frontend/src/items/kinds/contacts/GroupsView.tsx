@@ -1,17 +1,16 @@
-import { Bell, Download, FolderPlus, GitMerge, Hash, Pencil, Settings2, Sparkles, Trash2, Upload, Users } from "lucide-react";
+import { FolderPlus, Hash, Pencil, Settings2, Trash2, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState, Field, ItemButton, List, ListRow, Page, Section, Sheet, TextArea, TextInput, uid } from "@/items/ui";
 import type { ItemViewProps } from "@/items/types";
 import { cn } from "@/utils/cn";
 
-import { ImportSheet } from "./ImportSheet";
-import { AVATAR_COLORS, buildIndex, displayName, duplicateGroups, groupCounts, matches, sortContacts, tagCounts } from "./model";
-import { ContactAvatar, setPendingFilter, useHomeCountry, type Handle } from "./shared";
-import { DuplicatesSheet, ExportSheet, SettingsSheet } from "./ToolSheets";
+import { AVATAR_COLORS, buildIndex, displayName, groupCounts, matches, sortContacts, tagCounts } from "./model";
+import { ContactAvatar, setPendingFilter, type Handle } from "./shared";
+import { ToolsMenu } from "./ToolsMenu";
 import type { Contact, ContactsData, Group } from "./types";
 
-/* Groups & tags, plus the toolbox: import, export, duplicates, settings. */
+/* Groups & tags. (Import, export, duplicates and settings live under "More".) */
 
 export function GroupsView({ item, goTo, ask, doc, isPhone }: ItemViewProps<ContactsData>) {
   const data = item.data;
@@ -22,11 +21,8 @@ export function GroupsView({ item, goTo, ask, doc, isPhone }: ItemViewProps<Cont
     return m;
   }, [data.contacts]);
   const tags = useMemo(() => tagCounts(data), [data]);
-  const cc = useHomeCountry(item);
-  const dupes = useMemo(() => duplicateGroups(data, cc).length, [data, cc]);
   const [editing, setEditing] = useState<Group | "new" | null>(null);
   const [tagEdit, setTagEdit] = useState<string | null>(null);
-  const [tool, setTool] = useState<"import" | "export" | "dupes" | "settings" | null>(null);
   const can = item.canEdit;
 
   return (
@@ -131,22 +127,8 @@ export function GroupsView({ item, goTo, ask, doc, isPhone }: ItemViewProps<Cont
           </Section>
         </div>
 
-        <Section title="Tools">
-          <List>
-            {can && <ListRow onClick={() => setTool("import")} leading={<Upload className="h-5 w-5 text-[var(--item-accent)]" />} title="Import" subtitle="vCard (.vcf) or CSV from Google, iCloud, Outlook" />}
-            <ListRow onClick={() => setTool("export")} leading={<Download className="h-5 w-5 text-[var(--item-accent)]" />} title="Export" subtitle="vCard 3.0 / 4.0 or Google CSV" />
-            <ListRow
-              onClick={() => setTool("dupes")}
-              leading={<GitMerge className="h-5 w-5 text-[var(--item-accent)]" />}
-              title="Find duplicates"
-              subtitle="Same email, phone or full name"
-              trailing={dupes > 0 && <span className="rounded-full bg-[var(--item-accent)] px-2 py-0.5 text-xs font-semibold text-white tabular-nums">{dupes}</span>}
-            />
-            <ListRow onClick={() => setTool("settings")} leading={<Bell className="h-5 w-5 text-[var(--item-accent)]" />} title="Reminders & display" subtitle="Birthday time, days ahead, weekly digest, name order" />
-          </List>
-          <ItemButton variant="ghost" size="sm" className="self-start" icon={<Sparkles className="h-3.5 w-3.5 text-[var(--item-accent)]" />} onClick={() => ask("Tidy up my contacts: find duplicates, missing details and people who could use a tag or group. Tell me what you'd change before changing it.")}>
-            Ask the assistant to tidy up
-          </ItemButton>
+        <Section title="More" hint="Import, export, duplicates and settings. They are also under More on the Contacts tab.">
+          <ToolsMenu item={item} title={doc.title} ask={ask} className="self-start" align="left" />
           <p className="flex items-center gap-1.5 px-1 text-xs text-[var(--text-muted)]">
             <Settings2 className="h-3.5 w-3.5" /> {data.contacts.length.toLocaleString()} people · {data.groups.length} groups · {tags.length} tags
           </p>
@@ -155,10 +137,6 @@ export function GroupsView({ item, goTo, ask, doc, isPhone }: ItemViewProps<Cont
 
       <GroupSheet item={item} group={editing} onClose={() => setEditing(null)} />
       <TagSheet item={item} tag={tagEdit} onClose={() => setTagEdit(null)} />
-      <ImportSheet item={item} open={tool === "import"} onClose={() => setTool(null)} />
-      <ExportSheet item={item} open={tool === "export"} onClose={() => setTool(null)} title={doc.title} />
-      <DuplicatesSheet item={item} open={tool === "dupes"} onClose={() => setTool(null)} />
-      <SettingsSheet item={item} open={tool === "settings"} onClose={() => setTool(null)} />
     </Page>
   );
 }

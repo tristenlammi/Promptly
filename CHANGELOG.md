@@ -180,6 +180,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Mail: adding a mailbox asks for just your email and password; server details are under "Advanced", and a failed sign-in suggests what to check.
 - Mail: adding a link while writing uses a small box in the toolbar, not a browser pop-up.
 - Mail: colours come from the shared theme, small text is at least 12px, and buttons are bigger on phones.
+<!-- Contacts UI pass (ui-contacts) -->
+- Contacts: a "More" menu next to the search box with Import, Export, Find duplicates and Reminders & display, so they are one tap from the list instead of under Groups.
+- Contacts: select several people at once (More → Select contacts, Ctrl or Shift-click, or press and hold on a phone) to add them to a group, export them or delete them, with Undo on the delete.
+- Contacts: Call, Email and Favourite buttons appear on a row when you point at it, and "Clear filters" shows when nothing matches.
+- Person page: Call, Text, Email and Directions tiles for people who aren't on Promptly, and their address opens in Maps.
+- Photos faces: "Turn on face recognition" with a button when it's off, instead of a line pointing at settings.
+
+### Changed
+<!-- Contacts UI pass (ui-contacts) -->
+- Contacts: buttons and selection are terracotta like the rest of Promptly; the blue stays for the app's own mark.
+- The three screens that were all called "People" now have their own names: Contacts (the address book), Faces (in Photos) and the person page, with the same back and More buttons at the top of each.
+- Photos faces: saying two people are the same now shows both faces and asks first, and offers Undo straight after for named people.
+- Person page: Block and Unblock moved into the More menu at the top, and unblocking asks first.
+- Contacts: the delete buttons on notes and history are faintly visible instead of hidden until you point at them.
+- Contacts, Faces and the person page show the page's shape while loading instead of "Loading…".
 
 ## [0.35.0] - 2026-11-09
 
