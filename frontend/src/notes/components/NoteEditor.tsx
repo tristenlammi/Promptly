@@ -594,7 +594,7 @@ export function NoteEditor({
       )}
       <SendToSheet open={tool === "send"} onClose={() => setTool(null)} target={{ kind: "note", id: note.id, title: displayTitle(note) }} canGrant={false} />
       {pop === "color" && (
-        <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={248}>
+        <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={272}>
           <ColorGrid value={note.color} onPick={(c) => noteOps.color([id], c)} />
         </Pop>
       )}
