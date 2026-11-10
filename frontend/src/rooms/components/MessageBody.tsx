@@ -47,7 +47,7 @@ export const MessageBody = memo(function MessageBody({
               className={
                 self
                   ? "rounded bg-[color-mix(in_srgb,#C08B2C_22%,transparent)] px-0.5 font-medium text-[var(--text)]"
-                  : "rounded bg-[color-mix(in_srgb,var(--item-accent)_16%,transparent)] px-0.5 font-medium text-[var(--item-accent)]"
+                  : "rounded bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] px-0.5 font-medium text-[var(--accent-text)]"
               }
             >
               {children}
@@ -57,13 +57,13 @@ export const MessageBody = memo(function MessageBody({
         if (href?.startsWith("/") && !href.startsWith("//")) {
           // A mention (``@[Title](/link/…)``) or another in-app path.
           return (
-            <Link to={href} className="font-medium text-[var(--item-accent)] underline underline-offset-2 break-words">
+            <Link to={href} className="font-medium text-[var(--accent-text)] underline underline-offset-2 break-words">
               {children}
             </Link>
           );
         }
         return (
-          <a href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--item-accent)] underline underline-offset-2 break-words">
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-text)] underline underline-offset-2 break-words">
             {children}
           </a>
         );
@@ -94,7 +94,7 @@ export const MessageBody = memo(function MessageBody({
       h2: ({ children }) => <p className="my-1 text-base font-bold">{children}</p>,
       h3: ({ children }) => <p className="my-1 font-semibold">{children}</p>,
       img: ({ src, alt }) => (
-        <a href={src} target="_blank" rel="noopener noreferrer" className="text-[var(--item-accent)] underline">
+        <a href={src} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-text)] underline">
           {alt || src}
         </a>
       ),

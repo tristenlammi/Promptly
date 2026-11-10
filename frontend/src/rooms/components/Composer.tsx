@@ -15,9 +15,9 @@ import { fileSize, plainSnippet } from "../format";
 import { useRoomsStore } from "../store";
 import { SHARE_ICONS } from "./ShareCard";
 import { EmojiGrid, Popover, UserAvatar } from "./ui";
+import { clearDraft, getDraft, setDraft } from "../drafts";
 
 const MAX_FILE = 50 * 1024 * 1024;
-const drafts = new Map<string, string>();
 
 interface Upload {
   key: string;
@@ -73,7 +73,7 @@ export const Composer = forwardRef<
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const emojiBtn = useRef<HTMLButtonElement>(null);
-  const [text, setText] = useState(() => drafts.get(roomId) ?? "");
+  const [text, setText] = useState(() => getDraft(meId, roomId));
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const plusBtn = useRef<HTMLButtonElement>(null);
@@ -90,7 +90,7 @@ export const Composer = forwardRef<
   const prevRoom = useRef(roomId);
   useEffect(() => {
     if (prevRoom.current !== roomId) {
-      setText(drafts.get(roomId) ?? "");
+      setText(getDraft(meId, roomId));
       setUploads((u) => {
         u.forEach((x) => {
           x.abort.abort();
@@ -103,8 +103,8 @@ export const Composer = forwardRef<
   }, [roomId]);
 
   useEffect(() => {
-    if (!editing) drafts.set(roomId, text);
-  }, [text, roomId, editing]);
+    if (!editing) setDraft(meId, roomId, text);
+  }, [text, roomId, editing, meId]);
 
   // Entering / leaving edit mode.
   const editingId = editing?.id ?? null;
@@ -262,7 +262,7 @@ export const Composer = forwardRef<
       }
       onClearAttachment?.();
       setText("");
-      drafts.delete(roomId);
+      clearDraft(meId, roomId);
       lastTyping.current = 0;
       if (ready.length) {
         uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
@@ -272,7 +272,7 @@ export const Composer = forwardRef<
       return;
     }
     setText("");
-    drafts.delete(roomId);
+    clearDraft(meId, roomId);
     uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
     setUploads([]);
     const reply = replyTo?.id ?? null;
@@ -362,10 +362,12 @@ export const Composer = forwardRef<
     : "";
 
   const iconBtn =
-    "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:h-10 md:w-10";
+    "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:h-10 md:w-10";
 
   return (
-    <div className="relative shrink-0 border-t border-[var(--border)] bg-[var(--bg)] px-2 pt-2 pb-safe-toolbar md:px-4 md:pb-3">
+    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg)]">
+      {/* The same centred column as the messages above. */}
+      <div className="relative mx-auto w-full max-w-[760px] px-2 pt-2 pb-safe-toolbar md:px-4 md:pb-3">
       {showMentions && (
         <div
           role="listbox"
@@ -388,7 +390,7 @@ export const Composer = forwardRef<
               {c.user ? (
                 <UserAvatar user={c.user} size={24} />
               ) : (
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--item-accent)]">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--accent-text)]">
                   {c.special === "promptly" ? <Sparkles className="h-3.5 w-3.5" /> : <Users className="h-3.5 w-3.5" />}
                 </span>
               )}
@@ -441,12 +443,12 @@ export const Composer = forwardRef<
               ) : (
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-xs font-medium text-[var(--text)]">{u.file.name}</span>
-                  <span className="text-[10px] text-[var(--text-muted)]">{u.error ?? fileSize(u.file.size)}</span>
+                  <span className="text-xs text-[var(--text-muted)]">{u.error ?? fileSize(u.file.size)}</span>
                 </span>
               )}
               {!u.att && !u.error && (
                 <span className="absolute inset-x-1 bottom-1 h-1 overflow-hidden rounded-full bg-black/20">
-                  <span className="block h-full bg-[var(--item-accent)] transition-[width]" style={{ width: `${Math.round(u.progress * 100)}%` }} />
+                  <span className="block h-full bg-[var(--accent)] transition-[width]" style={{ width: `${Math.round(u.progress * 100)}%` }} />
                 </span>
               )}
               <button
@@ -462,7 +464,7 @@ export const Composer = forwardRef<
         </div>
       )}
 
-      <div className="flex items-end gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-1 transition-colors focus-within:border-[color-mix(in_srgb,var(--item-accent)_45%,var(--border))]">
+      <div className="flex items-end gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-1 transition-colors focus-within:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]">
         {!editing &&
           (onPlanEvent ? (
             <button
@@ -531,7 +533,7 @@ export const Composer = forwardRef<
           onClick={() => void submit()}
           className={cn(
             iconBtn,
-            canSend ? "!text-[var(--item-accent)]" : "opacity-40",
+            canSend ? "!text-[var(--accent-text)]" : "opacity-40",
           )}
         >
           {uploading || sharing ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizontal className="h-5 w-5" />}
@@ -587,6 +589,7 @@ export const Composer = forwardRef<
           <EmojiGrid onPick={(e) => insertAtCaret(e)} />
         </Popover>
       )}
+      </div>
     </div>
   );
 });
@@ -606,7 +609,7 @@ function AttachedShare({ attachment, onRemove }: { attachment: ComposerAttachmen
       {card?.thumb ? (
         <img src={card.thumb} alt="" className="h-11 w-11 shrink-0 rounded-lg bg-[var(--hover)] object-cover" />
       ) : (
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--item-accent)_12%,transparent)] text-[var(--item-accent)]">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent-text)]">
           {q.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-5 w-5" />}
         </span>
       )}
@@ -622,7 +625,7 @@ function AttachedShare({ attachment, onRemove }: { attachment: ComposerAttachmen
         type="button"
         aria-label="Remove the attachment"
         onClick={onRemove}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
       >
         <X className="h-4 w-4" />
       </button>
@@ -638,7 +641,7 @@ function PlusRow({ icon: Icon, label, hint, onClick }: { icon: LucideIcon; label
       onClick={onClick}
       className="flex min-h-[52px] w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none"
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] text-[var(--item-accent)]">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent-text)]">
         <Icon className="h-[18px] w-[18px]" />
       </span>
       <span className="flex min-w-0 flex-col">
