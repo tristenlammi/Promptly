@@ -72,6 +72,12 @@ class AdminUserResponse(BaseModel):
     daily_token_budget: int | None = None
     monthly_token_budget: int | None = None
 
+    # ----- Storage, for the Users list -----
+    # A total and the limit that applies (theirs, else the app's; NULL =
+    # no limit). Numbers only: never what the files are.
+    storage_used_bytes: int = 0
+    storage_limit_bytes: int | None = None
+
 
 class AdminUserUsageDay(BaseModel):
     """One row of the per-user daily usage rollup."""

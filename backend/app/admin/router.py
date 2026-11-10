@@ -103,6 +103,9 @@ async def _user_responses(
     for u in users:
         resp = AdminUserResponse.model_validate(u)
         resp.group_ids = member_map.get(u.id, [])
+        quota = await get_quota(db, u)
+        resp.storage_used_bytes = quota.used_bytes
+        resp.storage_limit_bytes = quota.cap_bytes
         out.append(resp)
     return out
 

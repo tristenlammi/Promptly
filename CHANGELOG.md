@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Admin → Users: a Storage column for everyone at once, with a small bar, the percentage, and used / limit (or "no limit"). You can also sort by most storage. It shows totals only, never what the files are.
+
 ### Fixed
 - Porch: "Text post" is now a button at the top of the new-post screen. It was a link underneath all your photos, where it was easy to never find.
 - Passwords extension: bookmark sync no longer says "synced" when your server couldn't be reached. It says the other browsers don't have the latest yet, and keeps trying.
