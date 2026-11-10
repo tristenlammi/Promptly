@@ -147,6 +147,9 @@ export function PhotosShell({ app = false }: { app?: boolean } = {}) {
             aria-haspopup="menu"
             aria-expanded={moreOpen}
             title={inMore ? `${inMore.label} (more places)` : "More places"}
+            // Its own name, so screen readers don't hear two "More" buttons
+            // beside a page's own More menu (an album, a memory).
+            aria-label={inMore ? `${inMore.label} (more places)` : "More places"}
             onClick={() => setMoreOpen((v) => !v)}
             className={pill(!!inMore)}
           >

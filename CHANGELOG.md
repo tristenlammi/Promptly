@@ -202,6 +202,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+<!-- Release e2e pass (release-prep) -->
+- Photos: the menu's "More places" button is called that for screen readers too, so it's no longer a second "More" beside an album's or a memory's own More button.
+
 <!-- New-member onboarding (onboard-fixes) -->
 - Choosing a password: a live checklist shows the rules (length, a number, a symbol), and errors read as plain sentences instead of "new_password: Value error, …".
 - After changing your password, an old error message no longer stays on screen, and you see that it worked.
