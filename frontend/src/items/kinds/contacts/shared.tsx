@@ -1,5 +1,5 @@
 import { Mail, MessageSquare, Phone, Users, Sparkles, type LucideIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 
 import type { ItemHandle } from "@/items/useItem";
 import { useAuthStore } from "@/store/authStore";
@@ -223,4 +223,41 @@ export function overdueLabel(days: number): string {
   if (days < 14) return `${days} day${days === 1 ? "" : "s"} overdue`;
   if (days < 60) return `${Math.round(days / 7)} weeks overdue`;
   return `${Math.round(days / 30.4)} months overdue`;
+}
+
+// ---------------------------------------------------------------- colour
+
+/* Contacts' blue is the app mark only (the icon in the header). Buttons,
+ * selection and links inside the app use the suite's terracotta: the views
+ * read ``--item-accent``, so it is pointed at ``--accent`` for this app.
+ * Sheets and menus render in a portal under <html>, where the item shell
+ * sets the kind's own colour, so that one is kept in step here too (and
+ * handed back when the tab goes away). */
+const SUITE_ACCENT = "var(--accent)";
+
+export function ContactsTheme({ children }: { children: ReactNode }) {
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    let theirs = root.style.getPropertyValue("--item-accent");
+    const apply = () => {
+      const now = root.style.getPropertyValue("--item-accent");
+      if (now.trim() === SUITE_ACCENT) return;
+      theirs = now;
+      root.style.setProperty("--item-accent", SUITE_ACCENT);
+    };
+    apply();
+    const mo = typeof MutationObserver === "undefined" ? null : new MutationObserver(apply);
+    mo?.observe(root, { attributes: true, attributeFilter: ["style"] });
+    return () => {
+      mo?.disconnect();
+      if (root.style.getPropertyValue("--item-accent").trim() !== SUITE_ACCENT) return;
+      if (theirs) root.style.setProperty("--item-accent", theirs);
+      else root.style.removeProperty("--item-accent");
+    };
+  }, []);
+  return (
+    <div className="contents" style={{ "--item-accent": SUITE_ACCENT } as CSSProperties}>
+      {children}
+    </div>
+  );
 }
