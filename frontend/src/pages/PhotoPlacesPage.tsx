@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { usePhotosPath } from "@/components/photos/photosPath";
 import { photosApi, type PhotoItem } from "@/api/photos";
+import { CardGridSkeleton } from "@/components/photos/PhotoSkeletons";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { Button } from "@/components/shared/Button";
@@ -54,7 +55,7 @@ function PlaceList({ country }: { country?: string }) {
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {isLoading ? (
-          <p className="text-sm text-[var(--text-muted)]">Loading…</p>
+          <CardGridSkeleton label="Loading places" />
         ) : error ? (
           <p role="alert" className="text-sm text-[var(--text-muted)]">{apiErrorMessage(error, "Couldn't load your places.")}</p>
         ) : !cards.length ? (

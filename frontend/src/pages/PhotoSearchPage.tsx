@@ -7,6 +7,8 @@ import { usePhotosPath } from "@/components/photos/photosPath";
 import { albumsApi } from "@/api/albums";
 
 import { photosApi, type PhotoItem, type PhotoSearchResult } from "@/api/photos";
+import { NameDialog } from "@/components/photos/NameDialog";
+import { TileGridSkeleton } from "@/components/photos/PhotoSkeletons";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { Button } from "@/components/shared/Button";
@@ -46,12 +48,12 @@ export function PhotoSearchPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   // The same question as an album that keeps itself up to date (PH-5).
-  const saveSmart = async () => {
-    const title = window.prompt("Name the smart album — new photos that match join it by themselves", q);
-    if (!title?.trim()) return;
+  const [naming, setNaming] = useState(false);
+  const saveSmart = async (title: string) => {
     try {
-      const a = await albumsApi.create(title.trim(), [], { q });
+      const a = await albumsApi.create(title, [], { q });
       void qc.invalidateQueries({ queryKey: ["albums"] });
+      setNaming(false);
       navigate(photosPath(`/albums/${a.id}`));
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't make the album."));
@@ -80,7 +82,7 @@ export function PhotoSearchPage() {
           />
         </form>
         {q && items.length > 0 && !data?.unresolved?.length && (
-          <Button size="sm" variant="ghost" aria-label="Save as smart album" leftIcon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => void saveSmart()}>
+          <Button size="sm" variant="ghost" aria-label="Save as smart album" leftIcon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => setNaming(true)}>
             <span className="hidden sm:inline">Save as smart album</span>
           </Button>
         )}
@@ -94,7 +96,9 @@ export function PhotoSearchPage() {
               {apiErrorMessage(error, "Search isn't available right now.")}
             </p>
           ) : isFetching && !data ? (
-            <p className="text-sm text-[var(--text-muted)]">Looking…</p>
+            <div role="status" aria-label="Looking through your photos">
+              <TileGridSkeleton rows={3} tile={width < 640 ? 110 : 200} />
+            </div>
           ) : items.length === 0 ? (
             <>
               <Understood data={data} />
@@ -131,6 +135,17 @@ export function PhotoSearchPage() {
           )}
         </div>
       </div>
+      {naming && (
+        <NameDialog
+          title="Save as a smart album"
+          description="New photos that match this search join it by themselves."
+          label="Album name"
+          initial={q}
+          confirmLabel="Save album"
+          onClose={() => setNaming(false)}
+          onSubmit={saveSmart}
+        />
+      )}
       {viewing && (
         <PhotoViewer items={items} startId={viewing} loadMore={async () => []} onClose={() => setViewing(null)} onChanged={() => {}} />
       )}

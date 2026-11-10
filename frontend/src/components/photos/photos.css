@@ -1,0 +1,52 @@
+/* Photos-only motion. The global reduced-motion block in index.css turns
+   every animation here down to nothing for people who ask for that. */
+
+@keyframes photos-heart-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+.photos-heart-pop {
+  animation: photos-heart-pop 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes photos-bar-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.photos-bar-in {
+  animation: photos-bar-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes photos-pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+.photos-pop-in {
+  animation: photos-pop-in 120ms ease-out;
+}
+
+@keyframes photos-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.photos-fade-in {
+  animation: photos-fade-in 160ms ease-out;
+}
+
+/* The tick on a tile: on touch screens it only takes taps once you are
+   picking (long-press starts that), so a tap near the corner still opens
+   the photo. */
+@media (hover: none) {
+  .photos-tick-idle {
+    pointer-events: none;
+  }
+}
+
+/* A day's tick can't be hovered into view on a touch screen: keep a faint
+   one there. */
+@media (hover: none) {
+  .photos-day-idle {
+    opacity: 0.55 !important;
+  }
+}

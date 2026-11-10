@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Heart, Play } from "lucide-react";
 import { thumbHashToDataURL } from "thumbhash";
 
 import type { PhotoItem } from "@/api/photos";
 import { cn } from "@/utils/cn";
+
+import "./photos.css";
 
 /** One photo in a grid (WP-9.2): the blur until its tile arrives, video
  *  length / LIVE / favourite badges, and selection (tick, Shift, a long
@@ -44,6 +46,14 @@ export function PhotoTile({
   const blur = useMemo(() => placeholder(photo.thumbhash), [photo.thumbhash]);
   const [loaded, setLoaded] = useState(false);
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
+  // The heart pops when you favourite it, not every time the tile scrolls in.
+  const wasFavorite = useRef(photo.favorite);
+  const [pop, setPop] = useState(false);
+  useEffect(() => {
+    if (photo.favorite && !wasFavorite.current) setPop(true);
+    if (!photo.favorite) setPop(false);
+    wasFavorite.current = photo.favorite;
+  }, [photo.favorite]);
 
   const label = `${photo.kind === "video" ? "Video" : "Photo"}, ${new Date(photo.taken_local).toLocaleString()}`;
   // A plain frame holding two buttons side by side — open (the picture)
@@ -123,18 +133,21 @@ export function PhotoTile({
         )}
       </button>
       {photo.kind === "video" && (
-        <span className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[10px] font-medium text-white">
-          <Play className="h-2.5 w-2.5 fill-current" />
+        <span className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-xs font-medium leading-none text-white">
+          <Play className="h-3 w-3 fill-current" />
           {duration(photo.duration_ms)}
         </span>
       )}
       {photo.live && (
-        <span className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-black/55 px-1 py-0.5 text-[9px] font-semibold tracking-wide text-white">
+        <span className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-black/55 px-1 py-0.5 text-xs font-semibold leading-none tracking-wide text-white">
           LIVE
         </span>
       )}
       {photo.favorite && (
-        <Heart className="pointer-events-none absolute bottom-1.5 left-1.5 h-3.5 w-3.5 fill-white text-white drop-shadow" aria-label="Favourite" />
+        <Heart
+          className={cn("pointer-events-none absolute bottom-1.5 left-1.5 h-4 w-4 fill-white text-white drop-shadow", pop && "photos-heart-pop")}
+          aria-label="Favourite"
+        />
       )}
       <button
         type="button"
@@ -144,15 +157,23 @@ export function PhotoTile({
           e.stopPropagation();
           onToggle(photo, e.shiftKey);
         }}
+        // A 40px corner to hit, around a smaller circle to look at.
         className={cn(
-          "absolute left-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border transition",
-          selected
-            ? "border-[var(--accent)] bg-[var(--accent)] text-white opacity-100"
-            : "border-white/90 bg-black/20 text-transparent opacity-0 group-hover:opacity-100",
-          selecting && !selected && "opacity-100",
+          "group/tick absolute left-0 top-0 z-10 flex h-10 w-10 items-start justify-start p-1.5 outline-none",
+          !selecting && "photos-tick-idle",
         )}
       >
-        <Check className="h-3 w-3" />
+        <span
+          className={cn(
+            "flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 transition",
+            selected
+              ? "border-[var(--accent)] bg-[var(--accent)] text-white opacity-100"
+              : "border-white/90 bg-black/25 text-transparent opacity-0 group-hover:opacity-100 group-hover/tick:bg-black/45 group-hover/tick:text-white",
+            selecting && !selected && "opacity-100",
+          )}
+        >
+          <Check className="h-3.5 w-3.5" strokeWidth={3} />
+        </span>
       </button>
     </div>
   );

@@ -58,6 +58,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - - Files: the left list is grouped into Browse, Shared and Tools, and storage is one slim line that opens to show what is using the space and the last backup.
 - - Files: "Details" is in every item's menu; on a phone or tablet it opens as a sheet from the bottom.
 <!-- /Files UI -->
+- Photos: on a phone, a handle on the right edge of the timeline to drag through the months, with the month shown beside it.
+- Photos: Undo after moving photos to the trash or archiving them, in the timeline, in an album and in the viewer.
+- Photos: drop photos or videos anywhere in Photos to upload them; dropped on an open album, they go into that album.
+- Photos: tick a whole day from its date heading.
+- Photos viewer: a "More" button on phones with Send, Download, Download edited and Archive; the F, A and Delete keys favourite, archive and trash; every button says what it does when you hover.
+
+### Changed
+- Photos viewer: the photo follows your finger as you swipe and the next one slides in; it opens growing from its tile and follows a swipe down to close.
+- Photos: the selection bar floats over the grid, so the photos no longer jump when you start picking; its buttons are bigger.
+- Photos: the menu keeps Photos, Albums, People and Places in the row; Favourites, Archive, Family and Clean up are under "More".
+- Photos: the heart flips straight away, with a small pop, in the grid and the viewer.
+- Photos: grey placeholder tiles and album cards while things load, in place of "Loading…".
+- Photos: New album, Save as a smart album and closing the editor with changes ask in the app's own dialogs, not the browser's.
+- Photos: photos added from an album page upload through the upload list, so they show progress and can be retried.
+- Photos: the tick on a tile is easier to hit, and the empty Photos page is shorter, with a "Set up phone backup" button.
 
 ## [0.35.0] - 2026-11-09
 

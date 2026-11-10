@@ -35,6 +35,17 @@ export function PhotosAppTabs({ onSettings }: { onSettings: () => void }) {
   // Close the sheet on navigation.
   const search = params.toString();
   useEffect(() => setMoreOpen(false), [pathname, search]);
+  // Escape closes it too.
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setMoreOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [moreOpen]);
 
   const onTimeline = pathname === base || pathname === `${base}/`;
   const view = onTimeline ? params.get("view") || "all" : null;
@@ -46,7 +57,7 @@ export function PhotosAppTabs({ onSettings }: { onSettings: () => void }) {
     { to: photosPath("/search"), label: "Search", icon: Search, active: under("/search") },
   ];
   const anyTab = tabs.some((t) => t.active);
-  const tab = "flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px]";
+  const tab = "flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-xs";
 
   const more = [
     { to: photosPath("?view=favorites"), label: "Favourites", icon: Heart },
@@ -62,7 +73,7 @@ export function PhotosAppTabs({ onSettings }: { onSettings: () => void }) {
     { to: "/files/home", label: "Promptly Files", icon: FolderOpen },
     { to: "/chat", label: "Promptly", icon: MessageSquare },
   ];
-  const row = "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[var(--text)] hover:bg-[var(--hover)]";
+  const row = "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[var(--text)] hover:bg-[var(--hover)]";
 
   return (
     <>
@@ -99,6 +110,7 @@ export function PhotosAppTabs({ onSettings }: { onSettings: () => void }) {
         <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setMoreOpen(false)}>
           <div
             role="dialog"
+            aria-modal="true"
             aria-label="More"
             onClick={(e) => e.stopPropagation()}
             className="max-h-[85dvh] w-full overflow-y-auto rounded-t-2xl border-t border-[var(--border)] bg-[var(--surface)] p-2 pb-safe"
@@ -109,7 +121,7 @@ export function PhotosAppTabs({ onSettings }: { onSettings: () => void }) {
                 type="button"
                 aria-label="Close"
                 onClick={() => setMoreOpen(false)}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)]"
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -150,7 +162,7 @@ export function PhotosAppTabs({ onSettings }: { onSettings: () => void }) {
                 </button>
               </li>
             </ul>
-            <p className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Open</p>
+            <p className="px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Open</p>
             <ul className="flex flex-col">
               {elsewhere.map((m) => {
                 const Icon = m.icon;
