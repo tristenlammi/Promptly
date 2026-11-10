@@ -1,21 +1,23 @@
-import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowLeft, CheckCheck, Flag, GripVertical, Inbox, ListPlus, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCheck, Flag, GripVertical, Inbox, ListPlus, Pencil, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import { confirm } from "@/components/shared/ConfirmDialog";
 import type { ItemViewProps } from "@/items/types";
 import type { ItemHandle } from "@/items/useItem";
-import { EmptyState, Fab, Field, IconButton, ItemButton, Page, Sheet, TextInput, todayISO, uid } from "@/items/ui";
+import { EmptyState, Fab, Field, IconButton, ItemButton, Page, Sheet, TextInput, fmtTime, todayISO, uid } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
-import { LIST_COLORS, orderKey, sortKey } from "./logic";
+import { LIST_COLORS, orderKey, reopenChange, sortKey } from "./logic";
 import { AddSheet, Fold, QuickAdd, TaskGroup, TaskRow, useQuickAddRequest, useToggle } from "./parts";
 import { plusDays } from "./recur";
+import { useReschedule } from "./reschedule";
 import { TaskEditor } from "./TaskEditor";
-import { INBOX, type Task, type TaskList, type TasksData } from "./types";
+import { INBOX, type Done, type Task, type TaskList, type TasksData } from "./types";
 
 /* Lists: every list with its open count (plus High priority and Completed),
  * one list's tasks in your own order (drag to sort), and search. Phone:
@@ -35,6 +37,7 @@ export function ListsView({ item, isPhone }: ItemViewProps<TasksData>) {
   const [adding, setAdding] = useState(false);
   const [editList, setEditList] = useState<TaskList | "new" | null>(null);
   const toggle = useToggle(item);
+  const move = useReschedule(item);
   // Select + scroll to the linked list once it's in the data, then drop the
   // param so it doesn't pin the selection on later visits.
   useEffect(() => {
@@ -69,7 +72,7 @@ export function ListsView({ item, isPhone }: ItemViewProps<TasksData>) {
       .slice(0, 100);
   }, [query, data.tasks]);
 
-  const row = (t: Task, showList = true) => <TaskRow key={t.id} task={t} data={data} onToggle={() => toggle(t)} onOpen={() => setOpen(t.id)} canEdit={item.canEdit} showList={showList} />;
+  const row = (t: Task, showList = true) => <TaskRow key={t.id} task={t} data={data} onToggle={() => toggle(t)} onOpen={() => setOpen(t.id)} canEdit={item.canEdit} showList={showList} onReschedule={(due) => move(t, due)} />;
 
   const index = (
     <nav className="flex flex-col gap-4" aria-label="Lists">
@@ -84,7 +87,7 @@ export function ListsView({ item, isPhone }: ItemViewProps<TasksData>) {
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center justify-between px-2 pb-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">My lists</span>
-          {item.canEdit && <IconButton label="New list" icon={ListPlus} onClick={() => setEditList("new")} className="h-8 w-8" />}
+          {item.canEdit && <IconButton label="New list" icon={ListPlus} onClick={() => setEditList("new")} className="h-10 w-10 md:h-8 md:w-8" />}
         </div>
         {lists.map((l) => (
           <NavRow
@@ -112,10 +115,10 @@ export function ListsView({ item, isPhone }: ItemViewProps<TasksData>) {
     sel === null ? null : sel === "@high" ? (
       <section className="flex flex-col gap-3">
         <h1 className="text-xl font-semibold text-[var(--text)]">High priority</h1>
-        {high.length ? <TaskGroup>{high.map((t) => row(t))}</TaskGroup> : <EmptyState icon={Flag} title="Nothing urgent" text="Tasks marked high priority (!3) collect here." />}
+        {high.length ? <TaskGroup>{high.map((t) => row(t))}</TaskGroup> : <EmptyState icon={Flag} title="Nothing urgent" text="Tasks you flag as high priority collect here." />}
       </section>
     ) : sel === "@done" ? (
-      <CompletedPanel item={item} />
+      <CompletedPanel item={item} onOpen={setOpen} />
     ) : (
       <ListPanel
         item={item}
@@ -128,7 +131,7 @@ export function ListsView({ item, isPhone }: ItemViewProps<TasksData>) {
     );
 
   return (
-    <Page wide={!isPhone}>
+    <Page wide={!isPhone} className="tasks-scope">
       {isPhone ? (
         sel === null ? (
           <>
@@ -202,7 +205,11 @@ function ListPanel({
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+  const move = useReschedule(item);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const dragged = dragId ? openTasks.find((t) => t.id === dragId) : undefined;
   const onDragEnd = (e: DragEndEvent) => {
+    setDragId(null);
     if (!e.over || e.active.id === e.over.id) return;
     const ids = openTasks.map((t) => t.id);
     const moved = arrayMove(ids, ids.indexOf(String(e.active.id)), ids.indexOf(String(e.over.id)));
@@ -226,14 +233,22 @@ function ListPanel({
       </div>
       {item.canEdit && !isPhone && <QuickAdd item={item} listId={list.id} placeholder={`Add to ${list.name}`} />}
       {openTasks.length ? (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(e) => setDragId(String(e.active.id))} onDragEnd={onDragEnd} onDragCancel={() => setDragId(null)}>
           <SortableContext items={openTasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
             <TaskGroup>
               {openTasks.map((t) => (
-                <SortableTask key={t.id} task={t} data={data} canEdit={item.canEdit} onOpen={() => onOpen(t.id)} onToggle={() => onToggle(t)} />
+                <SortableTask key={t.id} task={t} data={data} canEdit={item.canEdit} onOpen={() => onOpen(t.id)} onToggle={() => onToggle(t)} onReschedule={(due) => move(t, due)} />
               ))}
             </TaskGroup>
           </SortableContext>
+          <DragOverlay>
+            {dragged ? (
+              <div className="tasks-ghost flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-sm text-[var(--text)] shadow-[var(--shadow-lg)]">
+                <GripVertical className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+                <span className="line-clamp-2">{dragged.title}</span>
+              </div>
+            ) : null}
+          </DragOverlay>
         </DndContext>
       ) : (
         <EmptyState icon={CheckCheck} title={doneTasks.length ? "All done here" : "Nothing in this list"} text={list.id === "shopping" ? "Add what you need — “Milk”, “Bread #shopping”." : "Add a task to get started."} />
@@ -272,10 +287,10 @@ function ListPanel({
   );
 }
 
-function SortableTask({ task, data, canEdit, onOpen, onToggle }: { task: Task; data: TasksData; canEdit: boolean; onOpen: () => void; onToggle: () => void }) {
+function SortableTask({ task, data, canEdit, onOpen, onToggle, onReschedule }: { task: Task; data: TasksData; canEdit: boolean; onOpen: () => void; onToggle: () => void; onReschedule: (due: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id, disabled: !canEdit });
   return (
-    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={cn("relative bg-[var(--surface)]", isDragging && "z-10 shadow-[var(--shadow-lg)]")}>
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={cn("relative bg-[var(--surface)]", isDragging && "opacity-40")}>
       <TaskRow
         task={task}
         data={data}
@@ -283,9 +298,10 @@ function SortableTask({ task, data, canEdit, onOpen, onToggle }: { task: Task; d
         onOpen={onOpen}
         canEdit={canEdit}
         showList={false}
+        onReschedule={onReschedule}
         handle={
           canEdit ? (
-            <button type="button" aria-label={`Reorder “${task.title}”`} {...attributes} {...listeners} className="flex h-11 w-6 shrink-0 cursor-grab touch-none items-center justify-center text-[var(--text-muted)] opacity-60 hover:opacity-100">
+            <button type="button" aria-label={`Reorder “${task.title}”`} data-no-swipe {...attributes} {...listeners} className="flex h-11 w-10 shrink-0 md:w-6 cursor-grab touch-none items-center justify-center text-[var(--text-muted)] opacity-60 hover:opacity-100">
               <GripVertical className="h-4 w-4" />
             </button>
           ) : undefined
@@ -297,15 +313,48 @@ function SortableTask({ task, data, canEdit, onOpen, onToggle }: { task: Task; d
 
 /* ------------------------------------------------------------ completed */
 
-function CompletedPanel({ item }: { item: ItemHandle<TasksData> }) {
+/** The day a moment falls on here, whatever zone it was written in. */
+function localDay(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function CompletedPanel({ item, onOpen }: { item: ItemHandle<TasksData>; onOpen: (id: string) => void }) {
   const data = item.data;
   const groups = useMemo(() => {
-    const m = new Map<string, typeof data.log>();
-    for (const x of [...data.log].reverse().slice(0, 500)) m.set(x.at.slice(0, 10), [...(m.get(x.at.slice(0, 10)) ?? []), x]);
-    return [...m.entries()];
+    const m = new Map<string, Done[]>();
+    for (const x of [...data.log].reverse().slice(0, 500)) {
+      const day = localDay(x.at);
+      m.set(day, [...(m.get(day) ?? []), x]);
+    }
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [data.log]);
   const today = todayISO();
-  const week = data.log.filter((x) => x.at.slice(0, 10) >= plusDays(today, -6)).length;
+  const weekAgo = plusDays(today, -6);
+  const week = data.log.filter((x) => localDay(x.at) >= weekAgo).length;
+
+  /** Put a finished task back on its list (Undo ticks it off again). */
+  const reopen = (x: Done, t: Task) => {
+    const doneAt = t.done_at;
+    const entry = { ...x };
+    const at = data.log.findIndex((y) => y.id === x.id);
+    item.update(reopenChange(t.id));
+    toast.success(`“${t.title}” is back on your list`, {
+      action: {
+        label: "Undo",
+        onClick: () =>
+          item.update((d) => {
+            const y = d.tasks.find((z) => z.id === t.id);
+            if (!y || y.done) return;
+            y.done = true;
+            y.done_at = doneAt;
+            if (!d.log.some((z) => z.id === entry.id)) d.log.splice(at < 0 ? d.log.length : Math.min(at, d.log.length), 0, entry);
+          }),
+      },
+    });
+  };
+
   return (
     <section className="flex flex-col gap-4">
       <div>
@@ -324,12 +373,33 @@ function CompletedPanel({ item }: { item: ItemHandle<TasksData> }) {
           <TaskGroup>
             {rows.map((x) => {
               const l = data.lists.find((y) => y.id === x.list_id);
-              return (
-                <div key={x.id} className="flex min-h-[44px] items-center gap-3 px-3 py-2">
+              const t = data.tasks.find((y) => y.id === x.task_id);
+              // Still done: a tap puts it back. Already back (a repeat that
+              // rolled on to its next day): a tap opens it.
+              const back = !!t && t.done && item.canEdit;
+              const inner = (
+                <>
                   <CheckCheck className="h-4 w-4 shrink-0 text-[var(--success)]" />
                   <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{x.title}</span>
                   {l && l.id !== INBOX && <span className="shrink-0 text-xs text-[var(--text-muted)]">{l.name}</span>}
-                  <span className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]">{x.at.slice(11, 16)}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]">{fmtTime(x.at)}</span>
+                  {back && <RotateCcw className="h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />}
+                </>
+              );
+              return t ? (
+                <button
+                  key={x.id}
+                  type="button"
+                  onClick={() => (back ? reopen(x, t) : onOpen(t.id))}
+                  aria-label={back ? `Put “${x.title}” back on your list` : `Open “${x.title}”`}
+                  title={back ? "Put back on your list" : "Open"}
+                  className="flex min-h-[44px] w-full items-center gap-3 px-3 py-2 text-left hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]"
+                >
+                  {inner}
+                </button>
+              ) : (
+                <div key={x.id} className="flex min-h-[44px] items-center gap-3 px-3 py-2">
+                  {inner}
                 </div>
               );
             })}
@@ -341,6 +411,17 @@ function CompletedPanel({ item }: { item: ItemHandle<TasksData> }) {
 }
 
 /* ------------------------------------------------------------ list editor */
+
+const COLOR_NAMES = ["Blue", "Terracotta", "Green", "Purple", "Amber", "Berry", "Sky", "Brown"];
+const colorName = (c: string) => COLOR_NAMES[LIST_COLORS.indexOf(c)] ?? "Custom";
+
+const LIST_EMOJIS = [
+  "🛒", "🏠", "💼", "📚", "🎓", "💪", "🏃", "🍽️",
+  "🧹", "🧺", "🔧", "🚗", "✈️", "🏖️", "🎁", "🎉",
+  "💰", "🧾", "💡", "📞", "💊", "🩺", "🐶", "🐱",
+  "🌱", "👶", "❤️", "⭐", "🎯", "🎬", "🎵", "🎮",
+  "⚽", "🧘", "📅", "✏️", "💻", "📦", "🔑",
+];
 
 function ListSheet({
   item,
@@ -368,6 +449,8 @@ function ListSheet({
     setColor(cur?.color ?? LIST_COLORS[item.data.lists.length % LIST_COLORS.length]);
   }
   const n = cur ? item.data.tasks.filter((t) => t.list_id === cur.id && !t.done).length : 0;
+  // A list that already has an icon from outside the grid keeps it.
+  const emojis = cur?.emoji && !LIST_EMOJIS.includes(cur.emoji) ? [cur.emoji, ...LIST_EMOJIS] : LIST_EMOJIS;
   const save = () => {
     const nm = name.trim();
     if (!nm) return;
@@ -387,6 +470,40 @@ function ListSheet({
     }
     onClose();
   };
+  const remove = async (list: TaskList, open: number) => {
+    // Close the sheet first so the question isn't asked underneath it.
+    onClose();
+    if (
+      open &&
+      !(await confirm({
+        title: `Delete “${list.name}”?`,
+        message: `Its ${open} open task${open === 1 ? "" : "s"} will move to the Inbox.`,
+        confirmLabel: "Delete list",
+        danger: true,
+      }))
+    )
+      return;
+    const copy = { ...list };
+    const moved = new Set(item.data.tasks.filter((t) => t.list_id === list.id).map((t) => t.id));
+    item.update((d) => {
+      for (const t of d.tasks) if (t.list_id === list.id) t.list_id = INBOX;
+      d.lists = d.lists.filter((x) => x.id !== list.id);
+    });
+    onDeleted();
+    toast.info(`Deleted “${list.name}”`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          item.update((d) => {
+            if (!d.lists.some((x) => x.id === copy.id)) d.lists.push({ ...copy });
+            // Only tasks still sitting in the Inbox go back.
+            for (const t of d.tasks) if (moved.has(t.id) && t.list_id === INBOX) t.list_id = copy.id;
+          });
+          onCreated(copy.id);
+        },
+      },
+    });
+  };
   return (
     <Sheet
       open={!!target}
@@ -396,20 +513,7 @@ function ListSheet({
       footer={
         <div className="flex w-full items-center gap-2">
           {cur && (
-            <ItemButton
-              variant="ghost"
-              className="text-[var(--danger)]"
-              icon={<Trash2 className="h-4 w-4" />}
-              onClick={() => {
-                if (n && !window.confirm(`Delete “${cur.name}”? Its ${n} open task${n === 1 ? "" : "s"} move to the Inbox.`)) return;
-                item.update((d) => {
-                  for (const t of d.tasks) if (t.list_id === cur.id) t.list_id = INBOX;
-                  d.lists = d.lists.filter((x) => x.id !== cur.id);
-                });
-                onDeleted();
-                onClose();
-              }}
-            >
+            <ItemButton variant="ghost" className="text-[var(--danger)]" icon={<Trash2 className="h-4 w-4" />} onClick={() => void remove(cur, n)}>
               Delete
             </ItemButton>
           )}
@@ -420,33 +524,65 @@ function ListSheet({
       }
     >
       <form
-        className="flex flex-col gap-3"
+        className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
           save();
         }}
       >
-        <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
-          <Field label="Emoji">
-            <TextInput value={emoji} onChange={(e) => setEmoji(e.target.value)} placeholder="🛒" maxLength={8} className="text-center" />
-          </Field>
-          <Field label="Name">
-            <TextInput autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Groceries" maxLength={80} />
-          </Field>
+        <Field label="Name">
+          <TextInput autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Groceries" maxLength={80} />
+        </Field>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-[var(--text-muted)]">Icon</span>
+          <div className="grid grid-cols-8 gap-1" role="group" aria-label="Icon">
+            <button
+              type="button"
+              aria-label="No icon"
+              title="No icon"
+              aria-pressed={!emoji}
+              onClick={() => setEmoji("")}
+              className={cn(
+                "flex h-10 items-center justify-center rounded-xl transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
+                !emoji && "bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] ring-2 ring-inset ring-[var(--accent)]",
+              )}
+            >
+              <span className="h-3 w-3 rounded-full" style={{ background: color }} />
+            </button>
+            {emojis.map((e) => (
+              <button
+                key={e}
+                type="button"
+                aria-label={`Icon ${e}`}
+                aria-pressed={emoji === e}
+                onClick={() => setEmoji(e)}
+                className={cn(
+                  "flex h-10 items-center justify-center rounded-xl text-xl leading-none transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
+                  emoji === e && "bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] ring-2 ring-inset ring-[var(--accent)]",
+                )}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-[var(--text-muted)]">Colour</span>
-          <div className="flex flex-wrap gap-2">
+          <span className="text-xs font-medium text-[var(--text-muted)]">
+            Colour · <span className="text-[var(--text)]">{colorName(color)}</span>
+          </span>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Colour">
             {LIST_COLORS.map((c) => (
               <button
                 key={c}
                 type="button"
-                aria-label={`Colour ${c}`}
+                aria-label={colorName(c)}
+                title={colorName(c)}
                 aria-pressed={c === color}
                 onClick={() => setColor(c)}
-                className={cn("h-9 w-9 rounded-full transition", c === color && "ring-2 ring-[var(--text)] ring-offset-2 ring-offset-[var(--surface)]")}
-                style={{ background: c }}
-              />
+                className="flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+              >
+                <span className={cn("h-7 w-7 rounded-full transition", c === color && "ring-2 ring-[var(--text)] ring-offset-2 ring-offset-[var(--surface)]")} style={{ background: c }} />
+              </button>
             ))}
           </div>
         </div>
