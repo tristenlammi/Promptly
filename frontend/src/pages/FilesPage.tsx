@@ -531,6 +531,8 @@ export function FilesPage({
       const ids = bulkIds();
       const res = await bulkTrash.mutateAsync(ids);
       const moved = res.files + res.folders;
+      // The folder tree in the rail lists folders too.
+      if (res.folders > 0) bumpTree();
       if (moved > 0) {
         undoToast(`Moved ${moved} item${moved === 1 ? "" : "s"} to trash`, async () => {
           await filesApi.bulkRestore(ids);

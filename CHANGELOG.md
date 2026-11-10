@@ -181,6 +181,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 - Photos: a photo or video you upload shows in the grid straight away, without a reload.
+- Files: the folder list at the side drops a folder as soon as you move it to trash, and brings it back on Undo or restore.
+- Photos: the viewer no longer shows a Next arrow on the last photo once it knows there are no more.
+- Contacts: a new contact with nothing typed yet shows "?" on its picture, not "NN".
 <!-- Maps UI pass (ui-maps) -->
 - Maps: stopping live location sharing, pausing the timeline, changing how long history is kept and deleting a timeline day now say so when they fail instead of failing silently.
 <!-- Notes (ui-notes) -->

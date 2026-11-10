@@ -24,6 +24,7 @@ import {
   type TrashListResponse,
   type FileSearchFilters,
 } from "@/api/files";
+import { useFilesShellStore } from "@/store/filesShellStore";
 import { toast } from "@/store/toastStore";
 
 const BROWSE_KEY = "files-browse" as const;
@@ -184,7 +185,10 @@ export function useBulkRestore() {
   const invalidate = useInvalidateFiles();
   return useMutation({
     mutationFn: (ids: BulkIds) => filesApi.bulkRestore(ids),
-    onSuccess: () => invalidate(),
+    onSuccess: (_d, ids) => {
+      invalidate();
+      if (ids.folder_ids?.length) useFilesShellStore.getState().bumpTree();
+    },
   });
 }
 export function useBulkPurge() {
@@ -355,9 +359,12 @@ export function useTrashFolder() {
       filesApi.trashFolder(args.id),
     onSuccess: (_data, vars) => {
       invalidate(vars.scope);
+      // The rail's folder tree keeps its own list.
+      useFilesShellStore.getState().bumpTree();
       undoToast("Folder moved to trash", async () => {
         await filesApi.restoreFolder(vars.id);
         invalidate(vars.scope);
+        useFilesShellStore.getState().bumpTree();
       });
     },
   });
@@ -368,7 +375,10 @@ export function useRestoreFolder() {
   return useMutation({
     mutationFn: (args: { id: string; scope: FileScope }) =>
       filesApi.restoreFolder(args.id),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
+    onSuccess: (_data, vars) => {
+      invalidate(vars.scope);
+      useFilesShellStore.getState().bumpTree();
+    },
   });
 }
 

@@ -128,6 +128,7 @@ export function PhotoViewer({
   const [index, setIndex] = useState(() => Math.max(0, initial.findIndex((p) => p.id === startId)));
   const [info, setInfo] = useState(() => window.innerWidth >= 1024 && localStorage.getItem("photos.info") === "1");
   const photo = items[index];
+  const [ended, setEnded] = useState(false);
   const qc = useQueryClient();
   const { data: links } = useLinks(photo?.id);
 
@@ -186,8 +187,13 @@ export function PhotoViewer({
         setIndex(next);
         return;
       }
-      const more = await loadMore(dir, items[index].id).catch(() => [] as PhotoItem[]);
-      if (!more.length) return;
+      const more = await loadMore(dir, items[index].id).catch(() => null);
+      if (!more) return;
+      if (!more.length) {
+        // Nothing after this one: the Next arrow goes away.
+        if (dir === 1) setEnded(true);
+        return;
+      }
       if (dir === 1) {
         setItems((cur) => [...cur, ...more.filter((m) => !cur.some((c) => c.id === m.id))]);
         setIndex(index + 1);
@@ -563,9 +569,11 @@ export function PhotoViewer({
               <ChevronLeft className="h-6 w-6" />
             </button>
           )}
-          <button type="button" aria-label="Next" title="Next (→)" onClick={() => step(1)} className="pointer-events-auto absolute right-2 top-1/2 hidden -translate-y-1/2 rounded-full bg-black/40 p-2 text-white hover:bg-black/60 sm:block">
-            <ChevronRight className="h-6 w-6" />
-          </button>
+          {!(ended && index >= items.length - 1) && (
+            <button type="button" aria-label="Next" title="Next (→)" onClick={() => step(1)} className="pointer-events-auto absolute right-2 top-1/2 hidden -translate-y-1/2 rounded-full bg-black/40 p-2 text-white hover:bg-black/60 sm:block">
+              <ChevronRight className="h-6 w-6" />
+            </button>
+          )}
 
           {undo && (
             <div className="absolute inset-x-0 bottom-6 z-20 flex justify-center px-4">
