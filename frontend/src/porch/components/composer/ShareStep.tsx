@@ -276,6 +276,7 @@ export function ShareStep({
       )}
 
       <div className="flex flex-col gap-2">
+        {canPhotos && !picks.length && !poll && <RowButton icon={<ImagePlus className="h-4 w-4" aria-hidden />} label="Add photos or videos" onClick={onAddPhotos} />}
         <RowButton
           icon={<MapPin className="h-4 w-4" aria-hidden />}
           label={place ? "Place" : "Add a place"}
@@ -286,7 +287,6 @@ export function ShareStep({
         />
         {!life && !poll && canLife && <RowButton icon={<PartyPopper className="h-4 w-4" aria-hidden />} label="Life event" onClick={onLife} />}
         {!poll && !life && canPoll && !picks.length && <RowButton icon={<BarChart3 className="h-4 w-4" aria-hidden />} label="Poll" onClick={onPoll} />}
-        {canPhotos && !picks.length && !poll && <RowButton icon={<ImagePlus className="h-4 w-4" aria-hidden />} label="Add photos" onClick={onAddPhotos} />}
         {onEvent && !picks.length && !poll && !life && <RowButton icon={<CalendarPlus className="h-4 w-4" aria-hidden />} label="Event" onClick={onEvent} />}
       </div>
     </div>

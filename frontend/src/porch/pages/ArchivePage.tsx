@@ -1,3 +1,4 @@
+import { TilesSkeleton } from "../components/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { Archive, Bookmark, Eye, Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -61,7 +62,7 @@ export function ArchivePage() {
   ];
 
   let body;
-  if (q.isPending) body = <p className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Loading your stories…</p>;
+  if (q.isPending) body = <TilesSkeleton tiles={9} className="px-0.5" />;
   else if (q.isError) body = <LoadError what="Couldn't load your stories." onRetry={() => void q.refetch()} />;
   else if (!stories.length) {
     body = (

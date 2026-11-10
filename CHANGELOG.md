@@ -93,6 +93,23 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Rooms: Block and Unblock moved from the top of a one-to-one conversation into its More menu.
 - Rooms: a brand-new Rooms shows one "Create a space" button, and "It's just you here" is a card with an Add people button.
 - Voice: the voice card says "Good connection", "Okay connection" or "Weak connection" (tap for the details), has bigger buttons on touch screens, says "Leave" instead of "Disconnect", and slides in and out.
+<!-- Porch UI pass (ui-porch) -->
+- Porch: tap a photo to see it full screen. Pinch or double-tap to zoom, swipe sideways for the next one, swipe down to close, and Save keeps a copy. Double-tapping a photo in the feed still likes it.
+- Porch: pull the feed down on a phone to check for new posts, and the "new posts" pill now slides in.
+- Porch: Undo after deleting your own post or comment. It goes at once with no "are you sure", and you have ten seconds to bring it back.
+- Porch on a phone: Search, Saved and Settings buttons at the top of your own profile, and a marker on the bottom bar showing which tab you're on.
+
+### Changed
+<!-- Porch UI pass (ui-porch) -->
+- Porch: posting takes you straight back to the feed. A small chip shows "Posting… 60%", then "Posted" with View. If it doesn't go, the chip says why, offers Try again, and the post is kept as a draft.
+- Porch: a new post starts with the words, with "Add photos or videos" as the first button, so a short post is one step.
+- Porch: your comment shows the moment you send it. If it can't be sent it goes back in the box.
+- Porch: liking gives a small pop, and on a phone the number of comments sits beside the comment button.
+- Porch: a post's "…" menu is set out as Share, Manage and Safety.
+- Porch: the welcome is now the top of your feed the first time you open it, with nothing to close.
+- Porch: lists show grey placeholders while they load, not the word "Loading…".
+- Porch: on a computer the right-hand column only shows when there's an invite or a group to join; otherwise the feed sits in the middle.
+- Porch: unread badges match the rest of Promptly, the smallest text is bigger, and the small buttons (photo arrows, comment heart and "…", reactions) are easier to hit.
 
 ## [0.35.0] - 2026-11-09
 

@@ -1,3 +1,4 @@
+import { RowsSkeleton, TilesSkeleton } from "../components/ui";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { CalendarPlus, Check, Crown, ImageIcon, LogOut, MoreHorizontal, PenSquare, Pencil, Pin as PinIcon, Shield, ShieldOff, Trash2, UserMinus, UserPlus, UserRound } from "lucide-react";
@@ -204,7 +205,7 @@ function MemberView({ g }: { g: PorchGroup }) {
         <span className="inline-flex items-center gap-1.5">
           Reports
           {n > 0 && (
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--item-accent)] px-1.5 text-[11px] font-semibold text-white">
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent-strong)] px-1.5 text-xs font-semibold text-white">
               {n}
               <span className="sr-only"> waiting</span>
             </span>
@@ -439,7 +440,7 @@ export function PhotoGrid({ posts, empty }: { posts: ReturnType<typeof listPosts
             >
               {src && <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" />}
               {p.media.length > 1 && (
-                <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-[10px] font-semibold text-white" aria-hidden>
+                <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-xs font-semibold text-white" aria-hidden>
                   {p.media.length}
                 </span>
               )}
@@ -463,7 +464,7 @@ function GroupPhotos({ g }: { g: PorchGroup }) {
   const sentinel = useSentinel(() => {
     if (q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
   });
-  if (q.isPending) return <p className="px-4 py-6 text-sm text-[var(--text-muted)]">Loading photos…</p>;
+  if (q.isPending) return <TilesSkeleton tiles={9} />;
   if (q.isError) return <LoadError what="Couldn't load the photos." onRetry={() => void q.refetch()} />;
   return (
     <>
@@ -476,7 +477,7 @@ function GroupPhotos({ g }: { g: PorchGroup }) {
 function People({ g, members, loading, error, retry }: { g: PorchGroup; members?: Member[]; loading: boolean; error: boolean; retry: () => void }) {
   const { b } = usePorch();
   const [who, setWho] = useState<Member | null>(null);
-  if (loading) return <p className="px-4 py-6 text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (loading) return <RowsSkeleton rows={5} className="px-4 md:px-0" />;
   if (error || !members) return <LoadError what="Couldn't load who's in the group." onRetry={retry} />;
   return (
     <div className="px-4 md:px-0">
@@ -576,7 +577,7 @@ function PersonSheet({ g, m, onClose }: { g: PorchGroup; m: Member; onClose: () 
 function PendingList({ g, onInvite }: { g: PorchGroup; onInvite: () => void }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: pendingKey(g.id), queryFn: () => porchApi.pendingInvites(g.id), staleTime: 15_000 });
-  if (q.isPending) return <p className="px-4 py-6 text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (q.isPending) return <RowsSkeleton rows={5} className="px-4 md:px-0" />;
   if (q.isError) return <LoadError what="Couldn't load the invites." onRetry={() => void q.refetch()} />;
   if (q.data.length === 0) {
     return (

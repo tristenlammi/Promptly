@@ -36,7 +36,8 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { useBlock } from "../actions";
-import { profileKey, putPost } from "../cache";
+import { LISTS, profileKey, putPost } from "../cache";
+import { removeWithUndo } from "../undo";
 import { usePorch } from "../context";
 import { usePostTalk } from "../talkActions";
 import { CommentsSheet, InlineComments } from "./Comments";
@@ -172,7 +173,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
   const actions: MenuAction[] = [];
   if (post.can_edit) {
     actions.push({
-      label: "Edit post",
+      group: "manage", label: "Edit post",
       icon: Pencil,
       hint: post.kind === "text" || post.kind === "poll" ? "Its words and place" : "Its words, photos and place",
       onClick: () => navigate(`/porch/p/${post.id}/edit`),
@@ -180,7 +181,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
   }
   if (!post.mine && author) {
     actions.push({
-      label: "Reply privately",
+      group: "share", label: "Reply privately",
       icon: MessagesSquare,
       hint: `A message to ${who} in Rooms, with this post`,
       onClick: async () => {
@@ -194,19 +195,19 @@ export function PostCard({ post, full = false, media = true, className }: { post
     });
   }
   actions.push({
-    label: "Share to a Room",
+    group: "share", label: "Share to a Room",
     icon: MessageSquareShare,
     hint: "Only people who can see this post can open it",
     onClick: () => setSharing(true),
   });
   actions.push({
-    label: "Make this an event",
+    group: "manage", label: "Make this an event",
     icon: CalendarPlus,
     hint: "In your calendar, inviting people who can see this post",
     onClick: () => setPlanning(true),
   });
   actions.push({
-    label: "Copy link",
+    group: "share", label: "Copy link",
     icon: Link2,
     hint: "Only people who can see this post can open it",
     onClick: () => {
@@ -220,7 +221,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
   // Pins (WP-P3.1): one entry per group you run that it's in.
   for (const g of post.pin_groups ?? []) {
     actions.push({
-      label: g.pinned ? `Unpin from ${g.name}` : `Pin to ${g.name}`,
+      group: "manage", label: g.pinned ? `Unpin from ${g.name}` : `Pin to ${g.name}`,
       icon: g.pinned ? PinOff : Pin,
       hint: g.pinned ? undefined : `At the top of ${g.name}'s page (up to 3)`,
       onClick: async () => {
@@ -236,11 +237,11 @@ export function PostCard({ post, full = false, media = true, className }: { post
     });
   }
   if (post.media.some((m) => m.full)) {
-    actions.push({ label: post.media.length > 1 ? "Save photos" : post.media[0]?.kind === "video" ? "Save video" : "Save photo", icon: Download, onClick: () => setSaving(true) });
+    actions.push({ group: "share", label: post.media.length > 1 ? "Save photos" : post.media[0]?.kind === "video" ? "Save video" : "Save photo", icon: Download, onClick: () => setSaving(true) });
   }
   if (!post.mine && author) {
     actions.push({
-      label: `Turn on posts from ${who}`,
+      group: "manage", label: `Turn on posts from ${who}`,
       icon: BellRing,
       hint: `A notification when ${who} posts. Turn it off on their profile.`,
       onClick: async () => {
@@ -257,25 +258,26 @@ export function PostCard({ post, full = false, media = true, className }: { post
   // Server admins run Everyone: they can take someone's post out of it.
   const inEveryone = post.groups.some((g) => g.kind === "everyone");
   if (!post.mine && b?.me?.is_admin && inEveryone) {
-    actions.push({ label: `Remove from ${b.everyone.name}`, icon: ShieldMinus, hint: "Asks for a reason, which they'll see", danger: true, onClick: () => setUnEveryone(true) });
+    actions.push({ group: "safety", label: `Remove from ${b.everyone.name}`, icon: ShieldMinus, hint: "Asks for a reason, which they'll see", danger: true, onClick: () => setUnEveryone(true) });
   }
-  if (!post.mine && author) actions.push({ label: `Block ${who}`, icon: UserX, danger: true, onClick: () => void block(author) });
-  if (!post.mine) actions.push({ label: "Report", icon: TriangleAlert, hint: "Tell the admins of a group it's in", danger: true, onClick: () => setReporting(true) });
+  if (!post.mine && author) actions.push({ group: "safety", label: `Block ${who}`, icon: UserX, danger: true, onClick: () => void block(author) });
+  if (!post.mine) actions.push({ group: "safety", label: "Report", icon: TriangleAlert, hint: "Tell the admins of a group it's in", danger: true, onClick: () => setReporting(true) });
   if (post.can_delete) {
     actions.push({
-      label: "Delete post",
+      group: "manage", label: "Delete post",
       icon: Trash2,
       danger: true,
       onClick: async () => {
-        const ok = await confirm({
-          title: "Delete this post?",
-          message: post.mine
-            ? "This deletes the post for everyone. The photos stay in your Photos library."
-            : `This deletes ${who}'s post for everyone. Their photos stay in their Photos library.`,
-          confirmLabel: "Delete",
-          danger: true,
-        });
-        if (!ok) return;
+        // Your own post goes at once, with Undo. Someone else's: asked first.
+        if (!post.mine) {
+          const ok = await confirm({
+            title: "Delete this post?",
+            message: `This deletes ${who}'s post for everyone. Their photos stay in their Photos library.`,
+            confirmLabel: "Delete",
+            danger: true,
+          });
+          if (!ok) return;
+        }
         // It carries your event: cancel that too, or keep it in calendars.
         const ev = post.event && !post.event.cancelled && post.event.organiser ? post.event : null;
         const cancelEvent = ev
@@ -287,14 +289,24 @@ export function PostCard({ post, full = false, media = true, className }: { post
               danger: true,
             })
           : false;
-        try {
-          await porchApi.deletePost(post.id, cancelEvent);
-          putPost(qc, post.id, null);
-          if (cancelEvent) void qc.invalidateQueries({ queryKey: ["calendar"] });
-          toast.success(cancelEvent ? "Post deleted and the event cancelled." : "Post deleted.");
-        } catch (err) {
-          toast.error(apiErrorMessage(err, "Couldn't delete the post. Try again."));
-        }
+        removeWithUndo({
+          message: cancelEvent ? "Post deleted. The event will be cancelled too." : post.mine ? "Post deleted. Your photos stay in Photos." : "Post deleted.",
+          hide: () => {
+            // On the post's own page there's nothing left to look at: back to the feed.
+            if (full) navigate("/porch/", { replace: true });
+            putPost(qc, post.id, null);
+          },
+          restore: () => {
+            qc.setQueryData(["porch", "post", post.id], post);
+            void qc.invalidateQueries({ queryKey: LISTS });
+          },
+          commit: async () => {
+            await porchApi.deletePost(post.id, cancelEvent);
+            putPost(qc, post.id, null);
+            if (cancelEvent) void qc.invalidateQueries({ queryKey: ["calendar"] });
+          },
+          failed: "Couldn't delete the post, so it's back. Try again.",
+        });
       },
     });
   }

@@ -1,3 +1,4 @@
+import { RowsSkeleton } from "../components/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, BellOff, Moon, UserRound } from "lucide-react";
 import { useId, useState } from "react";
@@ -122,7 +123,7 @@ export function SettingsPage() {
     return (
       <Column>
         <PageHeader title="Notifications" back />
-        <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">Loading…</p>
+        <RowsSkeleton rows={5} className="px-4 md:px-0" />
       </Column>
     );
   }
@@ -195,7 +196,7 @@ export function SettingsPage() {
 
         <Section title="New posts from people" hint="Turn this on from someone's profile: Notify me.">
           {alerts.isPending ? (
-            <p className="px-1 text-sm text-[var(--text-muted)]">Loading…</p>
+            <RowsSkeleton rows={2} className="px-1" />
           ) : alerts.isError ? (
             <LoadError what="Couldn't load these." onRetry={() => void alerts.refetch()} />
           ) : alerts.data.length === 0 ? (
