@@ -22,10 +22,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Added
+
 <!-- New-member onboarding (onboard-fixes) -->
 - Admin → Users: after you create an account, a "Send them this" card shows the address, username and password with the steps to sign in, ready to copy, share, or email to them when email is set up.
 
 ### Changed
+
 <!-- New-member onboarding (onboard-fixes) -->
 - First sign-in for someone new now opens on Today with a short welcome: what Promptly is, how to put it on this phone, and a button to message the person who set it up (and Porch). It replaces the "Pick your apps" question.
 - Install apps starts with one recommended step for the device you're on (iPhone, Android or computer); the separate per-app installs, Android Auto and the passwords extension are under "More".
@@ -34,37 +36,6 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Plainer words for new people: the sign-in page says "Your family's private space" and to ask the person who set up Promptly for an account; "Usage & cost" is now "AI usage"; the chat model button shows just the model's name; new chats suggest everyday things to ask; and the Apps page has a few words under each app.
 - Starting a new message in Rooms now lists the people on your Promptly straight away, instead of an empty search.
 - Admin → Users: the create form checks the password against the same rules as the server and shows them, and the role choices are described in plain words.
-
-### Fixed
-<!-- New-member onboarding (onboard-fixes) -->
-- Choosing a password: a live checklist shows the rules (length, a number, a symbol), and errors read as plain sentences instead of "new_password: Value error, …".
-- After changing your password, an old error message no longer stays on screen, and you see that it worked.
-- Files: the "System" row at the bottom of a folder no longer cuts off the list's rounded corners.
-### Removed
-- Running code is gone: the AI can no longer run Python in chat, code blocks no longer have a Run button, and the code sandbox container is no longer installed (./update.sh removes it). HTML, React and SVG previews of code blocks still work, and old chats still show their past runs. The "Code execution" setting on users is gone with it.
-
-### Security
-<!-- Security review fixes (sec-fixes) -->
-- A placeholder TUS_HOOK_SECRET (copied from .env.example) now stops Promptly starting on a public address, like a placeholder SECRET_KEY does. ./update.sh fills it in before it restarts anything.
-- After a SECRET_KEY change, mail account passwords, saved secrets, the breach-check key and the traffic key are also moved onto the new key at start-up (with SECRET_KEY_PREVIOUS set), not only MFA, provider and connector secrets.
-- Password-reset emails, single sign-on and feedback emails no longer take this server's address from the request. A forged Host header could make a real reset email link to someone else's site. Links now always use the public address set in Admin, or the one you're using when it's one of those.
-- Workspace search results in the Ctrl+K palette show their highlighted snippet as text, so words in a shared note can't turn into page markup.
-- Updated python-jose to 3.4.0 and cryptography to 44.0.1 for their security fixes.
-- After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"). A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
-- The Office converter can no longer call Promptly's own server directly over the internal network it shares with it, and big-upload hooks need their secret (no more "it came from inside, so it's fine").
-- Fetching a web page (the AI's page reader, remote images in Mail, automations, link previews) connects to the exact address that was checked, so a site can't switch its DNS to an address inside your network between the check and the request.
-- nginx ignores the visitor address in CF-Connecting-IP when it arrives through Docker's gateway, so a device on your network can't pretend to be someone else to the rate limits. cloudflared should run as a container on Promptly's network (README, "Cloudflare Tunnel").
-- New optional NGINX_BIND in .env picks which address ports 8087/8488 open on (usually the server's LAN address). By default they now open on IPv4 only. The README has a new "Exposure" section: what should be reachable, and how to check from outside on IPv4 and IPv6.
-- The server, its workers, the upload service and the Office converter run with almost all Linux privileges removed and can't gain new ones.
-- Signing out now ends that session's access straight away, instead of up to 15 minutes later.
-- Once a public address is set, pages on this machine's localhost are no longer allowed to make signed-in requests to Promptly (unless DEBUG is on).
-- Calls on Linux: LiveKit's ports 7880 and 6789 are documented as firewall-only (they can't be limited to localhost because nginx and the backend reach them over Docker's bridge).
-<!-- UI polish, shared foundations (ui-polish) -->
-- Dialogs, sheets and menus now open and close with a short, soft movement instead of snapping in and out (off when your device asks for reduced motion).
-- Icon buttons in the Item Store apps show a quick themed tooltip on hover or keyboard focus, in place of the slow browser one.
-- Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
-
-### Changed
 - Porch: on a computer a post's ⋯ menu drops down from the button instead of opening a sheet in the middle of the screen. Double-tap to like answers a little faster.
 - Photos: in search, Faces, Places and memories, where photos can't be picked, tiles no longer show a tick that did nothing. While you're picking photos, the set-up banner and memories fade back out of the way.
 - Messages at the bottom of the screen start beside the app's own side list in Porch, Rooms, Calendar and Notes, instead of sitting on top of it.
@@ -224,6 +195,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Tasks: bigger tap targets on phones for the day "+", send, new list and the reorder grip.
 
 ### Fixed
+
+<!-- New-member onboarding (onboard-fixes) -->
+- Choosing a password: a live checklist shows the rules (length, a number, a symbol), and errors read as plain sentences instead of "new_password: Value error, …".
+- After changing your password, an old error message no longer stays on screen, and you see that it worked.
+- Files: the "System" row at the bottom of a folder no longer cuts off the list's rounded corners.
 - Photos: a photo or video you upload shows in the grid straight away, without a reload.
 - Files: the folder list at the side drops a folder as soon as you move it to trash, and brings it back on Undo or restore.
 - Photos: the viewer no longer shows a Next arrow on the last photo once it knows there are no more.
@@ -244,13 +220,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Calendar: Promptly's own date and time pickers in the event editor on a computer (a phone keeps its built-in ones).
 - Tasks: the Completed list shows each task's time in your own time format and under the right local day.
 - Admin → Users: a Storage column for everyone at once, with a small bar, the percentage, and used / limit (or "no limit"). You can also sort by most storage. It shows totals only, never what the files are.
-
-### Fixed
 - Porch: "Text post" is now a button at the top of the new-post screen. It was a link underneath all your photos, where it was easy to never find.
 - Passwords extension: bookmark sync no longer says "synced" when your server couldn't be reached. It says the other browsers don't have the latest yet, and keeps trying.
 - Passwords bookmark sync: a bookmark deleted in one browser now stays deleted. A browser with no record of its last sync (first sync, sync turned off and on, or the extension reinstalled) used to send its own copy back as a new bookmark, so it stayed there and came back everywhere; it now removes a copy that matches one in Recently deleted and was there before the deletion. A removal the browser refuses is tried again instead of being re-uploaded, and a deleted bookmark is no longer brought back because another device reordered it at the same time. "Keep them everywhere" still brings everything back.
 - Solid accent buttons with white text now meet WCAG AA in light and dark: the fill is the deeper terracotta (white on it is 4.95:1, was 3.1:1) and hover darkens (6.0:1) instead of fading. Accent text, borders, tints, switches and progress bars are unchanged, and the e2e accessibility checks no longer skip accent buttons.
-### Fixed
 - **P Maps driving (phone and Android Auto): a wrong turn now gets a new route within a few seconds.** The check for having left the route ignored every GPS fix less sure than 15 m, which is most of them in a car, so it often never asked for a new route. It now uses any usable fix, allows more room the vaguer the fix, and also notices driving the wrong way along the route.
 - P Maps: after a wrong turn the new route is the best way from where you are, rather than a way back to the points of the route you first picked.
 - P Maps: after a wrong turn, a route you saved as "Always go this way" is only rejoined when that costs no more than the extra minutes you allowed for it. Otherwise you get the best way from where you are.
@@ -258,6 +231,32 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps driving: a GPS fix arriving at the same moment as a new route can no longer leave the old turns showing on the new line.
 - P Maps: a new route asked for while stopped no longer assumes the direction the phone last guessed you were facing.
 - Android Auto: turn alerts use their own notification channel, so they are no longer silenced with the quiet "navigation running" one.
+
+### Removed
+
+- Running code is gone: the AI can no longer run Python in chat, code blocks no longer have a Run button, and the code sandbox container is no longer installed (./update.sh removes it). HTML, React and SVG previews of code blocks still work, and old chats still show their past runs. The "Code execution" setting on users is gone with it.
+
+### Security
+
+<!-- Security review fixes (sec-fixes) -->
+- A placeholder TUS_HOOK_SECRET (copied from .env.example) now stops Promptly starting on a public address, like a placeholder SECRET_KEY does. ./update.sh fills it in before it restarts anything.
+- After a SECRET_KEY change, mail account passwords, saved secrets, the breach-check key and the traffic key are also moved onto the new key at start-up (with SECRET_KEY_PREVIOUS set), not only MFA, provider and connector secrets.
+- Password-reset emails, single sign-on and feedback emails no longer take this server's address from the request. A forged Host header could make a real reset email link to someone else's site. Links now always use the public address set in Admin, or the one you're using when it's one of those.
+- Workspace search results in the Ctrl+K palette show their highlighted snippet as text, so words in a shared note can't turn into page markup.
+- Updated python-jose to 3.4.0 and cryptography to 44.0.1 for their security fixes.
+- After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"). A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
+- The Office converter can no longer call Promptly's own server directly over the internal network it shares with it, and big-upload hooks need their secret (no more "it came from inside, so it's fine").
+- Fetching a web page (the AI's page reader, remote images in Mail, automations, link previews) connects to the exact address that was checked, so a site can't switch its DNS to an address inside your network between the check and the request.
+- nginx ignores the visitor address in CF-Connecting-IP when it arrives through Docker's gateway, so a device on your network can't pretend to be someone else to the rate limits. cloudflared should run as a container on Promptly's network (README, "Cloudflare Tunnel").
+- New optional NGINX_BIND in .env picks which address ports 8087/8488 open on (usually the server's LAN address). By default they now open on IPv4 only. The README has a new "Exposure" section: what should be reachable, and how to check from outside on IPv4 and IPv6.
+- The server, its workers, the upload service and the Office converter run with almost all Linux privileges removed and can't gain new ones.
+- Signing out now ends that session's access straight away, instead of up to 15 minutes later.
+- Once a public address is set, pages on this machine's localhost are no longer allowed to make signed-in requests to Promptly (unless DEBUG is on).
+- Calls on Linux: LiveKit's ports 7880 and 6789 are documented as firewall-only (they can't be limited to localhost because nginx and the backend reach them over Docker's bridge).
+<!-- UI polish, shared foundations (ui-polish) -->
+- Dialogs, sheets and menus now open and close with a short, soft movement instead of snapping in and out (off when your device asks for reduced motion).
+- Icon buttons in the Item Store apps show a quick themed tooltip on hover or keyboard focus, in place of the slow browser one.
+- Shared building blocks for the apps to move onto: one menu (arrow keys, type to jump, Esc), one popover, one "name it" dialog in place of the browser prompt, one app header, and loading placeholders shaped like lists, cards, tiles, messages and people.
 
 ## [0.35.0] - 2026-11-09
 
