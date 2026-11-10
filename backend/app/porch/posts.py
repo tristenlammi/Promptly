@@ -15,10 +15,10 @@ profile, and one post.
 from __future__ import annotations
 
 import uuid
-from datetime import date as Date, datetime
+from datetime import date as Date, datetime, timedelta
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import exists, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -509,19 +509,8 @@ async def delete_post(
     it's in). The photos stay in the poster's library. ``cancel_event``: the
     event it carries is cancelled too (WP-P3.2; only its organiser can)."""
     post = await access.load_post(db, user, post_id)
-    if post.author_id != user.id:
-        gids = set(
-            (
-                await db.execute(
-                    select(PorchPostGroup.group_id)
-                    .join(PorchGroup, PorchGroup.id == PorchPostGroup.group_id)
-                    .where(PorchPostGroup.post_id == post.id, PorchGroup.deleted_at.is_(None))
-                )
-            ).scalars()
-        )
-        admin_of = {x.group.id for x in await access.my_groups(db, user) if x.is_admin}
-        if not gids or not gids <= admin_of:
-            raise core.forbidden("Only the person who posted it, or an admin of every group it's in, can delete it")
+    if not await _may_delete(db, user, post):
+        raise core.forbidden("Only the person who posted it, or an admin of every group it's in, can delete it")
     audience = await access.audience_ids(db, post)
     if cancel_event and post.event_id is not None:
         from app.calendars import service as cal_service
@@ -535,6 +524,44 @@ async def delete_post(
     post.deleted_at = core.now()
     await db.commit()
     await core.publish(audience, {"type": "post_change", "post_id": str(post.id)})
+
+
+async def _may_delete(db: AsyncSession, user: User, post: PorchPost) -> bool:
+    """You wrote it, or you're an admin of every (live) group it's in."""
+    if post.author_id == user.id:
+        return True
+    gids = set(
+        (
+            await db.execute(
+                select(PorchPostGroup.group_id)
+                .join(PorchGroup, PorchGroup.id == PorchPostGroup.group_id)
+                .where(PorchPostGroup.post_id == post.id, PorchGroup.deleted_at.is_(None))
+            )
+        ).scalars()
+    )
+    admin_of = {x.group.id for x in await access.my_groups(db, user) if x.is_admin}
+    return bool(gids) and gids <= admin_of
+
+
+# How long after deleting a post "Undo" can still bring it back.
+RESTORE_WINDOW = timedelta(seconds=60)
+
+
+@router.post("/posts/{post_id}/restore", status_code=204)
+async def restore_post(post_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_porch)) -> None:
+    """Undo a delete: the post comes back as it was, comments and all. Only
+    for a moment after deleting it, and only by someone who could delete it.
+    An event cancelled along with it stays cancelled."""
+    post = await db.get(PorchPost, post_id)
+    if post is None or not await _may_delete(db, user, post):
+        raise core.not_found()
+    if post.deleted_at is None:
+        return
+    if core.now() - post.deleted_at > RESTORE_WINDOW:
+        raise HTTPException(status_code=409, detail="It's too late to bring that post back")
+    post.deleted_at = None
+    await db.commit()
+    await core.publish(await access.audience_ids(db, post), {"type": "post_change", "post_id": str(post.id)})
 
 
 __all__ = ["post_out", "posts_out", "router"]

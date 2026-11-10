@@ -20,8 +20,8 @@ import { NewGroupSheet } from "./components/GroupSheets";
 import { SearchSheet } from "./components/SearchSheet";
 import { StoryComposer } from "./components/stories/StoryComposer";
 import { StoryViewer } from "./components/stories/StoryViewer";
+import { PostingChip } from "./components/PostingChip";
 import { ActionSheet, GroupTile, PorchAvatar } from "./components/ui";
-import { WelcomeSheet } from "./components/WelcomeSheet";
 import { PorchContext } from "./context";
 import { usePorchEvents } from "./live";
 import { ActivityPage } from "./pages/ActivityPage";
@@ -241,22 +241,25 @@ export function PorchApp({ embedded = false, promptlyNav = false }: { embedded?:
             <Main id={SCROLLER_ID} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {page}
             </Main>
+            <PostingChip floating={false} />
             {/* The composer is full screen on a phone. */}
             {route.page !== "new" && route.page !== "edit" && <BottomBar b={b} route={route} />}
           </>
         ) : (
           <div className="flex min-h-0 flex-1">
             <SideNav b={b} route={route} />
-            <Main id={SCROLLER_ID} className="min-w-0 flex-1 overflow-y-auto">
-              <div className="px-2 pt-2 lg:px-6">{page}</div>
-            </Main>
+            <div data-toast-anchor className="relative flex min-w-0 flex-1 flex-col">
+              <Main id={SCROLLER_ID} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                <div className="px-2 pt-2 lg:px-6">{page}</div>
+              </Main>
+              <PostingChip floating />
+            </div>
             <RightPanel b={b} />
           </div>
         ),
       )}
       {route.page === "stories" && <StoryViewer key={route.id} userId={route.id} />}
       {route.page === "newStory" && <StoryComposer />}
-      <WelcomeSheet />
       <GlobalSheets />
     </PorchContext.Provider>
   );
@@ -278,7 +281,7 @@ function GlobalSheets() {
 function Badge({ n, className }: { n: number; className?: string }) {
   if (!n) return null;
   return (
-    <span className={cn("inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--item-accent)] px-1 text-[11px] font-bold leading-none text-white", className)}>
+    <span className={cn("inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent-strong)] px-1.5 text-xs font-semibold tabular-nums leading-none text-white", className)}>
       {n > 99 ? "99+" : n}
       <span className="sr-only"> new</span>
     </span>
@@ -289,32 +292,39 @@ function Badge({ n, className }: { n: number; className?: string }) {
 function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
   const navigate = useNavigate();
   const [making, setMaking] = useState(false);
-  const tab = "relative flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]";
+  const tab = "relative flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]";
   const is = (on: boolean) => (on ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]");
   const me = route.page === "user" && route.id === b.me.id;
+  // The tab you're on: a short bar above it, as well as the colour.
+  const mark = (on: boolean) => on && <span aria-hidden className="absolute left-1/2 top-0 h-[3px] w-8 -translate-x-1/2 rounded-b-full bg-[var(--item-accent)]" />;
+  const inGroups = route.page === "groups" || route.page === "group";
   return (
-    <nav aria-label="Porch" className="flex shrink-0 items-end border-t border-[var(--border)] bg-[var(--surface)] pb-safe">
+    <nav aria-label="Porch" className="flex shrink-0 items-stretch border-t border-[var(--border)] bg-[var(--surface)] pb-safe">
       <Link to="/porch/" aria-current={route.page === "feed" ? "page" : undefined} className={cn(tab, is(route.page === "feed"))}>
+        {mark(route.page === "feed")}
         <Newspaper className="h-5 w-5" aria-hidden />
         Feed
       </Link>
-      <Link to="/porch/groups" aria-current={route.page === "groups" ? "page" : undefined} className={cn(tab, is(route.page === "groups" || route.page === "group"))}>
+      <Link to="/porch/groups" aria-current={route.page === "groups" ? "page" : undefined} className={cn(tab, is(inGroups))}>
+        {mark(inGroups)}
         <Users className="h-5 w-5" aria-hidden />
         Groups
       </Link>
       <button type="button" onClick={() => setMaking(true)} aria-label="New post or story" aria-haspopup="dialog" className={cn(tab, "text-[var(--text-muted)]")}>
-        <span className="flex h-9 w-12 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white">
+        <span className="flex h-10 w-12 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white">
           <Plus className="h-5 w-5" aria-hidden />
         </span>
       </button>
       <Link to="/porch/activity" aria-current={route.page === "activity" ? "page" : undefined} className={cn(tab, is(route.page === "activity"))}>
+        {mark(route.page === "activity")}
         <span className="relative">
           <Bell className="h-5 w-5" aria-hidden />
           <Badge n={b.activity_unseen} className="absolute -right-3 -top-1.5" />
         </span>
         Activity
       </Link>
-      <Link to={`/porch/u/${b.me.id}`} aria-current={me ? "page" : undefined} className={cn(tab, is(me))}>
+      <Link to={`/porch/u/${b.me.id}`} aria-current={me ? "page" : undefined} className={cn(tab, is(me || route.page === "saved" || route.page === "settings" || route.page === "archive"))}>
+        {mark(me || route.page === "saved" || route.page === "settings" || route.page === "archive")}
         <PorchAvatar user={b.me} size={22} className={cn(me && "ring-2 ring-[var(--item-accent)]")} />
         Profile
       </Link>
@@ -433,6 +443,8 @@ function RightPanel({ b }: { b: Bootstrap }) {
   const setNewGroup = usePorchStore((s) => s.setNewGroupOpen);
   const discover = useQuery({ queryKey: discoverKey(""), queryFn: () => porchApi.discover(""), staleTime: 60_000 });
   const toJoin = useMemo(() => (discover.data ?? []).slice(0, 3), [discover.data]);
+  // Nothing waiting and nothing to join: no column, and the feed sits in the middle.
+  if (!b.invites.length && !toJoin.length) return null;
   return (
     <aside aria-label="This week" className="hidden w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l border-[var(--border)] p-4 xl:flex">
       {b.invites.length > 0 && (

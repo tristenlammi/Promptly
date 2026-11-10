@@ -1,4 +1,4 @@
-import { Sparkles } from "lucide-react";
+import { Search, Sparkles } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -7,6 +7,7 @@ import { Avatar, Segmented } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
 import { EMOJI_GROUPS } from "../emoji";
+import { emojiMatches } from "../emojiNames";
 import { initials } from "../format";
 
 export function UserAvatar({ user, size = 36, className }: { user: RoomUser | undefined | null; size?: number; className?: string }) {
@@ -30,7 +31,7 @@ export function PromptlyAvatar({ size = 36 }: { size?: number }) {
     <span
       aria-hidden
       className="inline-flex shrink-0 items-center justify-center rounded-full text-white"
-      style={{ width: size, height: size, background: "linear-gradient(135deg, var(--item-accent), #D97757)" }}
+      style={{ width: size, height: size, background: "linear-gradient(135deg, var(--accent-strong), var(--accent))" }}
     >
       <Sparkles style={{ width: size * 0.5, height: size * 0.5 }} />
     </span>
@@ -45,7 +46,7 @@ export function SpaceIcon({ space, size = 48, className }: { space: Pick<Space, 
       style={{
         width: size,
         height: size,
-        background: space.color || "var(--item-accent)",
+        background: space.color || "var(--accent)",
         fontSize: space.emoji ? size * 0.5 : size * 0.36,
         borderRadius: size * 0.3,
       }}
@@ -61,7 +62,7 @@ export function CountBadge({ n, className }: { n: number; className?: string }) 
   return (
     <span
       className={cn(
-        "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--danger)] px-1 text-[11px] font-bold leading-none text-white",
+        "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--danger)] px-1 text-xs font-bold leading-none text-white",
         className,
       )}
     >
@@ -98,27 +99,81 @@ export function NotifyControl({
   );
 }
 
+const RECENT_EMOJI_KEY = "promptly:rooms:recent-emoji";
+const RECENT_EMOJI_MAX = 16;
+
+function readRecentEmoji(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(RECENT_EMOJI_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, RECENT_EMOJI_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberEmoji(e: string) {
+  try {
+    const next = [e, ...readRecentEmoji().filter((x) => x !== e)].slice(0, RECENT_EMOJI_MAX);
+    localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(next));
+  } catch {
+    /* no storage: no recents */
+  }
+}
+
+/** The emoji picker: a search box, the ones you used lately, then the lot. */
 export function EmojiGrid({ onPick, className }: { onPick: (e: string) => void; className?: string }) {
+  const [q, setQ] = useState("");
+  // Read once per opening, so the row doesn't reshuffle under your finger.
+  const [recent] = useState(readRecentEmoji);
+  const pick = (e: string) => {
+    rememberEmoji(e);
+    onPick(e);
+  };
+  const query = q.trim();
+  const groups = query
+    ? [{ name: "Results", emoji: [...new Set(EMOJI_GROUPS.flatMap((g) => g.emoji))].filter((e) => emojiMatches(e, query)) }]
+    : [...(recent.length ? [{ name: "Recent", emoji: recent }] : []), ...EMOJI_GROUPS];
+  const cell =
+    "flex h-10 w-10 items-center justify-center rounded-lg text-xl hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:h-9 md:w-9";
   return (
-    <div className={cn("flex max-h-72 flex-col gap-2 overflow-y-auto overscroll-contain p-2", className)}>
-      {EMOJI_GROUPS.map((g) => (
-        <div key={g.name}>
-          <p className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{g.name}</p>
-          <div className="grid grid-cols-8 gap-0.5">
-            {g.emoji.map((e) => (
-              <button
-                key={e}
-                type="button"
-                aria-label={e}
-                onClick={() => onPick(e)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-xl hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
-              >
-                {e}
-              </button>
-            ))}
+    <div className={cn("flex max-h-80 flex-col", className)}>
+      <label className="relative m-2 mb-1 block shrink-0">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden />
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter picks the first match.
+            if (e.key === "Enter" && query && groups[0]?.emoji[0]) {
+              e.preventDefault();
+              pick(groups[0].emoji[0]);
+            }
+          }}
+          placeholder="Search emoji"
+          aria-label="Search emoji"
+          autoComplete="off"
+          className="h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] pl-8 pr-3 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none md:h-9"
+        />
+      </label>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-2 pt-1">
+        {groups.map((g) => (
+          <div key={g.name}>
+            <p className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{g.name}</p>
+            {g.emoji.length === 0 ? (
+              <p className="px-1 py-3 text-sm text-[var(--text-muted)]">Nothing matches "{query}". Try another word.</p>
+            ) : (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-0.5">
+                {g.emoji.map((e) => (
+                  <button key={e} type="button" aria-label={e} onClick={() => pick(e)} className={cell}>
+                    {e}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

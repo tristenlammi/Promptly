@@ -52,12 +52,12 @@ export function AgendaView({
           return (
             <section key={ymd(day)} aria-label={fmt(day, { weekday: "long", month: "long", day: "numeric" })} className="flex gap-3 border-b border-[var(--border)] py-2.5 last:border-b-0">
               <div className="flex w-12 shrink-0 flex-col items-center pt-0.5">
-                <span className={cn("text-[11px] font-medium uppercase", isToday ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}>{fmt(day, { weekday: "short" })}</span>
+                <span className={cn("text-xs font-medium uppercase", isToday ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}>{fmt(day, { weekday: "short" })}</span>
                 <span className={cn("flex h-8 w-8 items-center justify-center rounded-full text-base font-semibold tabular-nums", isToday ? "bg-[var(--item-accent)] text-white" : "text-[var(--text)]")}>
                   {day.getDate()}
                 </span>
                 {day.getDate() === 1 || dayDiff(from, day) === 0 ? (
-                  <span className="text-[10px] uppercase text-[var(--text-muted)]">{fmt(day, { month: "short" })}</span>
+                  <span className="text-xs uppercase text-[var(--text-muted)]">{fmt(day, { month: "short" })}</span>
                 ) : null}
               </div>
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -125,7 +125,7 @@ function AgendaRow({ v, day, onOpen }: { v: ViewEvent; day: Date; onOpen: OpenEv
           )}
           {v.look === "pending" && <span className="shrink-0 font-medium text-[var(--item-accent)]">Invited</span>}
         </span>
-        {zone && <span className="truncate text-[11px] text-[var(--text-muted)]">{zone}</span>}
+        {zone && <span className="truncate text-xs text-[var(--text-muted)]">{zone}</span>}
       </span>
     </button>
   );

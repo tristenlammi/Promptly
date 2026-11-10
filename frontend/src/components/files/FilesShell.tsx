@@ -158,6 +158,7 @@ function FilesRail() {
       <NewMenu variant="rail" folderId={currentFolderId} onChanged={bumpTree} />
 
       <nav aria-label="Files sections" className="flex flex-col gap-0.5 text-sm">
+        <RailHeading first>Browse</RailHeading>
         <RailLink to="/files/home" icon={Home} label="Home" />
         <RailLink to="/files/photos" icon={Images} label="Photos" />
         <RailLink to="/files" icon={FolderOpen} label="My files" end active={onMyFiles} />
@@ -170,7 +171,12 @@ function FilesRail() {
             version={treeVersion}
           />
         )}
-        <RailLink to="/files/shared" icon={Share2} label="Shared" />
+        <RailLink to="/files/starred" icon={Star} label="Starred" />
+        <RailLink to="/files/recent" icon={Clock} label="Recent" />
+        <RailLink to="/files/trash" icon={Trash2} label="Trash" hint="Deleted forever after 30 days" />
+
+        <RailHeading>Shared</RailHeading>
+        <RailLink to="/files/shared" icon={Share2} label="Shared with me" />
         <button
           type="button"
           onClick={() => setWsOpen((o) => !o)}
@@ -193,9 +199,8 @@ function FilesRail() {
             )}
           </ul>
         )}
-        <RailLink to="/files/starred" icon={Star} label="Starred" />
-        <RailLink to="/files/recent" icon={Clock} label="Recent" />
-        <RailLink to="/files/trash" icon={Trash2} label="Trash" hint="Deleted forever after 30 days" />
+
+        <RailHeading>Tools</RailHeading>
         <RailLink to="/files/import" icon={Import} label="Import & export" />
         <RailLink to="/files/devices" icon={Smartphone} label="Devices" hint="Back up your phone with the Promptly app" />
         {appsFolder && (
@@ -209,7 +214,7 @@ function FilesRail() {
               type="button"
               onClick={() => setChatsOpen((o) => !o)}
               aria-expanded={chatsOpen}
-              className="mt-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
             >
               <Bot className="h-4 w-4 shrink-0" />
               <span className="flex-1 truncate">From chats</span>
@@ -231,9 +236,9 @@ function FilesRail() {
             )}
           </>
         )}
+        <AiSearchRow />
       </nav>
 
-      <AiSearchRow />
       <StorageMeter />
     </div>
   );
@@ -248,16 +253,30 @@ function AiSearchRow() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="mt-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
       >
-        <Sparkles className="h-3.5 w-3.5 text-[var(--accent-text)]" />
-        <span className="flex-1">AI search</span>
-        <span className="tabular-nums">
+        <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />
+        <span className="flex-1 truncate">AI search</span>
+        <span className="text-xs tabular-nums">
           {!data ? "" : !data.enabled ? "Off" : data.pending > 0 ? "Indexing…" : `On · ${data.indexed}`}
         </span>
       </button>
       <DriveAiDialog open={open} onClose={() => setOpen(false)} />
     </>
+  );
+}
+
+/** A quiet group name in the rail: Browse / Shared / Tools. */
+function RailHeading({ children, first }: { children: string; first?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "px-2 pb-1 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]/80",
+        !first && "mt-3"
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -303,6 +322,7 @@ function RailLink({
  *  the server last backed everything up. */
 function StorageMeter() {
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const [open, setOpen] = useState(false);
   const { data } = useQuery({
     queryKey: ["files-storage"],
     queryFn: () => filesShellApi.storage(),
@@ -326,27 +346,43 @@ function StorageMeter() {
     </span>
   );
   return (
-    <div className="mt-1 space-y-2 border-t border-[var(--border)] pt-3">
-      <div className="text-xs text-[var(--text-muted)]">
-        <div className="mb-1 flex justify-between gap-2">
-          <span>Storage</span>
-          <span className="tabular-nums">
+    <div className="mt-1 border-t border-[var(--border)] pt-2">
+      {/* One slim line; what is using the space, and the last backup,
+          open underneath. */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        title={open ? "Hide the details" : "See what is using your space"}
+        className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+      >
+        <span className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5">
+            Storage
+            {stale && <ShieldAlert className="h-3.5 w-3.5 text-[var(--warning)]" aria-label="Backup needs a look" />}
+          </span>
+          <span className="flex items-center gap-1 tabular-nums">
             {humanSize(data.used_bytes)}
             {capped ? ` of ${humanSize(data.cap_bytes ?? 0)}` : ""}
+            {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </span>
-        </div>
+        </span>
         {capped && (
-          <div className="h-1.5 overflow-hidden rounded-full bg-[var(--border)]">
-            <div
+          <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-[var(--border)]">
+            <span
               className={cn(
-                "h-full rounded-full",
+                "block h-full rounded-full",
                 pct >= 0.95 ? "bg-red-500" : pct >= 0.8 ? "bg-amber-500" : "bg-[var(--accent)]"
               )}
               style={{ width: `${Math.max(2, Math.round(pct * 100))}%` }}
             />
-          </div>
+          </span>
         )}
-        <dl className="mt-1.5 space-y-0.5 text-[11px]">
+      </button>
+      {open && (
+      <div className="space-y-2 px-2 pb-1 pt-1">
+      <div className="text-xs text-[var(--text-muted)]">
+        <dl className="space-y-0.5 text-xs">
           {(data.photos_bytes ?? 0) > 0 && (
             <div className="flex justify-between">
               <dt>
@@ -400,6 +436,8 @@ function StorageMeter() {
         </Link>
       ) : (
         badge
+      )}
+      </div>
       )}
     </div>
   );

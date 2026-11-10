@@ -6,6 +6,7 @@ import { BLOCKED_KEY, peopleHubApi } from "@/api/peopleHub";
 import { unblockPerson } from "@/components/people/blockActions";
 import { Button } from "@/components/shared/Button";
 import { UserAvatar } from "@/rooms/components/ui";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /**
  * Account → Blocked people: everyone you've blocked (``/api/people/blocks``),
@@ -33,7 +34,7 @@ export function BlockedPeoplePanel() {
       </header>
 
       {isLoading ? (
-        <p className="text-xs text-[var(--text-muted)]">Loading…</p>
+        <SkeletonRows count={3} label="Loading" />
       ) : isError ? (
         <p className="text-xs text-red-600 dark:text-red-400">Couldn't load the list. Try again in a moment.</p>
       ) : people.length === 0 ? (

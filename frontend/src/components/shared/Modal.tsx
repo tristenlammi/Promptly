@@ -1,17 +1,11 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { cn } from "@/utils/cn";
 
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  "textarea:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
+import { FOCUSABLE_SELECTOR, isTopLayer, pushLayer, removeLayer, trapTab } from "./overlayStack";
+import { usePresence } from "./usePresence";
 
 interface ModalProps {
   open: boolean;
@@ -28,24 +22,31 @@ interface ModalProps {
    * would discard in-progress input. Defaults to true.
    */
   dismissible?: boolean;
+  /**
+   * "top" lifts the dialog above sheets and menus. For app-wide prompts
+   * (confirm, "name it") that can be raised from anywhere, including from
+   * inside a Sheet. Defaults to the normal dialog layer.
+   */
+  layer?: "normal" | "top";
 }
 
-/** Open dialogs, oldest first; the last one is on top. */
-const openLayers: number[] = [];
-let layerSeq = 0;
+/**
+ * The shared dialog. Opens with a fade and slight scale and closes the same
+ * way (motion set, A1): it stays mounted for ~120ms after ``open`` goes
+ * false, showing what it last showed, then unmounts. A caller that renders
+ * it conditionally (``{x && <Modal open … />}``) still works; it just skips
+ * the closing animation.
+ */
+export function Modal(props: ModalProps) {
+  const { open, onClose, dismissible = true, layer = "normal" } = props;
+  // While closing, keep painting the last open content: callers often clear
+  // the state their children read in the same breath as closing.
+  const lastOpen = useRef(props);
+  if (open) lastOpen.current = props;
+  const { title, description, children, footer, widthClass = "max-w-lg" } = open ? props : lastOpen.current;
+  const { mounted, closing } = usePresence(open);
 
-export function Modal({
-  open,
-  onClose,
-  title,
-  description,
-  children,
-  footer,
-  widthClass = "max-w-lg",
-  dismissible = true,
-}: ModalProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
-  const [layerId] = useState(() => ++layerSeq);
   // Where focus was before opening — captured during the render that opens
   // the dialog, before React's ``autoFocus`` moves focus inside it (an
   // effect-time capture saw the dialog's own button and restored nothing).
@@ -61,20 +62,22 @@ export function Modal({
 
   // Only the top-most dialog answers Escape and traps Tab — one Escape used
   // to close every open layer at once (R-088).
+  const layerId = useRef<symbol | null>(null);
   useEffect(() => {
     if (!open) return;
-    openLayers.push(layerId);
+    const id = pushLayer();
+    layerId.current = id;
     return () => {
-      const i = openLayers.lastIndexOf(layerId);
-      if (i >= 0) openLayers.splice(i, 1);
+      removeLayer(id);
+      layerId.current = null;
     };
-  }, [open, layerId]);
+  }, [open]);
 
   // Close on Escape + trap Tab focus inside the dialog.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (openLayers[openLayers.length - 1] !== layerId) return;
+      if (!layerId.current || !isTopLayer(layerId.current)) return;
       if (e.key === "Escape") {
         // Something inside (a menu, a picker) already handled it.
         if (e.defaultPrevented) return;
@@ -85,31 +88,12 @@ export function Modal({
         return;
       }
       if (e.key !== "Tab") return;
-      const root = dialogRef.current;
-      if (!root) return;
-      const focusable = Array.from(
-        root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
-      if (focusable.length === 0) {
-        e.preventDefault();
-        root.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement as HTMLElement | null;
       // Wrap around at the ends so focus never escapes the dialog.
-      if (e.shiftKey && (active === first || !root.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      trapTab(e, dialogRef.current);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose, dismissible, layerId]);
+  }, [open, onClose, dismissible]);
 
   // Lock body scroll while open.
   useEffect(() => {
@@ -147,25 +131,35 @@ export function Modal({
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
+  const scrim = cn(
+    "absolute inset-0 bg-black/50 backdrop-blur-sm",
+    closing ? "motion-fade-out" : "motion-fade-in",
+  );
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      className={cn(
+        "fixed inset-0 flex items-center justify-center px-4",
+        layer === "top" ? "z-[90]" : "z-50",
+        closing && "pointer-events-none",
+      )}
       role="dialog"
-      aria-modal="true"
+      aria-modal={closing ? undefined : "true"}
+      aria-hidden={closing || undefined}
       aria-labelledby={title ? titleId : undefined}
     >
       {dismissible ? (
         <button
           aria-label="Close dialog"
+          tabIndex={-1}
           onClick={onClose}
-          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          className={scrim}
         />
       ) : (
         <div
           aria-hidden
-          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          className={scrim}
         />
       )}
       <div
@@ -175,6 +169,7 @@ export function Modal({
           "relative w-full overflow-hidden rounded-card border shadow-xl outline-none",
           "bg-[var(--surface)] text-[var(--text)]",
           "border-[var(--border)]",
+          closing ? "motion-dialog-out" : "motion-dialog-in",
           widthClass
         )}
         onClick={(e) => e.stopPropagation()}

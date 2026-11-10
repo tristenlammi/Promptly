@@ -57,6 +57,7 @@ import {
   openTaskLink,
 } from "./WorkspaceBoardCardDetail";
 import { WorkspaceFileImage } from "./WorkspaceFileImage";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /**
  * The workspace task board — a 3-column Kanban (To Do / In Progress / Done)
@@ -739,7 +740,7 @@ export function WorkspaceBoardPane({
 
       {/* Columns */}
       {isLoading ? (
-        <p className="py-4 text-sm text-[var(--text-muted)]">Loading…</p>
+        <SkeletonRows count={3} className="py-4" label="Loading" />
       ) : view === "board" ? (
         <div className="flex gap-3 overflow-x-auto pb-1">
           {columns.map(({ col, tasks: colTasks }) => {

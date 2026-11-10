@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, ImagePlus, LogOut, MoreHorizontal, Plus, Send, Share2, Sparkles, Star, Trash2, Upload, Users, X } from "lucide-react";
+import { ArrowDownUp, ArrowLeft, BookImage, Download, ImageMinus, ImagePlus, LogOut, MoreHorizontal, PauseCircle, Plus, Send, Share2, Sparkles, Star, Trash2, Upload } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { usePhotosPath } from "@/components/photos/photosPath";
@@ -8,7 +8,13 @@ import { albumsApi, type Album, type AlbumPhoto } from "@/api/albums";
 import { filesApi } from "@/api/files";
 import { trashApi } from "@/api/trash";
 import { AlbumMembersDialog, Cover } from "@/components/photos/AlbumDialogs";
+import { uploadToAlbum } from "@/components/photos/albumUploads";
+import { NameDialog } from "@/components/photos/NameDialog";
+import { usePhotosDrop } from "@/components/photos/photosDrop";
+import { CardGridSkeleton, TileGridSkeleton } from "@/components/photos/PhotoSkeletons";
 import { PhotoTile } from "@/components/photos/PhotoTile";
+import { PopMenu, PopMenuItem } from "@/components/photos/PopMenu";
+import { SelectionBar, type SelectionAction } from "@/components/photos/SelectionBar";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { SendToSheet } from "@/components/share/SendToSheet";
 import { EntityTags } from "@/components/tags/TagPicker";
@@ -16,6 +22,8 @@ import { LinkedSection } from "@/components/links/LinkedSection";
 import { SmartAlbumDialog } from "@/components/photos/SmartAlbumDialog";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { Skeleton } from "@/components/shared/Skeleton";
 import { justify } from "@/lib/justify";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
@@ -30,12 +38,12 @@ export function PhotoAlbumsPage() {
   const qc = useQueryClient();
   const { data: albums, isLoading } = useQuery({ queryKey: ["albums"], queryFn: albumsApi.list });
   const [smart, setSmart] = useState(false);
-  const make = async () => {
-    const title = window.prompt("Name the album", "");
-    if (!title?.trim()) return;
+  const [naming, setNaming] = useState(false);
+  const make = async (title: string) => {
     try {
-      const a = await albumsApi.create(title.trim());
+      const a = await albumsApi.create(title);
       void qc.invalidateQueries({ queryKey: ["albums"] });
+      setNaming(false);
       navigate(photosPath(`/albums/${a.id}`));
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't make the album."));
@@ -48,20 +56,25 @@ export function PhotoAlbumsPage() {
         <Button size="sm" variant="ghost" leftIcon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => setSmart(true)}>
           New smart album
         </Button>
-        <Button size="sm" variant="secondary" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={() => void make()}>
+        <Button size="sm" variant="secondary" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={() => setNaming(true)}>
           New album
         </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {isLoading ? (
-          <p className="text-sm text-[var(--text-muted)]">Loading…</p>
+          <CardGridSkeleton label="Loading your albums" />
         ) : !albums?.length ? (
-          <div className="flex flex-col items-center gap-2 p-10 text-center">
-            <Users className="h-10 w-10 text-[var(--text-muted)]" />
-            <p className="text-sm font-medium text-[var(--text)]">No albums yet</p>
-            <p className="max-w-sm text-xs text-[var(--text-muted)]">
-              Select photos in Photos and choose Add to album — or make one here and share it, so family can add theirs.
-            </p>
+          <div className="mx-auto max-w-lg pt-6">
+            <EmptyState
+              icon={<BookImage className="h-5 w-5" />}
+              title="No albums yet"
+              description="Gather photos of a trip, a person or a year. Share an album and your family can add theirs."
+              action={
+                <Button size="sm" variant="primary" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={() => setNaming(true)}>
+                  New album
+                </Button>
+              }
+            />
           </div>
         ) : (
           <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5" aria-label="Albums">
@@ -83,6 +96,9 @@ export function PhotoAlbumsPage() {
           </ul>
         )}
       </div>
+      {naming && (
+        <NameDialog title="New album" label="Album name" placeholder="Summer holiday" onClose={() => setNaming(false)} onSubmit={make} />
+      )}
       {smart && (
         <SmartAlbumDialog
           onClose={() => setSmart(false)}
@@ -139,6 +155,7 @@ export function PhotoAlbumPage() {
   const [sending, setSending] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
   const [editing, setEditing] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -156,10 +173,31 @@ export function PhotoAlbumPage() {
     void qc.invalidateQueries({ queryKey: ["albums"] });
   };
 
+  // Photos dropped on the page go into this album (through the upload
+  // queue, so each one shows its progress).
+  const mayAdd = !!album && album.role !== "viewer";
+  usePhotosDrop(
+    mayAdd && album
+      ? { label: `Drop to add to “${album.title}”`, onFiles: (files) => uploadToAlbum(album, files, qc) }
+      : null,
+  );
+
   if (error) {
     return <p className="p-6 text-sm text-[var(--text-muted)]">This album isn't there, or it isn't shared with you.</p>;
   }
-  if (!album) return <p className="p-6 text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (!album) {
+    return (
+      <div role="status" aria-label="Loading the album" className="flex h-full min-h-0 flex-col">
+        <div className="border-b border-[var(--border)] px-4 py-3">
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="mt-2 h-3 w-24" />
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden p-2 sm:p-4">
+          <TileGridSkeleton rows={4} tile={160} />
+        </div>
+      </div>
+    );
+  }
   const owner = album.role === "owner";
   const canAdd = album.role !== "viewer";
   const chosen = items.filter((p) => selected.has(p.id));
@@ -173,61 +211,63 @@ export function PhotoAlbumPage() {
       return n;
     });
 
-  const upload = async (files: FileList | null) => {
-    if (!files?.length) return;
-    const ids: string[] = [];
-    toast.info(`Uploading ${files.length}…`);
-    for (const f of Array.from(files)) {
-      try {
-        // Into your own Photos folder (by date), then into the album.
-        ids.push((await filesApi.upload("mine", f, null, "camera")).id);
-      } catch (e) {
-        toast.error(`${f.name}: ${apiErrorMessage(e, "couldn't upload")}`);
-      }
-    }
-    if (ids.length) {
-      const n = await albumsApi.addItems(album.id, ids);
-      toast.success(`Added ${n} to “${album.title}”.`);
-      refresh();
-    }
-  };
+  // Into your own Photos folder (by date), then into the album.
+  const upload = (files: FileList | null) => uploadToAlbum(album, Array.from(files ?? []), qc);
+
+  const clear = () => setSelected(new Set());
+  const actions: SelectionAction[] = [
+    ...(owner && selected.size === 1
+      ? [{
+          key: "cover",
+          label: "Make cover",
+          icon: <Star />,
+          onClick: () =>
+            void albumsApi
+              .update(album.id, { cover_file_id: [...selected][0] })
+              .then(() => {
+                toast.success("That's the cover now.");
+                clear();
+                refresh();
+              })
+              .catch((e) => toast.error(apiErrorMessage(e, "Couldn't change the cover."))),
+        }]
+      : []),
+    {
+      key: "download",
+      label: "Download",
+      icon: <Download />,
+      onClick: () => void filesApi.bulkZipDownload({ file_ids: [...selected], folder_ids: [] }).catch((e) => toast.error(apiErrorMessage(e, "Couldn't download them."))),
+    },
+    ...(removable.length > 0
+      ? [{
+          key: "remove",
+          label: "Remove from album",
+          icon: <ImageMinus />,
+          onClick: () => {
+            const ids = removable.map((p) => p.id);
+            void albumsApi
+              .removeItems(album.id, ids)
+              .then((n) => {
+                // Still in Photos; one tap puts them back in the album.
+                toast.success(`Took ${n} out of the album. ${n === 1 ? "It's" : "They're"} still in Photos.`, {
+                  action: { label: "Undo", onClick: () => void albumsApi.addItems(album.id, ids).then(refresh).catch((e) => toast.error(apiErrorMessage(e))) },
+                });
+                clear();
+                refresh();
+              })
+              .catch((e) => toast.error(apiErrorMessage(e, "Couldn't take them out.")));
+          },
+        }]
+      : []),
+  ];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        {selected.size > 0 ? (
-          <div role="toolbar" aria-label="Selected photos" className="flex w-full flex-wrap items-center gap-1">
-            <button type="button" aria-label="Clear selection" onClick={() => setSelected(new Set())} className="rounded p-1 hover:bg-[var(--hover)]">
-              <X className="h-4 w-4" />
-            </button>
-            <span className="mr-2 text-sm font-medium">{selected.size} selected</span>
-            {owner && selected.size === 1 && (
-              <Button size="sm" variant="ghost" leftIcon={<Star className="h-3.5 w-3.5" />} onClick={() =>
-                void albumsApi.update(album.id, { cover_file_id: [...selected][0] }).then(() => { toast.success("That's the cover now."); setSelected(new Set()); refresh(); })
-              }>
-                Make cover
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" leftIcon={<Download className="h-3.5 w-3.5" />} onClick={() =>
-              void filesApi.bulkZipDownload({ file_ids: [...selected], folder_ids: [] }).catch((e) => toast.error(apiErrorMessage(e, "Couldn't download them.")))
-            }>
-              Download
-            </Button>
-            {removable.length > 0 && (
-              <Button size="sm" variant="ghost" leftIcon={<Trash2 className="h-3.5 w-3.5" />} onClick={() =>
-                void albumsApi.removeItems(album.id, removable.map((p) => p.id)).then((n) => {
-                  toast.success(`Took ${n} out of the album — they're still in Photos.`);
-                  setSelected(new Set());
-                  refresh();
-                })
-              }>
-                Remove from album
-              </Button>
-            )}
-          </div>
-        ) : (
-          <>
-            <Link to={photosPath("/albums")} aria-label="Back to albums" className="rounded p-1 hover:bg-[var(--hover)]">
+        {/* A selection's actions float over the grid (below), so the header
+            stays where it is. */}
+        <>
+            <Link to={photosPath("/albums")} aria-label="Back to albums" title="Back to albums" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full hover:bg-[var(--hover)] sm:h-8 sm:w-8">
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <div className="min-w-0 flex-1">
@@ -264,7 +304,17 @@ export function PhotoAlbumPage() {
                 <Button size="sm" variant="secondary" leftIcon={<ImagePlus className="h-3.5 w-3.5" />} onClick={() => navigate(photosPath(`?addTo=${album.id}`))}>
                   Add photos
                 </Button>
-                <input ref={fileInput} type="file" multiple accept="image/*,video/*,.heic,.heif" hidden onChange={(e) => void upload(e.target.files)} />
+                <input
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  accept="image/*,video/*,.heic,.heif,.dng,.mov"
+                  hidden
+                  onChange={(e) => {
+                    upload(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
                 <Button size="sm" variant="ghost" leftIcon={<Upload className="h-3.5 w-3.5" />} onClick={() => fileInput.current?.click()}>
                   Upload
                 </Button>
@@ -276,40 +326,47 @@ export function PhotoAlbumPage() {
             <Button size="sm" variant="ghost" leftIcon={<Send className="h-3.5 w-3.5" />} onClick={() => setSending(true)}>
               Send to…
             </Button>
-            <div className="relative">
-              <button type="button" aria-label="More" aria-expanded={menu} onClick={() => setMenu((v) => !v)} className="rounded p-1.5 hover:bg-[var(--hover)]">
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-              {menu && (
-                <div role="menu" className="absolute right-0 z-20 mt-1 w-48 rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 text-sm shadow-lg">
+            <button
+              ref={menuButton}
+              type="button"
+              aria-label="More"
+              title="More"
+              aria-haspopup="menu"
+              aria-expanded={menu}
+              onClick={() => setMenu((v) => !v)}
+              className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[var(--hover)] sm:h-8 sm:w-8"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+            <PopMenu open={menu} anchor={menuButton} onClose={() => setMenu(false)} label="More for this album">
                   {owner && (
-                    <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-[var(--hover)]" onClick={() => {
+                    <PopMenuItem icon={<ArrowDownUp className="h-4 w-4" />} onSelect={() => {
                       setMenu(false);
                       void albumsApi.update(album.id, { sort: album.sort === "newest" ? "oldest" : "newest" }).then(refresh);
                     }}>
                       {album.sort === "newest" ? "Oldest first" : "Newest first"}
-                    </button>
+                    </PopMenuItem>
                   )}
                   {owner && (
-                    <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-[var(--hover)]" onClick={() => {
+                    <PopMenuItem icon={<Sparkles className="h-4 w-4" />} onSelect={() => {
                       setMenu(false);
                       setEditing(true);
                     }}>
                       {album.smart ? "Edit what it holds" : "Make it smart"}
-                    </button>
+                    </PopMenuItem>
                   )}
                   {owner && album.smart && (
-                    <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left hover:bg-[var(--hover)]" onClick={async () => {
+                    <PopMenuItem icon={<PauseCircle className="h-4 w-4" />} onSelect={async () => {
                       setMenu(false);
                       if (!(await confirm({ title: "Stop adding photos by itself?", message: "What's in it now stays; new photos won't join.", confirmLabel: "Stop" }))) return;
                       await albumsApi.setRules(album.id, null);
                       refresh();
                     }}>
                       Stop updating
-                    </button>
+                    </PopMenuItem>
                   )}
                   {owner ? (
-                    <button type="button" role="menuitem" className="block w-full px-3 py-1.5 text-left text-red-500 hover:bg-[var(--hover)]" onClick={async () => {
+                    <PopMenuItem danger icon={<Trash2 className="h-4 w-4" />} onSelect={async () => {
                       setMenu(false);
                       if (!(await confirm({ title: `Delete “${album.title}”?`, message: "The photos stay in Photos and Files — only the album goes.", confirmLabel: "Delete album", danger: true }))) return;
                       await albumsApi.remove(album.id);
@@ -332,9 +389,9 @@ export function PhotoAlbumPage() {
                       });
                     }}>
                       Delete album
-                    </button>
+                    </PopMenuItem>
                   ) : (
-                    <button type="button" role="menuitem" className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--hover)]" onClick={async () => {
+                    <PopMenuItem icon={<LogOut className="h-4 w-4" />} onSelect={async () => {
                       setMenu(false);
                       if (!(await confirm({ title: `Leave “${album.title}”?`, message: "Photos you added leave with you.", confirmLabel: "Leave", danger: true }))) return;
                       const me = useAuthStore.getState().user?.id;
@@ -343,21 +400,35 @@ export function PhotoAlbumPage() {
                       void qc.invalidateQueries({ queryKey: ["albums"] });
                       navigate(photosPath("/albums"));
                     }}>
-                      <LogOut className="h-3.5 w-3.5" /> Leave album
-                    </button>
+                      Leave album
+                    </PopMenuItem>
                   )}
-                </div>
-              )}
-            </div>
+            </PopMenu>
           </>
-        )}
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2 sm:p-4">
+      <div className="relative min-h-0 flex-1">
+      <SelectionBar count={selected.size} onClear={clear} actions={actions} escape={!viewing && !sharing && !sending && !editing} />
+      <div className="h-full overflow-y-auto p-2 sm:p-4">
         <div ref={boxRef}>
-          {items.length === 0 && !pages.isLoading ? (
-            <p className="p-8 text-center text-sm text-[var(--text-muted)]">
-              {canAdd ? "Nothing here yet — Add photos from your library, or Upload from this device." : "Nothing here yet."}
-            </p>
+          {pages.isLoading ? (
+            <div role="status" aria-label="Loading the photos">
+              <TileGridSkeleton rows={4} tile={width < 640 ? 110 : 200} />
+            </div>
+          ) : items.length === 0 ? (
+            <div className="mx-auto max-w-lg pt-6">
+              <EmptyState
+                icon={<ImagePlus className="h-5 w-5" />}
+                title="Nothing here yet"
+                description={canAdd ? "Add photos from your library, upload from this device, or drop them here." : "Photos added to this album show up here."}
+                action={
+                  canAdd ? (
+                    <Button size="sm" variant="primary" leftIcon={<ImagePlus className="h-3.5 w-3.5" />} onClick={() => navigate(photosPath(`?addTo=${album.id}`))}>
+                      Add photos
+                    </Button>
+                  ) : undefined
+                }
+              />
+            </div>
           ) : (
             <div className="flex flex-col gap-1">
               {rows.map((r, ri) => (
@@ -383,6 +454,7 @@ export function PhotoAlbumPage() {
           )}
           <div ref={sentinel} className="h-8" />
         </div>
+      </div>
       </div>
       {sharing && <AlbumMembersDialog album={album} onClose={() => setSharing(false)} />}
       <SendToSheet open={sending} onClose={() => setSending(false)} target={{ kind: "album", id: album.id, title: album.title }} canGrant={owner} />

@@ -1,3 +1,4 @@
+import { TilesSkeleton } from "./ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe2, ImagePlus, Lock, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -372,7 +373,7 @@ function CoverPicker({ open, onClose, onPick }: { open: boolean; onClose: () => 
   return (
     <Sheet open={open} onClose={onClose} title="Choose a cover" size="lg">
       {q.isPending ? (
-        <p className="py-8 text-center text-sm text-[var(--text-muted)]">Loading your photos…</p>
+        <TilesSkeleton tiles={9} />
       ) : q.isError ? (
         <p className="py-8 text-center text-sm text-[var(--danger)]">Couldn't load your photos.</p>
       ) : items.length === 0 ? (

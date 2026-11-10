@@ -10,6 +10,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 
 import { formatDuration, formatKm, mapsApi } from "./api";
 import { pointsFromExport } from "./timelineImport";
+import { Choice, RowsSkeleton, SwitchRow } from "./ui";
 
 interface Segment {
   type: "stay" | "move";
@@ -87,13 +88,23 @@ export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onS
       toast.info("Turn this on from the P Maps app on your Android phone: that's what records where you go.");
       return;
     }
-    await apiClient.put("/maps/timeline/settings", { timeline_on: false });
+    try {
+      await apiClient.put("/maps/timeline/settings", { timeline_on: false });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't pause the timeline. It's still recording: try again."));
+      return;
+    }
     void qc.invalidateQueries({ queryKey: ["maps-timeline-settings"] });
     toast.success("Timeline paused. The phone stops the next time it checks in.");
   };
 
-  const setRetention = async (value: string) => {
-    await apiClient.put("/maps/timeline/settings", { retention_days: value ? Number(value) : null });
+  const setRetention = async (days: number) => {
+    try {
+      await apiClient.put("/maps/timeline/settings", { retention_days: days || null });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't change how long your history is kept."));
+      return;
+    }
     void qc.invalidateQueries({ queryKey: ["maps-timeline-settings"] });
   };
 
@@ -108,7 +119,12 @@ export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onS
     const start = new Date(`${day}T00:00:00`);
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
-    await apiClient.delete("/maps/timeline", { params: { start: start.toISOString(), end: end.toISOString() } });
+    try {
+      await apiClient.delete("/maps/timeline", { params: { start: start.toISOString(), end: end.toISOString() } });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't delete this day."));
+      return;
+    }
     shown.current = null;
     void qc.invalidateQueries({ queryKey: ["maps-timeline", day] });
   };
@@ -144,7 +160,7 @@ export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onS
         <button type="button" onClick={() => setDay(shift(day, 1))} disabled={day >= today} aria-label="The day after" className="rounded-full p-2 text-[var(--text)] enabled:hover:bg-[var(--hover)] disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
       </div>
 
-      {isLoading && <p className="flex items-center gap-2 px-4 py-3 text-sm text-[var(--text-muted)]"><Loader2 className="h-4 w-4 animate-spin" />Loading…</p>}
+      {isLoading && <RowsSkeleton rows={4} label="Loading this day" />}
       {error && <p className="px-4 py-3 text-sm text-[var(--text-muted)]">{apiErrorMessage(error, "Couldn't load this day.")}</p>}
       {data && data.segments.length === 0 && <p className="px-4 py-4 text-center text-sm text-[var(--text-muted)]">Nothing recorded on this day.</p>}
       {data && data.segments.length > 0 && (
@@ -175,28 +191,32 @@ export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onS
       )}
       {data && data.points > 0 && (
         <div className="px-4 pt-3">
-          <button type="button" onClick={removeDay} className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"><Trash2 className="h-3.5 w-3.5" />Delete this day</button>
+          <button type="button" onClick={removeDay} className="inline-flex min-h-10 items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] md:min-h-0"><Trash2 className="h-3.5 w-3.5" />Delete this day</button>
         </div>
       )}
 
       <div className="mt-4 space-y-3 border-t border-[var(--border)] px-4 pt-3">
-        <label className="flex items-center justify-between gap-3 text-sm text-[var(--text)]">
-          <span>Record where I go</span>
-          <input type="checkbox" checked={settings?.timeline_on ?? false} onChange={(e) => void setRecording(e.target.checked)} />
-        </label>
+        <SwitchRow checked={settings?.timeline_on ?? false} onChange={(on) => void setRecording(on)}>
+          <span className="text-sm text-[var(--text)]">Record where I go</span>
+        </SwitchRow>
         <p className="text-xs text-[var(--text-muted)]">Only you can see your timeline. An admin of this server could read its database.</p>
-        <label className="flex items-center justify-between gap-3 text-sm text-[var(--text)]">
-          <span>Keep history for</span>
-          <select value={settings?.retention_days ?? ""} onChange={(e) => void setRetention(e.target.value)} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)]">
-            <option value="">Until I delete it</option>
-            <option value="30">30 days</option>
-            <option value="90">3 months</option>
-            <option value="365">1 year</option>
-            <option value="1095">3 years</option>
-          </select>
-        </label>
+        <div>
+          <p className="mb-1 text-sm text-[var(--text)]">Keep history for</p>
+          <Choice
+            label="Keep history for"
+            value={settings?.retention_days ?? 0}
+            onChange={(days) => void setRetention(days)}
+            options={[
+              { value: 30, label: "30 days" },
+              { value: 90, label: "3 months" },
+              { value: 365, label: "1 year" },
+              { value: 1095, label: "3 years" },
+              { value: 0, label: "Until I delete it" },
+            ]}
+          />
+        </div>
         <GoogleImport onDone={() => void qc.invalidateQueries({ queryKey: ["maps-timeline"] })} />
-        <button type="button" onClick={removeAll} className="inline-flex items-center gap-1.5 text-xs text-[var(--danger,#c0392b)] hover:underline"><Trash2 className="h-3.5 w-3.5" />Delete my whole timeline</button>
+        <button type="button" onClick={removeAll} className="inline-flex min-h-10 items-center gap-1.5 text-xs text-[var(--danger,#c0392b)] hover:underline md:min-h-0"><Trash2 className="h-3.5 w-3.5" />Delete my whole timeline</button>
       </div>
     </div>
   );

@@ -74,6 +74,8 @@ export function ConfirmHost() {
       onClose={() => settle(false)}
       title={current?.title ?? "Are you sure?"}
       widthClass="max-w-sm"
+      // Above sheets and menus: a confirm can be raised from inside either.
+      layer="top"
       footer={
         <>
           {/* A destructive confirm starts on Cancel, so a stray Enter can't

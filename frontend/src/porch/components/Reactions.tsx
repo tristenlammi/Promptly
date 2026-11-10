@@ -1,3 +1,4 @@
+import { RowsSkeleton } from "./ui";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -173,7 +174,7 @@ export function ReactionsLine({
       <button
         type="button"
         onClick={onWho}
-        className={cn("inline-flex min-h-[32px] items-center gap-1.5 text-left text-sm text-[var(--text)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] rounded", className)}
+        className={cn("inline-flex min-h-[40px] items-center gap-1.5 text-left text-sm text-[var(--text)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] rounded", className)}
       >
         {prefix}
         {emojis}
@@ -213,7 +214,7 @@ export function WhoReactedSheet({ target, id, open, onClose }: { target: "post" 
               aria-checked={filter === e}
               onClick={() => setFilter(e)}
               className={cn(
-                "h-8 rounded-full border px-3 text-sm",
+                "h-10 rounded-full border px-3.5 text-sm",
                 filter === e ? "border-[var(--item-accent)] bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] text-[var(--text)]" : "border-[var(--border)] text-[var(--text-muted)]",
               )}
             >
@@ -223,7 +224,7 @@ export function WhoReactedSheet({ target, id, open, onClose }: { target: "post" 
         </div>
       )}
       {q.isPending ? (
-        <p className="py-6 text-center text-sm text-[var(--text-muted)]">Loading…</p>
+        <RowsSkeleton rows={4} />
       ) : q.isError ? (
         <LoadError what="Couldn't load the reactions." onRetry={() => void q.refetch()} />
       ) : rows.length === 0 ? (

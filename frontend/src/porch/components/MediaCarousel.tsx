@@ -6,6 +6,8 @@ import { thumbHashToDataURL } from "thumbhash";
 import type { PorchMedia } from "@/api/porch";
 import { cn } from "@/utils/cn";
 
+import { PhotoLightbox } from "./Lightbox";
+
 function blur(hash: string | null): string | undefined {
   if (!hash) return undefined;
   try {
@@ -45,16 +47,42 @@ export function MediaCarousel({
   const [burst, setBurst] = useState(0);
   const [showTags, setShowTags] = useState(false);
   const lastTap = useRef(0);
-  const tap = () => {
-    if (!onDoubleTap) return;
+  // One tap opens the photo full screen; it waits a beat first, so a second
+  // tap can turn it into a like instead.
+  const [open, setOpen] = useState<number | null>(null);
+  const opening = useRef<number | null>(null);
+  const photos = useMemo(() => media.filter((m) => m.kind !== "video"), [media]);
+  useEffect(() => () => {
+    if (opening.current) window.clearTimeout(opening.current);
+  }, []);
+  const tap = (m: PorchMedia) => {
+    const show = () => {
+      opening.current = null;
+      const i = photos.findIndex((p) => p.id === m.id);
+      if (i >= 0) setOpen(i);
+    };
+    if (!onDoubleTap) {
+      show();
+      return;
+    }
     const now = Date.now();
-    if (now - lastTap.current < 320) {
+    if (opening.current) window.clearTimeout(opening.current);
+    if (now - lastTap.current < 250) {
       lastTap.current = 0;
+      opening.current = null;
       setBurst((b) => b + 1);
       onDoubleTap();
     } else {
       lastTap.current = now;
+      opening.current = window.setTimeout(show, 250);
     }
+  };
+  /** Bring the carousel to the photo the full-screen view moved to. */
+  const follow = (i: number) => {
+    setOpen(i);
+    const el = track.current;
+    const to = media.findIndex((x) => x.id === photos[i]?.id);
+    if (el && to >= 0) el.scrollTo({ left: to * el.clientWidth });
   };
   const tags = media[at]?.tags ?? [];
   const ratio = useMemo(() => frameRatio(media), [media]);
@@ -109,14 +137,18 @@ export function MediaCarousel({
             {m.kind === "video" ? (
               <VideoSlide m={m} active={i === at} />
             ) : (
-              <div className="h-full w-full select-none" onClick={tap}>
+              <div className="h-full w-full cursor-zoom-in select-none" onClick={() => tap(m)}>
                 <PhotoSlide m={m} index={i} total={n} />
+                <button type="button" onClick={(e) => { e.stopPropagation(); const k = photos.findIndex((p) => p.id === m.id); if (k >= 0) setOpen(k); }} className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-3 focus-visible:top-3 focus-visible:rounded-full focus-visible:bg-black/70 focus-visible:px-3 focus-visible:py-2 focus-visible:text-xs focus-visible:font-medium focus-visible:text-white">
+                  Open this photo full screen
+                </button>
                 {showTags && <TagLabels m={m} />}
               </div>
             )}
           </div>
         ))}
       </div>
+      {open !== null && photos[open] && <PhotoLightbox photos={photos} index={open} onIndex={follow} onClose={() => setOpen(null)} />}
       {burst > 0 && (
         <span key={burst} aria-hidden className="porch-heart-burst pointer-events-none absolute inset-0 m-auto flex h-24 w-24 items-center justify-center text-white drop-shadow-[0_2px_8px_rgba(0,0,0,.45)]">
           <Heart className="h-24 w-24 fill-white" />
@@ -128,7 +160,7 @@ export function MediaCarousel({
           aria-pressed={showTags}
           aria-label={showTags ? "Hide who's in this photo" : `Show who's in this photo (${tags.length})`}
           onClick={() => setShowTags((v) => !v)}
-          className="absolute bottom-3 left-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          className="absolute bottom-2 left-2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
         >
           <UserRound className="h-4 w-4" aria-hidden />
         </button>
@@ -143,7 +175,7 @@ export function MediaCarousel({
             aria-label="Previous photo"
             onClick={() => go(at - 1)}
             disabled={at === 0}
-            className="absolute left-2 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition focus-visible:opacity-100 disabled:hidden group-hover/carousel:opacity-100 md:flex"
+            className="absolute left-2 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition focus-visible:opacity-100 disabled:hidden group-hover/carousel:opacity-100 md:flex"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -152,7 +184,7 @@ export function MediaCarousel({
             aria-label="Next photo"
             onClick={() => go(at + 1)}
             disabled={at === n - 1}
-            className="absolute right-2 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition focus-visible:opacity-100 disabled:hidden group-hover/carousel:opacity-100 md:flex"
+            className="absolute right-2 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition focus-visible:opacity-100 disabled:hidden group-hover/carousel:opacity-100 md:flex"
           >
             <ChevronRight className="h-5 w-5" />
           </button>

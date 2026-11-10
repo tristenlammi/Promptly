@@ -32,7 +32,10 @@ export function initials(c: Contact): string {
   const a = (c.first || "").trim();
   const b = (c.last || "").trim();
   if (a || b) return ((a[0] || "") + (b[0] || "")).toUpperCase() || "?";
-  const n = displayName(c).replace(/[^\p{L}\p{N} ]/gu, "").trim();
+  const shown = displayName(c);
+  // Nothing to go on yet (a new contact): a "?" rather than "NN" for "No name".
+  if (shown === "No name") return "?";
+  const n = shown.replace(/[^\p{L}\p{N} ]/gu, "").trim();
   const parts = n.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return (n.slice(0, 2) || "?").toUpperCase();

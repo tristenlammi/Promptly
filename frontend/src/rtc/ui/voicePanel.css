@@ -1,0 +1,29 @@
+/* The voice card arriving in (and leaving) the side column. The app-wide
+   reduced-motion block (index.css) turns both off. */
+@keyframes voice-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes voice-panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+.voice-panel-in {
+  animation: voice-panel-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.voice-panel-out {
+  animation: voice-panel-out 180ms ease-in forwards;
+  pointer-events: none;
+}

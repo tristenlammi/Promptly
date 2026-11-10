@@ -7,12 +7,14 @@ import { porchApi } from "@/api/porch";
 import { EmptyState, ItemButton } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
-import { feedKey, listPosts } from "../cache";
+import { BOOTSTRAP_KEY, STORIES_ROW_KEY, feedKey, listPosts } from "../cache";
 import { GroupChips } from "../components/GroupChips";
 import { PostCard, PostList } from "../components/PostCard";
 import { StoriesRow } from "../components/stories/StoriesRow";
 import { Column, LoadError, PageHeader, PostSkeleton } from "../components/ui";
+import { Welcome } from "../components/WelcomeSheet";
 import { usePorch } from "../context";
+import { PullIndicator, usePullToRefresh } from "../pull";
 import { usePorchStore } from "../store";
 import { scrollPorchTo, usePorchScroller, useSentinel } from "../scroll";
 
@@ -103,6 +105,19 @@ export function FeedPage() {
     await qc.resetQueries({ queryKey: feedKey(photos) });
   };
 
+  // Phones: pull the feed down from the top to check for new posts.
+  const pulled = usePullToRefresh(
+    scroller,
+    async () => {
+      clearFresh();
+      await Promise.all([q.refetch(), qc.invalidateQueries({ queryKey: STORIES_ROW_KEY }), qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY })]);
+    },
+    isPhone,
+  );
+
+  // Your first visit: the welcome is the top of the feed (see ``Welcome``).
+  const [welcome] = useState(!b.profile.welcomed);
+
   const ticked = b.groups.filter((g) => g.in_feed);
   const alone = b.everyone.member_count <= 1 && b.groups.length <= 1;
 
@@ -133,6 +148,16 @@ export function FeedPage() {
           )
         }
       />
+    );
+  } else if (posts.length === 0 && welcome && !photos) {
+    // The welcome above says the rest: here, just the way to start.
+    body = (
+      <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
+        <p className="text-sm text-[var(--text-muted)]">{alone ? "You're the first one here. Say hello." : "No posts yet. Be the first."}</p>
+        <ItemButton variant="primary" icon={<PenSquare className="h-4 w-4" />} onClick={() => navigate("/porch/new")}>
+          New post
+        </ItemButton>
+      </div>
     );
   } else if (posts.length === 0) {
     body = alone ? (
@@ -236,6 +261,7 @@ export function FeedPage() {
           </>
         }
       />
+      {isPhone && <PullIndicator pull={pulled.pull} refreshing={pulled.refreshing} />}
       {/* Phones and tablets: the chips. Wide screens tick groups in the left column instead. */}
       <div className={cn("sticky top-0 z-10 bg-[var(--bg)] lg:hidden", isPhone && "border-b border-[var(--border)]")}>
         <GroupChips groups={b.groups} />
@@ -245,7 +271,7 @@ export function FeedPage() {
           <button
             type="button"
             onClick={() => void showFresh()}
-            className="pointer-events-auto mt-2 inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--item-accent)] px-4 text-sm font-semibold text-white shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2"
+            className="porch-drop pointer-events-auto mt-2 inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--item-accent)] px-4 text-sm font-semibold text-white shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2"
           >
             <ArrowUp className="h-4 w-4" aria-hidden />
             {fresh.length === 1 ? "1 new post" : `${fresh.length} new posts`}
@@ -255,7 +281,10 @@ export function FeedPage() {
       <div className="md:pt-3">
         <StoriesRow />
       </div>
-      <div className="pt-2 md:pt-3">{body}</div>
+      <div className="pt-2 md:pt-3">
+        {welcome && <Welcome />}
+        {body}
+      </div>
     </Column>
   );
 }

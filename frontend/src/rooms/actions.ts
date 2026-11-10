@@ -40,15 +40,35 @@ export async function togglePin(m: Message) {
   }
 }
 
-export async function deleteMessage(m: Message, skipConfirm = false) {
-  if (!skipConfirm && !window.confirm("Delete this message for everyone?")) return;
+/** How long "Undo" stays on offer after a delete. */
+const UNDO_MS = 10_000;
+
+/** Delete now, for everyone, with a few seconds to change your mind: Undo
+ *  asks the server to put the message back exactly as it was. */
+export function deleteMessage(m: Message) {
+  if (m.deleted) return;
   const store = useRoomsStore.getState();
-  try {
-    await roomsApi.deleteMessage(m.id);
-    store.patchMessage(m.room_id, m.id, (cur) => ({ ...cur, deleted: true, body: "", attachments: [], reactions: [] }));
-  } catch (err) {
-    toast.error(apiErrorMessage(err, "Couldn't delete that message."));
-  }
+  store.patchMessage(m.room_id, m.id, (cur) => ({ ...cur, deleted: true, body: "", attachments: [], reactions: [] }));
+  roomsApi.deleteMessage(m.id).then(
+    () => {
+      toast.success("Message deleted", {
+        duration: UNDO_MS,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            roomsApi.restoreMessage(m.id).then(
+              (back) => store.upsertMessage(back),
+              (err) => toast.error(apiErrorMessage(err, "Couldn't bring that message back.")),
+            );
+          },
+        },
+      });
+    },
+    (err) => {
+      store.patchMessage(m.room_id, m.id, () => m);
+      toast.error(apiErrorMessage(err, "Couldn't delete that message, so it's back."));
+    },
+  );
 }
 
 export async function editMessage(m: Message, body: string): Promise<boolean> {

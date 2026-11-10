@@ -1,3 +1,4 @@
+import { RowsSkeleton } from "../ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AtSign, Camera, ChevronRight, FileText, Images, Loader2, MapPin, Minus, Pencil, Plus, Trash2, Type, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
@@ -173,7 +174,7 @@ function MentionSheet({ open, onClose, people, loading, onPick }: { open: boolea
       <p className="mb-2 text-xs text-[var(--text-muted)]">Only people in the groups you're sharing to. They'll get a notification.</p>
       <TextInput data-autofocus type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search names" aria-label="Search names" />
       <ul className="-mx-2 mt-2 flex flex-col">
-        {loading && <li className="px-2 py-3 text-sm text-[var(--text-muted)]">Loading…</li>}
+        {loading && <li className="px-2"><RowsSkeleton rows={3} /></li>}
         {!loading && shown.length === 0 && <li className="px-2 py-3 text-sm text-[var(--text-muted)]">{people.length ? "Nobody by that name here." : "Nobody else is in these groups yet."}</li>}
         {shown.map((u) => (
           <li key={u.id}>

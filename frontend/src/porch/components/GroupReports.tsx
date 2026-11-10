@@ -1,3 +1,4 @@
+import { RowsSkeleton } from "./ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Flag, MessageCircle } from "lucide-react";
 import { useId, useState } from "react";
@@ -34,7 +35,7 @@ export function GroupReports({ g }: { g: PorchGroup }) {
   const everyone = g.kind === "everyone";
 
   let body;
-  if (open.isPending) body = <p className="py-6 text-center text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (open.isPending) body = <RowsSkeleton rows={3} />;
   else if (open.isError) body = <LoadError what="Couldn't load the reports." onRetry={() => void open.refetch()} />;
   else if (open.data.length === 0) {
     body = (

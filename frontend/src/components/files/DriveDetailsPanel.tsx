@@ -53,6 +53,8 @@ export function DriveDetailsPanel({
   onOpenAsDocument,
   onOpenAsSheet,
   onHistory,
+  bare,
+  onAction,
 }: {
   file?: FileItem | null;
   folder?: FolderItem | null;
@@ -73,6 +75,11 @@ export function DriveDetailsPanel({
   onOpenAsSheet?: () => void;
   /** Its earlier versions (WP-8.1). */
   onHistory?: () => void;
+  /** Inside a sheet (phone / tablet): the sheet draws the title, the
+   *  close button and the scrolling. */
+  bare?: boolean;
+  /** Called after any of the actions is picked (the sheet closes). */
+  onAction?: () => void;
 }) {
   // Owner, location and dates (WP-3.5) — one small read per selection.
   const { data: details } = useQuery({
@@ -93,9 +100,9 @@ export function DriveDetailsPanel({
   const canShare = !isSystem;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className={cn("flex flex-col", !bare && "h-full")}>
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
+      <div className={cn("flex items-center justify-between border-b border-[var(--border)] px-3 py-2", bare && "hidden")}>
         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
           Details
         </span>
@@ -109,7 +116,7 @@ export function DriveDetailsPanel({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className={bare ? "pt-1" : "min-h-0 flex-1 overflow-y-auto p-3"}>
         {/* Preview / thumbnail */}
         <div className="mb-3 flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)]">
           {file ? (
@@ -170,7 +177,7 @@ export function DriveDetailsPanel({
         )}
 
         {/* Actions */}
-        <div className="mt-5 space-y-1">
+        <div className="mt-5 space-y-1" onClick={(e) => (e.target as HTMLElement).closest("button") && onAction?.()}>
           <PanelAction icon={<ExternalLink className="h-4 w-4" />} label="Open" onClick={onOpen} />
           {onOpenAsDocument && (
             <PanelAction icon={<FilePen className="h-4 w-4" />} label="Open in Promptly Docs" onClick={onOpenAsDocument} />

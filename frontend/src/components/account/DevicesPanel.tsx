@@ -10,6 +10,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
 import { DeviceGuide } from "./DeviceGuide";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /**
  * Settings → Devices (WP-8.3): an app password per device that syncs —
@@ -113,7 +114,7 @@ export function DevicesPanel() {
       {made && <NewPassword made={made} onDone={() => setMade(null)} />}
 
       {isLoading ? (
-        <p className="text-xs text-[var(--text-muted)]">Loading…</p>
+        <SkeletonRows count={3} label="Loading" />
       ) : devices.length > 0 ? (
         <ul className="mb-3 divide-y divide-[var(--border)] rounded-md border border-[var(--border)]">
           {devices.map((d) => (

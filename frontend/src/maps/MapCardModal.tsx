@@ -101,7 +101,7 @@ export function MapCardModal({ card, onClose }: { card: MapCard; onClose: () => 
                   <span className="font-semibold text-[var(--text)]">{formatDuration(routeSeconds(r))}</span>
                   <span className="ml-2 text-[var(--text-muted)]">{formatKm(r.km)}{r.toll ? " · Tolls" : ""}{r.ferry ? " · Ferry" : ""}</span>
                   {trafficLine(r) && <span className="block text-xs text-[var(--text-muted)]">{trafficLine(r)}</span>}
-                  {r.preferred && <span className="block text-xs font-medium text-[#D97757]">Your usual way</span>}
+                  {r.preferred && <span className="block text-xs font-medium text-[var(--accent-text)]">Your usual way</span>}
                   {r.incidents?.[0] && <span className="block text-xs font-medium text-[#C62828]">{r.incidents[0].label}{r.incidents[0].from ? ` on ${r.incidents[0].from}` : ""}{r.incidents.length > 1 ? `, and ${r.incidents.length - 1} more` : ""}</span>}
                 </button>
               ))}

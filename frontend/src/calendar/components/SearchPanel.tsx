@@ -125,7 +125,7 @@ function SearchBody({
   const section = (label: string, items: ViewEvent[]) =>
     items.length > 0 && (
       <section className="flex flex-col">
-        <h3 className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{label}</h3>
+        <h3 className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{label}</h3>
         {items.map((v) => {
           const i = idx++;
           return <ResultRow key={`${v.ev.id}`} v={v} i={i} active={!phone && i === active} onPick={pick} onHover={() => setActive(i)} />;
@@ -213,9 +213,9 @@ function ResultRow({ v, i, active, onPick, onHover }: { v: ViewEvent; i: number;
       className={cn("flex min-h-14 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition", active ? "bg-[var(--hover)]" : "hover:bg-[var(--hover)]")}
     >
       <span className="flex w-11 shrink-0 flex-col items-center leading-tight">
-        <span className="text-[10px] font-medium uppercase text-[var(--text-muted)]">{fmt(v.start, { month: "short" })}</span>
+        <span className="text-xs font-medium uppercase text-[var(--text-muted)]">{fmt(v.start, { month: "short" })}</span>
         <span className="text-lg font-semibold tabular-nums text-[var(--text)]">{v.start.getDate()}</span>
-        <span className="text-[10px] uppercase text-[var(--text-muted)]">{v.start.getFullYear() !== now.getFullYear() ? v.start.getFullYear() : fmt(v.start, { weekday: "short" })}</span>
+        <span className="text-xs uppercase text-[var(--text-muted)]">{v.start.getFullYear() !== now.getFullYear() ? v.start.getFullYear() : fmt(v.start, { weekday: "short" })}</span>
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-2">

@@ -36,7 +36,6 @@ for (const route of ["chat", "generated"]) {
       }
       await expect(page.getByText("2 selected")).toBeVisible();
       await page.getByRole("button", { name: "Move to trash" }).click();
-      await page.getByRole("dialog").getByRole("button", { name: "Move to trash" }).click();
       await expect(page.getByText(`bulk-${tag}-a.txt`)).toHaveCount(0);
       await expect(page.getByText(`bulk-${tag}-b.txt`)).toHaveCount(0);
     } finally {
@@ -83,7 +82,6 @@ test("Select all takes the whole folder, including what hasn't scrolled in", asy
 
     await all.click();
     await page.getByRole("button", { name: "Move to trash" }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Move to trash" }).click();
     await expect(page.getByText("Moved 5 items to trash")).toBeVisible();
     const left = await page.request.get(`/api/files/browse?scope=mine&folder_id=${folder}&limit=50`, { headers: { Authorization: auth } });
     expect((await left.json()).files).toHaveLength(0);

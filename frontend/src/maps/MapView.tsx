@@ -15,6 +15,14 @@ export interface MapViewHandle {
   bounds(): [number, number, number, number] | null;
   /** The part of the map you can see past the panels (pixels covered on each side). */
   visibleBounds(inset: { top: number; bottom: number; left: number; right: number }): [number, number, number, number] | null;
+  /** Slide to a spot without changing how far in you are. */
+  panTo(lat: number, lon: number): void;
+  zoomIn(): void;
+  zoomOut(): void;
+  /** Turn the map back so north is up and it lies flat. */
+  resetNorth(): void;
+  /** Which way is up, in degrees from north (0 when north is up). */
+  bearing(): number;
 }
 
 interface Props {
@@ -52,6 +60,8 @@ interface Props {
   onPickRoute: (index: number) => void;
   onPickParked: () => void;
   onMoved: () => void;
+  /** You started dragging the map yourself. */
+  onDragged?: () => void;
 }
 
 const EMPTY = { type: "FeatureCollection", features: [] };
@@ -144,6 +154,21 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
       return [clamp(Math.min(...lons), -180, 180), clamp(Math.min(...lats), -85, 85), clamp(Math.max(...lons), -180, 180), clamp(Math.max(...lats), -85, 85)];
     },
+    panTo(lat, lon) {
+      mapRef.current?.easeTo({ center: [lon, lat], duration: 400 });
+    },
+    zoomIn() {
+      mapRef.current?.zoomIn({ duration: 250 });
+    },
+    zoomOut() {
+      mapRef.current?.zoomOut({ duration: 250 });
+    },
+    resetNorth() {
+      mapRef.current?.resetNorthPitch({ duration: 400 });
+    },
+    bearing() {
+      return mapRef.current?.getBearing() ?? 0;
+    },
   }));
 
   // The map. A new theme means a new style, so the view is carried across.
@@ -195,6 +220,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
         view.current = { center: [c.lng, c.lat], zoom: map.getZoom() };
         calls.current.onMoved();
       });
+      map.on("dragstart", () => calls.current.onDragged?.());
       map.on("contextmenu", (e) => calls.current.onHold(e.lngLat.lat, e.lngLat.lng));
       let timer: number | undefined;
       map.on("touchstart", (e) => {

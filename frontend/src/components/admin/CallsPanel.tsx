@@ -12,6 +12,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { SettingsCard } from "./SettingsCard";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 const SETTINGS_KEY = ["calls", "admin", "settings"];
 
@@ -296,7 +297,7 @@ function Usage() {
       {q.isError ? (
         <Callout>Couldn't load usage. {apiErrorMessage(q.error)}</Callout>
       ) : !u ? (
-        <p className="text-xs text-[var(--text-muted)]">Loading…</p>
+        <SkeletonRows count={3} label="Loading" />
       ) : (
         <div className="flex flex-col gap-3">
           {!u.running && <p className="text-xs text-[var(--text-muted)]">The calls service isn't running, so there's nothing live to show.</p>}

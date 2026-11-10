@@ -12,6 +12,7 @@ import { tusUpload } from "@/lib/tusUpload";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /**
  * Moving in (WP-10.1, 10.3, Part C §4.9): bring a Google Takeout, a folder of
@@ -196,7 +197,7 @@ export function ImportJobPage() {
   const refresh = () => void qc.invalidateQueries({ queryKey: key });
 
   if (error) return <p className="p-6 text-sm text-[var(--text-muted)]">This import isn't there any more.</p>;
-  if (!job) return <p className="p-6 text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (!job) return <SkeletonRows count={3} className="p-6" label="Loading" />;
   const canAdd = job.state === "collecting" || job.state === "ready" || job.state === "failed";
   const text = SOURCES[job.source];
 
