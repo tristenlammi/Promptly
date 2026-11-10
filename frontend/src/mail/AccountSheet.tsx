@@ -1,6 +1,7 @@
-import { AlertCircle, Check, ChevronDown, Loader2, Pencil, Plus, Settings, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Loader2, Pencil, Plus, Settings, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import { Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -108,12 +109,8 @@ export function MailboxSheet({ accounts, current, onPick, onAdd, onEdit, onClose
 
   const row = "flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg px-2 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]";
   return (
-    <div role="dialog" aria-label="Mailboxes" className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 md:items-center">
-      <div className="promptly-scroll max-h-[90%] w-full max-w-md space-y-1 overflow-y-auto rounded-t-2xl bg-[var(--surface)] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:rounded-2xl">
-        <div className="flex items-center justify-between px-2 pb-2">
-          <h2 className="text-base font-semibold text-[var(--text)]">Mailboxes</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
-        </div>
+    <Sheet open onClose={onClose} title="Mailboxes" size="sm">
+      <div className="-mx-2 space-y-1">
         <button type="button" onClick={() => onPick(undefined)} aria-current={!current ? "true" : undefined} className={`${row} w-full`}>
           <span className="flex-1">All mailboxes</span>{!current && <Check className="h-4 w-4 text-[#D97757]" />}
         </button>
@@ -143,7 +140,7 @@ export function MailboxSheet({ accounts, current, onPick, onAdd, onEdit, onClose
         ))}
         <button type="button" onClick={onAdd} className={`${row} w-full text-[var(--text-muted)]`}><Plus className="h-4 w-4" />Add a mailbox</button>
       </div>
-    </div>
+    </Sheet>
   );
 }
 
@@ -159,6 +156,7 @@ export function AccountSheet({ onClose, onSaved }: { onClose: () => void; onSave
   const [note, setNote] = useState<string | null>(null);
   const [known, setKnown] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  const [guessed, setGuessed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [certificate, setCertificate] = useState<{ message: string; fingerprint: string } | null>(null);
@@ -173,6 +171,7 @@ export function AccountSheet({ onClose, onSaved }: { onClose: () => void; onSave
       setProvider(found.provider ?? "generic");
       setNote(found.note ?? null);
       setKnown(true);
+      setGuessed(false);
       setAdvanced(false);
     } else if (found?.note) {
       setKnown(false);
@@ -185,6 +184,7 @@ export function AccountSheet({ onClose, onSaved }: { onClose: () => void; onSave
       setKnown(false);
       setNote(null);
       setProvider("generic");
+      setGuessed(true);
       setAdvanced(true);
       const domain = email.split("@")[1];
       setImap((v) => (v.host ? v : { ...v, host: `imap.${domain}` }));
@@ -214,32 +214,36 @@ export function AccountSheet({ onClose, onSaved }: { onClose: () => void; onSave
 
   const input = "h-10 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 text-sm text-[var(--text)] outline-none focus:border-[#D97757]";
   return (
-    <div role="dialog" aria-label="Add a mailbox" className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 md:items-center">
-      <div className="promptly-scroll max-h-[90%] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-[var(--surface)] p-5 text-left shadow-2xl md:rounded-2xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-[var(--text)]">Add a mailbox</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
-        </div>
+    <Sheet open onClose={onClose} title="Add a mailbox" size="sm">
+      <div className="space-y-3 pb-1 text-left">
+        <p className="text-sm text-[var(--text-muted)]">Type your email address and password. Promptly works out the rest.</p>
         <input autoFocus type="email" value={email} onChange={(e) => setEmail(e.target.value.trim())} onBlur={() => void lookUp()} placeholder="you@example.com" aria-label="Email address" autoComplete="off" className={input} />
         {note && <p className="rounded-lg bg-[#D97757]/10 p-2.5 text-xs text-[var(--text)]">{note}</p>}
+        {guessed && !note && <p className="rounded-lg bg-[var(--hover)] p-2.5 text-xs text-[var(--text)]">Promptly doesn't know this email provider yet, so it's made its best guess at the details under Advanced. If it won't connect, your provider's help page will have the right ones: look for "mail app settings".</p>}
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={known ? "App password" : "Password"} aria-label="Password" autoComplete="new-password" className={input} />
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name, as people will see it" aria-label="Your name" className={input} />
         <div className="flex gap-2" role="radiogroup" aria-label="Colour">
           {COLOURS.map((c) => <button key={c} type="button" role="radio" aria-checked={colour === c} aria-label={c} onClick={() => setColour(c)} style={{ backgroundColor: c }} className={`h-6 w-6 rounded-full ${colour === c ? "ring-2 ring-[var(--text)] ring-offset-2 ring-offset-[var(--surface)]" : ""}`} />)}
         </div>
-        <button type="button" onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced} className="inline-flex items-center gap-1 text-xs text-[var(--text-muted)]">Server settings<ChevronDown className={`h-3.5 w-3.5 transition-transform ${advanced ? "rotate-180" : ""}`} /></button>
+        <button type="button" onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced} className="inline-flex min-h-10 items-center gap-1 text-xs text-[var(--text-muted)] md:min-h-0">Advanced<ChevronDown className={`h-3.5 w-3.5 transition-transform ${advanced ? "rotate-180" : ""}`} /></button>
         {advanced && (
           <div className="space-y-2">
-            <ServerFields label="Incoming (IMAP)" value={imap} onChange={setImap} />
-            <ServerFields label="Outgoing (SMTP)" value={smtp} onChange={setSmtp} />
+            <p className="text-xs text-[var(--text-muted)]">Where your mail comes in and goes out. Most people never need to change these.</p>
+            <ServerFields label="Incoming mail (IMAP)" value={imap} onChange={setImap} />
+            <ServerFields label="Outgoing mail (SMTP)" value={smtp} onChange={setSmtp} />
           </div>
         )}
-        <p className="text-[11px] text-[var(--text-muted)]">Your password is stored encrypted on your Promptly server. Your mail stays in your mailbox too, and removing this later doesn't delete anything there.</p>
-        {problem && <p role="alert" className="text-sm text-[#C62828]">{problem}</p>}
+        <p className="text-xs text-[var(--text-muted)]">Your password is stored encrypted on your Promptly server. Your mail stays in your mailbox too, and removing this later doesn't delete anything there.</p>
+        {problem && (
+          <div role="alert" className="space-y-1">
+            <p className="text-sm text-[#C62828]">{problem}</p>
+            <p className="text-xs text-[var(--text-muted)]">{known ? "Check the password first. Some email providers want an app password, made just for this, instead of your usual one." : "Check the password first. If that's right, open Advanced and compare the details with your email provider's help page."}</p>
+          </div>
+        )}
         {certificate && (
           <div role="alert" className="space-y-2 rounded-lg bg-[#D97757]/10 p-3 text-xs text-[var(--text)]">
             <p>{certificate.message}</p>
-            <p className="break-all font-mono text-[11px] text-[var(--text-muted)]">{certificate.fingerprint.match(/.{1,2}/g)?.join(":")}</p>
+            <p className="break-all font-mono text-xs text-[var(--text-muted)]">{certificate.fingerprint.match(/.{1,2}/g)?.join(":")}</p>
             <button type="button" onClick={() => { setPin(certificate.fingerprint); void save(certificate.fingerprint); }} className="h-8 rounded-lg bg-[#D97757] px-3 font-medium text-white">Trust this certificate</button>
           </div>
         )}
@@ -247,6 +251,6 @@ export function AccountSheet({ onClose, onSaved }: { onClose: () => void; onSave
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}{busy ? "Connecting…" : "Connect"}
         </button>
       </div>
-    </div>
+    </Sheet>
   );
 }

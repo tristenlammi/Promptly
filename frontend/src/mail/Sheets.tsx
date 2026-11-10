@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { LocationInput } from "@/components/maps/LocationInput";
+import { Sheet as SharedSheet } from "@/items/ui";
 import { useSelectedModel } from "@/store/modelStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -71,17 +72,12 @@ export function EventSheet({ accountId, threadKey, subject, onClose }: { account
 const COLOURS = ["#D97757", "#4F7FE0", "#6B9E78", "#8E6FB5", "#C9A227", "#C2668A"];
 const FIELD = "w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[#D97757]";
 
-function Sheet({ title, onClose, children, roomy = false }: { title: string; onClose: () => void; children: ReactNode; roomy?: boolean }) {
+/** Mail's sheets are the shared one: same handle, Esc and Close as the rest of Promptly. */
+function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
-    <div role="dialog" aria-label={title} className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 md:items-center" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`promptly-scroll max-h-[90%] w-full max-w-md space-y-3 rounded-t-2xl ${roomy ? "overflow-visible" : "overflow-y-auto"} bg-[var(--surface)] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:rounded-2xl`}>
-        <div className="flex items-center justify-between px-1">
-          <h2 className="text-base font-semibold text-[var(--text)]">{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <SharedSheet open onClose={onClose} title={title} size="sm">
+      <div className="space-y-3 pb-1">{children}</div>
+    </SharedSheet>
   );
 }
 
@@ -180,7 +176,7 @@ export function MailSettingsSheet({ onClose }: { onClose: () => void }) {
   });
   const on = Boolean(data?.sorting);
   return (
-    <Sheet title="Mail settings" onClose={onClose} roomy>
+    <Sheet title="Mail settings" onClose={onClose}>
       <label className="flex items-start gap-3 px-1 text-sm text-[var(--text)]">
         <input type="checkbox" checked={on} disabled={change.isPending || (!on && !selected)} onChange={(e) => change.mutate(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#D97757]" />
         <span>
@@ -193,7 +189,8 @@ export function MailSettingsSheet({ onClose }: { onClose: () => void }) {
       ) : (
         <p className="px-1 text-xs text-[var(--text-muted)]">It will use {selected?.model_id ?? "the model chosen here"}. To use a different one, pick it here:</p>
       )}
-      <div className="flex justify-start px-1"><div className="relative"><ModelSelector upward /></div></div>
+      {/* The list of models opens downwards, inside the sheet: room for it to open into. */}
+      <div className="flex min-h-[26rem] items-start justify-end px-1"><div className="relative"><ModelSelector /></div></div>
     </Sheet>
   );
 }

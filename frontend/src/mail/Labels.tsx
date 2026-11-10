@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { Sheet as SharedSheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -36,17 +37,12 @@ export function LabelPill({ label }: { label: MailLabel }) {
   );
 }
 
+/** Mail's sheets are the shared one: same handle, Esc and Close as the rest of Promptly. */
 function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
-    <div role="dialog" aria-label={title} className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 md:items-center" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="promptly-scroll max-h-[90%] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[var(--surface)] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:rounded-2xl">
-        <div className="flex items-center justify-between px-1 pb-3">
-          <h2 className="text-base font-semibold text-[var(--text)]">{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <SharedSheet open onClose={onClose} title={title} size="sm">
+      <div className="pb-1">{children}</div>
+    </SharedSheet>
   );
 }
 
