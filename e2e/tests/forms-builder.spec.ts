@@ -277,9 +277,17 @@ test("every question type, sections, settings and the look", async ({ alice: pag
   // The look: a colour, a built-in header, a font.
   await page.getByRole("button", { name: "Look", exact: true }).click();
   const look = page.getByRole("dialog", { name: "Look" });
-  await look.getByRole("radio", { name: "Teal" }).check({ force: true });
+  // The choices are labels round hidden radios: click the label, which waits
+  // for the sheet to finish sliding in (a forced check on the hidden input
+  // could land mid-animation, outside the window).
+  const choose = async (name: string) => {
+    const radio = look.getByRole("radio", { name, exact: true });
+    await look.locator("label").filter({ has: page.getByRole("radio", { name, exact: true }) }).click();
+    await expect(radio).toBeChecked();
+  };
+  await choose("Teal");
   await look.getByRole("button", { name: "Bunting" }).click();
-  await look.getByRole("radio", { name: "Serif" }).check({ force: true });
+  await choose("Serif");
   await page.keyboard.press("Escape");
   await saved(page);
 
@@ -338,6 +346,10 @@ test("the builder, preview, settings and Forms home pass an accessibility scan",
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
   await page.emulateMedia({ colorScheme: "light" });
   await page.getByRole("tab", { name: "Settings" }).click();
+  // The tabs fade their colour (a short transition): scan once it's done,
+  // not half way from the selected colour to the muted one.
+  await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
+  await page.waitForTimeout(400);
   found.push(...(await scan(page, "settings", "main")));
   expect(found, found.join("\n")).toEqual([]);
 });

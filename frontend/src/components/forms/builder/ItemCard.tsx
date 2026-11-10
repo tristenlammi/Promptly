@@ -856,7 +856,10 @@ function ChoiceEditor(p: KindEditorProps) {
       el?.select();
       setFocusId(null);
     }
-  }, [focusId, c.options]);
+    // Only when focusId changes: with the options in here too, typing fast
+    // into the new option re-ran this before focusId was cleared, selected
+    // what had been typed so far, and the next letter replaced it.
+  }, [focusId]);
 
   const targets = goToChoices(p.sections, p.sectionIndex);
   const setOptions = (fn: (o: FormOption[]) => FormOption[], key?: string) =>
