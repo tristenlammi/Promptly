@@ -10,7 +10,9 @@ import com.stadiamaps.ferrostar.composeui.notification.DefaultForegroundNotifica
 import com.stadiamaps.ferrostar.core.AndroidTtsObserver
 import com.stadiamaps.ferrostar.core.AndroidTtsStatusListener
 import com.stadiamaps.ferrostar.core.DefaultNavigationViewModel
+import com.stadiamaps.ferrostar.core.CorrectiveAction
 import com.stadiamaps.ferrostar.core.FerrostarCore
+import com.stadiamaps.ferrostar.core.RouteDeviationHandler
 import com.stadiamaps.ferrostar.core.annotation.valhalla.valhallaExtendedOSRMAnnotationPublisher
 import com.stadiamaps.ferrostar.core.http.OkHttpClientProvider.Companion.toOkHttpClientProvider
 import com.stadiamaps.ferrostar.core.location.NavigationLocationProvider
@@ -50,6 +52,7 @@ import uniffi.ferrostar.stepAdvanceDistanceEntryAndExit
 import uniffi.ferrostar.stepAdvanceDistanceToEndOfStep
 import java.time.Instant
 import java.util.Locale
+import kotlin.time.Duration.Companion.seconds
 
 /** How you asked to travel. */
 data class ThroughPoint(val lat: Double, val lon: Double, val heading: Int?)
@@ -150,6 +153,10 @@ object Nav {
     val offRoute = _offRoute.asStateFlow()
     private var offRouteSaid = false
 
+    /** The points holding the trip to the way you picked, until you leave it. */
+    @Volatile
+    private var pinned: List<ThroughPoint> = emptyList()
+
     @Volatile private var cameras: List<Camera> = emptyList()
     private val warned = mutableSetOf<Camera>()
     private val closestSoFar = mutableMapOf<Camera, Float>()
@@ -200,9 +207,11 @@ object Nav {
         Maps.server(app) ?: throw IllegalStateException("Not signed in")
         val config = NavigationControllerConfig(
             WaypointAdvanceMode.WaypointWithinRange(60.0),
-            stepAdvanceDistanceEntryAndExit(30u, 5u, 32u),
-            stepAdvanceDistanceToEndOfStep(10u, 32u),
-            RouteDeviationTracking.StaticThreshold(15U, 60.0),
+            stepAdvanceDistanceEntryAndExit(30u, 5u, 50u),
+            stepAdvanceDistanceToEndOfStep(10u, 50u),
+            // Our own check: the library's ignored any fix vaguer than its limit, so a
+            // phone in a cupholder never got a new route after a wrong turn.
+            RouteDeviationTracking.Custom(OffRouteDetector()),
             CourseFiltering.SNAP_TO_ROUTE,
         )
         val built = FerrostarCore(
@@ -229,6 +238,17 @@ object Nav {
         }
         observer.setMuted(savedMuted())
         built.spokenInstructionObserver = observer
+        // A new route within a few seconds of leaving the old one, and again soon
+        // after if you keep going your own way (the library waits 5 s and 50 m).
+        built.minimumTimeBeforeRecalculation = 3.seconds
+        built.minimumMovementBeforeRecalculation = 20.0
+        // From where you are to your stops, not back through the points that pinned
+        // the way you'd picked: that sent you round to rejoin the old route.
+        built.deviationHandler = RouteDeviationHandler { _, _, remaining ->
+            val stops = OffRouteWatch.stopsOnly(remaining, pinned, { it.kind == WaypointKind.VIA }) { it.coordinate.lat to it.coordinate.lng }
+            Log.i(TAG, "Off the route: asking for a new one to ${stops.size} stop(s), ${remaining.size - stops.size} pinned point(s) let go")
+            CorrectiveAction.GetNewRoutes(stops)
+        }
         core = built
         return TripModel(built).also {
             model = it
@@ -352,6 +372,7 @@ object Nav {
                 // first would drive the whole route, come back, and drive it again.
                 val waypoints = rest.dropLast(1).map(::stopAt) + through.map(::viaPoint) + rest.takeLast(1).map(::stopAt)
                 val route = provider().fetch(here.toUserLocation(), waypoints).first()
+                pinned = through
                 vm.setDestination(rest.lastOrNull()?.name)
                 withContext(Dispatchers.Main) {
                     if (vm.navigationUiState.value.isNavigating()) c.replaceRoute(route) else c.startNavigation(route)
@@ -589,6 +610,7 @@ object Nav {
             runCatching {
                 val here = vm.navigationUiState.value.location ?: return@launch
                 val route = provider().fetch(here, stops.map { Waypoint(coordinate = GeographicCoordinate(it.lat, it.lon), kind = WaypointKind.BREAK) }).first()
+                pinned = emptyList()
                 withContext(Dispatchers.Main) { c.replaceRoute(route) }
                 then()
                 hazards = emptyList()
@@ -660,6 +682,7 @@ object Nav {
                 val here = vm.navigationUiState.value.location ?: return@launch
                 val waypoints = offer.through.map(::viaPoint) + Waypoint(coordinate = GeographicCoordinate(to.lat, to.lon), kind = WaypointKind.BREAK)
                 val route = provider().fetch(here, waypoints).first()
+                pinned = offer.through
                 withContext(Dispatchers.Main) { c.replaceRoute(route) }
                 speak("Taking the faster route.")
                 // Traffic on the new road, right away.
