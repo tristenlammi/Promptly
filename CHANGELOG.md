@@ -31,6 +31,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Files: starring is instant. The star fills the moment you tap it (and comes back off with a message if it couldn't be saved), and starring several things at once says how many.
 - Files: "Move to…" on Recent opens the move dialog (it used to just open the folder; that is now "Show in folder"), and trashing several starred things offers Undo.
 - - Files: pictures in the preview zoom with the wheel, a pinch or a double-click, drag to look around, and swipe across for the next file.
+- - Files: the selection bar now floats at the bottom and slides in, so the list no longer jumps; on a phone it names its three main actions and keeps the rest under More.
 <!-- /Files UI -->
 
 ## [0.35.0] - 2026-11-09
