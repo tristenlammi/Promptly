@@ -129,7 +129,7 @@ export function RoomView({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
         <p className="text-sm text-[var(--text-muted)]">This room isn't here any more, or you're not in it.</p>
-        <button type="button" onClick={() => navigate("/rooms/")} className="text-sm font-semibold text-[var(--item-accent)] underline">
+        <button type="button" onClick={() => navigate("/rooms/")} className="text-sm font-semibold text-[var(--accent-text)] underline">
           Back to Rooms
         </button>
       </div>
@@ -197,14 +197,7 @@ export function RoomView({
                 </div>
               )}
               <MessageList room={room} title={title} ctx={ctx} />
-              <div className="flex h-5 shrink-0 items-center gap-3 px-4 text-[11px] text-[var(--text-muted)]" aria-live="polite">
-                {thinking && (
-                  <span className="inline-flex items-center gap-1 font-medium text-[var(--item-accent)]">
-                    <Sparkles className="h-3 w-3 animate-pulse" /> Promptly is thinking…
-                  </span>
-                )}
-                {typingText && <span className="truncate">{typingText}</span>}
-              </div>
+              <TypingStrip thinking={thinking} typingText={typingText} />
               <Composer
                 ref={composer}
                 roomId={roomId}
@@ -263,8 +256,8 @@ export function RoomView({
       aria-pressed={panel === p}
       onClick={() => setPanel(panel === p ? null : p)}
       className={cn(
-        "flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:h-9 md:w-9",
-        panel === p && "bg-[var(--hover)] !text-[var(--item-accent)]",
+        "flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:h-9 md:w-9",
+        panel === p && "bg-[var(--hover)] !text-[var(--accent-text)]",
       )}
     >
       <Icon className="h-[18px] w-[18px]" />
@@ -319,13 +312,13 @@ export function RoomView({
             <span className="flex min-w-0 flex-col">
               <span className="truncate text-[15px] font-semibold leading-tight text-[var(--text)]">{title}</span>
               {(room.topic || (isPhone && space)) && (
-                <span className="truncate text-[11px] leading-tight text-[var(--text-muted)]">{room.topic || space?.name}</span>
+                <span className="truncate text-xs leading-tight text-[var(--text-muted)]">{room.topic || space?.name}</span>
               )}
             </span>
           </button>
           {aiOn && (
             <span
-              className="hidden shrink-0 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] px-2.5 py-1 text-[11px] font-semibold text-[var(--item-accent)] sm:inline-flex"
+              className="hidden shrink-0 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-text)] sm:inline-flex"
               title="Promptly can read this room's recent messages when someone asks it something."
             >
               <Sparkles className="h-3 w-3" /> AI can read this room
@@ -333,19 +326,22 @@ export function RoomView({
           )}
           {aiOn && (
             <span className="inline-flex shrink-0 sm:hidden" title="AI can read this room" aria-label="AI can read this room">
-              <Sparkles className="h-4 w-4 text-[var(--item-accent)]" />
+              <Sparkles className="h-4 w-4 text-[var(--accent-text)]" />
             </span>
           )}
           <div className="ml-auto flex shrink-0 items-center">
             {!space && <CallHeaderButtons b={b} room={room} otherName={oneToOne?.username ?? null} />}
-            {compactHeader && (
+            {(compactHeader || oneToOne) && (
               <button
                 type="button"
                 aria-label="More"
                 title="More"
                 aria-expanded={!!moreAnchor}
                 onClick={(e) => setMoreAnchor(moreAnchor ? null : e.currentTarget)}
-                className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+                className={cn(
+                  "flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                  !compactHeader && "order-last md:h-9 md:w-9",
+                )}
               >
                 <MoreVertical className="h-[18px] w-[18px]" />
               </button>
@@ -354,21 +350,6 @@ export function RoomView({
             {!compactHeader && headerBtn("events", "Events", CalendarDays)}
             {!compactHeader && headerBtn("pins", "Pinned messages", Pin)}
             {(!isPhone || space) && headerBtn("members", "Members", Users)}
-            {oneToOne && !compactHeader && (
-              <button
-                type="button"
-                aria-label={room.blocked ? `Unblock ${oneToOne.username}` : `Block ${oneToOne.username}`}
-                title={room.blocked ? `Unblock ${oneToOne.username}` : `Block ${oneToOne.username}`}
-                aria-pressed={!!room.blocked}
-                onClick={toggleBlock}
-                className={cn(
-                  "flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:h-9 md:w-9",
-                  room.blocked && "!text-[var(--danger)]",
-                )}
-              >
-                <Ban className="h-[18px] w-[18px]" />
-              </button>
-            )}
             <button
               type="button"
               aria-label="Settings"
@@ -380,12 +361,12 @@ export function RoomView({
             </button>
           </div>
         </header>
-        {compactHeader && (
+        {(compactHeader || oneToOne) && (
           <Floating open={!!moreAnchor} onClose={() => setMoreAnchor(null)} anchor={moreAnchor} label="More" width={240}>
             <div className="py-1">
-              {moreItem("Search this conversation", Search, () => setPanel("search"))}
-              {moreItem("Events", CalendarDays, () => setPanel("events"))}
-              {moreItem("Pinned messages", Pin, () => setPanel("pins"))}
+              {compactHeader && moreItem("Search this conversation", Search, () => setPanel("search"))}
+              {compactHeader && moreItem("Events", CalendarDays, () => setPanel("events"))}
+              {compactHeader && moreItem("Pinned messages", Pin, () => setPanel("pins"))}
               {oneToOne && moreItem(room.blocked ? `Unblock ${oneToOne.username}` : `Block ${oneToOne.username}`, Ban, toggleBlock, !room.blocked)}
             </div>
           </Floating>
@@ -394,14 +375,7 @@ export function RoomView({
 
         <MessageList room={room} title={title} ctx={ctx} />
 
-        <div className="flex h-5 shrink-0 items-center gap-3 px-4 text-[11px] text-[var(--text-muted)]" aria-live="polite">
-          {thinking && (
-            <span className="inline-flex items-center gap-1 font-medium text-[var(--item-accent)]">
-              <Sparkles className="h-3 w-3 animate-pulse" /> Promptly is thinking…
-            </span>
-          )}
-          {typingText && <span className="truncate">{typingText}</span>}
-        </div>
+        <TypingStrip thinking={thinking} typingText={typingText} />
 
         {room.can_send === false ? (
           // Closed by a block. The person who was blocked only ever sees the
@@ -410,7 +384,7 @@ export function RoomView({
             {room.blocked && oneToOne ? (
               <>
                 You've blocked {oneToOne.username}. You can still read your conversation.{" "}
-                <button type="button" onClick={toggleBlock} className="font-semibold text-[var(--item-accent)] underline">
+                <button type="button" onClick={toggleBlock} className="font-semibold text-[var(--accent-text)] underline">
                   Unblock
                 </button>
               </>
@@ -439,7 +413,7 @@ export function RoomView({
       </section>
 
       {!isPhone && panel && (
-        <aside className="hidden w-80 shrink-0 border-l border-[var(--border)] bg-[var(--surface)] md:block" aria-label={panelTitle}>
+        <aside className="rooms-panel-in hidden w-80 shrink-0 border-l border-[var(--border)] bg-[var(--surface)] md:block" aria-label={panelTitle}>
           <PanelFrame title={panelTitle} onClose={() => setPanel(null)}>
             {panelBody}
           </PanelFrame>
@@ -475,12 +449,37 @@ export function RoomView({
       />
 
       {dragging && (
-        <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-[var(--item-accent)] bg-[color-mix(in_srgb,var(--item-accent)_10%,var(--bg))]">
-          <span className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--item-accent)]">
+        <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg))]">
+          <span className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--accent-text)]">
             <Upload className="h-5 w-5" /> Drop to attach to {space ? `#${title}` : title}
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The line above the composer: who's typing, and Promptly thinking. */
+function TypingStrip({ thinking, typingText }: { thinking: boolean; typingText: string }) {
+  return (
+    <div className="h-5 shrink-0 text-xs text-[var(--text-muted)]" aria-live="polite">
+      <div className="mx-auto flex h-full w-full max-w-[760px] items-center gap-3 px-4">
+        {thinking && (
+          <span className="inline-flex items-center gap-1 font-medium text-[var(--accent-text)]">
+            <Sparkles className="h-3 w-3 animate-pulse" /> Promptly is thinking…
+          </span>
+        )}
+        {typingText && (
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <span className="inline-flex shrink-0 items-center gap-0.5" aria-hidden>
+              <span className="rooms-typing-dot" />
+              <span className="rooms-typing-dot" />
+              <span className="rooms-typing-dot" />
+            </span>
+            <span className="truncate">{typingText}</span>
+          </span>
+        )}
+      </div>
     </div>
   );
 }

@@ -152,9 +152,8 @@ test("a poll: ask, vote, change your vote, and see who voted for what", async ({
   const fam = `Poll ${stamp}`;
   const famId = await groupWith(alice, aAuth, fam, [[bob, bAuth, bobId]]);
 
-  // Alice asks, from the composer's Share step.
+  // Alice asks, from the composer (a new post starts at the words).
   await alice.goto("/porch/new");
-  await alice.getByRole("button", { name: "Write a text post instead" }).click();
   await alice.getByRole("button", { name: "Poll", exact: true }).click();
   const editor = alice.getByRole("dialog", { name: "Add a poll" });
   await editor.getByRole("textbox", { name: "Option 1" }).fill("Pizza");
@@ -217,6 +216,7 @@ test("tag someone on a photo; they say yes from Activity; the badge; an outsider
 
   // Alice picks the photo, tags Bob in Arrange, posts it to the group.
   await alice.goto("/porch/new");
+  await alice.getByRole("button", { name: "Add photos or videos" }).click();
   await alice.locator(`[data-photo="${pic}"]`).click();
   await alice.getByRole("button", { name: "Next" }).first().click();
   await expect(alice.getByRole("heading", { name: "Arrange" })).toBeVisible();

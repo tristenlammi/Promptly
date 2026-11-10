@@ -16,7 +16,7 @@ export function StatusBadge({ status }: { status: RsvpStatus }) {
     declined: "bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] text-[var(--danger)]",
     invited: "bg-[var(--surface-2)] text-[var(--text-muted)]",
   };
-  return <span className={cn("inline-flex h-5 items-center rounded-full px-2 text-[11px] font-medium", tone[status])}>{STATUS_LABEL[status]}</span>;
+  return <span className={cn("inline-flex h-5 items-center rounded-full px-2 text-xs font-medium", tone[status])}>{STATUS_LABEL[status]}</span>;
 }
 
 /** Going / Maybe / Can't go. */

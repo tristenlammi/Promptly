@@ -244,28 +244,36 @@ ext.alarms.onAlarm.addListener(async (a) => {
 
 ext.idle.onStateChanged.addListener((state) => void onIdleState(state));
 
-async function safeSync() {
-  if (!client?.unlocked) return;
+/** Did the last sync get through to the server? Unknown until one has run. */
+let serverReached: boolean | undefined;
+
+/** True when the server answered. A failure is kept quiet here (the local copy still works),
+ *  so whoever shows "synced" has to ask. */
+async function safeSync(): Promise<boolean> {
+  if (!client?.unlocked) return false;
+  let reached = false;
   try {
-    await client.sync();
+    reached = !(await client.sync()).offline;
   } catch (e) {
     // A 403 can be about one shared vault, so it's asking for a session that says if it's us.
     if (e instanceof ApiError && (e.status === 401 || e.status === 403) && (await proveAgain(client)) && e.status === 401) {
       try {
-        await client.sync();
+        reached = !(await client.sync()).offline;
       } catch (again) {
         /* the token's revoked or the server's gone: keep working from the local copy */
         if (again instanceof ApiError && again.status === 401) await lockIfNever();
       }
     }
   }
+  serverReached = reached;
   // Open vault pages re-read the copy we share. Nobody listening is fine.
   ext.runtime.sendMessage({ t: "vaultChanged" }).catch(() => undefined);
+  return reached;
 }
 
 // ---- Bookmarks (BOOKMARKS.md) -------------------------------------------------------------
 
-type BookmarkState = { on: boolean; at?: string; total?: number; unsynced?: number; failed?: number; held?: { fromBrowser: number; fromVault: number }; error?: string };
+type BookmarkState = { on: boolean; at?: string; total?: number; unsynced?: number; failed?: number; away?: boolean; held?: { fromBrowser: number; fromVault: number }; error?: string };
 
 const bookmarkState = async () => ((await store.getMeta<BookmarkState>("bookmark_sync")) ?? { on: false }) as BookmarkState;
 
@@ -335,7 +343,9 @@ async function bookmarkPass(allowUpTo: number | undefined) {
     const base = (await store.getMeta<Base>("bookmark_base")) ?? {};
     const now = Date.now();
     const recent = ((await store.getMeta<{ at: number; n: number }[]>("bookmark_deletes")) ?? []).filter((d) => now - d.at < DELETION_WINDOW_MS);
-    const r = await reconcile(browser, new VaultBookmarks(client, vaultId), base, { hash: bookmarkHash(salt), newId: () => crypto.randomUUID(), deletedLately: recent.reduce((sum, d) => sum + d.n, 0), allowUpTo });
+    // "Keep them everywhere" was the answer: this run brings back what was deleted elsewhere too.
+    const keepAll = !!(await store.getMeta<boolean>("bookmark_keep"));
+    const r = await reconcile(browser, new VaultBookmarks(client, vaultId), base, { hash: bookmarkHash(salt), newId: () => crypto.randomUUID(), deletedLately: recent.reduce((sum, d) => sum + d.n, 0), allowUpTo, keepAll });
     // Turned off while that ran: what it was doing has finished, and off stays off.
     if (!(await bookmarkState()).on) return;
     if (r.status === "held") {
@@ -344,10 +354,14 @@ async function bookmarkPass(allowUpTo: number | undefined) {
       return;
     }
     await store.setMeta("bookmark_base", r.base);
+    if (keepAll) await store.setMeta("bookmark_keep", false);
     // A person's yes starts the count again.
     await store.setMeta("bookmark_deletes", allowMassDelete ? [] : r.deleted ? [...recent, { at: now, n: r.deleted }] : recent);
-    await store.setMeta("bookmark_sync", { on: true, at: new Date().toISOString(), total: r.total, unsynced: browser.unsynced, failed: r.counts.failed });
-    if (r.wroteVault) await safeSync();
+    // This browser and its own copy of the vault now agree. Whether the server (and so the
+    // other browsers) has it is a separate thing, and "synced" mustn't claim it when it doesn't.
+    const reached = r.wroteVault ? await safeSync() : serverReached !== false;
+    if (!(await bookmarkState()).on) return;
+    await store.setMeta("bookmark_sync", { on: true, at: reached ? new Date().toISOString() : state.at, total: r.total, unsynced: browser.unsynced, failed: r.counts.failed, away: !reached });
   } catch (e) {
     if (!(await bookmarkState()).on) return;
     await store.setMeta("bookmark_sync", { ...state, error: e instanceof Error ? e.message : "Couldn't sync bookmarks" });
@@ -1240,9 +1254,11 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       return bookmarkStateForScreen();
     case "setBookmarks": {
       if (!m.on) {
-        // What's in the vault stays. Turning it on again is a fresh merge, which only adds.
+        // What's in the vault stays. Turning it on again is a fresh merge, which only adds, apart
+        // from taking away what was deleted in another browser since.
         await store.setMeta("bookmark_sync", { on: false });
         await store.setMeta("bookmark_base", {});
+        await store.setMeta("bookmark_keep", false);
         return { ok: true };
       }
       // A permission just given can take a moment to reach a service worker.
@@ -1268,6 +1284,7 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       }
       // No: nothing goes. Starting the comparison again brings each side's back to the other.
       await store.setMeta("bookmark_base", {});
+      await store.setMeta("bookmark_keep", true);
       await store.setMeta("bookmark_sync", { on: true });
       await runBookmarks();
       return { ok: true };

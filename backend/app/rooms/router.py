@@ -611,20 +611,31 @@ async def delete_message(message_id: uuid.UUID, db: AsyncSession = Depends(get_d
     asked = msg.kind == "promptly" and (msg.meta or {}).get("asked_by") == str(user.id)
     if not (mine or asked or core.is_admin(sm)):
         raise core.forbidden("You can only delete your own messages")
+    # Gone for everyone now. What it said, its files and its reactions are
+    # wiped a little later (``service.purge_deleted``), so Undo can put it
+    # back exactly; nothing serves them in the meantime.
     msg.deleted_at = _now()
-    msg.body = ""
-    msg.pinned_at = None
-    msg.mentions = []
-    atts = (await db.execute(select(RoomAttachment).where(RoomAttachment.message_id == msg.id))).scalars().all()
-    for a in atts:
-        service.remove_attachment_files(a)
-        await db.delete(a)
-    await db.execute(delete(RoomReaction).where(RoomReaction.message_id == msg.id))
-    from app.links.service import purge_sources
-
-    await purge_sources(db, "room_msg", [msg.id])
     await db.commit()
     await core.publish(await core.member_ids(db, room), {"type": "message_delete", "room_id": str(room.id), "id": str(msg.id)})
+
+
+@router.post("/messages/{message_id}/restore")
+async def restore_message(message_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Undo a delete: the message comes back as it was, for everyone. Only
+    for a moment after deleting it, and only by someone who could delete it."""
+    msg, room, sm = await _load_message(db, message_id, user)
+    if msg.deleted_at is not None:
+        mine = msg.author_id == user.id
+        asked = msg.kind == "promptly" and (msg.meta or {}).get("asked_by") == str(user.id)
+        if not (mine or asked or core.is_admin(sm)):
+            raise core.forbidden("You can only bring back your own messages")
+        if _now() - msg.deleted_at > service.RESTORE_WINDOW:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="It's too late to bring that message back")
+        msg.deleted_at = None
+        await db.commit()
+    out = await core.message_out(db, msg)
+    await core.publish(await core.member_ids(db, room), {"type": "message_edit", "message": out})
+    return out
 
 
 class ReactionIn(BaseModel):
@@ -731,6 +742,11 @@ async def get_attachment(att_id: uuid.UUID, exp: int, sig: str, thumb: int = 0, 
     att = await db.get(RoomAttachment, att_id)
     if att is None:
         raise core.not_found("File")
+    if att.message_id is not None:
+        # A deleted message's files are gone, even before they're wiped.
+        owner = await db.get(RoomMessage, att.message_id)
+        if owner is not None and owner.deleted_at is not None:
+            raise core.not_found("File")
     want_thumb = bool(thumb) and att.has_thumb
     path = absolute_path(service.att_path(att, want_thumb))
     if not path.exists():

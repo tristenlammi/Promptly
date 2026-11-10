@@ -141,7 +141,7 @@ function Access({ onDone }: { onDone: () => void }) {
 
 /** Bookmarks in this browser, kept the same as every other browser this vault is connected in. */
 function BookmarkSettings() {
-  type Shown = { on: boolean; granted: boolean; at?: string; total?: number; unsynced?: number; failed?: number; held?: { fromBrowser: number; fromVault: number }; error?: string; inBrowser?: number };
+  type Shown = { on: boolean; granted: boolean; at?: string; total?: number; unsynced?: number; failed?: number; away?: boolean; held?: { fromBrowser: number; fromVault: number }; error?: string; inBrowser?: number };
   const [s, setS] = useState<Shown | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
@@ -194,7 +194,7 @@ function BookmarkSettings() {
         Keep my bookmarks the same in every browser
       </label>
       <p className="text-xs text-[var(--text-muted)]">
-        Bookmarks are encrypted in your vault, so your server can't read them. Turn this on in each browser you use. They sync about once a minute while the vault's unlocked, and catch up when you next unlock. The first sync only adds: nothing in this browser is removed, and exact duplicates in a folder become one. If you also use a browser's own bookmark sync, turn that off to avoid surprises.
+        Bookmarks are encrypted in your vault, so your server can't read them. Turn this on in each browser you use. They sync about once a minute while the vault's unlocked, and catch up when you next unlock. The first sync only adds: nothing in this browser is removed apart from bookmarks you deleted in another browser, and exact duplicates in a folder become one. If you also use a browser's own bookmark sync, turn that off to avoid surprises.
       </p>
       {problem && <Callout kind="danger">{problem}</Callout>}
       {s.on && !s.held && (
@@ -204,6 +204,7 @@ function BookmarkSettings() {
           {s.unsynced ? ` ${s.unsynced} stay in this browser only, because they aren't web addresses.` : ""}
           {s.failed ? ` ${s.failed} couldn't be changed in this browser, and will be tried again.` : ""}
           {s.error ? ` Last problem: ${s.error}` : ""}
+          {s.away ? " Your server couldn't be reached, so your other browsers don't have the latest yet. It'll keep trying." : ""}
         </p>
       )}
       {s.on && s.held && (

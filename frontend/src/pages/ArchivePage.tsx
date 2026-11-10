@@ -13,6 +13,7 @@ import {
 } from "@/hooks/useConversations";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /**
  * Dedicated Archive page. Lists chats the user has archived (hidden from
@@ -97,7 +98,7 @@ export function ArchivePage() {
           )}
 
           {isLoading && (
-            <div className="text-sm text-[var(--text-muted)]">Loading…</div>
+            <SkeletonRows count={3} label="Loading" />
           )}
 
           {!isLoading && !search && filtered.length === 0 && (

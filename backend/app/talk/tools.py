@@ -5,7 +5,7 @@ in front of the ones that change something.
 (``maps/assistant.py`` ``READ_TOOLS``/``WRITE_TOOLS``) plus maps, your files,
 your photos and memory: quick look-ups and small changes. Not the ones that
 need a screen and minutes (``deep_research``, ``run_agents``,
-``code_interpreter``, ``generate_*``, ``propose_*``), and no connectors. The
+``generate_*``, ``propose_*``), and no connectors. The
 phone's own actions (timer, alarm, call, text, open an app, directions) are
 tools too, offered only when the phone said in its ``hello`` that it can do
 them; they don't run here, they come back as an ``action`` for the phone.
@@ -67,7 +67,7 @@ DEVICE = {
 DEVICE_HELD = frozenset({"set_alarm"})
 # Never on a spoken turn: they need a screen and minutes.
 NOT_ON_VOICE = (
-    "deep_research", "run_agents", "code_interpreter", "generate_image", "generate_pdf", "fetch_url",
+    "deep_research", "run_agents", "generate_image", "generate_pdf", "fetch_url",
     "propose_file_changes", "propose_photo_action", "propose_workspace_note", "propose_board_cards",
     "propose_board_updates", "forget", "post_to_room", "read_room", "mail_draft_reply",
 )

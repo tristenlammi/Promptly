@@ -1,4 +1,4 @@
-import { BarChart3, ChevronRight, ExternalLink, Globe2, ImagePlus, MapPin, PartyPopper, Pencil, Tag, Users, X } from "lucide-react";
+import { BarChart3, CalendarPlus, ChevronRight, ExternalLink, Globe2, ImagePlus, MapPin, PartyPopper, Pencil, Tag, Users, X } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { GroupLabel, LinkSnapshot, PorchGroup, PorchUser, PostPlace } from "@/api/porch";
@@ -77,6 +77,7 @@ export function ShareStep({
   canPoll,
   pollLocked,
   onTags,
+  onEvent,
 }: {
   picks: Pick[];
   onEditPhotos: () => void;
@@ -113,6 +114,8 @@ export function ShareStep({
   pollLocked: boolean;
   /** Back to Arrange to change the tags. */
   onTags: () => void;
+  /** Plan an event in the one group chosen (WP-P3.2); undefined: not now. */
+  onEvent?: () => void;
 }) {
   const everyone = groups.find((g) => g.kind === "everyone");
   const withEveryone = !fixedGroups && !!everyone && (audience === "all" || audience.includes(everyone.id));
@@ -273,6 +276,7 @@ export function ShareStep({
       )}
 
       <div className="flex flex-col gap-2">
+        {canPhotos && !picks.length && !poll && <RowButton icon={<ImagePlus className="h-4 w-4" aria-hidden />} label="Add photos or videos" onClick={onAddPhotos} />}
         <RowButton
           icon={<MapPin className="h-4 w-4" aria-hidden />}
           label={place ? "Place" : "Add a place"}
@@ -283,7 +287,7 @@ export function ShareStep({
         />
         {!life && !poll && canLife && <RowButton icon={<PartyPopper className="h-4 w-4" aria-hidden />} label="Life event" onClick={onLife} />}
         {!poll && !life && canPoll && !picks.length && <RowButton icon={<BarChart3 className="h-4 w-4" aria-hidden />} label="Poll" onClick={onPoll} />}
-        {canPhotos && !picks.length && !poll && <RowButton icon={<ImagePlus className="h-4 w-4" aria-hidden />} label="Add photos" onClick={onAddPhotos} />}
+        {onEvent && !picks.length && !poll && !life && <RowButton icon={<CalendarPlus className="h-4 w-4" aria-hidden />} label="Event" onClick={onEvent} />}
       </div>
     </div>
   );

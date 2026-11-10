@@ -36,12 +36,12 @@ async def shared_between(db: AsyncSession, viewer: User, target: User, limit: in
     )
 
 
-async def section(db: AsyncSession, viewer: User, target: User) -> dict[str, Any]:
+async def section(db: AsyncSession, viewer: User, target: User) -> dict[str, Any] | None:
     if viewer.id == target.id:
-        return {"items": []}
+        return None
     notes = await shared_between(db, viewer, target)
     if not notes:
-        return {"items": []}
+        return None
     lists = [n.id for n in notes if n.kind == "list"]
     left: dict = {}
     if lists:
@@ -66,9 +66,9 @@ async def section(db: AsyncSession, viewer: User, target: User) -> dict[str, Any
             "owner": owner,
             "href": f"/notes/n/{n.id}",
         })
-    return {"items": items, "more_url": f"/notes?with={target.id}"}
+    return {"kind": "grid", "items": items, "more_url": f"/notes?with={target.id}", "more_label": "See all in Notes"}
 
 
-sections.register("notes", "Notes", section, order=50, kind="grid")
+sections.register("notes", "Notes", section, order=50)
 
 __all__ = ["MAX", "section", "shared_between"]

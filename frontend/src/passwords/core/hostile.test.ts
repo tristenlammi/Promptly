@@ -619,4 +619,38 @@ describe("a member of a shared vault you made, with the server", () => {
     await c.refreshEmergency();
     expect(s.wrapped.length).toBeGreaterThan(0);
   });
+
+  it("a bookmark deleted on one device isn't brought back by another that only moved it, but an edit still wins", async () => {
+    const { api, c, secretKey } = await fresh();
+    const vid = await c.personalVaultId();
+    const moved = await c.saveNew(vid, newBody("bookmark", "Moved", { bookmark: { parent: "root:bar", pos: 1024, url: "https://moved.example/" } }));
+    const renamed = await c.saveNew(vid, newBody("bookmark", "Renamed", { bookmark: { parent: "root:bar", pos: 2048, url: "https://renamed.example/" } }));
+    const other = await c.saveNew(vid, newBody("bookmark", "Other way", { bookmark: { parent: "root:bar", pos: 3072, url: "https://other.example/" } }));
+    await c.sync();
+    const c2 = new VaultClient(api, new MemoryStore());
+    await c2.unlock(MASTER, secretKey);
+    await c2.sync();
+    // One device deletes two; the other, not having heard, reorders one and renames the other.
+    await c.trashItem(moved.id);
+    await c.trashItem(renamed.id);
+    await c.sync();
+    await c2.update(moved.id, { ...c2.get(moved.id)!.body, bookmark: { parent: "root:other", pos: 512, url: "https://moved.example/" } });
+    await c2.update(renamed.id, { ...c2.get(renamed.id)!.body, title: "Renamed here" });
+    // And the other way round: the move reaches the server first, then the delete meets it.
+    await c2.update(other.id, { ...c2.get(other.id)!.body, bookmark: { parent: "root:bar", pos: 256, url: "https://other.example/" } });
+    await c2.sync();
+    await c.sync();
+    await c.trashItem(other.id).catch(() => undefined);
+    await c2.update(other.id, { ...c2.get(other.id)!.body, bookmark: { parent: "root:bar", pos: 128, url: "https://other.example/" } });
+    await c2.sync();
+    await c.sync();
+    await c2.sync();
+    await c.sync();
+    for (const d of [c, c2]) {
+      expect(d.get(moved.id)?.deleted).toBe(true);
+      expect(d.get(other.id)?.deleted).toBe(true);
+      expect(d.get(renamed.id)?.deleted).toBe(false);
+      expect(d.get(renamed.id)?.body.title).toBe("Renamed here");
+    }
+  });
 });

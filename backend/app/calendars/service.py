@@ -365,9 +365,16 @@ async def rsvp(db: AsyncSession, user: User, event_id: uuid.UUID, status: str) -
 
             rooms = await core.shared_rooms(db, ev.id, user)
             link = await db.get(CalEventRoom, (ev.id, rooms[0])) if rooms else None
-            if link is None:
-                raise core.not_found()
-            att = CalAttendee(event_id=ev.id, user_id=user.id, invited_by=link.shared_by or ev.created_by or user.id)
+            if link is not None:
+                att = CalAttendee(event_id=ev.id, user_id=user.id, invited_by=link.shared_by or ev.created_by or user.id)
+            else:
+                # Answering a Porch post's event card (WP-P3.2): you're a guest now.
+                from app.porch.plans import event_post_for
+
+                post = await event_post_for(db, ev.id, user)
+                if post is None:
+                    raise core.not_found()
+                att = CalAttendee(event_id=ev.id, user_id=user.id, invited_by=post.author_id or ev.created_by or user.id)
         db.add(att)
     changed = att.status != status
     att.status = status

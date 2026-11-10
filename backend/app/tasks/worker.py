@@ -267,6 +267,15 @@ async def memory_learning(ctx) -> dict[str, int]:
     return {"suggested": await nightly()}
 
 
+async def rooms_purge_deleted(ctx) -> int:
+    """Cron: wipe what deleted Rooms messages held, once Undo has run out."""
+    from app.database import SessionLocal
+    from app.rooms.service import purge_deleted
+
+    async with SessionLocal() as db:
+        return await purge_deleted(db)
+
+
 # Forms (WP-F1.4): telling owners their form closed, and the daily email.
 async def forms_close_tick(ctx) -> int:
     """Cron: forms whose closing time passed — tell their owners once."""
@@ -475,6 +484,7 @@ class WorkerSettings:
         # Forms (WP-F1.4): closing pushes every 5 minutes; the daily email
         # checks four times an hour (it goes at each person's own time).
         cron(forms_close_tick, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True),
+        cron(rooms_purge_deleted, minute=set(range(0, 60, 2)), run_at_startup=False, unique=True),
         cron(forms_digest, minute={7, 22, 37, 52}, run_at_startup=False, unique=True),
         # Forms (WP-F1.5): linked sheets catch up every 10 minutes (collab was
         # down, a sync was lost), and are checked in full overnight.

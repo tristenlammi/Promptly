@@ -114,3 +114,28 @@ html.dark .note-c[data-color="chalk"] { --note-bg: #232427; }
 .note-check:checked::before { transform: scale(1); }
 .note-check:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .note-check:disabled { cursor: default; opacity: 0.6; }
+
+/* Dark: a plain card sits a step above the page, with an edge you can see. */
+html.dark .note-c:not([data-color]),
+html.dark .note-c[data-color="default"] {
+  --note-bg: var(--surface-1);
+  --note-border: rgba(168, 148, 132, 0.28);
+}
+
+/* The note a card opened into: the card steps aside while it's open. */
+[data-note-card][data-note-open] { opacity: 0; }
+
+/* Small arrivals: menus, the phone's side menu, sheets. (The app-wide
+   reduced-motion rule switches these off.) */
+@keyframes note-pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.97); } }
+@keyframes note-fade-in { from { opacity: 0; } }
+@keyframes note-drawer-in { from { transform: translateX(-100%); } }
+@keyframes note-sheet-up { from { transform: translateY(24px); opacity: 0; } }
+@keyframes note-sheet-in { from { transform: scale(0.97); opacity: 0; } }
+.note-pop-in { animation: note-pop-in 0.12s ease-out; transform-origin: top left; }
+.note-fade-in { animation: note-fade-in 0.18s ease-out; }
+.note-drawer-in { animation: note-drawer-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.note-sheet-in { animation: note-sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@media (min-width: 640px) {
+  .note-sheet-in { animation: note-sheet-in 0.16s ease-out; }
+}

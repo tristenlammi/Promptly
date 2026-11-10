@@ -29,6 +29,7 @@ from app.auth.models import User
 from app.config import get_settings
 from app.database import get_db
 from app.mfa.smtp import SmtpNotConfiguredError, SmtpSendError, send_message
+from app.public_origin import link_origin
 from app.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
@@ -67,13 +68,10 @@ async def feedback_config(
     return FeedbackConfig(email=_settings.FEEDBACK_EMAIL)
 
 
-def _compose_body(message: str, user: User, request: Request) -> str:
-    origin = (
-        request.headers.get("origin")
-        or request.headers.get("referer")
-        or request.headers.get("host")
-        or "unknown"
-    )
+def _compose_body(message: str, user: User, origin: str | None) -> str:
+    # The server's configured address (app/public_origin.py), not request
+    # headers, which a sender could set to anything.
+    origin = origin or "unknown"
     sent = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return (
         f"{message.strip()}\n\n"
@@ -104,7 +102,9 @@ async def submit_feedback(
             db,
             to=to,
             subject=f"Promptly feedback from {user.username}",
-            text_body=_compose_body(payload.message, user, request),
+            text_body=_compose_body(
+                payload.message, user, await link_origin(db, request)
+            ),
             reply_to=reply_to,
         )
         return FeedbackResponse(delivered=True)

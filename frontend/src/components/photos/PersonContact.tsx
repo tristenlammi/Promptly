@@ -17,6 +17,7 @@ import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 /*
  * A Photos person ↔ their contact. Linked: a compact contact card under the
@@ -286,7 +287,7 @@ function LinkContactSheet({ personId, person, onClose }: { personId: string; per
   return (
     <Sheet open onClose={onClose} title={title}>
       {app.isLoading ? (
-        <p className="py-8 text-center text-sm text-[var(--text-muted)]">Loading…</p>
+        <SkeletonRows count={4} className="py-2" label="Loading" />
       ) : app.isError ? (
         <p className="py-8 text-center text-sm text-[var(--text-muted)]">Couldn't reach your apps. Try again in a moment.</p>
       ) : !app.data?.installed ? (

@@ -23,6 +23,13 @@ const sidebarOrder = (page: Page) =>
 test("the sidebar's apps can be put in order from Edit", async ({ alice: page }) => {
   await page.goto("/apps");
   await page.getByRole("button", { name: "Edit" }).click();
+  // Start from an empty sidebar list: a run that stopped part way (this one
+  // or another that pins apps) can leave apps pinned.
+  const offs = page.getByRole("region", { name: "Sidebar order" }).getByRole("button", { name: /^Take .* off the sidebar$/ });
+  for (let n = await offs.count(); n > 0; n--) {
+    await offs.first().click();
+    await expect(offs).toHaveCount(n - 1);
+  }
   for (const name of NAMES) await page.getByRole("button", { name: `Show ${name} in the sidebar` }).click();
   const list = page.getByRole("region", { name: "Sidebar order" });
   await expect(list.getByRole("button", { name: /^Move / })).toHaveCount(3);

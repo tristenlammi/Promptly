@@ -158,7 +158,7 @@ export function AttachmentViewer({ messageId, attachments, start, saved, saving,
             <FileIcon className="mx-auto h-9 w-9 text-[var(--text-muted)]" />
             <p className="mt-3 break-words text-sm font-medium text-[var(--text)]">{file.name}</p>
             <p className="mt-1 text-sm text-[var(--text-muted)]">{shown.why}</p>
-            {shown.retry && <button type="button" onClick={() => setAttempt((n) => n + 1)} className="mt-3 h-9 rounded-lg bg-[#D97757] px-4 text-sm font-medium text-white hover:opacity-90">Try again</button>}
+            {shown.retry && <button type="button" onClick={() => setAttempt((n) => n + 1)} className="mt-3 h-9 rounded-lg bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90">Try again</button>}
           </div>
         )}
         {many && (

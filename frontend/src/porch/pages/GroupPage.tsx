@@ -1,6 +1,7 @@
+import { RowsSkeleton, TilesSkeleton } from "../components/ui";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Check, Crown, ImageIcon, LogOut, MoreHorizontal, PenSquare, Pencil, Shield, ShieldOff, Trash2, UserMinus, UserPlus, UserRound } from "lucide-react";
+import { CalendarPlus, Check, Crown, ImageIcon, LogOut, MoreHorizontal, PenSquare, Pencil, Pin as PinIcon, Shield, ShieldOff, Trash2, UserMinus, UserPlus, UserRound } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -12,9 +13,10 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { useGroupActions } from "../actions";
-import { groupKey, groupPostsKey, groupsChanged, listPosts, membersKey, pendingKey } from "../cache";
+import { groupEventsKey, groupKey, groupPinsKey, groupPostsKey, groupsChanged, listPosts, membersKey, pendingKey } from "../cache";
 import { EditGroupSheet, InviteSheet } from "../components/GroupSheets";
 import { GroupReports } from "../components/GroupReports";
+import { PlanGroupEventSheet } from "../components/PlanGroupEventSheet";
 import { PostCard, PostList } from "../components/PostCard";
 import { ActionSheet, Column, GroupTile, LoadError, PageHeader, PorchAvatar, PostSkeleton, VisibilityTag, peopleCount, shortAgo, type MenuAction } from "../components/ui";
 import { usePorch } from "../context";
@@ -22,7 +24,7 @@ import { GroupBell } from "../notify";
 import { useSentinel } from "../scroll";
 import { Unavailable } from "./PostPage";
 
-type Tab = "posts" | "photos" | "people" | "invites" | "reports";
+type Tab = "posts" | "photos" | "events" | "people" | "invites" | "reports";
 const ROLE_WORD = { owner: "Owner", admin: "Admin", member: "" } as const;
 
 /** ``/porch/g/:id``: a group — its posts, photos, people and invites. */
@@ -176,6 +178,7 @@ function MemberView({ g }: { g: PorchGroup }) {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const members = useQuery({ queryKey: membersKey(g.id), queryFn: () => porchApi.members(g.id), staleTime: 30_000 });
   const showInvites = g.kind === "custom" && g.is_admin;
 
@@ -190,6 +193,7 @@ function MemberView({ g }: { g: PorchGroup }) {
   const tabs: { value: Tab; label: ReactNode }[] = [
     { value: "posts", label: "Posts" },
     { value: "photos", label: "Photos" },
+    { value: "events", label: "Events" },
     { value: "people", label: "People" },
   ];
   if (showInvites) tabs.push({ value: "invites", label: "Invites" });
@@ -201,7 +205,7 @@ function MemberView({ g }: { g: PorchGroup }) {
         <span className="inline-flex items-center gap-1.5">
           Reports
           {n > 0 && (
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--item-accent)] px-1.5 text-[11px] font-semibold text-white">
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent-strong)] px-1.5 text-xs font-semibold text-white">
               {n}
               <span className="sr-only"> waiting</span>
             </span>
@@ -255,6 +259,9 @@ function MemberView({ g }: { g: PorchGroup }) {
         <ItemButton variant="secondary" icon={<PenSquare className="h-4 w-4" />} onClick={() => navigate(`/porch/new?group=${g.id}`)}>
           Post to {g.name}
         </ItemButton>
+        <ItemButton variant="secondary" icon={<CalendarPlus className="h-4 w-4" />} onClick={() => setPlanning(true)}>
+          Event
+        </ItemButton>
       </div>
       <div className="px-4 pt-4 md:px-0">
         <div className="-mx-1 overflow-x-auto px-1">
@@ -264,6 +271,7 @@ function MemberView({ g }: { g: PorchGroup }) {
       <div className="pt-3">
         {tab === "posts" && <GroupPosts g={g} />}
         {tab === "photos" && <GroupPhotos g={g} />}
+        {tab === "events" && <GroupEvents g={g} onPlan={() => setPlanning(true)} />}
         {tab === "people" && <People g={g} members={members.data} loading={members.isPending} error={members.isError} retry={() => void members.refetch()} />}
         {tab === "invites" && showInvites && <PendingList g={g} onInvite={() => setInviting(true)} />}
         {tab === "reports" && showReports && <GroupReports g={g} />}
@@ -272,6 +280,7 @@ function MemberView({ g }: { g: PorchGroup }) {
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={g.name} actions={actions} />
       <EditGroupSheet group={g} open={editing} onClose={() => setEditing(false)} />
       <InviteSheet group={g} open={inviting} onClose={() => setInviting(false)} exclude={(members.data ?? []).map((m) => m.id)} />
+      <PlanGroupEventSheet group={g} open={planning} onClose={() => setPlanning(false)} onPosted={() => setTab("events")} />
     </Column>
   );
 }
@@ -307,6 +316,7 @@ function GroupPosts({ g }: { g: PorchGroup }) {
   }
   return (
     <>
+      <Pinned g={g} />
       <PostList>
         {posts.map((p) => (
           <PostCard key={p.id} post={p} />
@@ -320,6 +330,96 @@ function GroupPosts({ g }: { g: PorchGroup }) {
         ) : null}
       </div>
     </>
+  );
+}
+
+/** Up to three posts the group's admins pinned (WP-P3.1), above its posts.
+ *  Never in the feed. */
+function Pinned({ g }: { g: PorchGroup }) {
+  const q = useQuery({ queryKey: groupPinsKey(g.id), queryFn: () => porchApi.groupPins(g.id), staleTime: 30_000 });
+  const pins = q.data ?? [];
+  if (!pins.length) return null;
+  return (
+    <section aria-label={`Pinned in ${g.name}`} className="mb-3 px-4 md:px-0">
+      <ul className="flex flex-col gap-2">
+        {pins.map((p) => {
+          const m = p.media[0];
+          const pic = m ? (m.thumb ?? m.poster) : null;
+          const words = p.body.split(/\r?\n/).find((l) => l.trim())?.trim() || p.life_event?.title || p.event?.title || (p.media.length ? "Photos" : "A post");
+          return (
+            <li key={p.id}>
+              <Link
+                to={`/porch/p/${p.id}`}
+                className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+              >
+                {pic ? (
+                  <img src={pic} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                ) : (
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--item-accent)_12%,var(--surface))] text-lg" aria-hidden>
+                    {p.event ? "📅" : "📝"}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1 text-xs font-medium text-[var(--accent-text)]">
+                    <PinIcon className="h-3 w-3" aria-hidden /> Pinned
+                  </span>
+                  <span className="block truncate text-sm font-medium text-[var(--text)]">{words}</span>
+                  <span className="block truncate text-xs text-[var(--text-muted)]">
+                    {p.author?.name ?? "Someone"} · {shortAgo(p.created_at)}
+                  </span>
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** The group's events (WP-P3.2): coming up first, soonest first; then past ones. */
+function GroupEvents({ g, onPlan }: { g: PorchGroup; onPlan: () => void }) {
+  const q = useQuery({ queryKey: groupEventsKey(g.id), queryFn: () => porchApi.groupEvents(g.id), staleTime: 30_000 });
+  if (q.isPending) return <PostSkeleton />;
+  if (q.isError) return <LoadError what="Couldn't load the events." onRetry={() => void q.refetch()} />;
+  const { upcoming, past } = q.data;
+  if (!upcoming.length && !past.length) {
+    return (
+      <EmptyState
+        className="mx-4 md:mx-0"
+        icon={CalendarPlus}
+        title={`Nothing planned in ${g.name} yet`}
+        text={g.kind === "everyone" ? "Plan something and it's posted here. Anyone can answer from the post." : `Plan something and everyone in ${g.name} gets it on their calendar, with Going, Maybe or Can't go.`}
+        action={
+          <ItemButton variant="primary" icon={<CalendarPlus className="h-4 w-4" />} onClick={onPlan}>
+            Plan an event
+          </ItemButton>
+        }
+      />
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {upcoming.length > 0 ? (
+        <PostList>
+          {upcoming.map((p) => (
+            <PostCard key={p.id} post={p} />
+          ))}
+        </PostList>
+      ) : (
+        <p className="px-4 text-sm text-[var(--text-muted)] md:px-0">Nothing coming up.</p>
+      )}
+      {past.length > 0 && (
+        <>
+          <h3 className="px-4 pt-3 text-sm font-semibold text-[var(--text)] md:px-0">Past events</h3>
+          <PostList>
+            {past.map((p) => (
+              <PostCard key={p.id} post={p} />
+            ))}
+          </PostList>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -340,7 +440,7 @@ export function PhotoGrid({ posts, empty }: { posts: ReturnType<typeof listPosts
             >
               {src && <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" />}
               {p.media.length > 1 && (
-                <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-[10px] font-semibold text-white" aria-hidden>
+                <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-xs font-semibold text-white" aria-hidden>
                   {p.media.length}
                 </span>
               )}
@@ -364,7 +464,7 @@ function GroupPhotos({ g }: { g: PorchGroup }) {
   const sentinel = useSentinel(() => {
     if (q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
   });
-  if (q.isPending) return <p className="px-4 py-6 text-sm text-[var(--text-muted)]">Loading photos…</p>;
+  if (q.isPending) return <TilesSkeleton tiles={9} />;
   if (q.isError) return <LoadError what="Couldn't load the photos." onRetry={() => void q.refetch()} />;
   return (
     <>
@@ -377,7 +477,7 @@ function GroupPhotos({ g }: { g: PorchGroup }) {
 function People({ g, members, loading, error, retry }: { g: PorchGroup; members?: Member[]; loading: boolean; error: boolean; retry: () => void }) {
   const { b } = usePorch();
   const [who, setWho] = useState<Member | null>(null);
-  if (loading) return <p className="px-4 py-6 text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (loading) return <RowsSkeleton rows={5} className="px-4 md:px-0" />;
   if (error || !members) return <LoadError what="Couldn't load who's in the group." onRetry={retry} />;
   return (
     <div className="px-4 md:px-0">
@@ -477,7 +577,7 @@ function PersonSheet({ g, m, onClose }: { g: PorchGroup; m: Member; onClose: () 
 function PendingList({ g, onInvite }: { g: PorchGroup; onInvite: () => void }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: pendingKey(g.id), queryFn: () => porchApi.pendingInvites(g.id), staleTime: 15_000 });
-  if (q.isPending) return <p className="px-4 py-6 text-sm text-[var(--text-muted)]">Loading…</p>;
+  if (q.isPending) return <RowsSkeleton rows={5} className="px-4 md:px-0" />;
   if (q.isError) return <LoadError what="Couldn't load the invites." onRetry={() => void q.refetch()} />;
   if (q.data.length === 0) {
     return (

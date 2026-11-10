@@ -4,6 +4,8 @@ import { useSearchParams } from "react-router-dom";
 
 import type { ItemModule, ItemViewProps } from "@/items/types";
 
+import "./tasks.css";
+
 import { ListsView } from "./ListsView";
 import { requestQuickAdd } from "./parts";
 import { SettingsView } from "./SettingsView";

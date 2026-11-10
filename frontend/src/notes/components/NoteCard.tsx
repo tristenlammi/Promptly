@@ -26,6 +26,8 @@ export interface CardActions {
   remind: (id: string, anchor: HTMLElement) => void;
   /** Who has it (the share dialog). */
   share: (id: string) => void;
+  /** Everything you can do with it, as a sheet (press and hold on a phone). */
+  menu?: (id: string) => void;
 }
 
 function duration(ms: number): string {
@@ -80,7 +82,7 @@ export const NoteCard = memo(function NoteCard({
   const owner = users[note.owner_id];
   const editor = note.edited_by ? users[note.edited_by]?.username : undefined;
 
-  const tool = "flex h-8 w-8 items-center justify-center rounded-full note-muted note-hover hover:text-[var(--note-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]";
+  const tool = "flex h-9 w-9 shrink-0 items-center justify-center rounded-full note-muted note-hover hover:text-[var(--note-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]";
 
   return (
     <article
@@ -199,7 +201,7 @@ export const NoteCard = memo(function NoteCard({
           aria-pressed={selected}
           onClick={() => actions.select(note.id, "toggle")}
           className={cn(
-            "absolute -left-0.5 -top-0.5 z-[2] flex h-8 w-8 items-center justify-center rounded-full text-[var(--note-text)] transition",
+            "absolute -left-0.5 -top-0.5 z-[2] flex h-9 w-9 items-center justify-center rounded-full text-[var(--note-text)] transition",
             selected || selecting ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover/card:opacity-100",
           )}
         >
@@ -222,7 +224,7 @@ export const NoteCard = memo(function NoteCard({
       {!selecting && (
         <div
           className={cn(
-            "relative z-[2] flex items-center gap-0.5 px-1.5 pb-1.5 transition-opacity",
+            "relative z-[2] flex flex-wrap items-center gap-0.5 px-1 pb-1 transition-opacity",
             pop ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover/card:opacity-100 max-md:hidden",
           )}
         >
@@ -257,7 +259,7 @@ export const NoteCard = memo(function NoteCard({
         </div>
       )}
       {pop === "color" && (
-        <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={248}>
+        <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={272}>
           <ColorGrid
             value={note.color}
             onPick={(c) => {

@@ -115,7 +115,7 @@ export const NAV_ITEMS: NavItem[] = [
     optionalKey: "workspaces",
   },
   {
-    to: "/tasks",
+    to: "/automations",
     icon: Workflow,
     label: "Automations",
     section: "chat",

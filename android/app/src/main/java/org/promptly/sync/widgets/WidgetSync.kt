@@ -44,7 +44,10 @@ class WidgetSync(context: Context, params: WorkerParameters) : CoroutineWorker(c
             if (store.unlinked) WidgetStore.wipe(ctx)
             SyncLogic.Outcome.NOT_LINKED
         } else {
-            SyncLogic.run(ctx, WidgetApi(account), Widgets.wanted(ctx), System.currentTimeMillis(), Widgets.noteIds(ctx))
+            SyncLogic.run(
+                ctx, WidgetApi(account), Widgets.wanted(ctx), System.currentTimeMillis(), Widgets.noteIds(ctx),
+                albums = PhotoWidget.albums(ctx), showing = PhotoWidget.showing(ctx),
+            )
         }
         if (outcome == SyncLogic.Outcome.REMOVED) store.unlinked = true
         Widgets.redraw(ctx)
@@ -123,7 +126,10 @@ object SyncLogic {
     private const val DAYS = 7
     private const val MAX_TRIES = 20
 
-    suspend fun run(ctx: Context, api: WidgetBackend, want: List<String>, now: Long, noteIds: List<String> = emptyList()): Outcome {
+    suspend fun run(
+        ctx: Context, api: WidgetBackend, want: List<String>, now: Long, noteIds: List<String> = emptyList(),
+        albums: List<String> = emptyList(), showing: Set<String> = emptySet(),
+    ): Outcome {
         try {
             // The outbox first, oldest first: an add then a tick of it arrive in order.
             for (queued in WidgetStore.load(ctx).ops) {
@@ -146,10 +152,16 @@ object SyncLogic {
                 }
             }
             Capture.sweep(ctx, WidgetStore.state.value.ops, now)
-            if (want.isEmpty()) return Outcome.OK
-            val answer = api.snapshot(want, DAYS, someday = true, etags = WidgetStore.etags(), noteIds = noteIds)
-            WidgetsOff.set(ctx, false)
-            WidgetStore.merge(ctx, answer, now)
+            if (want.isNotEmpty()) {
+                val answer = api.snapshot(want, DAYS, someday = true, etags = WidgetStore.etags(), noteIds = noteIds)
+                WidgetsOff.set(ctx, false)
+                WidgetStore.merge(ctx, answer, now)
+            }
+            // Photo widgets: a few of each album's photos, kept small on the phone.
+            if (albums.isNotEmpty()) {
+                withContext(Dispatchers.IO) { PhotoSync.run(ctx, api, albums, now, showing) }
+                WidgetsOff.set(ctx, false)
+            }
             return Outcome.OK
         } catch (e: Unlinked) {
             WidgetStore.wipe(ctx)

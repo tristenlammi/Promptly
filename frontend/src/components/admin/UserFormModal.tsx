@@ -12,6 +12,10 @@ import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
+import { useAppSettings } from "@/hooks/useAdminUsers";
+import { PasswordChecklist, passwordMeetsRules } from "@/components/account/PasswordChecklist";
+
+import { NewMemberCard, type NewMember } from "./NewMemberCard";
 import type { AdminModelOption, AdminUser, UserRole } from "@/api/types";
 import type { UserGroup } from "@/api/groups";
 
@@ -24,8 +28,6 @@ export interface UserFormValues {
   allowed_models: string[] | null;
   /** Whether the user can use the `generate_image` chat tool. */
   can_generate_images: boolean;
-  /** Whether the user can run code via the "Run" button on code artifacts. */
-  can_execute_code: boolean;
   can_reach_private_network: boolean;
   /** Whether the user may use Automations (off unless turned on). */
   can_use_automations: boolean;
@@ -64,8 +66,9 @@ interface UserFormModalProps {
   /**
    * Commits the form. Resolve on success; throw to surface an error inline.
    * For edits, password is only included when the caller entered one.
+   * Create resolves with the new account, for the "Send them this" card.
    */
-  onSubmit: (values: UserFormValues) => Promise<void>;
+  onSubmit: (values: UserFormValues) => Promise<AdminUser | void>;
 }
 
 export function UserFormModal({
@@ -85,7 +88,6 @@ export function UserFormModal({
   const [role, setRole] = useState<UserRole>("user");
   const [fullAccess, setFullAccess] = useState(true);
   const [canGenerateImages, setCanGenerateImages] = useState(true);
-  const [canExecuteCode, setCanExecuteCode] = useState(true);
   const [canReachPrivate, setCanReachPrivate] = useState(false);
   const [canUseAutomations, setCanUseAutomations] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -95,6 +97,9 @@ export function UserFormModal({
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // After Create: the details to send them (password held only here).
+  const [created, setCreated] = useState<NewMember | null>(null);
+  const { data: appSettings } = useAppSettings();
 
   // Quota fields stored as the strings the user types so an empty
   // input is distinguishable from "0" (which is a valid cap meaning
@@ -111,8 +116,12 @@ export function UserFormModal({
 
   // Re-initialize whenever the modal is opened.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setCreated(null);
+      return;
+    }
     setError(null);
+    setCreated(null);
     setBusy(false);
     setSearch("");
     if (mode === "edit" && user) {
@@ -122,7 +131,6 @@ export function UserFormModal({
       setRole(user.role);
       setFullAccess(user.allowed_models === null);
       setCanGenerateImages(user.can_generate_images ?? true);
-      setCanExecuteCode(user.can_execute_code ?? true);
       setCanReachPrivate(user.can_reach_private_network ?? false);
       setCanUseAutomations(user.can_use_automations ?? false);
       setLocked(!!user.model_locked && user.allowed_models !== null);
@@ -150,7 +158,6 @@ export function UserFormModal({
       setRole("user");
       setFullAccess(true);
       setCanGenerateImages(true);
-      setCanExecuteCode(true);
       setCanReachPrivate(false);
       setCanUseAutomations(false);
       setLocked(false);
@@ -202,7 +209,9 @@ export function UserFormModal({
   const canSubmit =
     email.trim().length > 0 &&
     username.trim().length >= 3 &&
-    (mode === "edit" || password.length >= 8) &&
+    (mode === "edit"
+      ? password.length === 0 || passwordMeetsRules(password, policy.min_length)
+      : passwordMeetsRules(password, policy.min_length)) &&
     !(role === "user" && locked && picked.size !== 1);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -222,7 +231,7 @@ export function UserFormModal({
     const storageBytes = parseGbToBytes(storageCapGb);
 
     try {
-      await onSubmit({
+      const result = await onSubmit({
         email: email.trim(),
         username: username.trim(),
         password,
@@ -232,7 +241,6 @@ export function UserFormModal({
         allowed_models:
           role === "admin" || fullAccess ? null : Array.from(picked),
         can_generate_images: canGenerateImages,
-        can_execute_code: canExecuteCode,
         can_reach_private_network: canReachPrivate,
         can_use_automations: canUseAutomations,
         model_locked: role === "user" && !fullAccess && locked,
@@ -242,7 +250,18 @@ export function UserFormModal({
         daily_token_budget: parseQuota(dailyTokens),
         monthly_token_budget: parseQuota(monthlyTokens),
       });
-      onClose();
+      if (mode === "create" && result) {
+        setCreated({
+          id: result.id,
+          username: result.username,
+          email: result.email,
+          password,
+          temporary: result.must_change_password ?? mustChangePassword,
+        });
+        setPassword("");
+      } else {
+        onClose();
+      }
     } catch (err) {
       setError(apiErrorMessage(err, "Request failed"));
     } finally {
@@ -253,8 +272,28 @@ export function UserFormModal({
   const title = mode === "create" ? "Create user" : `Edit ${user?.username ?? "user"}`;
   const description =
     mode === "create"
-      ? "Create a new account and choose which models they can use."
+      ? "Make an account for someone in your family. Next you'll get the details to send them."
       : "Update this user's details. Leave password blank to keep it unchanged.";
+
+  if (created) {
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Send them this"
+        description="How they get in. Copy it into a message, share it, or email it."
+        widthClass="max-w-lg"
+        dismissible={false}
+        footer={
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        }
+      >
+        <NewMemberCard member={created} smtpConfigured={!!appSettings?.smtp_configured} />
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -310,6 +349,9 @@ export function UserFormModal({
           autoComplete="new-password"
           placeholder={mode === "edit" ? "Leave blank to keep unchanged" : undefined}
         />
+        {(mode === "create" || password.length > 0) && (
+          <PasswordChecklist password={password} minLength={policy.min_length} />
+        )}
 
         {/* Role toggle */}
         <div>
@@ -322,14 +364,14 @@ export function UserFormModal({
               onClick={() => setRole("user")}
               icon={<UserIcon className="h-4 w-4" />}
               title="User"
-              body="Chat only. Model access limited to what you grant below."
+              body="Messages, photos, calendar, notes, files and the AI helper. Can't change settings or other people's accounts."
             />
             <RoleOption
               active={role === "admin"}
               onClick={() => setRole("admin")}
               icon={<ShieldCheck className="h-4 w-4" />}
               title="Admin"
-              body="Full access. Can manage users and model providers."
+              body="Everything, plus running this Promptly: people, settings and AI models."
             />
           </div>
         </div>
@@ -416,23 +458,6 @@ export function UserFormModal({
                 <span className="block text-[11px] text-[var(--text-muted)]">
                   Let this user ask the chat to generate or edit images. Off =
                   the image tool is withheld entirely for them.
-                </span>
-              </span>
-            </label>
-            <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={canExecuteCode}
-                onChange={(e) => setCanExecuteCode(e.target.checked)}
-              />
-              <span className="text-xs">
-                <span className="font-medium text-[var(--text)]">
-                  Code execution
-                </span>
-                <span className="block text-[11px] text-[var(--text-muted)]">
-                  Let this user run code with the “Run” button on code
-                  artifacts. Off = the Run button is hidden for them.
                 </span>
               </span>
             </label>

@@ -13,6 +13,8 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 
+import { EmptyState as SharedEmptyState } from "@/components/shared/EmptyState";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/utils/cn";
 
 /*
@@ -287,20 +289,21 @@ export function IconButton({
   disabled?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
-        active && "bg-[var(--hover)] text-[var(--item-accent)]",
-        className,
-      )}
-    >
-      <Icon className="h-[18px] w-[18px]" />
-    </button>
+    <Tooltip label={label}>
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onClick}
+        disabled={disabled}
+        className={cn(
+          "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
+          active && "bg-[var(--hover)] text-[var(--item-accent)]",
+          className,
+        )}
+      >
+        <Icon className="h-[18px] w-[18px]" />
+      </button>
+    </Tooltip>
   );
 }
 
@@ -491,32 +494,33 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   );
 }
 
+/** The item kit's empty state. Draws the one shared style
+ *  (``@/components/shared/EmptyState``); kept here for its item-flavoured
+ *  props (an icon component, ``text``). */
 export function EmptyState({
   icon: Icon,
   title,
   text,
   action,
   className,
+  compact,
 }: {
   icon?: ComponentType<{ className?: string }>;
   title: ReactNode;
   text?: ReactNode;
   action?: ReactNode;
   className?: string;
+  compact?: boolean;
 }) {
   return (
-    <div className={cn("flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[var(--border)] px-6 py-10 text-center", className)}>
-      {Icon && (
-        <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] text-[var(--item-accent)]">
-          <Icon className="h-6 w-6" />
-        </span>
-      )}
-      <div className="flex flex-col gap-1">
-        <p className="text-sm font-semibold text-[var(--text)]">{title}</p>
-        {text && <p className="max-w-sm text-sm text-[var(--text-muted)]">{text}</p>}
-      </div>
-      {action}
-    </div>
+    <SharedEmptyState
+      icon={Icon ? <Icon className={compact ? "h-4 w-4" : "h-5 w-5"} /> : undefined}
+      title={title}
+      description={text}
+      action={action}
+      compact={compact}
+      className={className}
+    />
   );
 }
 

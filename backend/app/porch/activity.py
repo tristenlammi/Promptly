@@ -70,13 +70,17 @@ async def after_comment(db: AsyncSession, post: PorchPost, c: PorchComment, pare
     await push.comment_added(db, post, c, parent)
 
 
-async def after_post(db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool = False) -> None:
+async def after_post(
+    db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool = False,
+    skip: set[uuid.UUID] | None = None,
+) -> None:
     """A new or changed post: anyone newly @mentioned or asked about a tag
-    (and, for a new post, the pushes for bells and "Notify me when they post")."""
+    (and, for a new post, the pushes for bells and "Notify me when they post",
+    less ``skip``: people Calendar has just invited to its event)."""
     mentioned, tagged = list(mentioned), list(tagged)
     who = {uuid.UUID(str(m)) for m in mentioned} | set(tagged)
     await tell(db, who, actor=post.author_id)
-    await push.post_created(db, post, mentioned, tagged, created=created)
+    await push.post_created(db, post, mentioned, tagged, created=created, skip=skip)
 
 
 # ------------------------------------------------------------------ reading

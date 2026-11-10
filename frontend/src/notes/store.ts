@@ -277,6 +277,7 @@ export async function loadLists(): Promise<void> {
  *  device, so they open and edit with no connection even if they've never
  *  been opened here. A card alone has only the start of a note. */
 const PREFETCH = 100;
+const PREFETCH_GAP_MS = 150;
 let prefetching = false;
 async function prefetch(uid: string): Promise<void> {
   if (prefetching) return;
@@ -292,6 +293,9 @@ async function prefetch(uid: string): Promise<void> {
       if (get().uid !== uid) return;
       const r = await Promise.all(want.slice(i, i + 2).map((id) => fetchNote(id)));
       if (r.includes("offline")) return;
+      // Unhurried: back to back, a hundred notes went over the server's
+      // per-address request limit, and the note you opened came back 429.
+      await sleep(PREFETCH_GAP_MS);
     }
   } finally {
     prefetching = false;
@@ -316,7 +320,7 @@ export async function loadTrash(): Promise<void> {
 }
 
 /** The whole note (opening it): from the server when we can. */
-export async function fetchNote(id: string): Promise<"ok" | "gone" | "offline"> {
+export async function fetchNote(id: string, retry = true): Promise<"ok" | "gone" | "offline"> {
   if (get().drafts[id]) return "ok";
   const k = get().known[id];
   if (k?.local) return "ok";
@@ -329,6 +333,11 @@ export async function fetchNote(id: string): Promise<"ok" | "gone" | "offline"> 
     if (status(e) === 404) {
       lose([id]);
       return "gone";
+    }
+    // Too many requests at once (the server's limit), not offline: ask again once.
+    if (status(e) === 429 && retry) {
+      await sleep(1500);
+      return fetchNote(id, false);
     }
     return "offline";
   }

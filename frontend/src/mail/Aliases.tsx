@@ -47,18 +47,18 @@ export function AliasNotes({ info, accountId, threadKey }: { info: ThreadAliases
       {list.map((a) => (
         <div key={a.id} data-testid="mail-alias" className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--text)]">
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <AtSign className="h-3.5 w-3.5 shrink-0 text-[#D97757]" />
+            <AtSign className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
             <span>Sent to your alias <span className="font-mono">{a.address}</span>{a.enabled ? "" : " (off)"}</span>
             <span className="text-[var(--text-muted)]">
               {a.item_id ? <a className="underline" href={`/passwords/#/item/${a.item_id}`}>for a login in Passwords</a> : "not linked to a login"} · {a.count === 1 ? "1 email" : `${a.count} emails`}, last {day(a.last_at)}
             </span>
-            <button type="button" onClick={() => void toggle(a)} className="ml-auto font-medium text-[#D97757]">{a.enabled ? "Turn off" : "Turn on"}</button>
+            <button type="button" onClick={() => void toggle(a)} className="ml-auto font-medium text-[var(--accent-text)]">{a.enabled ? "Turn off" : "Turn on"}</button>
           </p>
           {a.send_as === "refused" && (
             <p className="mt-1 text-[var(--text-muted)]">Replies go from your mailbox's own address, because your provider won't send as {a.domain}. {a.send_as_text}</p>
           )}
           {a.flagged_sender && (
-            <p className="mt-1 flex gap-1.5 text-[#C9A227]">
+            <p className="mt-1 flex gap-1.5 text-[var(--warning)]">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span>This alias got mail from {a.flagged_sender}, which doesn't look like who it was for. It may have been sold or leaked. Check it in Passwords → Aliases.</span>
             </p>

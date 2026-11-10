@@ -101,8 +101,15 @@ async def test_room_message_mention_shows_only_to_people_in_the_room(client, db,
     assert len((await conns(client, user, "task", ref))["mentioned_in"]) == 1
     assert (await client.delete(f"/api/rooms/messages/{mid}", headers=_auth(user))).status_code == 204
     assert (await conns(client, user, "task", ref))["mentioned_in"] == []
-    from app.links.models import EntityLink
+    from datetime import timedelta
 
+    from app.links.models import EntityLink
+    from app.rooms.service import purge_deleted
+
+    # A deleted message keeps its link while Undo can still bring it back (it's
+    # hidden meanwhile, above); the link goes when the message is wiped.
+    await purge_deleted(db, older_than=timedelta(0))
+    await db.commit()
     assert (await db.execute(select(EntityLink).where(EntityLink.source_id == mid))).first() is None
 
 

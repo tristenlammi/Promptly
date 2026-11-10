@@ -41,7 +41,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
+from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult, guard_outbound
 from app.chat.tools.validation import clean_model_text
 from app.net.safe_fetch import (
     DEFAULT_MAX_BYTES,
@@ -332,6 +332,11 @@ class FetchUrlTool(Tool):
         url = url.strip()
         if not url.lower().startswith(("http://", "https://")):
             raise ToolError("`url` must be an http(s) URL")
+        # After the turn read outside content, an address the person didn't
+        # give (and this turn's search didn't find) waits for their yes: a
+        # page or email could be steering the model to send what it has seen
+        # to another site in the address (security review H2).
+        guard_outbound(ctx, f"opening {_log_host(url)}", url=url)
 
         # Where to start reading. The whole page is fetched and extracted
         # either way — this only windows what we hand back, so a long

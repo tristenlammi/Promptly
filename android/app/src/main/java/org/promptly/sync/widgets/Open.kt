@@ -24,6 +24,7 @@ object Open {
     const val CALENDAR = "org.promptly.app.CalendarLauncher"
     const val TASKS = "org.promptly.app.TasksLauncher"
     const val NOTES = "org.promptly.app.NotesLauncher"
+    const val PHOTOS = "org.promptly.app.PhotosLauncher"
 
     /** An intent for a widget: through [OpenActivity], which decides at tap time. */
     fun page(ctx: Context, launcher: String, path: String): Intent =

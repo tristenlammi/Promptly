@@ -7,6 +7,8 @@ import { PersonInput } from "@/items/ui/PersonInput";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
+import { Choice } from "./ui";
+
 export interface LivePerson {
   user_id: string;
   name: string;
@@ -55,15 +57,34 @@ export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: 
     }
   };
 
-  const stop = async (id: string) => {
-    await apiClient.delete(`/maps/share/${id}`);
+  // Stopping is done straight away (it's your privacy): Undo shares again for the time that was left.
+  const stop = async (p: Shares["sharing_with"][number]) => {
+    try {
+      await apiClient.delete(`/maps/share/${p.user_id}`);
+    } catch (e) {
+      toast.error(apiErrorMessage(e, `Couldn't stop sharing with ${p.name}. They can still see where you are: try again.`));
+      return;
+    }
     refresh();
+    const left = p.expires_at ? (new Date(p.expires_at).getTime() - Date.now()) / 3_600_000 : null;
+    toast.success(`Stopped sharing with ${p.name}`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (left !== null && left <= 0) return;
+          apiClient
+            .put("/maps/share", { username: p.name, hours: left === null ? null : Math.max(1, Math.round(left)) })
+            .then(refresh)
+            .catch((e) => toast.error(apiErrorMessage(e, `Couldn't share with ${p.name} again.`)));
+        },
+      },
+    });
   };
 
   return (
     <div className="pb-4">
       <div className="flex items-center gap-2 px-3 pt-3">
-        <button type="button" onClick={onClose} aria-label="Back" className="rounded-full p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover)]">
+        <button type="button" onClick={onClose} aria-label="Back" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] md:h-8 md:w-8">
           <ArrowLeft className="h-4 w-4" />
         </button>
         <h1 className="text-base font-semibold text-[var(--text)]">Live location</h1>
@@ -71,7 +92,7 @@ export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: 
 
       {(data?.shared_with_me.length ?? 0) > 0 && <h2 className="px-4 pb-1 pt-3 text-xs font-medium text-[var(--text-muted)]">Sharing with you</h2>}
       {data?.shared_with_me.map((p) => (
-        <button key={p.user_id} type="button" disabled={!p.live} onClick={() => onShow(p)} className="flex w-full items-center gap-3 px-4 py-2 text-left enabled:hover:bg-[var(--hover)]">
+        <button key={p.user_id} type="button" disabled={!p.live} onClick={() => onShow(p)} className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left enabled:hover:bg-[var(--hover)]">
           <User className="h-4 w-4 text-[var(--text-muted)]" />
           <span className="min-w-0">
             <span className="block truncate text-sm text-[var(--text)]">{p.name}</span>
@@ -91,7 +112,7 @@ export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: 
             <span className="block truncate text-sm text-[var(--text)]">{p.name}</span>
             <span className="block text-xs text-[var(--text-muted)]">{p.expires_at ? `Until ${new Date(p.expires_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}` : "Until you stop"}</span>
           </span>
-          <button type="button" onClick={() => void stop(p.user_id)} aria-label={`Stop sharing with ${p.name}`} className="rounded-full p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover)]"><X className="h-4 w-4" /></button>
+          <button type="button" onClick={() => void stop(p)} aria-label={`Stop sharing with ${p.name}`} title="Stop sharing" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] md:h-8 md:w-8"><X className="h-4 w-4" /></button>
         </div>
       ))}
 
@@ -116,13 +137,21 @@ export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: 
             aria-label="Who to share with"
           />
         </div>
-        <select value={hours} onChange={(e) => setHours(e.target.value)} aria-label="For how long" className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--text)]">
-          <option value="1">1 hour</option>
-          <option value="8">8 hours</option>
-          <option value="24">1 day</option>
-          <option value="">Until I stop</option>
-        </select>
-        <button type="submit" className="h-9 rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-white hover:opacity-90">Share</button>
+        <div className="w-full">
+          <p className="mb-1 text-xs text-[var(--text-muted)]">For how long</p>
+          <Choice
+            label="For how long"
+            value={hours}
+            onChange={setHours}
+            options={[
+              { value: "1", label: "1 hour" },
+              { value: "8", label: "8 hours" },
+              { value: "24", label: "1 day" },
+              { value: "", label: "Until I stop" },
+            ]}
+          />
+        </div>
+        <button type="submit" disabled={!name.trim()} className="h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 md:h-9">Share</button>
       </form>
     </div>
   );

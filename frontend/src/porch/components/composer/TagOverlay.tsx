@@ -1,3 +1,4 @@
+import { RowsSkeleton } from "../ui";
 import { Search, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useState, type RefObject } from "react";
 
@@ -168,7 +169,7 @@ export function TagOverlay({
             </div>
           )}
           {!audienceReady ? (
-            <p className="py-4 text-center text-sm text-[var(--text-muted)]">Loading…</p>
+            <RowsSkeleton rows={3} />
           ) : choices.length === 0 ? (
             <p className="py-4 text-center text-sm text-[var(--text-muted)]">
               {audience.length ? "Nobody else to tag." : "Nobody else will see this post yet, so there's no one to tag. Pick its groups in the next step."}

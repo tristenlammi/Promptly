@@ -209,12 +209,42 @@ if ((Test-Path ".env") -and -not (Select-String -Path ".env" -Pattern "^LIVEKIT_
     [System.IO.File]::WriteAllText((Join-Path $PWD ".env"), $envText)
     Write-Ok "Calls: made a key pair and turned the calls service on (calls-desktop). Turn voice on in Admin -> Calls."
 }
+# Shared secrets that later versions need and older .env files lack (or still
+# hold the .env.example placeholder for): made once, before anything is
+# rebuilt, so the backend's boot check never trips. Real values are kept.
+#   TUS_HOOK_SECRET      backend <-> tusd upload hooks
+# (An old CODE_SANDBOX_SECRET line in .env is no longer read: the code
+# sandbox was removed. It's harmless to leave or delete.)
+if (Test-Path ".env") {
+    $envPath = Join-Path $PWD ".env"
+    $envText = [System.IO.File]::ReadAllText($envPath)
+    $changed = $false
+    foreach ($key in @("TUS_HOOK_SECRET")) {
+        if ($envText -match "(?m)^$key=(?!change-me).+") { continue }
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $b = New-Object byte[] 32; $rng.GetBytes($b); $rng.Dispose()
+        $value = -join ($b | ForEach-Object { $_.ToString('x2') })
+        if ($envText -match "(?m)^$key=") {
+            $envText = [regex]::Replace($envText, "(?m)^$key=.*$", "$key=$value")
+        } else {
+            if ($envText -and -not $envText.EndsWith("`n")) { $envText += "`n" }
+            $envText += "$key=$value`n"
+        }
+        $changed = $true
+        Write-Ok "$key generated in .env"
+    }
+    if ($changed) { [System.IO.File]::WriteAllText($envPath, ($envText -replace "`r`n", "`n")) }
+}
 docker compose pull --ignore-buildable --quiet
 if ($LASTEXITCODE -ne 0) { Write-Warn "Couldn't pull some images; continuing with what's here." }
 docker compose build --pull
 if ($LASTEXITCODE -ne 0) { throw "docker compose build failed" }
+# --remove-orphans also clears containers of services that no longer exist
+# (the old code sandbox, Promptly-Sandbox). Its empty network is left behind
+# by compose, so tidy that too; harmless when it isn't there.
 docker compose up -d --remove-orphans
 if ($LASTEXITCODE -ne 0) { throw "docker compose up failed" }
+try { docker network rm promptly-sandbox 2>$null | Out-Null } catch { }
 
 Write-Section "5/6  Reloading nginx config"
 Invoke-NginxReload

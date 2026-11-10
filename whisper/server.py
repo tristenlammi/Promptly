@@ -18,7 +18,7 @@ Design notes
 * **VAD trimming.** ``vad_filter=True`` drops leading/trailing silence so
   a clip where the user paused before speaking still transcribes cleanly
   and a bit faster.
-* **Stateless + internal-only.** Like the code sandbox this lives on the
+* **Stateless + internal-only.** This lives on the
   internal ``promptly`` docker network; only the backend reaches it.
 * **Live speech for Talk** (``WS /live``, WP-T1): a separate, smaller model
   (``WHISPER_LIVE_MODEL``, ``base`` by default) in its own ``live`` lane with

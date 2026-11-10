@@ -98,7 +98,7 @@ export function SearchPanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 p-3">
-        <label className="flex h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 focus-within:border-[var(--item-accent)] md:h-10">
+        <label className="flex h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 focus-within:border-[var(--accent)] md:h-10">
           <Search className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
           <input
             data-autofocus={autoFocus ? "" : undefined}
@@ -187,8 +187,8 @@ export function MembersPanel({ b, memberIds, space }: { b: Bootstrap; memberIds:
                 {u?.username ?? "Someone"}
                 {id === b.me.id && <span className="font-normal text-[var(--text-muted)]"> (you)</span>}
               </span>
-              {role === "owner" && <Crown className="h-4 w-4 text-[#C08B2C]" aria-label="Owner" />}
-              {role === "admin" && <Shield className="h-4 w-4 text-[var(--item-accent)]" aria-label="Admin" />}
+              {role === "owner" && <Crown className="h-4 w-4 text-[var(--warning)]" aria-label="Owner" />}
+              {role === "admin" && <Shield className="h-4 w-4 text-[var(--accent-text)]" aria-label="Admin" />}
             </button>
           </li>
         );
@@ -240,7 +240,7 @@ export function UpcomingPanel({ roomId, meId, onPlan }: { roomId: string; meId: 
         </div>
       ) : (
         <section aria-label="Upcoming">
-          <h3 className="px-4 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Upcoming</h3>
+          <h3 className="px-4 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Upcoming</h3>
           <ul className="flex flex-col pb-2">
             {events.map((ev) => {
               const w = upcomingWhen(ev);

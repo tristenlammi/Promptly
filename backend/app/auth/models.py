@@ -43,15 +43,6 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
 
-    # Per-user capability gate for user-invoked code execution (the "Run"
-    # button on code artifacts → ``POST /api/code/run``). TRUE (default) =
-    # the user can run code in the sandbox; FALSE = the Run affordance is
-    # hidden and the endpoint refuses. Admins are never gated by it. This
-    # is independent of the ``code_interpreter`` chat tool (model-driven).
-    can_execute_code: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default="true"
-    )
-
     # May this user's automation HTTP steps reach addresses on the local
     # network (LAN, Tailscale, the Docker host)? FALSE by default — any
     # user used to be able to tick that box per step (R-008, R-015).

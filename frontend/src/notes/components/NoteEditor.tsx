@@ -333,9 +333,8 @@ export function NoteEditor({
           <button
             type="button"
             className="rounded-full px-3 py-1 font-medium text-[var(--danger)] note-hover"
-            onClick={() => {
-              noteOps.forever([id]);
-              onClose();
+            onClick={async () => {
+              if (await noteOps.forever([id])) onClose();
             }}
           >
             Delete forever
@@ -377,7 +376,7 @@ export function NoteEditor({
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                if (note.kind === "text") body.current?.focus("start");
+                if (note.kind === "text") body.current?.continueBelow();
                 else (document.querySelector<HTMLInputElement>(`[data-note-editor="${id}"] input[aria-label="New list item"]`) ?? null)?.focus();
               }
             }}
@@ -563,7 +562,7 @@ export function NoteEditor({
           {isDraft ? "" : pending ? (offline ? "Saved on this device" : "Saving…") : edited(note, me, users)}
         </span>
         {variant !== "page" && (
-          <button type="button" onClick={close} className="h-9 rounded-full px-4 text-sm font-medium note-hover">
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={close} className="h-9 rounded-full px-4 text-sm font-medium note-hover">
             Close
           </button>
         )}
@@ -600,7 +599,7 @@ export function NoteEditor({
       )}
       <SendToSheet open={tool === "send"} onClose={() => setTool(null)} target={{ kind: "note", id: note.id, title: displayTitle(note) }} canGrant={false} />
       {pop === "color" && (
-        <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={248}>
+        <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={272}>
           <ColorGrid value={note.color} onPick={(c) => noteOps.color([id], c)} />
         </Pop>
       )}

@@ -151,19 +151,18 @@ export function ModelSelector({ compact = false, upward = false }: ModelSelector
     );
   }
 
-  // A custom model goes by its own name — never the provider it runs on.
-  const label = selected
-    ? selected.is_custom
-      ? selected.display_name
-      : `${selected.display_name} · ${selected.provider_name}`
-    : "Select a model";
+  // The model's own name; the provider it runs on ("· OpenRouter") means
+  // nothing to most people, so it's only in the tooltip. A custom model
+  // never shows its provider.
+  const label = selected ? selected.display_name : "Select a model";
+  const fullLabel = selected && !selected.is_custom ? `${selected.display_name} · ${selected.provider_name}` : label;
 
   if (locked) {
     if (compact) return null;
     return (
       <span
         className="inline-flex items-center gap-1.5 rounded-input border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text)]"
-        title={label}
+        title={fullLabel}
       >
         <span className="max-w-[220px] truncate">{label}</span>
         {selected?.supports_vision && <VisionBadge compact />}
@@ -179,7 +178,7 @@ export function ModelSelector({ compact = false, upward = false }: ModelSelector
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-label={selected ? `Model: ${label}. Tap to change.` : "Select a model"}
-          title={label}
+          title={fullLabel}
           className={cn(
             "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
             "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",

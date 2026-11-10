@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Clock, CornerDownLeft, Loader2, MapPin, Repeat as RepeatIcon, SlidersHorizontal, Sparkles, UserRound } from "lucide-react";
+import { CalendarDays, Clock, CornerDownLeft, Loader2, MapPin, PenLine, Repeat as RepeatIcon, SlidersHorizontal, UserRound } from "lucide-react";
 import { forwardRef, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { calendarApi, type CalEvent, type CalendarBootstrap, type CalUser } from "@/api/calendar";
@@ -116,7 +116,7 @@ export const QuickAddBar = forwardRef<
   return (
     <div className={cn("relative", className)}>
       <div className="relative">
-        <Sparkles className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--item-accent)]" />
+        <PenLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--item-accent)]" />
         <input
           ref={ref}
           value={text}

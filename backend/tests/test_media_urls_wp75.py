@@ -282,6 +282,7 @@ def test_claim_codes_are_append_only_and_porch_kinds_round_trip():
                                           "thumb_edit", "preview_edit", "basemap")] == list(range(1, 13))
     assert [media_urls._CODE[n] for n in ("form_upload", "form_thumb", "offline", "note")] == [13, 14, 15, 16]
     assert [media_urls._CODE[n] for n in media_urls.PORCH_RENDITIONS] == list(range(17, 23))
+    assert [media_urls._CODE[n] for n in media_urls.PORCH_STORY_RENDITIONS] == list(range(23, 27))
     assert len(set(media_urls._CODE.values())) == len(media_urls._CODE)
     mid, uid = uuid.uuid4(), uuid.uuid4()
     for name in media_urls.PORCH_RENDITIONS:

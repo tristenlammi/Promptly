@@ -39,7 +39,6 @@ EXTRAS = {
     "ollama": ["ollama"],
     "photos-ml": ["photos-ml"],
     "media": ["media-worker", "tusd"],
-    "sandbox": ["sandbox"],
     "voice": ["whisper", "tts"],
     "convert": ["convert"],
     "search": ["searxng"],
@@ -271,7 +270,6 @@ def transform(cfg: dict, opts, env: dict[str, str]) -> dict:
             dead = "http://127.0.0.1:9"
             e.update({
                 "SECRET_KEY": env["SECRET_KEY"],
-                "CODE_SANDBOX_SECRET": env["SECRET_KEY"],
                 "SEARXNG_ENABLED": "true" if "search" in extras else "false",
                 "OLLAMA_URL": "http://ollama:11434" if "ollama" in extras else dead,
                 "WHISPER_URL": "http://whisper:8000" if "voice" in extras else dead,
@@ -456,7 +454,7 @@ def main() -> None:
     # Optional services' images the main app already built: reused as-is
     # (read only) unless --build-extras.
     opts.reuse = {}
-    for svc in ("sandbox", "whisper", "tts", "photos-ml", "maps"):
+    for svc in ("whisper", "tts", "photos-ml", "maps"):
         ref = f"promptly-{svc}:latest"
         if subprocess.run(["docker", "image", "inspect", ref], capture_output=True).returncode == 0:
             opts.reuse[svc] = ref

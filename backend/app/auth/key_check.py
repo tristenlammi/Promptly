@@ -21,9 +21,12 @@ logger = logging.getLogger("promptly.keys")
 
 def _columns():
     from app.app_settings.models import AppSettings
+    from app.breach_watch.models import BreachConfig
+    from app.mail.models import MailAccount
     from app.mcp.models import McpConnector
     from app.mfa.models import UserMfaSecret
     from app.models_config.models import ModelProvider
+    from app.secrets.models import UserSecret
 
     return [
         (UserMfaSecret, "totp_secret_encrypted"),
@@ -32,6 +35,12 @@ def _columns():
         (McpConnector, "auth_value_encrypted"),
         (AppSettings, "smtp_password_encrypted"),
         (AppSettings, "oidc_client_secret_encrypted"),
+        # Also moved onto a new key at boot, so a rotation after a leak
+        # doesn't leave these readable only with the old one.
+        (AppSettings, "maps_traffic_key_encrypted"),
+        (MailAccount, "secret_encrypted"),
+        (UserSecret, "value_encrypted"),
+        (BreachConfig, "api_key_encrypted"),
     ]
 
 

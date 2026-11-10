@@ -16,6 +16,8 @@ import {
   MessagesSquare,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   ShieldMinus,
   Sparkles,
   Trash2,
@@ -34,10 +36,11 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { useBlock } from "../actions";
-import { profileKey, putPost } from "../cache";
+import { LISTS, profileKey, putPost } from "../cache";
 import { usePorch } from "../context";
 import { usePostTalk } from "../talkActions";
 import { CommentsSheet, InlineComments } from "./Comments";
+import { EventCard } from "./EventCard";
 import { MakeEventSheet } from "./MakeEventSheet";
 import { MediaCarousel } from "./MediaCarousel";
 import { PollCard } from "./PollCard";
@@ -135,6 +138,7 @@ function LifeEventCard({ post }: { post: PorchPost }) {
  */
 export function PostCard({ post, full = false, media = true, className }: { post: PorchPost; full?: boolean; media?: boolean; className?: string }) {
   const [menu, setMenu] = useState(false);
+  const moreBtn = useRef<HTMLButtonElement>(null);
   const [saving, setSaving] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [planning, setPlanning] = useState(false);
@@ -169,7 +173,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
   const actions: MenuAction[] = [];
   if (post.can_edit) {
     actions.push({
-      label: "Edit post",
+      group: "manage", label: "Edit post",
       icon: Pencil,
       hint: post.kind === "text" || post.kind === "poll" ? "Its words and place" : "Its words, photos and place",
       onClick: () => navigate(`/porch/p/${post.id}/edit`),
@@ -177,7 +181,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
   }
   if (!post.mine && author) {
     actions.push({
-      label: "Reply privately",
+      group: "share", label: "Reply privately",
       icon: MessagesSquare,
       hint: `A message to ${who} in Rooms, with this post`,
       onClick: async () => {
@@ -191,19 +195,19 @@ export function PostCard({ post, full = false, media = true, className }: { post
     });
   }
   actions.push({
-    label: "Share to a Room",
+    group: "share", label: "Share to a Room",
     icon: MessageSquareShare,
     hint: "Only people who can see this post can open it",
     onClick: () => setSharing(true),
   });
   actions.push({
-    label: "Make this an event",
+    group: "manage", label: "Make this an event",
     icon: CalendarPlus,
     hint: "In your calendar, inviting people who can see this post",
     onClick: () => setPlanning(true),
   });
   actions.push({
-    label: "Copy link",
+    group: "share", label: "Copy link",
     icon: Link2,
     hint: "Only people who can see this post can open it",
     onClick: () => {
@@ -214,12 +218,30 @@ export function PostCard({ post, full = false, media = true, className }: { post
       );
     },
   });
+  // Pins (WP-P3.1): one entry per group you run that it's in.
+  for (const g of post.pin_groups ?? []) {
+    actions.push({
+      group: "manage", label: g.pinned ? `Unpin from ${g.name}` : `Pin to ${g.name}`,
+      icon: g.pinned ? PinOff : Pin,
+      hint: g.pinned ? undefined : `At the top of ${g.name}'s page (up to 3)`,
+      onClick: async () => {
+        try {
+          await porchApi.setPin(g.id, post.id, !g.pinned);
+          putPost(qc, post.id, await porchApi.post(post.id));
+          void qc.invalidateQueries({ queryKey: ["porch", "pins", g.id] });
+          toast.success(g.pinned ? `Unpinned from ${g.name}.` : `Pinned to ${g.name}.`);
+        } catch (err) {
+          toast.error(apiErrorMessage(err, "Couldn't change the pin. Try again."));
+        }
+      },
+    });
+  }
   if (post.media.some((m) => m.full)) {
-    actions.push({ label: post.media.length > 1 ? "Save photos" : post.media[0]?.kind === "video" ? "Save video" : "Save photo", icon: Download, onClick: () => setSaving(true) });
+    actions.push({ group: "share", label: post.media.length > 1 ? "Save photos" : post.media[0]?.kind === "video" ? "Save video" : "Save photo", icon: Download, onClick: () => setSaving(true) });
   }
   if (!post.mine && author) {
     actions.push({
-      label: `Turn on posts from ${who}`,
+      group: "manage", label: `Turn on posts from ${who}`,
       icon: BellRing,
       hint: `A notification when ${who} posts. Turn it off on their profile.`,
       onClick: async () => {
@@ -236,32 +258,62 @@ export function PostCard({ post, full = false, media = true, className }: { post
   // Server admins run Everyone: they can take someone's post out of it.
   const inEveryone = post.groups.some((g) => g.kind === "everyone");
   if (!post.mine && b?.me?.is_admin && inEveryone) {
-    actions.push({ label: `Remove from ${b.everyone.name}`, icon: ShieldMinus, hint: "Asks for a reason, which they'll see", danger: true, onClick: () => setUnEveryone(true) });
+    actions.push({ group: "safety", label: `Remove from ${b.everyone.name}`, icon: ShieldMinus, hint: "Asks for a reason, which they'll see", danger: true, onClick: () => setUnEveryone(true) });
   }
-  if (!post.mine && author) actions.push({ label: `Block ${who}`, icon: UserX, danger: true, onClick: () => void block(author) });
-  if (!post.mine) actions.push({ label: "Report", icon: TriangleAlert, hint: "Tell the admins of a group it's in", danger: true, onClick: () => setReporting(true) });
+  if (!post.mine && author) actions.push({ group: "safety", label: `Block ${who}`, icon: UserX, danger: true, onClick: () => void block(author) });
+  if (!post.mine) actions.push({ group: "safety", label: "Report", icon: TriangleAlert, hint: "Tell the admins of a group it's in", danger: true, onClick: () => setReporting(true) });
   if (post.can_delete) {
     actions.push({
-      label: "Delete post",
+      group: "manage", label: "Delete post",
       icon: Trash2,
       danger: true,
       onClick: async () => {
-        const ok = await confirm({
-          title: "Delete this post?",
-          message: post.mine
-            ? "This deletes the post for everyone. The photos stay in your Photos library."
-            : `This deletes ${who}'s post for everyone. Their photos stay in their Photos library.`,
-          confirmLabel: "Delete",
-          danger: true,
-        });
-        if (!ok) return;
-        try {
-          await porchApi.deletePost(post.id);
-          putPost(qc, post.id, null);
-          toast.success("Post deleted.");
-        } catch (err) {
-          toast.error(apiErrorMessage(err, "Couldn't delete the post. Try again."));
+        // Your own post goes at once, with Undo. Someone else's: asked first.
+        if (!post.mine) {
+          const ok = await confirm({
+            title: "Delete this post?",
+            message: `This deletes ${who}'s post for everyone. Their photos stay in their Photos library.`,
+            confirmLabel: "Delete",
+            danger: true,
+          });
+          if (!ok) return;
         }
+        // It carries your event: cancel that too, or keep it in calendars.
+        const ev = post.event && !post.event.cancelled && post.event.organiser ? post.event : null;
+        const cancelEvent = ev
+          ? await confirm({
+              title: `Cancel “${ev.title}” too?`,
+              message: "Cancelling takes it out of everyone's calendar and tells the people going. Keep it, and it stays in calendars without this post.",
+              confirmLabel: "Cancel the event",
+              cancelLabel: "Keep the event",
+              danger: true,
+            })
+          : false;
+        // Deleted now, for everyone; Undo asks the server to put it back as it was.
+        const putBack = () => {
+          qc.setQueryData(["porch", "post", post.id], post);
+          void qc.invalidateQueries({ queryKey: LISTS });
+        };
+        // On the post's own page there's nothing left to look at: back to the feed.
+        if (full) navigate("/porch/", { replace: true });
+        putPost(qc, post.id, null);
+        try {
+          await porchApi.deletePost(post.id, cancelEvent);
+        } catch (err) {
+          putBack();
+          toast.error(apiErrorMessage(err, "Couldn't delete the post, so it's back. Try again."));
+          return;
+        }
+        if (cancelEvent) void qc.invalidateQueries({ queryKey: ["calendar"] });
+        toast.success(cancelEvent ? "Post deleted, and the event is cancelled." : post.mine ? "Post deleted. Your photos stay in Photos." : "Post deleted.", {
+          duration: 10_000,
+          action: {
+            label: "Undo",
+            onClick: () => {
+              porchApi.restorePost(post.id).then(putBack, (err) => toast.error(apiErrorMessage(err, "Couldn't bring the post back.")));
+            },
+          },
+        });
       },
     });
   }
@@ -298,9 +350,11 @@ export function PostCard({ post, full = false, media = true, className }: { post
         </div>
         <button
           type="button"
+          ref={moreBtn}
           aria-label="More for this post"
-          aria-haspopup="dialog"
-          onClick={() => setMenu(true)}
+          aria-haspopup={isPhone ? "dialog" : "menu"}
+          aria-expanded={menu}
+          onClick={() => setMenu((m) => !m)}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
         >
           <MoreHorizontal className="h-5 w-5" />
@@ -327,6 +381,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
       {hasMedia && actions_}
       {post.body && <Caption text={post.body} big={big && !post.poll} full={full} mentions={post.mentions} />}
       {post.poll && <PollCard post={post} />}
+      {post.event && <EventCard post={post} />}
       {post.link && <LinkCard link={post.link} />}
       {post.place && (
         <Link
@@ -342,7 +397,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
       {!full && talk && !isPhone && <InlineComments post={post} focusBox={talk.focus} className="mx-4 rounded-xl bg-[var(--surface-1)] p-3 md:mx-0" />}
       {!full && isPhone && <CommentsSheet post={post} open={!!talk} onClose={() => setTalk(null)} />}
 
-      <ActionSheet open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
+      <ActionSheet anchor={moreBtn.current} open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
       {!post.mine && <ReportSheet open={reporting} onClose={() => setReporting(false)} target="post" id={post.id} who={who} authorId={author?.id} groups={post.groups} />}
       {!post.mine && b?.me?.is_admin && inEveryone && (
         <RemoveFromEveryoneSheet
