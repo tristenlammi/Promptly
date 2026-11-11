@@ -282,8 +282,10 @@ test.describe("voice channels", () => {
 
     // Another app: the call comes along as a card in Promptly's sidebar dock,
     // still connected.
-    await go(alice, "/calendar");
-    await expect(alice).toHaveURL(/\/calendar/);
+    // (Not Calendar: apps with their own side list fold the sidebar to its icon
+    // rail, where the dock is icons, not cards.)
+    await go(alice, "/workspaces");
+    await expect(alice).toHaveURL(/\/workspaces/);
     const card = alice.getByTestId("dock-card-voice").first();
     await expect(card).toContainText(games, { timeout: 15_000 });
     await shot(alice, "desktop-light-panel-in-calendar.png");

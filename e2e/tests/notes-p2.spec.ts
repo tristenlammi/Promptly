@@ -33,7 +33,7 @@ test.describe("notes phase 2", () => {
   test("keep a list sorted by aisle: new items land in their aisle", async ({ alice: page }) => {
     test.setTimeout(120_000);
     const auth = await notesReady(page);
-    const title = `Shop ${stamp}`;
+    const title = `Aisles ${stamp}`; // not "Shop": notes.spec makes a list of that name in the same run
     const id = await newNote(page, auth, { title, ...list(["Frozen peas", "Bread", "Apples"]) });
     await page.goto("/notes");
     await card(page, title).getByRole("button", { name: `Open ${title}` }).click();

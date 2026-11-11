@@ -133,14 +133,14 @@ test.describe("voice on a phone with the Promptly app", () => {
     await alice.goto(`/rooms/r/${ids.general}`);
     await alice.getByRole("button", { name: `Join ${lounge}` }).click();
     await expect(panel(alice).getByTestId("voice-status")).toHaveText("Voice connected", { timeout: 30_000 });
-    // Rooms has its own accent (blurple) on the page...
+    // Rooms wears Promptly's accent now (it used to be blurple on the page)...
     const roomsAccent = await alice.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--item-accent").trim().toLowerCase());
-    expect(roomsAccent).toBe("#5865f2");
+    expect(roomsAccent).toBe("#d97757");
 
     await panel(alice).getByRole("button", { name: "Voice & video settings" }).click();
     const sheet = alice.getByTestId("voice-settings");
     await expect(sheet).toBeVisible();
-    // ...but the settings sheet is Promptly's: terracotta controls.
+    // ...and so does the settings sheet: terracotta controls.
     const slider = sheet.getByRole("slider", { name: /Input volume/ });
     expect(await slider.evaluate((el) => getComputedStyle(el).accentColor)).toBe(TERRACOTTA);
     const toggle = sheet.getByRole("switch", { name: "Echo cancellation" });
