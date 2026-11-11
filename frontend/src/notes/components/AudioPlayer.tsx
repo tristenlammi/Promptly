@@ -134,7 +134,7 @@ export function AudioPlayer({
           onClick={toggle}
           disabled={!src}
           aria-label={playing ? `Pause ${label}` : `Play ${label}`}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:opacity-50"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white transition hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:opacity-50"
         >
           {playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="ml-0.5 h-4 w-4 fill-current" />}
         </button>
@@ -168,7 +168,7 @@ export function AudioPlayer({
             <span
               key={i}
               aria-hidden
-              className={cn("min-w-[1px] flex-1 rounded-full", (i + 0.5) / levels.length <= done ? "bg-[var(--accent)]" : "bg-[color-mix(in_srgb,var(--note-text)_28%,transparent)]")}
+              className={cn("min-w-[1px] flex-1 rounded-full", (i + 0.5) / levels.length <= done ? "bg-[var(--accent-strong)]" : "bg-[color-mix(in_srgb,var(--note-text)_28%,transparent)]")}
               style={{ height: `${Math.max(8, Math.round(v * 100))}%` }}
             />
           ))}

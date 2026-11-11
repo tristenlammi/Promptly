@@ -247,7 +247,7 @@ function FindTimeBody({ onClose, me, people, start, end, ignore, onPick }: FindT
                 ))}
                 {/* The proposed time's label, over the hours (in the header so rows scroll under it). */}
                 <span
-                  className="pointer-events-none absolute top-1/2 flex h-[22px] -translate-x-1/2 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-[var(--item-accent)] px-2 text-xs font-semibold tabular-nums text-white shadow-[var(--shadow-sm)]"
+                  className="pointer-events-none absolute top-1/2 flex h-[22px] -translate-x-1/2 -translate-y-1/2 items-center whitespace-nowrap rounded-full bg-[var(--item-accent-fill)] px-2 text-xs font-semibold tabular-nums text-white shadow-[var(--shadow-sm)]"
                   style={{ left: (startMin + dur / 2) * ppm }}
                 >
                   {timeLabel(propS)} – {timeLabel(propE)}

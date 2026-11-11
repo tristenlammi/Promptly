@@ -222,7 +222,7 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
                     {answerCount > 0 && <span className="tabular-nums text-[var(--text-muted)]">{` (${answerCount.toLocaleString()})`}</span>}
                   </>
                 )}
-                {tab === t && <span aria-hidden="true" className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--accent)]" />}
+                {tab === t && <span aria-hidden="true" className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--accent-strong)]" />}
               </button>
             ))}
           </div>
@@ -562,7 +562,7 @@ function BuilderActions({
         <button
           type="button"
           onClick={onSend}
-          className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]"
+          className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 text-sm font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]"
         >
           <Send className="h-4 w-4" aria-hidden="true" />
           Send

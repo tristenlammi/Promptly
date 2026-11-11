@@ -180,7 +180,7 @@ export const NoteCard = memo(function NoteCard({
             </span>
             {note.changed && !trash && (
               <span data-note-changed="" className="ml-auto flex min-w-0 items-center gap-1 pl-1 text-[11px] font-medium">
-                <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
+                <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent-strong)]" />
                 <span className="truncate">{editor ? `${editor} made changes` : "New changes"}</span>
               </span>
             )}

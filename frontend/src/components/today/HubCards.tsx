@@ -193,7 +193,7 @@ export function SpikeBars({ values, target, className, label }: { values: (numbe
       {values.map((v, i) => (
         <span
           key={i}
-          className={cn("min-w-0 flex-1 rounded-sm", v === null ? "bg-[var(--surface-2)]" : i === values.length - 1 ? "bg-[var(--accent)]" : "bg-[var(--accent)] opacity-50", v !== null && target && v > target * 1.1 && "!bg-[var(--danger)]")}
+          className={cn("min-w-0 flex-1 rounded-sm", v === null ? "bg-[var(--surface-2)]" : i === values.length - 1 ? "bg-[var(--accent-strong)]" : "bg-[var(--accent-strong)] opacity-50", v !== null && target && v > target * 1.1 && "!bg-[var(--danger)]")}
           style={{ height: v === null ? "2px" : `${Math.max(6, (v / top) * 100)}%` }}
         />
       ))}
@@ -205,7 +205,7 @@ function Bar({ pct, over, className }: { pct: number; over?: boolean; className?
   return (
     <span className={cn("block h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]", className)}>
       <span
-        className={cn("block h-full rounded-full transition-[width] duration-500", over ? "bg-[var(--danger)]" : "bg-[var(--accent)]")}
+        className={cn("block h-full rounded-full transition-[width] duration-500", over ? "bg-[var(--danger)]" : "bg-[var(--accent-strong)]")}
         style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
       />
     </span>
@@ -342,7 +342,7 @@ export function ScheduleCard({ data }: { data: TodayData }) {
           <span
             className={cn(
               "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-              i.done ? "bg-[var(--surface-2)] text-[var(--text-muted)]" : i.due ? "bg-[var(--danger-bg)] text-[var(--danger)]" : key === nextAt ? "bg-[var(--accent)] text-white" : "bg-[var(--accent-soft)] text-[var(--accent-text)]",
+              i.done ? "bg-[var(--surface-2)] text-[var(--text-muted)]" : i.due ? "bg-[var(--danger-bg)] text-[var(--danger)]" : key === nextAt ? "bg-[var(--accent-strong)] text-white" : "bg-[var(--accent-soft)] text-[var(--accent-text)]",
             )}
             style={i.color && !i.done && key !== nextAt ? { color: i.color } : undefined}
           >
@@ -413,8 +413,8 @@ function NowLine({ time }: { time: string }) {
   return (
     <li aria-label={`Now, ${hhmm(time)}`} className="flex items-center gap-2.5 px-1 py-0.5">
       <span className="w-[3.75rem] shrink-0 text-right text-[11px] font-semibold tabular-nums text-[var(--accent-text)]">{hhmm(time)}</span>
-      <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
-      <span className="h-px flex-1 bg-[var(--accent)]" />
+      <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent-strong)]" />
+      <span className="h-px flex-1 bg-[var(--accent-strong)]" />
     </li>
   );
 }
@@ -444,7 +444,7 @@ export function MedsCard({ health }: { health: NonNullable<Sections["health"]> }
             type="button"
             disabled={busy !== null}
             onClick={() => void log("all", due.map((d) => ({ med: d.med_id, slot: d.time })), `Took ${due.length} doses`)}
-            className="rounded-full bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-60"
           >
             Take all
           </button>
@@ -485,7 +485,7 @@ export function MedsCard({ health }: { health: NonNullable<Sections["health"]> }
                     onClick={() => void log(key, [{ med: d.med_id, slot: d.time }], `Took ${d.name}`)}
                     className={cn(
                       "rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-60",
-                      d.state === "due" ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]",
+                      d.state === "due" ? "bg-[var(--accent-strong)] text-white" : "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]",
                     )}
                   >
                     Take
@@ -541,7 +541,7 @@ export function HealthCard({ health, today, hideWater }: { health: NonNullable<S
           placeholder={health.weight_unit}
           className="w-16 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-sm text-[var(--text)]"
         />
-        <button type="submit" disabled={busy !== null || !weight} className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50">
+        <button type="submit" disabled={busy !== null || !weight} className="rounded-lg bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50">
           Log
         </button>
       </form>
@@ -768,7 +768,7 @@ export function StudyCard({ s }: { s: NonNullable<Sections["study"]> }) {
           </span>
         </span>
         {s.due > 0 && (
-          <Link to={s.url} className="shrink-0 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white">
+          <Link to={s.url} className="shrink-0 rounded-lg bg-[var(--accent-strong)] px-3 py-1.5 text-xs font-semibold text-white">
             Study
           </Link>
         )}
@@ -802,7 +802,7 @@ export function FormsCard({ f }: { f: NonNullable<Sections["forms"]> }) {
       {f.forms.map((x) => (
         <Link key={x.url} to={x.url} className="flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
           <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{x.title}</span>
-          <span className="shrink-0 rounded-full bg-[var(--accent)] px-1.5 text-[11px] font-semibold leading-5 text-white">{x.new > 99 ? "99+" : x.new} new</span>
+          <span className="shrink-0 rounded-full bg-[var(--accent-strong)] px-1.5 text-[11px] font-semibold leading-5 text-white">{x.new > 99 ? "99+" : x.new} new</span>
         </Link>
       ))}
       {f.more > 0 && <p className="px-1 pt-0.5 text-xs text-[var(--text-muted)]">and {f.more} more {f.more === 1 ? "form" : "forms"}</p>}
@@ -856,7 +856,7 @@ export function PorchCard({ p }: { p: NonNullable<Sections["porch"]> }) {
                 <span className="block truncate text-sm text-[var(--text)]">{b.user.name}</span>
                 <span className="block text-xs text-[var(--text-muted)]">Birthday today</span>
               </Link>
-              <Link to={b.post_url} className="shrink-0 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90">
+              <Link to={b.post_url} className="shrink-0 rounded-lg bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90">
                 Post for {b.user.name.split(" ")[0]}
               </Link>
             </li>
@@ -875,7 +875,7 @@ export function JournalCard({ j }: { j: NonNullable<Sections["journal"]> }) {
           <span className="block text-sm font-medium text-[var(--text)]">{j.wrote_today ? `Written today · ${j.words_today.toLocaleString()} words` : "Nothing written yet today"}</span>
           <span className="block text-xs text-[var(--text-muted)]">{j.streak ? `${j.streak} day streak` : j.total ? "Start a new streak" : "Your first entry starts a streak"}</span>
         </span>
-        <Link to={j.url} className={cn("shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold", j.wrote_today ? "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]" : "bg-[var(--accent)] text-white")}>
+        <Link to={j.url} className={cn("shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold", j.wrote_today ? "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]" : "bg-[var(--accent-strong)] text-white")}>
           {j.wrote_today ? "Add more" : "Write"}
         </Link>
       </div>
@@ -1097,7 +1097,7 @@ export function VoiceCard({ v }: { v: NonNullable<Sections["voice"]> }) {
                   navigate(c.url);
                   void joinVoice(c.room_id);
                 }}
-                className="shrink-0 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1"
+                className="shrink-0 rounded-lg bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-semibold text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1"
                 aria-label={`Join ${c.name}`}
               >
                 Join

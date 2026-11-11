@@ -158,7 +158,7 @@ function Toolbar({ editor }: { editor: Editor }) {
             className="absolute bottom-full left-0 z-10 mb-2 flex w-72 max-w-[calc(100vw-2rem)] items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl"
           >
             <input autoFocus value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste or type a link" aria-label="Link address" autoComplete="off" className="h-9 min-w-0 flex-1 rounded-lg bg-[var(--hover)] px-2.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
-            <button type="submit" className="h-9 shrink-0 rounded-lg bg-[var(--accent)] px-3 text-xs font-medium text-white">Add</button>
+            <button type="submit" className="h-9 shrink-0 rounded-lg bg-[var(--accent-strong)] px-3 text-xs font-medium text-white">Add</button>
           </form>
         )}
       </span>
@@ -379,7 +379,7 @@ export function Composer({ draft, accounts, minimised = false, slot = 0, onClose
           {asking && (
             <form className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--accent)]/10 p-2" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setAsking(false); } }} onSubmit={(e) => { e.preventDefault(); void write(); }}>
               <input autoFocus value={wish} onChange={(e) => setWish(e.target.value)} placeholder={draft.reply_to ? "What should the reply say? (optional)" : "What's this email about?"} aria-label="What should it say" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
-              <button type="submit" disabled={drafting} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-60">{drafting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Write it</button>
+              <button type="submit" disabled={drafting} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--accent-strong)] px-3 text-xs font-medium text-white disabled:opacity-60">{drafting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Write it</button>
               <button type="button" onClick={() => setAsking(false)} aria-label="Cancel" className="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
             </form>
           )}
@@ -415,7 +415,7 @@ export function Composer({ draft, accounts, minimised = false, slot = 0, onClose
         <button type="button" onClick={() => setChoosing(true)} aria-label="Attach from Files" title="Attach from Files" className="flex h-10 w-10 shrink-0 items-center md:h-8 md:w-8 justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)]"><FolderOpen className="h-4 w-4" /></button>
         <button type="button" onClick={() => setAsking((v) => !v)} aria-label="Draft with AI" title={model ? `Draft with ${model.model_id}` : "Draft with AI"} className="flex h-10 w-10 shrink-0 items-center md:h-8 md:w-8 justify-center rounded-lg text-[var(--accent-text)] hover:bg-[var(--hover)]"><Sparkles className="h-4 w-4" /></button>
         <span className="flex-1" />
-        <button type="button" onClick={() => void send()} disabled={sending} title="Send (Ctrl+Enter)" className="inline-flex h-10 shrink-0 items-center md:h-9 gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"><Send className="h-4 w-4" />Send</button>
+        <button type="button" onClick={() => void send()} disabled={sending} title="Send (Ctrl+Enter)" className="inline-flex h-10 shrink-0 items-center md:h-9 gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"><Send className="h-4 w-4" />Send</button>
       </div>
       </div>
       <MyFilesPicker open={choosing} onClose={() => setChoosing(false)} onConfirm={(ids) => void addFromFiles(ids)} title="Attach from Files" description="They go with this email when you send it." verb="Attach" excludeIds={new Set(fromFiles.map((f) => f.id))} />

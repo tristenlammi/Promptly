@@ -384,7 +384,7 @@ export function MessageList({
           <button
             type="button"
             onClick={jumpToLatest}
-            className="rooms-pill-in pointer-events-auto inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[var(--shadow-lg)] transition-colors hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            className="rooms-pill-in pointer-events-auto inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-4 text-sm font-semibold text-white shadow-[var(--shadow-lg)] transition-colors hover:bg-[var(--accent-strong-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
           >
             <ArrowDown className="h-4 w-4" />
             {unseen > 0 ? `${unseen} new message${unseen === 1 ? "" : "s"}` : "Jump to latest"}

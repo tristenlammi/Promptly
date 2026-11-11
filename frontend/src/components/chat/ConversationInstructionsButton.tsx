@@ -85,7 +85,7 @@ export function ConversationInstructionsButton({
           <span
             aria-hidden
             className={cn(
-              "rounded-full bg-[var(--accent)]",
+              "rounded-full bg-[var(--accent-strong)]",
               compact
                 ? "absolute right-1 top-1 h-1.5 w-1.5"
                 : "h-1.5 w-1.5"
@@ -119,7 +119,7 @@ export function ConversationInstructionsButton({
               disabled={saving || draft === (value ?? "")}
               className={cn(
                 "rounded-md px-3 py-1.5 text-sm font-medium",
-                "bg-[var(--accent)] text-white hover:opacity-90",
+                "bg-[var(--accent-strong)] text-white hover:opacity-90",
                 "disabled:cursor-not-allowed disabled:opacity-60"
               )}
             >

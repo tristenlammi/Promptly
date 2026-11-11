@@ -197,7 +197,7 @@ export function MeetingNotesModal({
               <>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
                   <div
-                    className="h-full rounded-full bg-[var(--accent)] transition-all duration-500"
+                    className="h-full rounded-full bg-[var(--accent-strong)] transition-all duration-500"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
@@ -216,7 +216,7 @@ export function MeetingNotesModal({
                   onClose();
                   onOpenItem(itemId);
                 }}
-                className="mt-2.5 w-full rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
+                className="mt-2.5 w-full rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
               >
                 Open the page
               </button>
@@ -258,7 +258,7 @@ export function MeetingNotesModal({
                       setActing(false);
                     }
                   }}
-                  className="flex-1 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                  className="flex-1 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
                 >
                   Retry the notes
                 </button>
@@ -368,7 +368,7 @@ export function MeetingNotesModal({
               type="button"
               disabled={!file || uploading}
               onClick={() => void start()}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent-strong)] px-3 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {uploading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -380,7 +380,7 @@ export function MeetingNotesModal({
             {uploading && (
               <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
                 <div
-                  className="h-full rounded-full bg-[var(--accent)] transition-all"
+                  className="h-full rounded-full bg-[var(--accent-strong)] transition-all"
                   style={{ width: `${uploadPct}%` }}
                 />
               </div>

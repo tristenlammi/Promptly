@@ -346,7 +346,7 @@ function SearchSheet({
           className={cn(
             "mt-6 inline-flex w-full items-center justify-center gap-2 rounded-input px-4 py-3 text-base font-medium transition",
             value.trim()
-              ? "bg-[var(--accent)] text-white hover:opacity-90"
+              ? "bg-[var(--accent-strong)] text-white hover:opacity-90"
               : "cursor-not-allowed bg-[var(--surface)] text-[var(--text-muted)]"
           )}
         >

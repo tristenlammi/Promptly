@@ -729,7 +729,7 @@ function MealRow({ entry, recipe, allergies, onOpen, onCook }: { entry: PlanEntr
           type="button"
           onClick={onCook}
           aria-label={`Cook ${entry.title || recipe?.title || "this meal"}`}
-          className="mr-1 inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--item-accent)] px-3.5 text-sm font-semibold text-white shadow-[var(--shadow-sm)] active:brightness-90"
+          className="mr-1 inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--item-accent-fill)] px-3.5 text-sm font-semibold text-white shadow-[var(--shadow-sm)] active:brightness-90"
         >
           <ChefHat className="h-4 w-4" /> Cook
         </button>

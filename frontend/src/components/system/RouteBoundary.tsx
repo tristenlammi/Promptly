@@ -42,7 +42,7 @@ function PageCrash({ error, reset }: { error: Error; reset: () => void }) {
           <button
             type="button"
             onClick={reset}
-            className="inline-flex h-9 items-center rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white transition hover:opacity-90"
+            className="inline-flex h-9 items-center rounded-md bg-[var(--accent-strong)] px-3 text-sm font-medium text-white transition hover:opacity-90"
           >
             Try again
           </button>

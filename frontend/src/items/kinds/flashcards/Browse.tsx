@@ -258,7 +258,7 @@ export function BrowseTab({ item, isPhone, ask }: ItemViewProps<Data>) {
                       aria-hidden
                       className={cn(
                         "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2",
-                        sel.has(c.id) ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)]",
+                        sel.has(c.id) ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)]",
                       )}
                     >
                       {sel.has(c.id) && "✓"}

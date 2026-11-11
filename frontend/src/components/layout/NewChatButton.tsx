@@ -69,7 +69,7 @@ export function NewChatButton({ compact = false }: NewChatButtonProps) {
             onClick={startNormal}
             className={cn(
               "inline-flex h-9 w-9 items-center justify-center rounded-full",
-              "bg-[var(--accent)] text-white hover:opacity-90"
+              "bg-[var(--accent-strong)] text-white hover:opacity-90"
             )}
             aria-label="New chat"
             title="New chat"
@@ -108,7 +108,7 @@ export function NewChatButton({ compact = false }: NewChatButtonProps) {
           type="button"
           onClick={startNormal}
           className={cn(
-            "flex flex-1 items-center justify-center gap-2 bg-[var(--accent)] px-3 py-2",
+            "flex flex-1 items-center justify-center gap-2 bg-[var(--accent-strong)] px-3 py-2",
             "text-sm font-medium text-white transition hover:opacity-90"
           )}
         >
@@ -119,7 +119,7 @@ export function NewChatButton({ compact = false }: NewChatButtonProps) {
           type="button"
           onClick={() => setOpen((v) => !v)}
           className={cn(
-            "inline-flex w-9 items-center justify-center bg-[var(--accent)] text-white",
+            "inline-flex w-9 items-center justify-center bg-[var(--accent-strong)] text-white",
             "transition hover:opacity-90 border-l border-white/20"
           )}
           aria-label="More chat types"

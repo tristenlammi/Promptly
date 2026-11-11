@@ -477,7 +477,7 @@ function SpeedCard() {
               className={cn(
                 "rounded-full px-2.5 py-1 text-xs font-medium transition",
                 days === d
-                  ? "bg-[var(--accent)] text-white"
+                  ? "bg-[var(--accent-strong)] text-white"
                   : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
               )}
             >

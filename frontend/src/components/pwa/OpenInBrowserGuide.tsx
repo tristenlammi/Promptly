@@ -43,7 +43,7 @@ export function OpenInBrowserGuide({ appName, url }: { appName: string; url: str
           <button
             type="button"
             onClick={() => openInBrowser(url)}
-            className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:opacity-90"
+            className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-semibold text-white hover:opacity-90"
           >
             <ExternalLink className="h-4 w-4" /> Open in browser
           </button>

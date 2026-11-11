@@ -236,7 +236,7 @@ export function EditorAiEnhance({
               className={cn(
                 "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition",
                 proposal.stale
-                  ? "bg-[var(--accent)] font-medium text-white hover:opacity-90"
+                  ? "bg-[var(--accent-strong)] font-medium text-white hover:opacity-90"
                   : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
               )}
             >
@@ -246,7 +246,7 @@ export function EditorAiEnhance({
               <button
                 type="button"
                 onClick={() => void accept()}
-                className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white transition hover:opacity-90"
+                className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white transition hover:opacity-90"
               >
                 <Check className="h-3.5 w-3.5" />
                 Replace

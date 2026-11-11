@@ -401,8 +401,8 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-xs font-medium text-[var(--item-accent)]">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--item-accent)] opacity-60 motion-reduce:hidden" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--item-accent)]" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--item-accent-fill)] opacity-60 motion-reduce:hidden" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--item-accent-fill)]" />
               </span>
               Live workout{summaryLine?.week ? ` · week ${summaryLine.week}` : ""}
             </div>

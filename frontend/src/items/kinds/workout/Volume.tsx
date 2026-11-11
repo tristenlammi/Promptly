@@ -34,7 +34,7 @@ export function VolumeBars({ sets, muscles, compact, only }: { sets: Record<stri
               <div className="absolute inset-y-0 bg-[color-mix(in_srgb,var(--success)_30%,transparent)]" style={{ left: pct(info.mav[0]), width: `calc(${pct(info.mav[1])} - ${pct(info.mav[0])})` }} />
               <div className="absolute inset-y-0 bg-[color-mix(in_srgb,var(--warning)_22%,transparent)]" style={{ left: pct(info.mav[1]), width: `calc(${pct(info.mrv)} - ${pct(info.mav[1])})` }} />
               <div className="absolute inset-y-0 w-[2px] bg-[var(--danger)] opacity-70" style={{ left: pct(info.mrv) }} />
-              <div className={cn("absolute inset-y-[3px] left-0 rounded-full", status === "above_mrv" ? "bg-[var(--danger)]" : "bg-[var(--item-accent)]")} style={{ width: pct(v) }} />
+              <div className={cn("absolute inset-y-[3px] left-0 rounded-full", status === "above_mrv" ? "bg-[var(--danger)]" : "bg-[var(--item-accent-fill)]")} style={{ width: pct(v) }} />
             </div>
             <span className={cn("w-[4.5rem] text-right text-xs tabular-nums", TONE[status].cls)}>
               {v}

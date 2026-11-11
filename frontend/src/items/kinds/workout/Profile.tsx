@@ -290,7 +290,7 @@ export function Onboarding({ item, ask }: ItemViewProps<WorkoutData>) {
   return (
     <Page className="max-w-xl">
       <div className="flex flex-col items-center gap-2 pt-2 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--item-accent)] text-white">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--item-accent-fill)] text-white">
           <Dumbbell className="h-7 w-7" />
         </span>
         <h1 className="text-xl font-semibold text-[var(--text)]">Set up your training</h1>

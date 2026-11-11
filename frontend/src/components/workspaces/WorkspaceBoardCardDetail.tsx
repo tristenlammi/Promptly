@@ -686,7 +686,7 @@ function rel(iso: string): string {
 function Initials({ name }: { name: string }) {
   const txt = (name || "?").trim().slice(0, 2).toUpperCase();
   return (
-    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[10px] font-semibold text-white">
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] text-[10px] font-semibold text-white">
       {txt}
     </span>
   );
@@ -802,7 +802,7 @@ function ActivitySection({
             type="button"
             onClick={submit}
             disabled={!draft.trim() || add.isPending}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white disabled:opacity-50"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 text-sm font-medium text-white disabled:opacity-50"
           >
             {add.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />

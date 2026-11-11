@@ -278,7 +278,7 @@ function Header({
         ? "bg-[var(--border)]"
         : s.muted
           ? "bg-[var(--text-muted)]"
-          : "bg-[var(--accent)]";
+          : "bg-[var(--accent-strong)]";
   const median = s.latencies.length
     ? [...s.latencies].sort((a, b) => a - b)[Math.floor(s.latencies.length / 2)]
     : null;
@@ -570,7 +570,7 @@ function MicMeter({ active }: { active: boolean }) {
         levelRef={talkLevel}
         bars={18}
         className="h-6 w-36"
-        barClassName="w-[3px] rounded-full bg-[var(--accent)] opacity-80"
+        barClassName="w-[3px] rounded-full bg-[var(--accent-strong)] opacity-80"
       />
     </div>
   );
@@ -601,7 +601,7 @@ function AskCard({ ask }: { ask: NonNullable<TalkUi["ask"]> }) {
           type="button"
           onClick={() => talk.confirm("yes")}
           disabled={left <= 0}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-3 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
         >
           <Check className="h-4 w-4" /> Yes
         </button>
@@ -775,7 +775,7 @@ function TypeInstead({ onDone }: { onDone: () => void }) {
         type="submit"
         disabled={!text.trim()}
         aria-label="Send"
-        className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent)] text-white disabled:opacity-40"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white disabled:opacity-40"
       >
         <Send className="h-4 w-4" />
       </button>
@@ -803,7 +803,7 @@ function Problem({ s, onFallback, onClose }: { s: TalkUi; onFallback: () => void
           <button
             type="button"
             onClick={onFallback}
-            className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+            className="rounded-full bg-[var(--accent-strong)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
           >
             Use tap-to-talk voice mode
           </button>

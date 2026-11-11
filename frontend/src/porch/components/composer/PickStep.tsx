@@ -70,7 +70,7 @@ function Tile({ photo, order, onToggle, tooLong }: { photo: PhotoItem; order: nu
         aria-hidden
         className={cn(
           "absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 text-xs font-bold",
-          picked ? "border-white bg-[var(--item-accent)] text-white" : "border-white/90 bg-black/20",
+          picked ? "border-white bg-[var(--item-accent-fill)] text-white" : "border-white/90 bg-black/20",
         )}
       >
         {picked ? order : null}

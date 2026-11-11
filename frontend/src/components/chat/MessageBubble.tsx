@@ -774,7 +774,7 @@ function Avatar({ role }: { role: ChatMessage["role"] }) {
     <div
       className={cn(
         "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-        "bg-[var(--accent)] text-white"
+        "bg-[var(--accent-strong)] text-white"
       )}
     >
       <Sparkles className="h-4 w-4" />
@@ -1175,7 +1175,7 @@ function MessageBubbleImpl({
                 {streaming && (
                   <span
                     aria-hidden
-                    className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[var(--accent)] align-text-bottom"
+                    className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[var(--accent-strong)] align-text-bottom"
                   />
                 )}
               </>
@@ -1493,7 +1493,7 @@ function UserMessageEditor({
           disabled={disabled}
           className={cn(
             "rounded-md px-3 py-1 text-xs font-semibold text-white",
-            "bg-[var(--accent)] hover:opacity-90",
+            "bg-[var(--accent-strong)] hover:opacity-90",
             "disabled:cursor-not-allowed disabled:opacity-50"
           )}
         >

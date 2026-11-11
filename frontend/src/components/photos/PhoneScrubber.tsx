@@ -113,7 +113,7 @@ export function PhoneScrubber({
           <span
             className={cn(
               "flex h-11 w-7 items-center justify-center rounded-l-full border border-r-0 border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] shadow-md",
-              dragging && "bg-[var(--accent)] text-white",
+              dragging && "bg-[var(--accent-strong)] text-white",
             )}
             style={{ marginRight: -6 }}
           >

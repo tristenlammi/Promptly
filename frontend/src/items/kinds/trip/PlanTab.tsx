@@ -425,7 +425,7 @@ function DayList({ trip, dates, selected, onSelect, today, noStay }: { trip: Tri
                   over && "ring-2 ring-[var(--item-accent)]",
                 )}
               >
-                <span className={cn("flex w-9 shrink-0 flex-col items-center rounded-lg py-0.5 text-center", d === today && "bg-[var(--item-accent)] text-white")}>
+                <span className={cn("flex w-9 shrink-0 flex-col items-center rounded-lg py-0.5 text-center", d === today && "bg-[var(--item-accent-fill)] text-white")}>
                   <span className="text-[10px] font-semibold uppercase leading-tight">{fmtWeekday(d)}</span>
                   <span className="text-sm font-semibold leading-tight tabular-nums">{fmtDayNum(d)}</span>
                 </span>
@@ -460,12 +460,12 @@ function DayStrip({ dates, selected, onSelect, today }: { dates: string[]; selec
           aria-current={d === selected ? "date" : undefined}
           className={cn(
             "flex h-14 w-12 shrink-0 flex-col items-center justify-center rounded-2xl border text-center transition",
-            d === selected ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
+            d === selected ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
           )}
         >
           <span className="text-[10px] font-semibold uppercase">{fmtWeekday(d)}</span>
           <span className="text-base font-semibold tabular-nums">{fmtDayNum(d)}</span>
-          {d === today && d !== selected && <span className="mt-0.5 h-1 w-1 rounded-full bg-[var(--item-accent)]" />}
+          {d === today && d !== selected && <span className="mt-0.5 h-1 w-1 rounded-full bg-[var(--item-accent-fill)]" />}
         </button>
       ))}
     </ScrollRow>

@@ -38,7 +38,7 @@ export function CashFlowBars({
               className={cn("flex h-full min-w-0 flex-1 items-end justify-center gap-1 rounded-lg px-1 pt-1", m.month === current && "bg-[color-mix(in_srgb,var(--item-accent)_7%,transparent)]")}
             >
               <span className="w-full max-w-[22px] rounded-t-md bg-[color-mix(in_srgb,var(--text-muted)_45%,transparent)]" style={{ height: `${Math.max(2, (m.in / max) * 100)}%` }} />
-              <span className="w-full max-w-[22px] rounded-t-md bg-[var(--item-accent)]" style={{ height: `${Math.max(2, (m.out / max) * 100)}%` }} />
+              <span className="w-full max-w-[22px] rounded-t-md bg-[var(--item-accent-fill)]" style={{ height: `${Math.max(2, (m.out / max) * 100)}%` }} />
             </div>
           );
         })}
@@ -63,7 +63,7 @@ export function CashFlowBars({
           <span className="h-2 w-2 rounded-sm bg-[color-mix(in_srgb,var(--text-muted)_45%,transparent)]" /> Money in
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-[var(--item-accent)]" /> Spending
+          <span className="h-2 w-2 rounded-sm bg-[var(--item-accent-fill)]" /> Spending
         </span>
         <span className="ml-auto">Net under each month</span>
       </div>

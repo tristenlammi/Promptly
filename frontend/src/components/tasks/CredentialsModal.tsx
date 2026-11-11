@@ -211,7 +211,7 @@ export function CredentialsModal({
                       type="button"
                       disabled={busy}
                       onClick={() => void saveHosts(s.id)}
-                      className="shrink-0 rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                      className="shrink-0 rounded-md bg-[var(--accent-strong)] px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
                     >
                       Save
                     </button>
@@ -235,7 +235,7 @@ export function CredentialsModal({
                       type="button"
                       disabled={busy || !replaceValue.trim()}
                       onClick={() => void replace(s.id)}
-                      className="shrink-0 rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                      className="shrink-0 rounded-md bg-[var(--accent-strong)] px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
                     >
                       Save
                     </button>
@@ -302,7 +302,7 @@ export function CredentialsModal({
                 disabled={busy || !name.trim() || !value.trim()}
                 onClick={() => void create()}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white",
+                  "inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white",
                   "disabled:cursor-not-allowed disabled:opacity-50"
                 )}
               >

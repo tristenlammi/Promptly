@@ -163,7 +163,7 @@ export function CheckDot({ on, big }: { on: boolean; big?: boolean }) {
       className={cn(
         "flex shrink-0 items-center justify-center rounded-full border-2 transition",
         big ? "h-8 w-8" : "h-6 w-6",
-        on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)] bg-[var(--surface)]",
+        on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)] bg-[var(--surface)]",
       )}
     >
       {on && (

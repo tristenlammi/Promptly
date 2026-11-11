@@ -186,7 +186,7 @@ function EveryoneCard({ data, save, busy }: { data: PorchAdminSettings; save: Sa
       footer={
         <button
           type="button"
-          className={cn(btn, "bg-[var(--accent)] text-white hover:brightness-95")}
+          className={cn(btn, "bg-[var(--accent-strong)] text-white hover:brightness-95")}
           disabled={busy || !changed || !name.trim()}
           onClick={() => save({ everyone_name: name.trim(), everyone_emoji: emoji.trim() })}
         >

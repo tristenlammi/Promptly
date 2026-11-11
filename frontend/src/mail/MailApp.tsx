@@ -599,7 +599,7 @@ export function MailApp() {
         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent)]/15"><Mail className="h-7 w-7 text-[var(--accent-text)]" /></span>
         <h1 className="text-xl font-semibold text-[var(--text)]">All your email, in one calm place</h1>
         <p className="max-w-sm text-sm text-[var(--text-muted)]">Connect any mailbox: Gmail, Proton, Fastmail, your work address. Your mail stays where it is, and you can add as many as you like.</p>
-        <button type="button" onClick={() => setAdding(true)} className="mt-2 inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90"><Plus className="h-4 w-4" />Add a mailbox</button>
+        <button type="button" onClick={() => setAdding(true)} className="mt-2 inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90"><Plus className="h-4 w-4" />Add a mailbox</button>
         {adding && <AccountSheet onClose={() => setAdding(false)} onSaved={() => { setAdding(false); refresh(); }} />}
       </div>
     );
@@ -758,7 +758,7 @@ export function MailApp() {
     <nav aria-label="Mail folders" className="flex w-60 shrink-0 flex-col border-r border-[var(--border)] p-3">
       <div className="mb-2 shrink-0">{picker}</div>
       <div data-mail-rail-scroll className="promptly-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-0.5">
-      <button type="button" onClick={() => write(newMessage())} className="mb-3 inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] text-sm font-medium text-white hover:opacity-90"><Pen className="h-4 w-4" />Compose</button>
+      <button type="button" onClick={() => write(newMessage())} className="mb-3 inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--accent-strong)] text-sm font-medium text-white hover:opacity-90"><Pen className="h-4 w-4" />Compose</button>
       {ROLES.map(({ role, label, icon: Icon }) => (
         <button key={role} type="button" onClick={() => showRole(role)} onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ role })])} aria-current={!view.label && view.role === role ? "page" : undefined} {...(CAN_LAND.has(role) ? dropTarget(`role:${role}`, role === "snoozed" ? "Snooze" : `Move to ${label}`) : {})} style={dropStyle(`role:${role}`)} className={`flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-[background-color,box-shadow,transform,opacity] duration-150 ease-out ${dragging && !CAN_LAND.has(role) ? "opacity-40 " : ""}${!view.label && view.role === role ? "bg-[var(--accent)]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
           <Icon className="h-4 w-4" /><span className="flex-1 text-left">{label}</span>
@@ -926,7 +926,7 @@ export function MailApp() {
         )}
       </div>
       {isMobile && (
-        <button type="button" onClick={() => write(newMessage())} aria-label="Compose" className="absolute bottom-[7.5rem] right-4 z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-lg"><Pen className="h-5 w-5" /></button>
+        <button type="button" onClick={() => write(newMessage())} aria-label="Compose" className="absolute bottom-[7.5rem] right-4 z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent-strong)] text-white shadow-lg"><Pen className="h-5 w-5" /></button>
       )}
     </section>
   );
@@ -1068,7 +1068,7 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
   return (
     <div ref={shell} className="group/row relative overflow-hidden">
     {slide !== 0 && (
-      <div aria-hidden className={`absolute inset-0 flex items-center px-5 text-white ${slide > 0 ? "justify-start bg-[var(--accent)]" : "justify-end bg-[var(--danger)]"}`}>
+      <div aria-hidden className={`absolute inset-0 flex items-center px-5 text-white ${slide > 0 ? "justify-start bg-[var(--accent-strong)]" : "justify-end bg-[var(--danger)]"}`}>
         {slide > 0 ? <Archive className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
       </div>
     )}
@@ -1112,7 +1112,7 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
       style={{ WebkitTouchCallout: "none", transform: slide ? `translateX(${slide}px)` : undefined, touchAction: "pan-y" }}
       className={`relative flex w-full gap-3 border-b border-[var(--border)] px-3 py-3 text-left transition-colors ${selected ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg,var(--surface)))]" : "bg-[var(--bg,var(--surface))] hover:bg-[var(--hover)]"}`}>
       {picked
-        ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white"><Check className="h-5 w-5" /></span>
+        ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white"><Check className="h-5 w-5" /></span>
         : <Avatar person={row.from} people={people} />}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
@@ -1342,7 +1342,7 @@ function InviteCard({ message }: { message: Message }) {
     }
   };
   const button = (value: InviteAnswer, label: string) => (
-    <button key={value} type="button" disabled={busy} aria-pressed={answer === value} onClick={() => void say(value)} className={`h-8 rounded-lg px-3 text-xs font-medium disabled:opacity-60 ${answer === value ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"}`}>{label}</button>
+    <button key={value} type="button" disabled={busy} aria-pressed={answer === value} onClick={() => void say(value)} className={`h-8 rounded-lg px-3 text-xs font-medium disabled:opacity-60 ${answer === value ? "bg-[var(--accent-strong)] text-white" : "border border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]"}`}>{label}</button>
   );
   const replied = invite.method === "REPLY" ? invite.attendees.find((a) => a.said) : undefined;
   return (

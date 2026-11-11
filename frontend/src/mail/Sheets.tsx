@@ -63,7 +63,7 @@ export function EventSheet({ accountId, threadKey, subject, onClose }: { account
       <p className="px-1 text-xs text-[var(--text-muted)]">{time ? "" : "With no time, it's added as an all-day event. "}Check the details: AI can get them wrong.</p>
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]">Cancel</button>
-        <button type="button" onClick={() => add.mutate()} disabled={add.isPending || !title.trim() || !day} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">{add.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Add</button>
+        <button type="button" onClick={() => add.mutate()} disabled={add.isPending || !title.trim() || !day} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">{add.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Add</button>
       </div>
     </Sheet>
   );
@@ -121,7 +121,7 @@ export function SnoozeSheet({ onPick, onClose }: { onPick: (when: Date) => void;
       </div>
       <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (custom) onPick(new Date(custom)); }}>
         <input type="datetime-local" value={custom} min={localInputValue(new Date())} onChange={(e) => setCustom(e.target.value)} aria-label="Pick a date and time" className={FIELD} />
-        <button type="submit" disabled={!custom} className="h-10 shrink-0 rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-white disabled:opacity-40">Snooze</button>
+        <button type="submit" disabled={!custom} className="h-10 shrink-0 rounded-lg bg-[var(--accent-strong)] px-3 text-sm font-medium text-white disabled:opacity-40">Snooze</button>
       </form>
     </Sheet>
   );
@@ -155,7 +155,7 @@ export function EditMailboxSheet({ account, onClose }: { account: MailAccount; o
       <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="New password, if it's changed" aria-label="New password" autoComplete="new-password" className={FIELD} />
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]">Cancel</button>
-        <button type="button" onClick={() => save.mutate()} disabled={save.isPending} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">{save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
+        <button type="button" onClick={() => save.mutate()} disabled={save.isPending} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">{save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
       </div>
     </Sheet>
   );

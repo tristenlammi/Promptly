@@ -394,7 +394,7 @@ export function TimeGridView({
                   <span
                     className={cn(
                       "flex h-8 w-8 items-center justify-center rounded-full text-base font-semibold tabular-nums",
-                      isToday ? "bg-[var(--item-accent)] text-white" : "text-[var(--text)]",
+                      isToday ? "bg-[var(--item-accent-fill)] text-white" : "text-[var(--text)]",
                     )}
                   >
                     {d.getDate()}

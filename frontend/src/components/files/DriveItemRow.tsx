@@ -290,7 +290,7 @@ function SelectCheckbox({
       className={cn(
         "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border transition",
         checked
-          ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+          ? "border-[var(--accent)] bg-[var(--accent-strong)] text-white"
           : "border-[var(--border)] bg-[var(--surface)] text-transparent hover:border-[var(--accent)]/60",
         !checked && !active && "opacity-0 group-hover:opacity-100 touch-reveal",
         className
@@ -700,7 +700,7 @@ export function DriveListHeader({
             "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border transition",
             selectAll.state === "none"
               ? "border-[var(--border)] bg-[var(--surface)] text-transparent hover:border-[var(--accent)]/60"
-              : "border-[var(--accent)] bg-[var(--accent)] text-white",
+              : "border-[var(--accent)] bg-[var(--accent-strong)] text-white",
           )}
         >
           {selectAll.state === "some" ? <Minus className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}

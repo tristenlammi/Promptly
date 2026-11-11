@@ -355,7 +355,7 @@ export function PhotosPage() {
                   toast.error(apiErrorMessage(e, "Couldn't add them."));
                 }
               }}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--accent)] h-10 px-4 text-sm font-medium text-white disabled:opacity-50 sm:h-8"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] h-10 px-4 text-sm font-medium text-white disabled:opacity-50 sm:h-8"
             >
               <ImagePlus className="h-3.5 w-3.5" /> Add
             </button>
@@ -566,7 +566,7 @@ function DayHeader({
             "flex h-5 w-5 items-center justify-center rounded-full border-2 transition",
             !selecting && "photos-day-idle",
             all
-              ? "border-[var(--accent)] bg-[var(--accent)] text-white opacity-100"
+              ? "border-[var(--accent)] bg-[var(--accent-strong)] text-white opacity-100"
               : "border-[var(--text-muted)] text-transparent opacity-0 group-hover/day:opacity-100 group-focus-within/day:opacity-100",
             selecting && "opacity-100",
           )}
@@ -591,7 +591,7 @@ function SetupBanner() {
       <p className="min-w-0 flex-1 text-sm text-[var(--text)]">
         <b>Set up Photos</b> — bring your photos in, name the people and pets, then ask for anything in them.
       </p>
-      <Link to={photosPath("/setup")} className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white">Start</Link>
+      <Link to={photosPath("/setup")} className="rounded-md bg-[var(--accent-strong)] px-3 py-1 text-xs font-medium text-white">Start</Link>
       <button type="button" aria-label="Not now" className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)]"
         onClick={() => void photosApi.saveSettings({ setup_done: true }).then((s) => qc.setQueryData(["photos", "settings"], s))}>
         <X className="h-4 w-4" />
@@ -602,7 +602,7 @@ function SetupBanner() {
 
 function Empty({ view, onFamily }: { view: PhotoView; onFamily: () => void }) {
   const photosPath = usePhotosPath();
-  const primary = "flex min-h-10 items-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white hover:bg-[var(--accent-hover)]";
+  const primary = "flex min-h-10 items-center rounded-md bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:bg-[var(--accent-strong-hover)]";
   const text =
     view === "family"
       ? "A shared place for your family's photos. Everyone chooses which of theirs go in."

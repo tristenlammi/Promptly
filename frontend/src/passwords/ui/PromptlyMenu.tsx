@@ -39,7 +39,7 @@ export function PromptlyMenuButton({ onClick, floating = false }: { onClick: () 
         floating ? "border border-[var(--border)] bg-[var(--surface)] pr-2 shadow-sm" : ""
       }`}
     >
-      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent)] text-white" aria-hidden>
+      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white" aria-hidden>
         <span className="text-sm font-bold">P</span>
       </span>
       {floating && <Menu className="h-4 w-4" aria-hidden />}

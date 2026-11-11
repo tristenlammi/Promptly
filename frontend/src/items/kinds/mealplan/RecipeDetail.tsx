@@ -220,7 +220,7 @@ export function RecipeDetail({
                           onClick={() => setHave((s) => { const n = new Set(s); if (on) n.delete(i.id); else n.add(i.id); return n; })}
                           className="flex min-h-[40px] w-full items-start gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-[var(--hover)]"
                         >
-                          <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition", on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)]")} aria-hidden>
+                          <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition", on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)]")} aria-hidden>
                             {on && <Check className="h-3 w-3" strokeWidth={3} />}
                           </span>
                           <span className={cn("min-w-0 flex-1 text-[15px] leading-snug", on ? "text-[var(--text-muted)] line-through" : i.optional ? "text-[var(--text-muted)]" : "text-[var(--text)]")}>

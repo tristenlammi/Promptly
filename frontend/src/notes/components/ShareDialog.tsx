@@ -99,7 +99,7 @@ export function ShareDialog({ note, onClose, onLeft }: { note: Note; onClose: ()
         type="button"
         onClick={() => void share()}
         disabled={!picked.length || busy === "share"}
-        className="flex h-10 items-center gap-2 rounded-full bg-[var(--accent)] px-5 text-sm font-medium text-white disabled:opacity-50"
+        className="flex h-10 items-center gap-2 rounded-full bg-[var(--accent-strong)] px-5 text-sm font-medium text-white disabled:opacity-50"
       >
         {busy === "share" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
         Share

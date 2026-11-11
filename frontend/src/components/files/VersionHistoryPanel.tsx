@@ -160,7 +160,7 @@ export function VersionHistoryPanel({
                 aria-label="Version name"
                 className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs outline-none focus:border-[var(--accent)]"
               />
-              <button type="submit" className="rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white">
+              <button type="submit" className="rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white">
                 Save
               </button>
               <button type="button" onClick={() => setSaving(null)} className="rounded-md px-2 py-1 text-xs text-[var(--text-muted)]">
@@ -231,7 +231,7 @@ export function VersionHistoryPanel({
                             <button
                               type="button"
                               onClick={() => void restore(v)}
-                              className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90"
+                              className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90"
                             >
                               <RotateCcw className="h-3.5 w-3.5" /> Restore this version
                             </button>
@@ -272,7 +272,7 @@ export function VersionHistoryPanel({
                               aria-label="Name this version"
                               className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs outline-none focus:border-[var(--accent)]"
                             />
-                            <button type="submit" className="rounded-md bg-[var(--accent)] px-2 py-1 text-xs text-white">
+                            <button type="submit" className="rounded-md bg-[var(--accent-strong)] px-2 py-1 text-xs text-white">
                               Save
                             </button>
                           </form>

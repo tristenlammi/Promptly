@@ -155,7 +155,7 @@ export function GroupsPage() {
                     aria-hidden
                     className={cn(
                       "flex h-6 w-6 items-center justify-center rounded-md border",
-                      g.in_feed ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)] bg-[var(--surface)]",
+                      g.in_feed ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)] bg-[var(--surface)]",
                     )}
                   >
                     {g.in_feed && <Check className="h-4 w-4" />}

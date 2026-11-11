@@ -56,7 +56,7 @@ export function SyncLandingPage() {
             <a
               href={APK}
               download="Promptly.apk"
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white hover:opacity-90"
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent-strong)] px-4 py-2.5 text-sm font-medium text-white hover:opacity-90"
             >
               <Download className="h-4 w-4" />
               Download for Android

@@ -266,7 +266,7 @@ function Footer({
   );
   const primaryBtn = cn(
     "inline-flex items-center justify-center gap-1.5 rounded-input px-3.5 py-1.5 text-sm font-medium",
-    "bg-[var(--accent)] text-white transition hover:bg-[var(--accent-hover)]",
+    "bg-[var(--accent-strong)] text-white transition hover:bg-[var(--accent-strong-hover)]",
     "disabled:cursor-not-allowed disabled:opacity-60"
   );
 

@@ -162,7 +162,7 @@ export function PeoplePanel({ onClose, onShow, show }: { onClose: () => void; on
             ]}
           />
         </div>
-        <button type="submit" disabled={!name.trim()} className="h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 md:h-9">Share</button>
+        <button type="submit" disabled={!name.trim()} className="h-10 rounded-lg bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 md:h-9">Share</button>
       </form>
     </div>
   );

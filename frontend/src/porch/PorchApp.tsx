@@ -296,7 +296,7 @@ function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
   const is = (on: boolean) => (on ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]");
   const me = route.page === "user" && route.id === b.me.id;
   // The tab you're on: a short bar above it, as well as the colour.
-  const mark = (on: boolean) => on && <span aria-hidden className="absolute left-1/2 top-0 h-[3px] w-8 -translate-x-1/2 rounded-b-full bg-[var(--item-accent)]" />;
+  const mark = (on: boolean) => on && <span aria-hidden className="absolute left-1/2 top-0 h-[3px] w-8 -translate-x-1/2 rounded-b-full bg-[var(--item-accent-fill)]" />;
   const inGroups = route.page === "groups" || route.page === "group";
   return (
     <nav aria-label="Porch" className="flex shrink-0 items-stretch border-t border-[var(--border)] bg-[var(--surface)] pb-safe">
@@ -311,7 +311,7 @@ function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
         Groups
       </Link>
       <button type="button" onClick={() => setMaking(true)} aria-label="New post or story" aria-haspopup="dialog" className={cn(tab, "text-[var(--text-muted)]")}>
-        <span className="flex h-10 w-12 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white">
+        <span className="flex h-10 w-12 items-center justify-center rounded-xl bg-[var(--item-accent-fill)] text-white">
           <Plus className="h-5 w-5" aria-hidden />
         </span>
       </button>
@@ -430,7 +430,7 @@ function SideNav({ b, route }: { b: Bootstrap; route: Route }) {
                   aria-hidden
                   className={cn(
                     "flex h-[18px] w-[18px] items-center justify-center rounded border",
-                    g.in_feed ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)] bg-[var(--surface)]",
+                    g.in_feed ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)] bg-[var(--surface)]",
                   )}
                 >
                   {g.in_feed && <Check className="h-3.5 w-3.5" />}

@@ -59,7 +59,7 @@ export function StoryReplyBar({ story, onBusy }: { story: PorchStory; onBusy?: (
           type="submit"
           disabled={!text.trim() || !!busy}
           aria-label="Send"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--item-accent)] text-white disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--item-accent-fill)] text-white disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
         >
           {busy === "text" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
         </button>

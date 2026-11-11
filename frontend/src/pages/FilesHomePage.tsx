@@ -141,7 +141,7 @@ export function FilesHomePage() {
               <button
                 type="submit"
                 disabled={picked.size === 0}
-                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
                 <MessageSquareText className="h-4 w-4" />
                 Ask

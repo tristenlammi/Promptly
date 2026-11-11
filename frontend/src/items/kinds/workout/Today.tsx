@@ -125,7 +125,7 @@ function Home({ item, ctx, isPhone, ask, goTo }: { item: ItemHandle<WorkoutData>
                   <span
                     className={cn(
                       "h-1.5 w-1.5 rounded-full",
-                      did ? "bg-[var(--success)]" : planned.some((p) => p.status === "planned") ? "bg-[var(--item-accent)]" : planned.some((p) => p.status === "skipped") ? "bg-[var(--text-muted)]" : "bg-transparent",
+                      did ? "bg-[var(--success)]" : planned.some((p) => p.status === "planned") ? "bg-[var(--item-accent-fill)]" : planned.some((p) => p.status === "skipped") ? "bg-[var(--text-muted)]" : "bg-transparent",
                     )}
                   />
                 </button>

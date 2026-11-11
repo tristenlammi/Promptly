@@ -290,7 +290,7 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
           <button
             type="button"
             onClick={primary.onClick}
-            className="hidden h-9 items-center gap-1.5 rounded-xl bg-[var(--item-accent)] px-3 text-sm font-semibold text-white shadow-[var(--shadow-sm)] hover:brightness-95 md:inline-flex"
+            className="hidden h-9 items-center gap-1.5 rounded-xl bg-[var(--item-accent-fill)] px-3 text-sm font-semibold text-white shadow-[var(--shadow-sm)] hover:brightness-95 md:inline-flex"
           >
             {primary.icon}
             {primary.label}
@@ -380,7 +380,7 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
             >
               <t.icon className="h-4 w-4" />
               {t.label}
-              {t.id === active?.id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--item-accent)]" />}
+              {t.id === active?.id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--item-accent-fill)]" />}
             </button>
           ))}
         </nav>
@@ -553,7 +553,7 @@ function FileBanners({ doc, item }: { doc: ItemDoc<any>; item: ItemHandle<any> }
                 type="button"
                 disabled={busy || !before}
                 onClick={() => void run()}
-                className="h-11 flex-1 rounded-xl bg-[var(--item-accent)] text-sm font-semibold text-white disabled:opacity-50"
+                className="h-11 flex-1 rounded-xl bg-[var(--item-accent-fill)] text-sm font-semibold text-white disabled:opacity-50"
               >
                 {busy ? "Archiving…" : "Archive"}
               </button>

@@ -975,7 +975,7 @@ export function InputBar({
       className={cn(
         "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition",
         // Not ready: a neutral chip, not a washed-out accent (V14).
-        "bg-[var(--accent)] text-white hover:opacity-90",
+        "bg-[var(--accent-strong)] text-white hover:opacity-90",
         "disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
       )}
       aria-label="Send message"
@@ -1340,7 +1340,7 @@ export function InputBar({
               <div className="mt-2 flex items-center gap-2">
                 <button
                   onClick={acceptEnhance}
-                  className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90"
+                  className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90"
                 >
                   <Check className="h-3 w-3" /> Use this
                 </button>

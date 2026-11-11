@@ -138,7 +138,7 @@ function CustomRepeat({ value, onChange, start }: { value: Repeat; onChange: (r:
                   }}
                   className={cn(
                     "flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition",
-                    on ? "bg-[var(--item-accent)] text-white" : "bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text)]",
+                    on ? "bg-[var(--item-accent-fill)] text-white" : "bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text)]",
                   )}
                 >
                   {w.narrow}

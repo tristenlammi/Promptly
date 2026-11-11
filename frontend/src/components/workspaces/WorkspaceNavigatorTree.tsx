@@ -631,7 +631,7 @@ export function WorkspaceNavigatorTree({
               type="button"
               onClick={onHome}
               className={cn(
-                "flex flex-1 items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition hover:bg-[var(--accent)]/90",
+                "flex flex-1 items-center justify-center gap-2 rounded-md bg-[var(--accent-strong)] px-3 py-2 text-sm font-medium text-white transition hover:bg-[var(--accent-strong-hover)]",
                 // Always solid orange — a constant anchor users can fall back
                 // to when they lose their place in the tree.
                 atHome && "ring-2 ring-[var(--accent)]/40"
@@ -1578,7 +1578,7 @@ function TreeRow({
           style={{ left: dropIndicator.depth * INDENT + 6 }}
         >
           <span className="h-2 w-2 shrink-0 rounded-full border-2 border-[var(--accent)] bg-[var(--bg)]" />
-          <span className="h-[3px] flex-1 rounded-full bg-[var(--accent)]" />
+          <span className="h-[3px] flex-1 rounded-full bg-[var(--accent-strong)]" />
         </div>
       )}
       <div
@@ -1618,7 +1618,7 @@ function TreeRow({
         {isSelected && !overlay && (
           <span
             aria-hidden
-            className="pointer-events-none absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--accent)]"
+            className="pointer-events-none absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--accent-strong)]"
           />
         )}
         <button

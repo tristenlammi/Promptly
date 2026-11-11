@@ -220,7 +220,7 @@ export function PhotosShell({ app = false }: { app?: boolean } = {}) {
           <button
             type="button"
             onClick={() => uploadInput.current?.click()}
-            className="flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white hover:bg-[var(--accent-hover)] sm:min-h-8"
+            className="flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent-strong)] px-3 py-1 text-xs font-medium text-white hover:bg-[var(--accent-strong-hover)] sm:min-h-8"
           >
             <Upload className="h-3.5 w-3.5" /> Upload
           </button>

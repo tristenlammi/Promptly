@@ -73,7 +73,7 @@ export function InboxPanel({
           <Bell className="h-4 w-4 text-[var(--text-muted)]" />
           <h2 className="text-sm font-semibold text-[var(--text)]">Inbox</h2>
           {unread > 0 && (
-            <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-[var(--accent)] px-1.5 text-[11px] font-semibold text-white">
+            <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-[var(--accent-strong)] px-1.5 text-[11px] font-semibold text-white">
               {unread}
             </span>
           )}
@@ -159,7 +159,7 @@ export function InboxPanel({
                       </span>
                       {unreadRow && (
                         <span
-                          className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]"
+                          className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--accent-strong)]"
                           aria-label="Unread"
                         />
                       )}

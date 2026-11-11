@@ -27,7 +27,7 @@ export function ThinkingBubble({ label = "Thinking", className }: ThinkingBubble
       <div
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-          "bg-[var(--accent)] text-white"
+          "bg-[var(--accent-strong)] text-white"
         )}
       >
         <Sparkles className="h-4 w-4" />

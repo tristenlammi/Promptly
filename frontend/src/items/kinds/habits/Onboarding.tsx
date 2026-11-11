@@ -63,7 +63,7 @@ export function Onboarding({ item, ask }: ItemViewProps<HabitsData>) {
                 <span className="block text-sm font-medium text-[var(--text)]">{idea.name}</span>
                 <span className="line-clamp-2 block text-xs text-[var(--text-muted)]">{idea.intention}</span>
               </span>
-              <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full border", on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)]")}>
+              <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full border", on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)]")}>
                 {on && <Check className="h-3.5 w-3.5" />}
               </span>
             </button>

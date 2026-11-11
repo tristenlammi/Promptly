@@ -39,7 +39,7 @@ export function SidebarHeader({ onToggle }: { onToggle: () => void }) {
   return (
     <div className="flex items-center justify-between px-4 pb-3 pt-4">
       <div className="flex items-center gap-2">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent)] text-white">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white">
           <span className="text-sm font-bold">P</span>
         </div>
         <span className="text-sm font-semibold tracking-tight">Promptly</span>
@@ -343,7 +343,7 @@ export const INBOX_BUTTON_CLASS =
 /** The theme row inside the account menu. */
 export const THEME_ROW_CLASS = "my-1 flex items-center justify-between border-y border-[var(--border)] px-2 py-1.5";
 
-const COUNT_PILL = "inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white";
+const COUNT_PILL = "inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent-strong)] px-1 text-[10px] font-semibold text-white";
 
 /** The account menu's "Workspace invites" count. */
 export function InviteCount({ count }: { count: number }) {
@@ -386,7 +386,7 @@ export function AccountButtonContent({
         />
         {inviteCount > 0 && (
           <span
-            className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--bg)]"
+            className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] ring-2 ring-[var(--bg)]"
             title={`${inviteCount} pending workspace invite${inviteCount === 1 ? "" : "s"}`}
           />
         )}

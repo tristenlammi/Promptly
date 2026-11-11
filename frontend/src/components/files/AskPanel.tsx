@@ -236,7 +236,7 @@ export function AskPanel({
             aria-label="Ask"
             className={cn(
               "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition",
-              draft.trim() && !busy ? "bg-[var(--accent)] text-white" : "bg-[var(--hover)] text-[var(--text-muted)]"
+              draft.trim() && !busy ? "bg-[var(--accent-strong)] text-white" : "bg-[var(--hover)] text-[var(--text-muted)]"
             )}
           >
             <ArrowUp className="h-4 w-4" />

@@ -606,7 +606,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
               type="button"
               aria-label="New event"
               onClick={() => setQuick(true)}
-              className="absolute bottom-[calc(16px+env(safe-area-inset-bottom,0px))] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--item-accent)] text-white shadow-[var(--shadow-lg)] transition active:scale-95"
+              className="absolute bottom-[calc(16px+env(safe-area-inset-bottom,0px))] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--item-accent-fill)] text-white shadow-[var(--shadow-lg)] transition active:scale-95"
             >
               <Plus className="h-6 w-6" />
             </button>
@@ -767,12 +767,12 @@ function WeekStrip({ cursor, onPick, events }: { cursor: Date; onPick: (d: Date)
             <span
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold tabular-nums",
-                isToday ? "bg-[var(--item-accent)] text-white" : isSel ? "bg-[color-mix(in_srgb,var(--item-accent)_18%,transparent)] text-[var(--text)]" : "text-[var(--text)]",
+                isToday ? "bg-[var(--item-accent-fill)] text-white" : isSel ? "bg-[color-mix(in_srgb,var(--item-accent)_18%,transparent)] text-[var(--text)]" : "text-[var(--text)]",
               )}
             >
               {d.getDate()}
             </span>
-            <span className={cn("h-1 w-1 rounded-full", has ? "bg-[var(--item-accent)]" : "bg-transparent")} />
+            <span className={cn("h-1 w-1 rounded-full", has ? "bg-[var(--item-accent-fill)]" : "bg-transparent")} />
           </button>
         );
       })}

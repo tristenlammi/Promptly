@@ -438,7 +438,7 @@ function NewThreadForm({
           type="button"
           onClick={submit}
           disabled={!title.trim() || pending}
-          className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {pending && <Loader2 className="h-3 w-3 animate-spin" />}
           Create
@@ -649,7 +649,7 @@ function ThreadView({
               type="button"
               onClick={submit}
               disabled={!draft.trim() || post.isPending}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {post.isPending ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />

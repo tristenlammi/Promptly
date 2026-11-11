@@ -61,7 +61,7 @@ export function InstallPromptCard({ appName, iconSrc, description, onClose, clas
           const r = await prompt();
           if (r !== "unavailable") setOutcome(r);
         }}
-        className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:opacity-90"
+        className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-semibold text-white hover:opacity-90"
       >
         <Download className="h-4 w-4" /> Install {appName}
       </button>

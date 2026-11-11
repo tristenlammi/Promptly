@@ -1256,7 +1256,7 @@ function ItemPreviewModal({
             <button
               type="button"
               onClick={() => onOpenFully(node)}
-              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--accent-hover)]"
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--accent-strong-hover)]"
             >
               <ArrowUpRight className="h-3.5 w-3.5" />
               Open
@@ -2340,7 +2340,7 @@ function SortableTab({
       {active && (
         <span
           aria-hidden
-          className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2.5px] -translate-y-1/2 rounded-r-full bg-[var(--accent)]"
+          className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2.5px] -translate-y-1/2 rounded-r-full bg-[var(--accent-strong)]"
         />
       )}
       <button

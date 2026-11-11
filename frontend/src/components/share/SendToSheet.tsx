@@ -142,7 +142,7 @@ function SendTo({ onClose, target, canGrant }: { onClose: () => void; target: Sh
             type="button"
             onClick={() => void send()}
             disabled={!pick || busy}
-            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] text-sm font-semibold text-white disabled:opacity-50 md:ml-auto md:flex-none md:px-6"
+            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--accent-strong)] text-sm font-semibold text-white disabled:opacity-50 md:ml-auto md:flex-none md:px-6"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             Send

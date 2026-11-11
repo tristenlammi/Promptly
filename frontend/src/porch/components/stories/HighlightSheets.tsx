@@ -62,7 +62,7 @@ export function StoryTile({ story, picked, order, onClick, label }: { story: Por
           aria-hidden
           className={cn(
             "absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 text-xs font-bold",
-            picked ? "border-white bg-[var(--item-accent)] text-white" : "border-white/90 bg-black/25",
+            picked ? "border-white bg-[var(--item-accent-fill)] text-white" : "border-white/90 bg-black/25",
           )}
         >
           {picked ? order : null}

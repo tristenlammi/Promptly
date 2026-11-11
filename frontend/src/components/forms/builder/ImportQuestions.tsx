@@ -78,7 +78,7 @@ export function ImportQuestions({
               type="button"
               disabled={picked.size === 0}
               onClick={doImport}
-              className="inline-flex min-h-[40px] items-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white disabled:opacity-50"
+              className="inline-flex min-h-[40px] items-center rounded-md bg-[var(--accent-strong)] px-4 text-sm font-medium text-white disabled:opacity-50"
             >
               Import {picked.size || ""} question{picked.size === 1 ? "" : "s"}
             </button>

@@ -448,7 +448,7 @@ export const Composer = forwardRef<
               )}
               {!u.att && !u.error && (
                 <span className="absolute inset-x-1 bottom-1 h-1 overflow-hidden rounded-full bg-black/20">
-                  <span className="block h-full bg-[var(--accent)] transition-[width]" style={{ width: `${Math.round(u.progress * 100)}%` }} />
+                  <span className="block h-full bg-[var(--accent-strong)] transition-[width]" style={{ width: `${Math.round(u.progress * 100)}%` }} />
                 </span>
               )}
               <button

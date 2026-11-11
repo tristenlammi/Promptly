@@ -138,7 +138,7 @@ export function MapCardModal({ card, onClose }: { card: MapCard; onClose: () => 
         )}
 
         <div className="flex justify-end">
-          <Link to={openLink} onClick={onClose} className="inline-flex h-9 items-center gap-2 rounded-xl bg-[var(--accent)] px-3.5 text-sm font-medium text-white hover:opacity-90">
+          <Link to={openLink} onClick={onClose} className="inline-flex h-9 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-3.5 text-sm font-medium text-white hover:opacity-90">
             <ExternalLink className="h-4 w-4" />Open in Maps
           </Link>
         </div>

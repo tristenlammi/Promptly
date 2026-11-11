@@ -126,7 +126,7 @@ export function PhotosPicker({ onClose, onPick }: { onClose: () => void; onPick:
           <button type="button" onClick={onClose} className="h-9 rounded-full px-4 text-sm font-medium hover:bg-[var(--hover)]">
             Cancel
           </button>
-          <button type="button" disabled={!chosen.length} onClick={() => onPick(picked)} className="h-9 rounded-full bg-[var(--accent)] px-4 text-sm font-medium text-white disabled:opacity-50">
+          <button type="button" disabled={!chosen.length} onClick={() => onPick(picked)} className="h-9 rounded-full bg-[var(--accent-strong)] px-4 text-sm font-medium text-white disabled:opacity-50">
             Add{chosen.length ? ` ${chosen.length}` : ""}
           </button>
         </>
@@ -162,7 +162,7 @@ export function PhotosPicker({ onClose, onPick }: { onClose: () => void; onPick:
                     className={cn("relative block aspect-square w-full overflow-hidden rounded-md bg-[var(--surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]", on && "ring-[3px] ring-[var(--accent)]")}
                   >
                     {p.thumb ? <img src={p.thumb} alt="" loading="lazy" className="h-full w-full object-cover" /> : <ImageIcon className="m-auto h-6 w-6 text-[var(--text-muted)]" aria-hidden />}
-                    <span className={cn("absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white shadow", on ? "bg-[var(--accent)]" : "bg-black/25")} aria-hidden>
+                    <span className={cn("absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white shadow", on ? "bg-[var(--accent-strong)]" : "bg-black/25")} aria-hidden>
                       {on && <Check className="h-3.5 w-3.5 text-white" />}
                     </span>
                   </button>

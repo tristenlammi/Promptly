@@ -128,7 +128,7 @@ export function PlayTab({ item, isPhone, ask, goTo }: ItemViewProps<Data>) {
 
           <Card className="flex flex-col gap-3 overflow-hidden bg-[linear-gradient(135deg,color-mix(in_srgb,var(--item-accent)_16%,var(--surface)),var(--surface))]">
             <div className="flex items-center gap-3">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--item-accent)] text-white shadow-[var(--shadow-sm)]">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--item-accent-fill)] text-white shadow-[var(--shadow-sm)]">
                 <Dices className="h-6 w-6" />
               </span>
               <div className="min-w-0">

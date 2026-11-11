@@ -299,7 +299,7 @@ export function ItemCommentsPanel({
               disabled={!draft.trim() || posting}
               className={cn(
                 "inline-flex shrink-0 items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium",
-                "bg-[var(--accent)] text-white hover:opacity-90",
+                "bg-[var(--accent-strong)] text-white hover:opacity-90",
                 "disabled:cursor-not-allowed disabled:opacity-50"
               )}
             >

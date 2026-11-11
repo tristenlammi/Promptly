@@ -118,7 +118,7 @@ export function PublicAlbum({ token, unlockToken }: { token: string; unlockToken
         <a
           href={page.zip}
           download
-          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
         >
           <Download className="h-4 w-4" /> Download all
         </a>

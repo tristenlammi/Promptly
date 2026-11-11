@@ -185,13 +185,13 @@ export function AppHeader<T extends string = string>({
                   {TabIcon && <TabIcon className="h-4 w-4" />}
                   {t.label}
                   {badge != null && (
-                    <span className="rounded-full bg-[var(--accent)] px-1.5 text-xs font-semibold leading-5 text-white">{badge}</span>
+                    <span className="rounded-full bg-[var(--accent-strong)] px-1.5 text-xs font-semibold leading-5 text-white">{badge}</span>
                   )}
                   {/* The "you are here" line, in the suite's accent. */}
                   <span
                     aria-hidden
                     className={cn(
-                      "absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[var(--accent)] transition-opacity",
+                      "absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[var(--accent-strong)] transition-opacity",
                       on ? "opacity-100" : "opacity-0",
                     )}
                   />

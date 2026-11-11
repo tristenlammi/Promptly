@@ -373,7 +373,7 @@ export function ScorePad({
             type="button"
             aria-label={`Plus ${step}`}
             onClick={() => bump(t, step)}
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[var(--item-accent)] text-white shadow-[var(--shadow-sm)] active:scale-95"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[var(--item-accent-fill)] text-white shadow-[var(--shadow-sm)] active:scale-95"
           >
             <Plus className="h-5 w-5" />
           </button>

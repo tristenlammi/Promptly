@@ -72,7 +72,7 @@ export function ToolsMenu({
         >
           <MoreHorizontal className="h-4 w-4 text-[var(--text-muted)]" aria-hidden />
           More
-          {dupes > 0 && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--item-accent)] ring-2 ring-[var(--bg)]" aria-hidden />}
+          {dupes > 0 && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--item-accent-fill)] ring-2 ring-[var(--bg)]" aria-hidden />}
         </button>
         {open && (
           <div
@@ -142,7 +142,7 @@ function ToolRow({ icon: Icon, label, hint, badge, onClick }: { icon: LucideIcon
         <span className="block text-sm text-[var(--text)]">{label}</span>
         {hint && <span className="block truncate text-xs text-[var(--text-muted)]">{hint}</span>}
       </span>
-      {badge !== undefined && <span className="rounded-full bg-[var(--item-accent)] px-2 py-0.5 text-xs font-semibold tabular-nums text-white">{badge}</span>}
+      {badge !== undefined && <span className="rounded-full bg-[var(--item-accent-fill)] px-2 py-0.5 text-xs font-semibold tabular-nums text-white">{badge}</span>}
     </button>
   );
 }

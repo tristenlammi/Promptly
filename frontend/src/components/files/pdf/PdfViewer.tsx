@@ -496,7 +496,7 @@ export function PdfViewer({
               type="button"
               onClick={() => void save()}
               disabled={!dirty || !!busy}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-40"
             >
               <Save className="h-4 w-4" /> Save
             </button>

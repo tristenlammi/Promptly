@@ -168,7 +168,7 @@ export function PhotoTile({
           className={cn(
             "flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 transition",
             selected
-              ? "border-[var(--accent)] bg-[var(--accent)] text-white opacity-100"
+              ? "border-[var(--accent)] bg-[var(--accent-strong)] text-white opacity-100"
               : "border-white/90 bg-black/25 text-transparent opacity-0 group-hover:opacity-100 group-hover/tick:bg-black/45 group-hover/tick:text-white",
             selecting && !selected && "opacity-100",
           )}

@@ -537,7 +537,7 @@ function NewChat({ compact = false }: { compact?: boolean }) {
       className={
         compact
           ? "inline-flex h-4 w-9 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          : "inline-flex w-9 items-center justify-center border-l border-white/20 bg-[var(--accent)] text-white transition hover:opacity-90"
+          : "inline-flex w-9 items-center justify-center border-l border-white/20 bg-[var(--accent-strong)] text-white transition hover:opacity-90"
       }
       aria-label="More chat types"
       aria-expanded={open}
@@ -553,7 +553,7 @@ function NewChat({ compact = false }: { compact?: boolean }) {
         <div className="flex flex-col items-center gap-0.5">
           <a
             href="/chat"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent)] text-white hover:opacity-90"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white hover:opacity-90"
             aria-label="New chat"
             title="New chat"
           >
@@ -565,7 +565,7 @@ function NewChat({ compact = false }: { compact?: boolean }) {
         <div className="flex w-full items-stretch gap-px overflow-hidden rounded-input">
           <a
             href="/chat"
-            className="flex flex-1 items-center justify-center gap-2 bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition hover:opacity-90"
+            className="flex flex-1 items-center justify-center gap-2 bg-[var(--accent-strong)] px-3 py-2 text-sm font-medium text-white transition hover:opacity-90"
           >
             <MessageSquarePlus className="h-4 w-4" />
             New chat
@@ -871,7 +871,7 @@ function ThemeToggle() {
             }}
             className={cn(
               "inline-flex h-7 w-7 items-center justify-center rounded-full transition",
-              active ? "bg-[var(--accent)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
+              active ? "bg-[var(--accent-strong)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
             )}
           >
             <Icon className="h-3.5 w-3.5" />

@@ -292,7 +292,7 @@ function GroupSheet({ item, group, onClose }: { item: Handle; group: Group | "ne
                 >
                   <ContactAvatar contact={c} size={30} />
                   <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{displayName(c)}</span>
-                  <span className={cn("h-5 w-5 rounded-md border", on ? "border-[var(--item-accent)] bg-[var(--item-accent)]" : "border-[var(--border)]")} aria-hidden />
+                  <span className={cn("h-5 w-5 rounded-md border", on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)]" : "border-[var(--border)]")} aria-hidden />
                 </button>
               </li>
             );

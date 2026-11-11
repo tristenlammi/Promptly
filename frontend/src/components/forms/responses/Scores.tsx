@@ -114,7 +114,7 @@ export function ScoresStrip({
             type="button"
             onClick={() => void release()}
             disabled={busy || ready <= 0}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             title={ready <= 0 ? "Mark the waiting answers first" : undefined}
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Send className="h-4 w-4" aria-hidden="true" />} Release scores
@@ -298,7 +298,7 @@ export function QuestionMark({
                 className="h-9 w-16 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-sm tabular-nums"
               />
               <span className="text-sm text-[var(--text-muted)]">/ {m.max}</span>
-              <button type="button" disabled={busy} onClick={() => void save(value)} className="h-9 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white disabled:opacity-60">
+              <button type="button" disabled={busy} onClick={() => void save(value)} className="h-9 rounded-md bg-[var(--accent-strong)] px-3 text-sm font-medium text-white disabled:opacity-60">
                 Save
               </button>
             </span>

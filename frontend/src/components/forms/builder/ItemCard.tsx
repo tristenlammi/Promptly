@@ -635,7 +635,7 @@ function KindEditor(p: KindEditorProps) {
             <legend className="mb-1 text-xs text-[var(--text-muted)]">Shape</legend>
             <div className="flex overflow-hidden rounded-md border border-[var(--border)]">
               {(["star", "heart", "thumb"] as const).map((icon) => (
-                <label key={icon} className={cn("flex h-10 cursor-pointer items-center px-3 text-sm", c.icon === icon ? "bg-[var(--accent)] text-white" : "hover:bg-[var(--hover)]")}>
+                <label key={icon} className={cn("flex h-10 cursor-pointer items-center px-3 text-sm", c.icon === icon ? "bg-[var(--accent-strong)] text-white" : "hover:bg-[var(--hover)]")}>
                   <input type="radio" className="sr-only" name={`${item.id}-icon`} checked={c.icon === icon} onChange={() => setConfig((x: RatingConfig) => ({ ...x, icon }))} />
                   {icon === "star" ? "Stars" : icon === "heart" ? "Hearts" : "Thumbs"}
                 </label>
@@ -661,7 +661,7 @@ function KindEditor(p: KindEditorProps) {
           <legend className="mb-1 text-xs text-[var(--text-muted)]">Answer</legend>
           <div className="flex w-fit overflow-hidden rounded-md border border-[var(--border)]">
             {(["time", "duration"] as const).map((mode) => (
-              <label key={mode} className={cn("flex h-10 cursor-pointer items-center px-3 text-sm", c.mode === mode ? "bg-[var(--accent)] text-white" : "hover:bg-[var(--hover)]")}>
+              <label key={mode} className={cn("flex h-10 cursor-pointer items-center px-3 text-sm", c.mode === mode ? "bg-[var(--accent-strong)] text-white" : "hover:bg-[var(--hover)]")}>
                 <input type="radio" className="sr-only" name={`${item.id}-mode`} checked={c.mode === mode} onChange={() => setConfig((x: TimeConfig) => ({ ...x, mode }))} />
                 {mode === "time" ? "Time of day" : "How long (a duration)"}
               </label>
@@ -743,7 +743,7 @@ function LocationEditor({ item, setConfig }: { item: FormItem<"location">; setCo
         <legend className="mb-1 text-xs text-[var(--text-muted)]">Ask for</legend>
         <div className="flex w-fit flex-wrap overflow-hidden rounded-md border border-[var(--border)]">
           {choices.map((o) => (
-            <label key={o.key} className={cn("flex h-10 cursor-pointer items-center px-3 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-[var(--accent)]", c.ask === o.key ? "bg-[var(--accent)] text-white" : "hover:bg-[var(--hover)]")}>
+            <label key={o.key} className={cn("flex h-10 cursor-pointer items-center px-3 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-[var(--accent)]", c.ask === o.key ? "bg-[var(--accent-strong)] text-white" : "hover:bg-[var(--hover)]")}>
               <input type="radio" className="sr-only" name={`${item.id}-ask`} checked={c.ask === o.key} onChange={() => setConfig((x: LocationConfig) => ({ ...x, ask: o.key }))} />
               {o.label}
             </label>
@@ -944,7 +944,7 @@ function SuggestOptions({
           <span className="flex gap-1">
             <button
               type="button"
-              className="min-h-[36px] rounded-md bg-[var(--accent)] px-3 text-xs font-medium text-white"
+              className="min-h-[36px] rounded-md bg-[var(--accent-strong)] px-3 text-xs font-medium text-white"
               onClick={() => {
                 onAdd(got);
                 setGot(null);

@@ -344,7 +344,7 @@ export function SubchatModal({
         {messages.map((m) =>
           m.role === "user" ? (
             <div key={m.id} className="flex min-w-0 justify-end">
-              <div className="max-w-[85%] overflow-hidden whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent)] px-3 py-1.5 text-white [overflow-wrap:anywhere]">
+              <div className="max-w-[85%] overflow-hidden whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent-strong)] px-3 py-1.5 text-white [overflow-wrap:anywhere]">
                 {m.content}
               </div>
             </div>
@@ -430,7 +430,7 @@ export function SubchatModal({
               disabled={draft.trim().length === 0}
               className={cn(
                 "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition",
-                "bg-[var(--accent)] text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                "bg-[var(--accent-strong)] text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               )}
               aria-label="Send"
               title="Send (Enter)"

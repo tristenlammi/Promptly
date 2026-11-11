@@ -141,7 +141,7 @@ export function StreamErrorCard({
                 disabled={retryBlocked}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium",
-                  "bg-[var(--accent)] text-white hover:opacity-90",
+                  "bg-[var(--accent-strong)] text-white hover:opacity-90",
                   retryBlocked && "cursor-not-allowed opacity-50 hover:opacity-50"
                 )}
               >
@@ -158,7 +158,7 @@ export function StreamErrorCard({
                   "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium",
                   onRetry
                     ? "border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
-                    : "bg-[var(--accent)] text-white hover:opacity-90"
+                    : "bg-[var(--accent-strong)] text-white hover:opacity-90"
                 )}
               >
                 {body.helpLabel}

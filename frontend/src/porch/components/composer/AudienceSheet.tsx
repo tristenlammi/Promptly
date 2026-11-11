@@ -53,7 +53,7 @@ export function AudienceSheet({
     );
   const dot = (on: boolean) => (
     <span aria-hidden className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2", on ? "border-[var(--item-accent)]" : "border-[var(--border)]")}>
-      {on && <span className="h-2.5 w-2.5 rounded-full bg-[var(--item-accent)]" />}
+      {on && <span className="h-2.5 w-2.5 rounded-full bg-[var(--item-accent-fill)]" />}
     </span>
   );
   const done = () => {
@@ -107,7 +107,7 @@ export function AudienceSheet({
                     aria-hidden
                     className={cn(
                       "flex h-5 w-5 shrink-0 items-center justify-center rounded border",
-                      on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)] bg-[var(--surface)]",
+                      on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)] bg-[var(--surface)]",
                     )}
                   >
                     {on && <Check className="h-3.5 w-3.5" />}

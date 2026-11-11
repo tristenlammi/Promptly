@@ -557,7 +557,7 @@ function AgentRow({ agent }: { agent: AgentProgress }) {
             // so a CSS width-transition would only add lag — apply it just for
             // the done/failed snap to 100%.
             running ? "animate-pulse" : "transition-[width] duration-500 ease-out",
-            failed ? "bg-[var(--warning)]" : "bg-[var(--accent)]",
+            failed ? "bg-[var(--warning)]" : "bg-[var(--accent-strong)]",
           )}
           style={{ width: `${width}%` }}
         />

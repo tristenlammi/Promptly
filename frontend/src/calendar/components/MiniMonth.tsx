@@ -71,7 +71,7 @@ export function MiniMonth({
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-full text-xs tabular-nums transition",
                   isToday
-                    ? "bg-[var(--item-accent)] font-semibold text-white"
+                    ? "bg-[var(--item-accent-fill)] font-semibold text-white"
                     : isSel
                       ? "bg-[color-mix(in_srgb,var(--item-accent)_18%,transparent)] font-semibold text-[var(--text)]"
                       : inMonth
@@ -81,7 +81,7 @@ export function MiniMonth({
               >
                 {d.getDate()}
               </span>
-              {dots?.has(ymd(d)) && !isToday && <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-[var(--item-accent)]" />}
+              {dots?.has(ymd(d)) && !isToday && <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-[var(--item-accent-fill)]" />}
             </button>
           );
         })}

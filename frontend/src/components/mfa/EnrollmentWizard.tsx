@@ -341,7 +341,7 @@ function Wrap({
   return (
     <div className="w-full max-w-md">
       <div className="mb-5 flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)] text-white">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white">
           <ShieldCheck className="h-4 w-4" />
         </div>
         <div>

@@ -124,7 +124,7 @@ export function MediaDetails({ fileId }: { fileId: string }) {
           </label>
         </div>
         <div className="flex flex-wrap gap-1.5 pt-1">
-          <button type="submit" className="rounded bg-[var(--accent)] px-2.5 py-1 text-white disabled:opacity-50" disabled={save.isPending}>
+          <button type="submit" className="rounded bg-[var(--accent-strong)] px-2.5 py-1 text-white disabled:opacity-50" disabled={save.isPending}>
             Save
           </button>
           <button type="button" className="rounded border border-[var(--border)] px-2.5 py-1" onClick={() => setEditing(false)}>

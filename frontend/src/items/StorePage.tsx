@@ -164,7 +164,7 @@ export function StorePage() {
             return (
               <article
                 key={it.kind}
-                style={{ "--item-accent": it.color } as CSSProperties}
+                style={{ "--item-accent": it.color, "--item-accent-fill": it.color } as CSSProperties}
                 className={cn(
                   "group flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 transition hover:border-[var(--item-accent)] hover:shadow-[var(--shadow-md)]",
                   it.disabled && "opacity-60",
@@ -200,7 +200,7 @@ export function StorePage() {
                       type="button"
                       onClick={() => add.mutate(it.kind)}
                       disabled={add.isPending || it.disabled}
-                      className="inline-flex h-8 items-center rounded-lg bg-[var(--item-accent)] px-4 text-xs font-semibold text-white hover:brightness-95 disabled:opacity-50"
+                      className="inline-flex h-8 items-center rounded-lg bg-[var(--item-accent-fill)] px-4 text-xs font-semibold text-white hover:brightness-95 disabled:opacity-50"
                     >
                       Get
                     </button>
@@ -214,7 +214,7 @@ export function StorePage() {
 
       <Sheet open={!!open} onClose={() => setOpen(null)} title={open?.name} size="md">
         {open && (
-          <div style={{ "--item-accent": open.color } as CSSProperties} className="flex flex-col gap-4">
+          <div style={{ "--item-accent": open.color, "--item-accent-fill": open.color } as CSSProperties} className="flex flex-col gap-4">
             <div className="flex items-center gap-3">
               {(() => {
                 const Icon = itemIcon(open.icon);
@@ -245,7 +245,7 @@ export function StorePage() {
                 type="button"
                 onClick={() => void start(open)}
                 disabled={creating === open.kind || open.disabled}
-                className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--item-accent)] px-4 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50"
+                className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--item-accent-fill)] px-4 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50"
               >
                 {creating === open.kind && <Loader2 className="h-4 w-4 animate-spin" />}
                 {open.installed ? `Open ${open.name}` : `Get ${open.name}`}

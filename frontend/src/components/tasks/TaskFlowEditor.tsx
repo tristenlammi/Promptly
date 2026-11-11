@@ -1323,7 +1323,7 @@ function OutputView({ text, nodeId }: { text: string; nodeId: string }) {
               className={cn(
                 "px-1.5 py-0.5 text-[10px] capitalize transition",
                 tab === k
-                  ? "bg-[var(--accent)] text-white"
+                  ? "bg-[var(--accent-strong)] text-white"
                   : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
               )}
             >
@@ -3261,7 +3261,7 @@ export function TaskFlowEditor({
             type="button"
             onClick={onSave}
             disabled={!dirty || save.isPending}
-            className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white transition hover:bg-[var(--accent-strong-hover)] disabled:opacity-50"
           >
             {save.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -3379,7 +3379,7 @@ export function TaskFlowEditor({
                 type="button"
                 disabled={copilotBusy || !copilotPrompt.trim()}
                 onClick={() => void handleDraft()}
-                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {copilotBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -3704,7 +3704,7 @@ export function TaskFlowEditor({
                 setSelectedId(null);
               }}
               disabled={save.isPending}
-              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[var(--accent-strong-hover)] disabled:opacity-50"
             >
               {save.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -3805,7 +3805,7 @@ function NodeInspector({
               type="button"
               onClick={onRunToHere}
               disabled={running}
-              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white transition hover:bg-[var(--accent-strong-hover)] disabled:opacity-50"
             >
               {running ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -4733,7 +4733,7 @@ function NodeInspector({
                 className={cn(
                   "rounded px-2 py-1 transition",
                   node.type === o.t
-                    ? "bg-[var(--accent)] text-white"
+                    ? "bg-[var(--accent-strong)] text-white"
                     : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
                 )}
               >

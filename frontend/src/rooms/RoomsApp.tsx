@@ -504,14 +504,14 @@ function Rail({
 }) {
   const promptlyNav = useContext(PromptlyNavContext);
   const plainBtn =
-    "flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface)] text-[var(--text-muted)] transition hover:bg-[var(--accent)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
+    "flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface)] text-[var(--text-muted)] transition hover:bg-[var(--accent-strong)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
   return (
     <nav className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-[var(--surface-2)] py-3" aria-label="Spaces">
       <RailButton label="Messages" active={sel === "dms"} onClick={onMessages} badge={t.dmUnread}>
         <span
           className={cn(
             "flex h-12 w-12 items-center justify-center rounded-2xl",
-            sel === "dms" ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
+            sel === "dms" ? "bg-[var(--accent-strong)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
           )}
         >
           <MessagesSquare className="h-6 w-6" />
@@ -522,7 +522,7 @@ function Rail({
           <span
             className={cn(
               "flex h-12 w-12 items-center justify-center rounded-2xl",
-              sel === "calls" ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
+              sel === "calls" ? "bg-[var(--accent-strong)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
             )}
           >
             <Phone className="h-6 w-6" />

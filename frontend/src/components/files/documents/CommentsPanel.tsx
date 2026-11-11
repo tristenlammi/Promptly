@@ -181,7 +181,7 @@ function Composer({
           type="button"
           disabled={!body.trim() || busy}
           onClick={() => void send()}
-          className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 text-xs font-medium text-white disabled:opacity-50"
+          className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2.5 text-xs font-medium text-white disabled:opacity-50"
         >
           {busy && <Loader2 className="h-3 w-3 animate-spin" />}
           {submitLabel}

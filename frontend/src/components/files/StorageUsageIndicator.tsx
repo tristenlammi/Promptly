@@ -132,7 +132,7 @@ function toneBarClass(tone: "ok" | "warn" | "crit"): string {
     case "warn":
       return "bg-amber-500";
     default:
-      return "bg-[var(--accent)]";
+      return "bg-[var(--accent-strong)]";
   }
 }
 

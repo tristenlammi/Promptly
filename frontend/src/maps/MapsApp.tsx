@@ -1072,7 +1072,7 @@ function MapButton({ label, active, expanded, onClick, children }: { label: stri
       title={label}
       aria-pressed={expanded === undefined ? active : undefined}
       aria-expanded={expanded}
-      className={`flex h-11 w-11 items-center justify-center rounded-full border shadow-lg transition ${active ? "border-transparent bg-[var(--accent)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"}`}
+      className={`flex h-11 w-11 items-center justify-center rounded-full border shadow-lg transition ${active ? "border-transparent bg-[var(--accent-strong)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"}`}
     >
       {children}
     </button>
@@ -1081,7 +1081,7 @@ function MapButton({ label, active, expanded, onClick, children }: { label: stri
 
 function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={on} className={`inline-flex min-h-10 items-center rounded-full border px-3 text-xs shadow md:min-h-0 md:px-2.5 md:py-1 ${on ? "border-transparent bg-[var(--accent)] font-medium text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"}`}>
+    <button type="button" onClick={onClick} aria-pressed={on} className={`inline-flex min-h-10 items-center rounded-full border px-3 text-xs shadow md:min-h-0 md:px-2.5 md:py-1 ${on ? "border-transparent bg-[var(--accent-strong)] font-medium text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"}`}>
       {children}
     </button>
   );
@@ -1274,7 +1274,7 @@ function PanelHeader({ title, detail, onClose }: { title: string; detail?: strin
 
 function PrimaryButton({ icon: Icon, children, onClick }: { icon: typeof Car; children: React.ReactNode; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90">
+    <button type="button" onClick={onClick} className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90">
       <Icon className="h-4 w-4" />{children}
     </button>
   );
@@ -1480,7 +1480,7 @@ function SavePicker({ place, already, withList, onDone, onRemove, onEdited, onSa
         </div>
       </fieldset>
       <div className="flex items-center gap-2">
-        <button type="submit" className="h-10 rounded-lg bg-[var(--accent)] md:h-9 px-4 text-sm font-medium text-white hover:opacity-90">{already ? "Save changes" : "Save"}</button>
+        <button type="submit" className="h-10 rounded-lg bg-[var(--accent-strong)] md:h-9 px-4 text-sm font-medium text-white hover:opacity-90">{already ? "Save changes" : "Save"}</button>
         <button type="button" onClick={onDone} className="h-10 rounded-lg px-3 md:h-9 text-sm text-[var(--text)] hover:bg-[var(--hover)]">Cancel</button>
         {already && <button type="button" onClick={remove} className="ml-auto h-10 rounded-lg md:h-9 px-3 text-sm text-[var(--danger,#c0392b)] hover:bg-[var(--hover)]">Remove</button>}
       </div>
@@ -1536,7 +1536,7 @@ function SortableStop({ stop, index, total, onRemove }: { stop: StopRow; index: 
       <button type="button" aria-label={`Move ${stop.name}`} className="-ml-2 flex h-10 w-8 shrink-0 cursor-grab touch-none items-center justify-center text-[var(--text-muted)] md:h-8" {...attributes} {...listeners}>
         <GripVertical className="h-4 w-4" />
       </button>
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-semibold text-white">{String.fromCharCode(65 + index)}</span>
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] text-xs font-semibold text-white">{String.fromCharCode(65 + index)}</span>
       <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{stop.name}</span>
       {total > 2 && onRemove && <SmallIcon label={`Remove ${stop.name}`} onClick={onRemove}><X className="h-4 w-4" /></SmallIcon>}
     </li>

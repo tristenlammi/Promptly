@@ -244,10 +244,10 @@ export function AccountSheet({ onClose, onSaved }: { onClose: () => void; onSave
           <div role="alert" className="space-y-2 rounded-lg bg-[var(--accent)]/10 p-3 text-xs text-[var(--text)]">
             <p>{certificate.message}</p>
             <p className="break-all font-mono text-xs text-[var(--text-muted)]">{certificate.fingerprint.match(/.{1,2}/g)?.join(":")}</p>
-            <button type="button" onClick={() => { setPin(certificate.fingerprint); void save(certificate.fingerprint); }} className="h-8 rounded-lg bg-[var(--accent)] px-3 font-medium text-white">Trust this certificate</button>
+            <button type="button" onClick={() => { setPin(certificate.fingerprint); void save(certificate.fingerprint); }} className="h-8 rounded-lg bg-[var(--accent-strong)] px-3 font-medium text-white">Trust this certificate</button>
           </div>
         )}
-        <button type="button" onClick={() => void save()} disabled={busy || !email || !password || !imap.host || !smtp.host} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+        <button type="button" onClick={() => void save()} disabled={busy || !email || !password || !imap.host || !smtp.host} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent-strong)] text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}{busy ? "Connecting…" : "Connect"}
         </button>
       </div>

@@ -436,7 +436,7 @@ export function PeopleView({ item, isPhone, ask, doc }: ItemViewProps<ContactsDa
                           aria-hidden
                           className={cn(
                             "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition",
-                            isPicked ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-transparent",
+                            isPicked ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-transparent",
                           )}
                         >
                           <Check className="h-3.5 w-3.5" strokeWidth={3} />
@@ -447,7 +447,7 @@ export function PeopleView({ item, isPhone, ask, doc }: ItemViewProps<ContactsDa
                         <span className="block truncate text-[15px] font-medium text-[var(--text)] md:text-sm">{name}</span>
                         <span className="block truncate text-xs text-[var(--text-muted)]">{workLine(c) || c.emails[0]?.value || c.phones[0]?.value || " "}</span>
                       </span>
-                      {overdue && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--item-accent)]" title="Due to reconnect" aria-label="Due to reconnect" />}
+                      {overdue && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--item-accent-fill)]" title="Due to reconnect" aria-label="Due to reconnect" />}
                       {c.favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-current text-[var(--text-muted)]" aria-label="Favourite" />}
                     </button>
                     {!isPhone && !picked && (
@@ -604,7 +604,7 @@ function LetterStrip({ letters, onPick }: { letters: string[]; onPick: (l: strin
         ))}
       </div>
       {bubble && (
-        <div aria-live="polite" className="pointer-events-none absolute left-1/2 top-1/3 flex h-16 w-16 -translate-x-1/2 items-center justify-center rounded-2xl bg-[var(--item-accent)] text-3xl font-bold text-white shadow-[var(--shadow-lg)]">
+        <div aria-live="polite" className="pointer-events-none absolute left-1/2 top-1/3 flex h-16 w-16 -translate-x-1/2 items-center justify-center rounded-2xl bg-[var(--item-accent-fill)] text-3xl font-bold text-white shadow-[var(--shadow-lg)]">
           {bubble}
         </div>
       )}

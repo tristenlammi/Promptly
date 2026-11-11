@@ -196,7 +196,7 @@ export function PackingTab({ item, isPhone, ask }: ItemViewProps<Trip>) {
                         <span
                           className={cn(
                             "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border-2 transition",
-                            i.checked ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)]",
+                            i.checked ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)]",
                           )}
                         >
                           {i.checked && <Check className="h-4 w-4" />}

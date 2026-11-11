@@ -382,7 +382,7 @@ export function AddToPlanSheet({
               >
                 <span className="text-[11px] text-[var(--text-muted)]">{fmtWeekday(d)}</span>
                 <span className="text-base font-semibold tabular-nums text-[var(--text)]">{fmtDayNum(d)}</span>
-                {t.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-[var(--item-accent)]" title={t.map((x) => x.title).join(", ")} />}
+                {t.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-[var(--item-accent-fill)]" title={t.map((x) => x.title).join(", ")} />}
               </button>
             );
           })}

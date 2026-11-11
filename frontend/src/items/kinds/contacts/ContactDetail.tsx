@@ -275,7 +275,7 @@ export function ContactDetail({
       {/* Birthday this week — the one thing to do right now. */}
       {bdayIn !== null && bdayIn <= 7 && (
         <div className="flex items-center gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--item-accent)_35%,transparent)] bg-[color-mix(in_srgb,var(--item-accent)_10%,transparent)] px-4 py-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--item-accent)] text-white">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--item-accent-fill)] text-white">
             <Cake className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
@@ -931,14 +931,14 @@ function NoteList({
             aria-hidden
             className={cn(
               "flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 transition",
-              n.done ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[color-mix(in_srgb,var(--text-muted)_70%,transparent)]",
+              n.done ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[color-mix(in_srgb,var(--text-muted)_70%,transparent)]",
             )}
           >
             {n.done && <Check className="h-3 w-3" strokeWidth={3} />}
           </span>
         </button>
       ) : (
-        <span className="mt-[15px] h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--item-accent)]" aria-hidden />
+        <span className="mt-[15px] h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--item-accent-fill)]" aria-hidden />
       )}
       <span className={cn("min-w-0 flex-1 py-2.5 text-sm leading-snug text-[var(--text)]", n.done && "text-[var(--text-muted)] line-through")}>{n.text}</span>
       {can && (
@@ -969,7 +969,7 @@ function NoteList({
             type="submit"
             aria-label="Add"
             disabled={!text.trim()}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white disabled:opacity-40 md:h-10 md:w-10"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent-fill)] text-white disabled:opacity-40 md:h-10 md:w-10"
           >
             <Plus className="h-4 w-4" />
           </button>

@@ -138,7 +138,7 @@ export function SpaceRoomList({
           <p className="px-3 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Notify me about</p>
           {(["all", "mentions", "none"] as NotifyLevel[]).map((n) => (
             <button key={n} type="button" role="menuitemradio" aria-checked={space.notify === n} className={menuItem} onClick={() => setNotify(n)}>
-              <span className={cn("h-2 w-2 rounded-full", space.notify === n ? "bg-[var(--accent)]" : "bg-transparent")} />
+              <span className={cn("h-2 w-2 rounded-full", space.notify === n ? "bg-[var(--accent-strong)]" : "bg-transparent")} />
               {n === "all" ? "All messages" : n === "mentions" ? "Only @mentions" : "Nothing"}
             </button>
           ))}

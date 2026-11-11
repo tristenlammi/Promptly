@@ -86,7 +86,7 @@ export function DecksTab({ item, isPhone, ask, goTo }: ItemViewProps<Data>) {
             className={cn("relative flex min-h-[56px] items-center", active && "bg-[color-mix(in_srgb,var(--item-accent)_10%,transparent)]")}
             style={{ paddingLeft: depth * 18 }}
           >
-            {active && <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-[var(--item-accent)]" />}
+            {active && <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-[var(--item-accent-fill)]" />}
             <button
               type="button"
               aria-label={hasKids ? (collapsed.has(deck.id) ? `Expand ${deck.name}` : `Collapse ${deck.name}`) : undefined}

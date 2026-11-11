@@ -274,7 +274,7 @@ export function NewMenu({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((o) => !o)}
-          className="grid h-12 w-12 place-items-center rounded-full bg-[var(--accent)] text-white shadow-lg"
+          className="grid h-12 w-12 place-items-center rounded-full bg-[var(--accent-strong)] text-white shadow-lg"
         >
           {creating ? <Loader2 className="h-6 w-6 animate-spin" /> : <Plus className="h-6 w-6" />}
         </button>

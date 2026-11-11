@@ -466,7 +466,7 @@ function OfficeActions({
         <button
           type="button"
           onClick={() => setShareOpen(true)}
-          className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white hover:opacity-90"
+          className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 text-sm font-medium text-white hover:opacity-90"
         >
           <Share2 className="h-4 w-4" />
           Share

@@ -107,7 +107,7 @@ export function StatsTab({ item, isPhone, ask, goTo }: ItemViewProps<Data>) {
                 subtitle={
                   <span className="flex items-center gap-2">
                     <span className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-[var(--surface-2)]" aria-hidden>
-                      <span className="block h-full rounded-full bg-[var(--item-accent)]" style={{ width: `${Math.round((r.wins / Math.max(1, r.plays)) * 100)}%` }} />
+                      <span className="block h-full rounded-full bg-[var(--item-accent-fill)]" style={{ width: `${Math.round((r.wins / Math.max(1, r.plays)) * 100)}%` }} />
                     </span>
                     <span className="truncate">
                       {fmtPct(r.wins / Math.max(1, r.plays))} · {r.wins} of {r.plays}
@@ -242,7 +242,7 @@ export function StatsTab({ item, isPhone, ask, goTo }: ItemViewProps<Data>) {
               title={r.game?.name ?? "?"}
               subtitle={
                 <span className="block h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]" aria-hidden>
-                  <span className="block h-full rounded-full bg-[var(--item-accent)]" style={{ width: `${Math.round((r.n / Math.max(1, ov.mostPlayed[0]?.n ?? 1)) * 100)}%` }} />
+                  <span className="block h-full rounded-full bg-[var(--item-accent-fill)]" style={{ width: `${Math.round((r.n / Math.max(1, ov.mostPlayed[0]?.n ?? 1)) * 100)}%` }} />
                 </span>
               }
               trailing={<span className="inline-block w-9 text-right font-semibold tabular-nums text-[var(--text)]">{r.n}×</span>}

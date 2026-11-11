@@ -107,7 +107,7 @@ export function WorkspaceAutomationPane({
             className={cn(
               "rounded px-2.5 py-1 transition",
               showFlow === o.flow
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-strong)] text-white"
                 : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
             )}
           >

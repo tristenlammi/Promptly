@@ -76,6 +76,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps on Android Auto: with no trip set, the map now keeps you in the middle, heading up, while you drive (it used to centre once and stay put). Move the map yourself and it's left alone for 20 seconds.
 
 ### Changed
+- Buttons are now the same deeper terracotta everywhere (the colour of Porch's "New post"), and easier to read: white words on the old light orange were hard to make out. Switches, ticked boxes, count badges and selected tabs follow. Tints, outlines, links and the logo keep the lighter orange.
 - Memory: health, money and other sensitive details are now saved like any other fact instead of waiting as suggestions for you to approve. If you'd rather be asked first, tick "Ask me before saving health, money and other sensitive details" in Account, Memory. Passwords, card numbers and the like are still never saved.
 
 <!-- Admin privacy, AP6 -->

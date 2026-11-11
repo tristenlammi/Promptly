@@ -204,7 +204,7 @@ export function MedSheet({ item, editing, onClose }: { item: H; editing?: Medica
                   onClick={() => setSch({ weekdays: on ? sch.weekdays.filter((x) => x !== i) : [...sch.weekdays, i] })}
                   className={cn(
                     "h-11 rounded-lg text-xs font-semibold transition",
-                    on ? "bg-[var(--item-accent)] text-white" : "bg-[var(--surface-2)] text-[var(--text-muted)]",
+                    on ? "bg-[var(--item-accent-fill)] text-white" : "bg-[var(--surface-2)] text-[var(--text-muted)]",
                   )}
                 >
                   {w}

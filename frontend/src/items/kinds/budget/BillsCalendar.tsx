@@ -79,7 +79,7 @@ export function BillsCalendar({
                 )}
               >
                 <span className="flex items-center gap-1 text-[11px] tabular-nums text-[var(--text-muted)]">
-                  <span className={cn(d === today && "flex h-5 w-5 items-center justify-center rounded-full bg-[var(--item-accent)] font-semibold text-white")}>
+                  <span className={cn(d === today && "flex h-5 w-5 items-center justify-center rounded-full bg-[var(--item-accent-fill)] font-semibold text-white")}>
                     {date.getDate() === 1 ? date.toLocaleDateString(undefined, { day: "numeric", month: "short" }) : date.getDate()}
                   </span>
                   {paydays.has(d) && <span className="truncate rounded bg-[color-mix(in_srgb,var(--success)_16%,transparent)] px-1 text-[10px] font-semibold text-[var(--success)]">Payday</span>}

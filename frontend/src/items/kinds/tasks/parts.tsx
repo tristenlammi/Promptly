@@ -192,7 +192,7 @@ export function TaskCheck({ task, onToggle, disabled, ticking }: { task: Task; o
       <span
         className={cn(
           "tasks-check-ring flex h-[22px] w-[22px] items-center justify-center rounded-full border-2",
-          done ? "border-transparent bg-[var(--item-accent)] text-white" : "group-hover:bg-[color-mix(in_srgb,currentColor_12%,transparent)]",
+          done ? "border-transparent bg-[var(--item-accent-fill)] text-white" : "group-hover:bg-[color-mix(in_srgb,currentColor_12%,transparent)]",
         )}
         style={done ? undefined : { borderColor: color, color, background: task.priority ? `color-mix(in srgb, ${color} 10%, transparent)` : undefined }}
       >
@@ -462,7 +462,7 @@ export function QuickAdd({
           onClick={add}
           disabled={!parsed.title}
           aria-label="Add task"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white transition disabled:opacity-30"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent-fill)] text-white transition disabled:opacity-30"
         >
           <SendHorizontal className="h-4 w-4" />
         </button>

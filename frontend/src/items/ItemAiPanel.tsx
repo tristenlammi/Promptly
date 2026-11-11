@@ -418,7 +418,7 @@ export function ItemAiPanel({
               type="submit"
               disabled={(!draft.trim() && !attached.length) || uploading}
               aria-label="Send"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white transition disabled:opacity-40"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent-fill)] text-white transition disabled:opacity-40"
             >
               <ArrowUp className="h-4 w-4" />
             </button>

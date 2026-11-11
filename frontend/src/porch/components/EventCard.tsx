@@ -132,7 +132,7 @@ export function EventCard({ post, className }: { post: PorchPost; className?: st
                 onClick={() => void answer(status)}
                 className={cn(
                   "inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] disabled:opacity-60",
-                  on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]",
+                  on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]",
                 )}
               >
                 <Icon className="h-4 w-4" aria-hidden />

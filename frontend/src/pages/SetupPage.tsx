@@ -174,7 +174,7 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-4 text-[var(--text)]">
       <div className="w-full max-w-md rounded-card border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)] text-white">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white">
             <Sparkles className="h-4 w-4" />
           </div>
           <div>
@@ -1054,7 +1054,7 @@ function ProviderCard({
           className={[
             "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
             selected
-              ? "bg-[var(--accent)] text-white"
+              ? "bg-[var(--accent-strong)] text-white"
               : "bg-[var(--bg)] text-[var(--text-muted)]",
           ].join(" ")}
         >
@@ -1363,7 +1363,7 @@ function StepDots({ current, total }: { current: number; total: number }) {
           className={[
             "h-1 flex-1 rounded-full transition",
             n === current
-              ? "bg-[var(--accent)]"
+              ? "bg-[var(--accent-strong)]"
               : n < current
                 ? "bg-[var(--accent)]/40"
                 : "bg-[var(--border)]",

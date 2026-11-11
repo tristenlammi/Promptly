@@ -263,7 +263,7 @@ export function RestTimer({ item }: { item: ItemHandle<WorkoutData> }) {
           <button type="button" onClick={() => adjust(15)} aria-label="15 seconds more rest" className="flex h-11 min-w-11 items-center justify-center gap-0.5 rounded-xl px-2 text-sm font-semibold text-[var(--text-muted)] hover:bg-[var(--hover)]">
             <Plus className="h-3.5 w-3.5" />15
           </button>
-          <button type="button" onClick={skip} aria-label="Skip rest" className="flex h-11 items-center gap-1 rounded-xl bg-[var(--item-accent)] px-3 text-sm font-semibold text-white">
+          <button type="button" onClick={skip} aria-label="Skip rest" className="flex h-11 items-center gap-1 rounded-xl bg-[var(--item-accent-fill)] px-3 text-sm font-semibold text-white">
             <SkipForward className="h-4 w-4" /> Skip
           </button>
         </div>

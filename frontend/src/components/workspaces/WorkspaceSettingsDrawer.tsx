@@ -1045,7 +1045,7 @@ function MemoryModeSelector({
               "rounded-[1.25rem] px-2.5 py-1 text-xs font-medium transition",
               "disabled:cursor-not-allowed disabled:opacity-60",
               active
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-strong)] text-white"
                 : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
             )}
           >

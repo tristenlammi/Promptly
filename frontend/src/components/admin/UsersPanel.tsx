@@ -1076,7 +1076,7 @@ function StorageCell({ used, limit }: { used: number; limit: number | null }) {
     );
   }
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 100;
-  const tone = pct >= 95 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-[var(--accent)]";
+  const tone = pct >= 95 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-[var(--accent-strong)]";
   return (
     <div className="flex items-center gap-2 whitespace-nowrap">
       <div

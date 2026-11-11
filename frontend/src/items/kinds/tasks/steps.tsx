@@ -61,7 +61,7 @@ function StepRow({ step, readOnly, edit }: { step: Step; readOnly: boolean; edit
         <span
           className={cn(
             "tasks-check-ring flex h-[18px] w-[18px] items-center justify-center rounded-full border-2",
-            step.done ? "border-transparent bg-[var(--item-accent)] text-white" : "border-[var(--text-muted)] text-[var(--text-muted)]",
+            step.done ? "border-transparent bg-[var(--item-accent-fill)] text-white" : "border-[var(--text-muted)] text-[var(--text-muted)]",
           )}
         >
           <TickMark className="h-3 w-3" />

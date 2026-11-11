@@ -27,7 +27,7 @@ export function Switch({ checked, onChange, label, disabled, id }: { checked: bo
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${checked ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${checked ? "bg-[var(--accent-strong)]" : "bg-[var(--border)]"}`}
     >
       <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-[22px]" : "translate-x-0.5"}`} />
     </button>
@@ -51,7 +51,7 @@ export function SwitchRow({ checked, onChange, disabled, children, className }: 
       className={`flex min-h-10 cursor-pointer items-center justify-between gap-3 ${disabled ? "cursor-default opacity-60" : ""} ${className ?? ""}`}
     >
       <span className="min-w-0">{children}</span>
-      <span aria-hidden="true" className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${checked ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}>
+      <span aria-hidden="true" className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${checked ? "bg-[var(--accent-strong)]" : "bg-[var(--border)]"}`}>
         <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-[22px]" : "translate-x-0.5"}`} />
       </span>
     </div>
@@ -75,7 +75,7 @@ export function Choice<V extends string | number>({ value, onChange, options, la
           role="radio"
           aria-checked={o.value === value}
           onClick={() => onChange(o.value)}
-          className={`inline-flex h-10 items-center rounded-full border px-3 text-xs md:h-8 ${o.value === value ? "border-transparent bg-[var(--accent)] font-medium text-white" : "border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]"}`}
+          className={`inline-flex h-10 items-center rounded-full border px-3 text-xs md:h-8 ${o.value === value ? "border-transparent bg-[var(--accent-strong)] font-medium text-white" : "border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]"}`}
         >
           {o.label}
         </button>

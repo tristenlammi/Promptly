@@ -106,7 +106,7 @@ function PhoneBackup() {
               type="button"
               onClick={() => void link()}
               disabled={busy}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-60"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--accent-strong)] px-3 text-xs font-semibold text-white disabled:opacity-60"
             >
               {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Set up backup on this phone

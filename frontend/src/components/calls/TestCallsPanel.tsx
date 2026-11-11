@@ -235,7 +235,7 @@ export function TestCallsPanel() {
                 aria-valuemax={100}
                 aria-valuenow={Math.round(level * 100)}
               >
-                <div className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-75" style={{ width: `${Math.round(level * 100)}%` }} />
+                <div className="h-full rounded-full bg-[var(--accent-strong)] transition-[width] duration-75" style={{ width: `${Math.round(level * 100)}%` }} />
               </div>
               <span className="w-28 text-right text-[11px] text-[var(--text-muted)]">{level > 0.35 ? "Hearing you" : "Say something"}</span>
             </div>

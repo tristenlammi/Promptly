@@ -47,7 +47,7 @@ export function TaskRunDocument({ run }: { run: TaskRun }) {
   if (run.status !== "success" && run.status !== "warning") {
     return (
       <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
+        <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent-strong)]" />
         {run.status === "running" ? "Generating report…" : "Queued…"}
       </div>
     );

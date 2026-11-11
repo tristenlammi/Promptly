@@ -267,7 +267,7 @@ function TodayBody({ data }: { data: TodayData }) {
                       {r.name}
                       {r.where && !r.dm ? <span className="text-[var(--text-muted)]"> · {r.where}</span> : null}
                     </span>
-                    <span className="rounded-full bg-[var(--accent)] px-1.5 text-[11px] font-semibold leading-5 text-white">{r.unread > 99 ? "99+" : r.unread}</span>
+                    <span className="rounded-full bg-[var(--accent-strong)] px-1.5 text-[11px] font-semibold leading-5 text-white">{r.unread > 99 ? "99+" : r.unread}</span>
                   </Link>
                 </li>
               ))}
@@ -488,7 +488,7 @@ function TickBox({ done, busy, label, onClick }: { done: boolean; busy: boolean;
       onClick={onClick}
       className={cn(
         "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition",
-        done ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border-strong,var(--border))] hover:border-[var(--accent)]",
+        done ? "border-[var(--accent)] bg-[var(--accent-strong)] text-white" : "border-[var(--border-strong,var(--border))] hover:border-[var(--accent)]",
         busy && "opacity-50",
       )}
     >
@@ -630,7 +630,7 @@ function WorkCard({ work }: { work: NonNullable<TodayData["sections"]["work"]> }
         {cards.map((c) => (
           <li key={c.id}>
             <Link to={c.url} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-[var(--hover)]">
-              <span className={cn("h-2 w-2 shrink-0 rounded-full", c.overdue ? "bg-[var(--danger)]" : c.due ? "bg-[var(--accent)]" : "bg-[var(--border)]")} />
+              <span className={cn("h-2 w-2 shrink-0 rounded-full", c.overdue ? "bg-[var(--danger)]" : c.due ? "bg-[var(--accent-strong)]" : "bg-[var(--border)]")} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm">{c.title}</span>
                 <span className={cn("block truncate text-xs", c.overdue ? "text-[var(--danger)]" : "text-[var(--text-muted)]")}>
@@ -720,7 +720,7 @@ function MorningCard({ data }: { data: TodayData }) {
         aria-label="Morning summary"
         disabled={saving}
         onClick={() => void save(!m.on, m.time)}
-        className={cn("relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition", m.on ? "bg-[var(--accent)]" : "bg-[var(--surface-2)]")}
+        className={cn("relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition", m.on ? "bg-[var(--accent-strong)]" : "bg-[var(--surface-2)]")}
       >
         <span className={cn("inline-block h-5 w-5 rounded-full bg-white shadow transition", m.on ? "translate-x-5" : "translate-x-0.5")} />
       </button>

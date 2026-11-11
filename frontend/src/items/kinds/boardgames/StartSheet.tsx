@@ -236,7 +236,7 @@ export function StartSheet({
               >
                 <PlayerBadge player={p} size={32} />
                 {p.name}
-                {i >= 0 && <span className="ml-0.5 rounded-full bg-[var(--item-accent)] px-1.5 text-[11px] font-bold text-white tabular-nums">{i + 1}</span>}
+                {i >= 0 && <span className="ml-0.5 rounded-full bg-[var(--item-accent-fill)] px-1.5 text-[11px] font-bold text-white tabular-nums">{i + 1}</span>}
               </button>
             );
           })}

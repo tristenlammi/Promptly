@@ -110,7 +110,7 @@ export function Welcome() {
                           aria-hidden
                           className={cn(
                             "flex h-6 w-6 items-center justify-center rounded-full border",
-                            on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)]",
+                            on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)]",
                           )}
                         >
                           {on && <Check className="h-4 w-4" />}

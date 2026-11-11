@@ -169,7 +169,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
           disabled={!picked || create.isPending}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-input px-3 py-2 text-sm font-medium",
-            "bg-[var(--accent)] text-white transition hover:opacity-90",
+            "bg-[var(--accent-strong)] text-white transition hover:opacity-90",
             "disabled:cursor-not-allowed disabled:opacity-50"
           )}
         >

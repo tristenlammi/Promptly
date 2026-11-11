@@ -50,7 +50,7 @@ export function RefineResearchDialog({ open, onSubmit, onClose }: Props) {
             disabled={!canStart}
             className={cn(
               "rounded-md px-4 py-1.5 text-sm font-medium",
-              "bg-[var(--accent)] text-white hover:opacity-90",
+              "bg-[var(--accent-strong)] text-white hover:opacity-90",
               "disabled:cursor-not-allowed disabled:opacity-50"
             )}
           >

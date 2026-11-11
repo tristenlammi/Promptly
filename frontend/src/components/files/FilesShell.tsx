@@ -372,7 +372,7 @@ function StorageMeter() {
             <span
               className={cn(
                 "block h-full rounded-full",
-                pct >= 0.95 ? "bg-red-500" : pct >= 0.8 ? "bg-amber-500" : "bg-[var(--accent)]"
+                pct >= 0.95 ? "bg-red-500" : pct >= 0.8 ? "bg-amber-500" : "bg-[var(--accent-strong)]"
               )}
               style={{ width: `${Math.max(2, Math.round(pct * 100))}%` }}
             />

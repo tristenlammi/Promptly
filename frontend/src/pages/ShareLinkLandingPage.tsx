@@ -649,7 +649,7 @@ function PublicBlobPreview({
             <a
               href={blobUrl}
               download={filename}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white"
             >
               <Download className="h-3.5 w-3.5" /> Download
             </a>
@@ -976,7 +976,7 @@ function Chrome({
             wide ? "max-w-5xl" : "max-w-3xl"
           )}
         >
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent)] text-white">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white">
             <span className="text-sm font-bold">P</span>
           </div>
           <div className="text-sm font-semibold tracking-tight">

@@ -698,7 +698,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   // ------------------------------------------------------------ the page
   const empty = (() => {
     if (!ready || (!loaded.main && !all.length)) {
-      if (loadError) return <Empty icon={CloudOff} title="Couldn't load your notes" body={loadError} action={<button type="button" className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white" onClick={() => void loadLists()}>Try again</button>} />;
+      if (loadError) return <Empty icon={CloudOff} title="Couldn't load your notes" body={loadError} action={<button type="button" className="rounded-full bg-[var(--accent-strong)] px-4 py-2 text-sm font-medium text-white" onClick={() => void loadLists()}>Try again</button>} />;
       if (ready && typeof navigator !== "undefined" && navigator.onLine === false) return <Empty icon={CloudOff} title="You're offline" body="Your notes will show once you're connected. Notes you write now are kept on this device." />;
       return <NoteGridSkeleton layout={layout} />;
     }
@@ -828,7 +828,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
             type="button"
             onClick={() => newOnPhone("text")}
             aria-label="New note"
-            className="-mt-7 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-[var(--shadow-lg)] transition active:scale-95"
+            className="-mt-7 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent-strong)] text-white shadow-[var(--shadow-lg)] transition active:scale-95"
           >
             <Plus className="h-7 w-7" />
           </button>
@@ -936,7 +936,7 @@ function NoteMissing({ state, onBack, lost, onKeep }: { state: "idle" | "loading
           title={LOST_TITLE}
           body={LOST_BODY}
           action={
-            <button type="button" onClick={onKeep} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white">
+            <button type="button" onClick={onKeep} className="rounded-full bg-[var(--accent-strong)] px-4 py-2 text-sm font-medium text-white">
               Keep a copy
             </button>
           }
@@ -974,7 +974,7 @@ function NoteMissingDialog({ state, onBack, lost, onKeep }: { state: "idle" | "l
                 <button type="button" onClick={onBack} className="rounded-full px-4 py-2 text-sm font-medium hover:bg-[var(--hover)]">
                   Back to notes
                 </button>
-                <button type="button" onClick={onKeep} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white">
+                <button type="button" onClick={onKeep} className="rounded-full bg-[var(--accent-strong)] px-4 py-2 text-sm font-medium text-white">
                   Keep a copy
                 </button>
               </div>
@@ -990,7 +990,7 @@ function NoteMissingDialog({ state, onBack, lost, onKeep }: { state: "idle" | "l
             title={state === "gone" ? "This note isn't here any more" : "This note isn't on this device yet"}
             body={state === "gone" ? "It was deleted, or it's no longer shared with you." : "Connect to open it."}
             action={
-              <button type="button" onClick={onBack} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white">
+              <button type="button" onClick={onBack} className="rounded-full bg-[var(--accent-strong)] px-4 py-2 text-sm font-medium text-white">
                 Back to notes
               </button>
             }

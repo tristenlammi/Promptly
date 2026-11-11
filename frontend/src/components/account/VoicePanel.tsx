@@ -239,7 +239,7 @@ function TalkSettings() {
             onClick={() => void save(key, value)}
             className={cn(
               "rounded-md px-3 py-1 text-xs font-medium transition",
-              current === value ? "bg-[var(--accent)] text-white" : "text-[var(--text)] hover:bg-[var(--hover)]"
+              current === value ? "bg-[var(--accent-strong)] text-white" : "text-[var(--text)] hover:bg-[var(--hover)]"
             )}
           >
             {text}

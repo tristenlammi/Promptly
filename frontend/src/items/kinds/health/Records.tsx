@@ -260,7 +260,7 @@ function NextVisit({ a, onOpen }: { a: Appointment; onOpen: () => void }) {
           <ul className="flex flex-col gap-1">
             {a.questions.slice(0, 4).map((q) => (
               <li key={q} className="flex gap-2 text-sm text-[var(--text)]">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--item-accent)]" />
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--item-accent-fill)]" />
                 <span className="min-w-0">{q}</span>
               </li>
             ))}

@@ -144,7 +144,7 @@ export function ChangePasswordPanel({ onChanged }: { onChanged?: () => void } = 
           <button
             type="submit"
             disabled={!canSubmit}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3.5 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3.5 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
           >
             {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Change password

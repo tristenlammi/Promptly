@@ -93,7 +93,7 @@ export function CalendarView({ item, isPhone, ask }: ItemViewProps<JournalData>)
               style={fill ? { background: `color-mix(in srgb, ${fill} 42%, var(--surface))`, color: "var(--text)" } : { color: list ? "var(--text)" : "var(--text-muted)" }}
             >
               {Number(c.slice(8))}
-              {list && !avg && <span className="absolute bottom-1.5 h-1 w-1 rounded-full bg-[var(--item-accent)]" aria-hidden />}
+              {list && !avg && <span className="absolute bottom-1.5 h-1 w-1 rounded-full bg-[var(--item-accent-fill)]" aria-hidden />}
               {list && list.length > 1 && <span className="absolute right-1 top-0.5 text-[9px] font-semibold opacity-60">{list.length}</span>}
               {isToday && <span className="absolute bottom-1 h-0.5 w-3 rounded-full bg-[var(--text)] opacity-60" aria-hidden />}
             </button>

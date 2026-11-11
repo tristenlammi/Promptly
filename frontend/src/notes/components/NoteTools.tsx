@@ -20,7 +20,7 @@ import { Sheet } from "./Sheet";
  */
 
 const btn = "flex h-10 items-center justify-center gap-2 rounded-full px-4 text-sm font-medium";
-const primary = `${btn} bg-[var(--accent)] px-5 text-white disabled:opacity-50`;
+const primary = `${btn} bg-[var(--accent-strong)] px-5 text-white disabled:opacity-50`;
 const quiet = `${btn} hover:bg-[var(--hover)]`;
 
 /** Ask the model for a proposal (once on open, again on Try again). */

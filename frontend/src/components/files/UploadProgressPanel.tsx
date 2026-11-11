@@ -195,7 +195,7 @@ export function UploadProgressPanel() {
       {active.length > 0 && (
         <div className="h-0.5 w-full bg-[var(--border)]/60">
           <div
-            className="h-0.5 bg-[var(--accent)] transition-[width] duration-300"
+            className="h-0.5 bg-[var(--accent-strong)] transition-[width] duration-300"
             style={{ width: `${Math.round(aggregate * 100)}%` }}
           />
         </div>
@@ -490,7 +490,7 @@ function statusRowClass(status: UploadTask["status"]): {
       };
     default:
       return {
-        bar: "bg-[var(--accent)]",
+        bar: "bg-[var(--accent-strong)]",
         pct: "text-[var(--text-muted)]",
       };
   }

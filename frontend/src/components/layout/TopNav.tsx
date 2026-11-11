@@ -68,7 +68,7 @@ export function TopNav({
           >
             <Menu className="h-5 w-5" />
             {happening > 0 && (
-              <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--accent)] ring-2 ring-[var(--bg)]" />
+              <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--accent-strong)] ring-2 ring-[var(--bg)]" />
             )}
           </button>
         )}

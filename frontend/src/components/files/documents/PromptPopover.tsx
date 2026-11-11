@@ -95,7 +95,7 @@ export function PromptPopover({
             title="Apply"
             aria-label="Apply"
             onClick={submit}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)] text-white transition hover:opacity-90"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent-strong)] text-white transition hover:opacity-90"
           >
             <Check className="h-4 w-4" />
           </button>

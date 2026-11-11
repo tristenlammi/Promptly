@@ -145,7 +145,7 @@ function Strip({
         return (
           <li key={p.key} data-pick className={cn("relative shrink-0", target && (over.to > over.from ? "pr-3" : "pl-3"))}>
             {target && (
-              <span aria-hidden className={cn("absolute bottom-1 top-1 w-1 rounded-full bg-[var(--item-accent)]", over.to > over.from ? "right-0.5" : "left-0.5")} />
+              <span aria-hidden className={cn("absolute bottom-1 top-1 w-1 rounded-full bg-[var(--item-accent-fill)]", over.to > over.from ? "right-0.5" : "left-0.5")} />
             )}
             <button
               type="button"

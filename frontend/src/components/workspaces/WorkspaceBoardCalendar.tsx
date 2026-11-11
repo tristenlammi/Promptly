@@ -187,7 +187,7 @@ export function WorkspaceBoardCalendar({
                   className={cn(
                     "inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[11px]",
                     isToday
-                      ? "bg-[var(--accent)] font-semibold text-white"
+                      ? "bg-[var(--accent-strong)] font-semibold text-white"
                       : inMonth
                         ? "text-[var(--text)]"
                         : "text-[var(--text-muted)]"

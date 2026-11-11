@@ -243,7 +243,7 @@ export function FeedPage() {
             onClick={() => setPhotos(!photos)}
             className={cn(
               "inline-flex h-10 items-center gap-1.5 rounded-xl px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
-              photos ? "bg-[var(--item-accent)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]",
+              photos ? "bg-[var(--item-accent-fill)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]",
             )}
           >
             <ImageIcon className="h-[18px] w-[18px]" aria-hidden />
@@ -271,7 +271,7 @@ export function FeedPage() {
           <button
             type="button"
             onClick={() => void showFresh()}
-            className="porch-drop pointer-events-auto mt-2 inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--item-accent)] px-4 text-sm font-semibold text-white shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2"
+            className="porch-drop pointer-events-auto mt-2 inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--item-accent-fill)] px-4 text-sm font-semibold text-white shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2"
           >
             <ArrowUp className="h-4 w-4" aria-hidden />
             {fresh.length === 1 ? "1 new post" : `${fresh.length} new posts`}

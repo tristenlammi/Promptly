@@ -357,7 +357,7 @@ function PullByNameForm({
           </div>
           <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--bg)]">
             <div
-              className="h-full bg-[var(--accent)] transition-all"
+              className="h-full bg-[var(--accent-strong)] transition-all"
               style={{ width: pct === null ? "10%" : `${pct}%` }}
             />
           </div>

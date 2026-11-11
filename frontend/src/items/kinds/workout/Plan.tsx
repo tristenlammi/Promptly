@@ -254,7 +254,7 @@ function ProgramCard({ item, ctx, programId, ask }: { item: ItemHandle<WorkoutDa
       <div className="flex gap-1" aria-label="Program weeks">
         {p.weeks.map((w) => (
           <div key={w.n} className="flex flex-1 flex-col items-center gap-1" title={w.label || `Week ${w.n}`}>
-            <div className={cn("h-2 w-full rounded-full", w.deload ? "bg-[color-mix(in_srgb,var(--warning)_45%,transparent)]" : w.n < cur ? "bg-[var(--item-accent)]" : w.n === cur ? "bg-[color-mix(in_srgb,var(--item-accent)_55%,transparent)]" : "bg-[var(--surface-2)]")} />
+            <div className={cn("h-2 w-full rounded-full", w.deload ? "bg-[color-mix(in_srgb,var(--warning)_45%,transparent)]" : w.n < cur ? "bg-[var(--item-accent-fill)]" : w.n === cur ? "bg-[color-mix(in_srgb,var(--item-accent)_55%,transparent)]" : "bg-[var(--surface-2)]")} />
             <span className={cn("text-[10px] tabular-nums", w.n === cur ? "font-semibold text-[var(--text)]" : "text-[var(--text-muted)]")}>{w.deload ? "DL" : w.n}</span>
           </div>
         ))}

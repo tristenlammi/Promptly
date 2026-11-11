@@ -50,7 +50,7 @@ export function PhotoSetupPage() {
             <button type="button" aria-current={i === step ? "step" : undefined} onClick={() => setStep(i)}
               className={cn("flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1",
                 i === step ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]")}>
-              <span className={cn("flex h-4 w-4 items-center justify-center rounded-full text-[10px]", i < step ? "bg-[var(--accent)] text-white" : "border border-current")}>
+              <span className={cn("flex h-4 w-4 items-center justify-center rounded-full text-[10px]", i < step ? "bg-[var(--accent-strong)] text-white" : "border border-current")}>
                 {i < step ? <Check className="h-2.5 w-2.5" /> : i + 1}
               </span>
               {s}
@@ -201,7 +201,7 @@ function Understand() {
                 <span className="tabular-nums">{s.done.toLocaleString()} / {s.total.toLocaleString()}</span>
               </div>
               <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-[var(--hover)]">
-                <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${s.total ? Math.round((100 * s.done) / s.total) : 100}%` }} />
+                <div className="h-full rounded-full bg-[var(--accent-strong)]" style={{ width: `${s.total ? Math.round((100 * s.done) / s.total) : 100}%` }} />
               </div>
             </div>
           ))}

@@ -95,7 +95,7 @@ export function PhotosDropZone({
             className="photos-fade-in pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-[var(--accent)] bg-[var(--bg)]/85 backdrop-blur-sm"
           >
             <div className="flex flex-col items-center gap-2 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)] text-white">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white">
                 <Upload className="h-5 w-5" />
               </span>
               <p className="text-sm font-medium text-[var(--text)]">{target?.label ?? "Drop to add to your photos"}</p>

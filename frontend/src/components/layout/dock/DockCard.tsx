@@ -132,7 +132,7 @@ export function DockCard({ card }: { card: DockCardData }) {
           aria-valuenow={pct}
           className="h-1 w-full bg-[var(--border)]"
         >
-          <div className="h-full rounded-r-full bg-[var(--accent)] transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-r-full bg-[var(--accent-strong)] transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
         </div>
       )}
     </div>

@@ -124,7 +124,7 @@ function LiveBanner({ a, goTo }: { a: NonNullable<WorkoutData["active"]>; goTo: 
     <button
       type="button"
       onClick={() => goTo("today")}
-      className="flex w-full items-center gap-3 rounded-2xl bg-[var(--item-accent)] px-4 py-3 text-left text-white shadow-[var(--shadow-sm)]"
+      className="flex w-full items-center gap-3 rounded-2xl bg-[var(--item-accent-fill)] px-4 py-3 text-left text-white shadow-[var(--shadow-sm)]"
     >
       <span className="relative flex h-2.5 w-2.5">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60 motion-reduce:hidden" />

@@ -259,7 +259,7 @@ export const ItemButton = forwardRef<
         size === "sm" && "h-8 px-3 text-xs",
         size === "md" && "h-11 px-4 text-sm md:h-10",
         size === "lg" && "h-12 px-5 text-base",
-        variant === "primary" && "bg-[var(--item-accent)] text-white shadow-[var(--shadow-sm)] hover:brightness-95 active:brightness-90",
+        variant === "primary" && "bg-[var(--item-accent-fill)] text-white shadow-[var(--shadow-sm)] hover:brightness-95 active:brightness-90",
         variant === "secondary" && "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]",
         variant === "ghost" && "text-[var(--text)] hover:bg-[var(--hover)]",
         variant === "danger" && "bg-[var(--danger)] text-white hover:brightness-95",
@@ -486,7 +486,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
       onClick={() => onChange(!checked)}
       className={cn(
         "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition",
-        checked ? "bg-[var(--item-accent)]" : "bg-[var(--surface-2)]",
+        checked ? "bg-[var(--item-accent-fill)]" : "bg-[var(--surface-2)]",
       )}
     >
       <span className={cn("inline-block h-5 w-5 rounded-full bg-white shadow transition", checked ? "translate-x-6" : "translate-x-1")} />
@@ -602,7 +602,7 @@ export function Fab({ label, icon: Icon, onClick }: { label: string; icon: Compo
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="fixed bottom-[calc(76px+env(safe-area-inset-bottom,0px))] right-4 z-30 flex h-14 items-center gap-2 rounded-2xl bg-[var(--item-accent)] px-5 text-sm font-semibold text-white shadow-[var(--shadow-lg)] transition active:scale-95 md:hidden"
+      className="fixed bottom-[calc(76px+env(safe-area-inset-bottom,0px))] right-4 z-30 flex h-14 items-center gap-2 rounded-2xl bg-[var(--item-accent-fill)] px-5 text-sm font-semibold text-white shadow-[var(--shadow-lg)] transition active:scale-95 md:hidden"
     >
       <Icon className="h-5 w-5" />
       {label}

@@ -66,7 +66,7 @@ export function TaskSourceBadge({ source, onNavigate }: { source: TaskEventSourc
         className="flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-60"
       >
         <span
-          className={cn("flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-[var(--item-accent)]", done && "bg-[var(--item-accent)]")}
+          className={cn("flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-[var(--item-accent)]", done && "bg-[var(--item-accent-fill)]")}
         >
           {done && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
         </span>

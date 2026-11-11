@@ -902,7 +902,7 @@ function ProviderOptionCard({
           className={[
             "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
             selected
-              ? "bg-[var(--accent)] text-white"
+              ? "bg-[var(--accent-strong)] text-white"
               : "bg-[var(--bg)] text-[var(--text-muted)]",
           ].join(" ")}
         >

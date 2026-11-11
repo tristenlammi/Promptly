@@ -68,7 +68,7 @@ export function PlacesPage() {
             <button
               type="button"
               onClick={() => setOnly(null)}
-              className={cn("rounded-full px-2.5 py-1 text-xs", !only ? "bg-[var(--accent)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)]")}
+              className={cn("rounded-full px-2.5 py-1 text-xs", !only ? "bg-[var(--accent-strong)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)]")}
             >
               All
             </button>
@@ -80,7 +80,7 @@ export function PlacesPage() {
                 onClick={() => setOnly(only === s.key ? null : s.key)}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs",
-                  only === s.key ? "bg-[var(--accent)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
+                  only === s.key ? "bg-[var(--accent-strong)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
                 )}
               >
                 <s.icon className="h-3 w-3" /> {s.label}
@@ -133,7 +133,7 @@ export function PlacesPage() {
                         setOnly(null);
                         setPicked(null);
                       }}
-                      className="inline-flex h-10 items-center rounded-lg bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90"
+                      className="inline-flex h-10 items-center rounded-lg bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90"
                     >
                       Show all places
                     </button>

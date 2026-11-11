@@ -163,7 +163,7 @@ export function DriveAiDialog({ open, onClose }: { open: boolean; onClose: () =>
               onClick={() => toggle(!data.enabled)}
               className={cn(
                 "relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50",
-                data.enabled ? "bg-[var(--accent)]" : "bg-[var(--border)]"
+                data.enabled ? "bg-[var(--accent-strong)]" : "bg-[var(--border)]"
               )}
             >
               <span
@@ -186,7 +186,7 @@ export function DriveAiDialog({ open, onClose }: { open: boolean; onClose: () =>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-[var(--border)]">
                 <div
-                  className="h-full bg-[var(--accent)] transition-all"
+                  className="h-full bg-[var(--accent-strong)] transition-all"
                   style={{ width: `${data.eligible ? Math.round((done / data.eligible) * 100) : 100}%` }}
                 />
               </div>

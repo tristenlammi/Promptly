@@ -131,7 +131,7 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
                 type="button"
                 onClick={() => void decide(true)}
                 disabled={busy !== null}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-3 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-60"
               >
                 {busy === "approve" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
                 {native ? "Yes, do it" : "Approve"}

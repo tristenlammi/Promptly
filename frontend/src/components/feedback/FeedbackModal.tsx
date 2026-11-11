@@ -84,7 +84,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
             onClick={submit}
             disabled={!message.trim() || submitting}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition",
+              "inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white transition",
               "hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             )}
           >

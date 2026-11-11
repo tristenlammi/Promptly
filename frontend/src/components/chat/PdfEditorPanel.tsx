@@ -628,7 +628,7 @@ function EmbedFallback({
           onClick={onOpenInNewTab}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-white",
-            "bg-[var(--accent)] hover:opacity-90"
+            "bg-[var(--accent-strong)] hover:opacity-90"
           )}
         >
           <ExternalLink className="h-3.5 w-3.5" />
@@ -988,7 +988,7 @@ function Footer({
         disabled={!isDirty || saving}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-semibold text-white",
-          "bg-[var(--accent)] transition hover:opacity-90",
+          "bg-[var(--accent-strong)] transition hover:opacity-90",
           "disabled:cursor-not-allowed disabled:opacity-40"
         )}
       >
@@ -1020,7 +1020,7 @@ function MissingSourceNotice({ onClose }: { onClose: () => void }) {
         onClick={onClose}
         className={cn(
           "mt-2 inline-flex items-center rounded-md px-3 py-1.5 text-xs font-semibold text-white",
-          "bg-[var(--accent)] hover:opacity-90"
+          "bg-[var(--accent-strong)] hover:opacity-90"
         )}
       >
         Close

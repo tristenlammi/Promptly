@@ -127,7 +127,7 @@ export function WorkspaceConnectorsTab({ workspaceId }: { workspaceId: string })
                 aria-label={`${c.name} in this workspace`}
                 className={cn(
                   "relative h-5 w-9 shrink-0 rounded-full transition",
-                  c.attached ? "bg-[var(--accent)]" : "bg-[var(--border)]",
+                  c.attached ? "bg-[var(--accent-strong)]" : "bg-[var(--border)]",
                   (!c.can_change || saving) && "opacity-60"
                 )}
                 title={

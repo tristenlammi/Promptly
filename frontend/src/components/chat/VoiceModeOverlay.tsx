@@ -506,7 +506,7 @@ export function VoiceModeOverlay({
             className={cn(
               "inline-block h-2 w-2 rounded-full",
               active
-                ? "bg-[var(--accent)] animate-pulse"
+                ? "bg-[var(--accent-strong)] animate-pulse"
                 : busy
                   ? "bg-amber-500 animate-pulse"
                   : "bg-[var(--border)]"
@@ -614,7 +614,7 @@ export function VoiceModeOverlay({
           levelRef={rawLevelRef}
           bars={26}
           className="h-10 w-56"
-          barClassName="w-[4px] rounded-full bg-[var(--accent)] opacity-90"
+          barClassName="w-[4px] rounded-full bg-[var(--accent-strong)] opacity-90"
         />
 
         {/* Status line */}

@@ -607,7 +607,7 @@ function CategoryRow({
           disabled={busy}
           onChange={(e) => onChange(e.target.checked)}
         />
-        <div className="h-5 w-9 rounded-full bg-[var(--border)] transition peer-checked:bg-[var(--accent)]" />
+        <div className="h-5 w-9 rounded-full bg-[var(--border)] transition peer-checked:bg-[var(--accent-strong)]" />
         <div className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition peer-checked:translate-x-4" />
         {busy && (
           <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin text-[var(--text-muted)]" />

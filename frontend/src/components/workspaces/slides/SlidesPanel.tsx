@@ -222,7 +222,7 @@ export function SlidesPanel({
       <aside aria-label="Slides" className="flex w-44 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] sm:w-52">
         <div className="flex items-center gap-1 border-b border-[var(--border)] p-2">
           <button type="button" disabled={!slides.length} onClick={() => setPresenting(currentIndex)}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50">
             <Play className="h-3.5 w-3.5" /> Present
           </button>
           <div className="relative">

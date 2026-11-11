@@ -233,7 +233,7 @@ function Resizer({
       // a drag handle without us having to draw a fat divider.
       className={cn(
         "group relative h-full w-1.5 shrink-0 cursor-col-resize",
-        "bg-[var(--border)] transition-colors hover:bg-[var(--accent)]",
+        "bg-[var(--border)] transition-colors hover:bg-[var(--accent-strong)]",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
       )}
     >
@@ -364,7 +364,7 @@ function ArtifactEditBar({
           title="Ask AI to edit this artifact in place"
           className={cn(
             "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition",
-            "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]",
+            "bg-[var(--accent-strong)] text-white hover:bg-[var(--accent-strong-hover)]",
             "disabled:cursor-not-allowed disabled:opacity-50"
           )}
         >
@@ -439,7 +439,7 @@ function FooterButton({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition",
         variant === "primary"
-          ? "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]"
+          ? "bg-[var(--accent-strong)] text-white hover:bg-[var(--accent-strong-hover)]"
           : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] hover:bg-[var(--surface-1)]",
         disabled && "cursor-not-allowed opacity-60"
       )}

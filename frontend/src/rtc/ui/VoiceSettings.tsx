@@ -379,7 +379,7 @@ export function VoiceSettings() {
               )}
             >
               <span
-                className={cn("mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2", prefs.noise === o.value ? "border-[var(--accent)] bg-[var(--accent)]" : "border-[var(--border)]")}
+                className={cn("mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2", prefs.noise === o.value ? "border-[var(--accent)] bg-[var(--accent-strong)]" : "border-[var(--border)]")}
                 aria-hidden
               />
               <span>

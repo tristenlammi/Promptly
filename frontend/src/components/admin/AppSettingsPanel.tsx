@@ -1277,7 +1277,7 @@ function MapsTrafficCard({ settings, onSubmit, busy }: CardSubmit) {
           <button type="button" onClick={() => void test()} disabled={busy || testing || dirty} className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50">
             {testing ? "Testing…" : "Test key"}
           </button>
-          <button type="button" onClick={() => void save()} disabled={busy || !dirty} className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+          <button type="button" onClick={() => void save()} disabled={busy || !dirty} className="rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
             Save
           </button>
         </>
@@ -1673,7 +1673,7 @@ function Toggle({
       disabled={disabled}
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition",
-        checked ? "bg-[var(--accent)]" : "bg-black/15 dark:bg-white/15",
+        checked ? "bg-[var(--accent-strong)]" : "bg-black/15 dark:bg-white/15",
         "disabled:cursor-not-allowed disabled:opacity-60",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
       )}

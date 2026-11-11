@@ -100,7 +100,7 @@ export function LabelChooser({
                   aria-hidden
                   className={cn(
                     "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                    on ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--text-muted)]",
+                    on ? "border-[var(--accent)] bg-[var(--accent-strong)] text-white" : "border-[var(--text-muted)]",
                   )}
                 >
                   {on && <Check className="h-3 w-3" />}

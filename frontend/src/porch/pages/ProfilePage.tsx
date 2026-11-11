@@ -46,7 +46,7 @@ function AvatarRing({ userId, me, children }: { userId: string; me: boolean; chi
       aria-label={me ? "Your story" : `${q.data?.user.name ?? "Their"} story${fresh ? " (new)" : ""}`}
       className={cn(
         "shrink-0 rounded-full p-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2",
-        fresh ? "bg-[var(--item-accent)]" : "bg-[var(--border)]",
+        fresh ? "bg-[var(--item-accent-fill)]" : "bg-[var(--border)]",
       )}
     >
       <span className="block rounded-full bg-[var(--bg)] p-[2px]">{children}</span>

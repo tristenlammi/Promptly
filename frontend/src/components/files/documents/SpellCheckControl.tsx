@@ -154,7 +154,7 @@ function Switch({ on }: { on: boolean }) {
     <span
       className={cn(
         "relative h-5 w-9 rounded-full transition-colors",
-        on ? "bg-[var(--accent)]" : "bg-[var(--border)]"
+        on ? "bg-[var(--accent-strong)]" : "bg-[var(--border)]"
       )}
     >
       <span

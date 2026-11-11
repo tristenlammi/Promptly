@@ -197,7 +197,7 @@ export function ReminderPicker({ note, anchor, onClose }: { note: Note; anchor: 
             <button type="button" onClick={() => setCustom(false)} className="h-9 rounded-full px-3 text-sm font-medium hover:bg-[var(--hover)]">
               Back
             </button>
-            <button type="submit" className="h-9 rounded-full bg-[var(--accent)] px-4 text-sm font-medium text-white">
+            <button type="submit" className="h-9 rounded-full bg-[var(--accent-strong)] px-4 text-sm font-medium text-white">
               Save
             </button>
           </div>

@@ -28,7 +28,7 @@ function Ring({ r, label, name, onClick, add }: { r: StoryRing | null; label: st
         <span
           className={cn(
             "relative flex h-[66px] w-[66px] items-center justify-center rounded-full",
-            r ? (fresh ? "bg-[var(--item-accent)] p-[3px]" : "bg-[var(--border)] p-[2px]") : "p-[3px]",
+            r ? (fresh ? "bg-[var(--item-accent-fill)] p-[3px]" : "bg-[var(--border)] p-[2px]") : "p-[3px]",
           )}
         >
           <span className="flex h-full w-full items-center justify-center rounded-full bg-[var(--bg)] p-[2px]">
@@ -51,7 +51,7 @@ function Ring({ r, label, name, onClick, add }: { r: StoryRing | null; label: st
           type="button"
           onClick={add}
           aria-label="New story"
-          className="absolute left-[46px] top-[44px] flex h-6 w-6 items-center justify-center rounded-full bg-[var(--item-accent)] text-white ring-2 ring-[var(--bg)] focus-visible:outline-none focus-visible:ring-[var(--text)]"
+          className="absolute left-[46px] top-[44px] flex h-6 w-6 items-center justify-center rounded-full bg-[var(--item-accent-fill)] text-white ring-2 ring-[var(--bg)] focus-visible:outline-none focus-visible:ring-[var(--text)]"
         >
           <Plus className="h-4 w-4" aria-hidden />
         </button>

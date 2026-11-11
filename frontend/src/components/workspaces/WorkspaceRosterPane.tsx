@@ -833,7 +833,7 @@ export function WorkspaceRosterPane({
                   "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition",
                   doc.settings.published && !unpublished
                     ? "border border-[var(--border-strong)] text-[var(--text-muted)]"
-                    : "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]"
+                    : "bg-[var(--accent-strong)] text-white hover:bg-[var(--accent-strong-hover)]"
                 )}
               >
                 {doc.settings.published && !unpublished ? (
@@ -1184,7 +1184,7 @@ export function WorkspaceRosterPane({
             />
             {memberById(ghost.personId)?.username.split(" ")[0] ?? ""}
             {ghost.count > 1 && (
-              <span className="rounded-full bg-[var(--accent)] px-1.5 text-[10px] text-white">
+              <span className="rounded-full bg-[var(--accent-strong)] px-1.5 text-[10px] text-white">
                 ×{ghost.count}
               </span>
             )}
@@ -1954,7 +1954,7 @@ function TagManagerPopover({
             onAdd(newLabel, newColor);
             setNewLabel("");
           }}
-          className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
+          className="rounded-lg bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
         >
           Add
         </button>

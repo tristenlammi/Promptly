@@ -107,7 +107,7 @@ export function LabelPicker({ target, labels, onMove, onToInbox, onMakeRule, onC
       {target.labels.length > 0 && <button type="button" onClick={onToInbox} className={row}><span className="h-2.5 w-2.5 shrink-0" />Back to Inbox</button>}
       <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); void create(); }}>
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="New label" aria-label="New label" className={INPUT} />
-        <button type="submit" disabled={!name.trim()} aria-label="Add label" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-white disabled:opacity-40"><Plus className="h-4 w-4" /></button>
+        <button type="submit" disabled={!name.trim()} aria-label="Add label" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white disabled:opacity-40"><Plus className="h-4 w-4" /></button>
       </form>
       {onMakeRule && <button type="button" onClick={onMakeRule} className="mt-3 w-full rounded-lg px-2 py-2 text-left text-sm font-medium text-[var(--accent-text)] hover:bg-[var(--hover)]">Do this for future emails too…</button>}
     </Sheet>
@@ -132,7 +132,7 @@ export function NewLabelSheet({ labels, onMade, onClose }: { labels: MailLabel[]
     <Sheet title="New label" onClose={onClose}>
       <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void make(); }}>
         <input autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Name the label" aria-label="Name the label" className={INPUT} />
-        <button type="submit" disabled={busy || !name.trim()} className="h-10 shrink-0 rounded-lg bg-[var(--accent)] px-4 text-sm font-medium text-white disabled:opacity-40">Move</button>
+        <button type="submit" disabled={busy || !name.trim()} className="h-10 shrink-0 rounded-lg bg-[var(--accent-strong)] px-4 text-sm font-medium text-white disabled:opacity-40">Move</button>
       </form>
     </Sheet>
   );
@@ -183,7 +183,7 @@ export function RuleSheet({ target, labels, onClose }: { target: LabelTarget; la
   };
 
   const choice = (active: boolean) => `flex min-h-11 w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm text-[var(--text)] ${active ? "border-[var(--accent)] bg-[var(--accent)]/10" : "border-[var(--border)] hover:bg-[var(--hover)]"}`;
-  const dot = (active: boolean) => <span className={`h-3.5 w-3.5 shrink-0 rounded-full border-2 ${active ? "border-[var(--accent)] bg-[var(--accent)]" : "border-[var(--text-muted)]"}`} />;
+  const dot = (active: boolean) => <span className={`h-3.5 w-3.5 shrink-0 rounded-full border-2 ${active ? "border-[var(--accent)] bg-[var(--accent-strong)]" : "border-[var(--text-muted)]"}`} />;
 
   return (
     <Sheet title="Make a rule" onClose={onClose}>
@@ -217,7 +217,7 @@ export function RuleSheet({ target, labels, onClose }: { target: LabelTarget; la
       <p className="mt-3 px-1 text-xs text-[var(--text-muted)]">These go straight to the label and skip your Inbox, in all your mailboxes. Nothing is sent anywhere.</p>
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]">Cancel</button>
-        <button type="button" onClick={() => void create()} disabled={busy || !valid || (labelId === "new" && !newName.trim())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+        <button type="button" onClick={() => void create()} disabled={busy || !valid || (labelId === "new" && !newName.trim())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}Make rule
         </button>
       </div>
@@ -290,7 +290,7 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
               ) : (
                 <div className="mt-2 flex items-center justify-between">
                   <button type="button" onClick={() => setRemoving(l.id)} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs text-[var(--danger)]"><Trash2 className="h-3.5 w-3.5" />Remove</button>
-                  <button type="submit" className="h-8 rounded-lg bg-[var(--accent)] px-3 text-xs font-medium text-white">Done</button>
+                  <button type="submit" className="h-8 rounded-lg bg-[var(--accent-strong)] px-3 text-xs font-medium text-white">Done</button>
                 </div>
               )}
             </form>
@@ -319,7 +319,7 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
           <Tag className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
           <input value={fresh} onChange={(e) => setFresh(e.target.value)} maxLength={60} placeholder="New label" aria-label="New label" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
         </div>
-        <button type="submit" disabled={!fresh.trim()} aria-label="Add label" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-white disabled:opacity-40"><Plus className="h-4 w-4" /></button>
+        <button type="submit" disabled={!fresh.trim()} aria-label="Add label" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white disabled:opacity-40"><Plus className="h-4 w-4" /></button>
       </form>
       {rows.length > 0 && <div className="mt-2"><InsidePicker value={freshInside} places={placesFor(rows)} onChange={setFreshInside} /></div>}
     </Sheet>

@@ -124,7 +124,7 @@ export function LogSheet({ item, contactId, open, onClose }: { item: Handle; con
                   }
                   className="flex min-h-[44px] items-center gap-3 rounded-xl px-2 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]"
                 >
-                  <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md border", on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)]")}>
+                  <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-md border", on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)]")}>
                     {on && <Check className="h-3.5 w-3.5" />}
                   </span>
                   {t.text}

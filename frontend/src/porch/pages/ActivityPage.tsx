@@ -158,7 +158,7 @@ function TalkRow({ it, post }: { it: ActivityItem; post: NonNullable<ActivityIte
     >
       <span className="relative shrink-0">
         <PorchAvatar user={it.actors[0]} size={40} />
-        <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--item-accent)] text-white ring-2 ring-[var(--surface)]" aria-hidden>
+        <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--item-accent-fill)] text-white ring-2 ring-[var(--surface)]" aria-hidden>
           <Icon className="h-3 w-3" />
         </span>
       </span>

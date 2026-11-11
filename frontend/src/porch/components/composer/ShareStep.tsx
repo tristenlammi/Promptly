@@ -169,7 +169,7 @@ export function ShareStep({
 
       {life && meta && (
         <div className="flex items-center gap-3 rounded-2xl bg-[color-mix(in_srgb,var(--item-accent)_10%,var(--surface))] p-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--item-accent)] text-white">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--item-accent-fill)] text-white">
             <LifeIcon className="h-5 w-5" aria-hidden />
           </span>
           <span className="flex min-w-0 flex-1 flex-col">

@@ -146,7 +146,7 @@ function Toggle({
       disabled={disabled}
       className={cn(
         "relative mt-1 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition",
-        checked ? "bg-[var(--accent)]" : "bg-black/15 dark:bg-white/15",
+        checked ? "bg-[var(--accent-strong)]" : "bg-black/15 dark:bg-white/15",
         "disabled:cursor-not-allowed disabled:opacity-60",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
       )}

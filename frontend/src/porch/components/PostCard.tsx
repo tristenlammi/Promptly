@@ -120,7 +120,7 @@ function LifeEventCard({ post }: { post: PorchPost }) {
   const Icon = meta.icon;
   return (
     <div className="mx-4 flex flex-col items-center gap-2 rounded-2xl bg-[color-mix(in_srgb,var(--item-accent)_10%,var(--surface))] px-4 py-6 text-center md:mx-0">
-      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--item-accent)] text-white">
+      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--item-accent-fill)] text-white">
         <Icon className="h-7 w-7" />
       </span>
       <p className="text-lg font-semibold text-[var(--text)]">{ev.title || meta.label}</p>

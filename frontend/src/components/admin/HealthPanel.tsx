@@ -116,7 +116,7 @@ export function HealthPanel() {
                     ? "bg-red-500"
                     : poolPct >= 50
                       ? "bg-amber-500"
-                      : "bg-[var(--accent)]"
+                      : "bg-[var(--accent-strong)]"
                 )}
                 style={{ width: `${Math.min(100, poolPct)}%` }}
               />

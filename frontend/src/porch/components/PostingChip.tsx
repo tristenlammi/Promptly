@@ -51,7 +51,7 @@ export function PostingChip({ floating }: { floating: boolean }) {
               Posting… <span className="tabular-nums text-[var(--text-muted)]">{pct}%</span>
             </span>
             <span aria-hidden className="absolute inset-x-0 bottom-0 h-[3px] bg-[var(--surface-2)]">
-              <span className="block h-full bg-[var(--item-accent)] transition-[width] duration-300 motion-reduce:transition-none" style={{ width: `${Math.max(4, pct)}%` }} />
+              <span className="block h-full bg-[var(--item-accent-fill)] transition-[width] duration-300 motion-reduce:transition-none" style={{ width: `${Math.max(4, pct)}%` }} />
             </span>
           </>
         )}

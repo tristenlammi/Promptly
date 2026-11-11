@@ -279,7 +279,7 @@ export function Recorder({ onSave, onFiles, onClose }: { onSave: (r: Recording) 
                 disabled={phase === "starting" || phase === "saving"}
                 aria-label="Stop and save"
                 title="Stop and save"
-                className={cn(big, "h-16 w-16 bg-[var(--accent)] text-white shadow-[var(--shadow-md)] hover:brightness-110 disabled:opacity-50")}
+                className={cn(big, "h-16 w-16 bg-[var(--accent-strong)] text-white shadow-[var(--shadow-md)] hover:brightness-110 disabled:opacity-50")}
               >
                 {phase === "saving" ? <Loader2 className="h-6 w-6 animate-spin" /> : <Square className="h-6 w-6 fill-current" />}
               </button>

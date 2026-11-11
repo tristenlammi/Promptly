@@ -143,7 +143,7 @@ export function AnswerKey({
             <CheckCircle2 className="mr-1 inline h-4 w-4" aria-hidden="true" /> Looks right
           </button>
         )}
-        <button type="button" className="min-h-[40px] rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white" onClick={onDone}>
+        <button type="button" className="min-h-[40px] rounded-md bg-[var(--accent-strong)] px-3 text-sm font-medium text-white" onClick={onDone}>
           Done
         </button>
       </div>

@@ -264,7 +264,7 @@ export function TaskFormModal({
           <button
             onClick={submit}
             disabled={busy}
-            className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-md bg-[var(--accent-strong)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy ? "Saving…" : editing ? "Save changes" : "Create automation"}
           </button>

@@ -224,7 +224,7 @@ export function TaskDetailPage() {
                     className={cn(
                       "rounded px-2.5 py-1 transition",
                       showFlow === o.flow
-                        ? "bg-[var(--accent)] text-white"
+                        ? "bg-[var(--accent-strong)] text-white"
                         : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
                     )}
                   >
@@ -464,7 +464,7 @@ export function TaskDetailPage() {
                     <button
                       onClick={() => void onFollowUp()}
                       disabled={actionBusy === "chat"}
-                      className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                      className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
                     >
                       <MessageSquarePlus className="h-3.5 w-3.5" />
                       {actionBusy === "chat" ? "Opening…" : "Follow up in chat"}

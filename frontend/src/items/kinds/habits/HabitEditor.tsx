@@ -212,7 +212,7 @@ export function HabitEditor({
                     onClick={() => setSched({ days: on ? h.schedule.days.filter((d) => d !== i) : [...h.schedule.days, i].sort() })}
                     className={cn(
                       "h-11 rounded-xl text-xs font-semibold transition",
-                      on ? "bg-[var(--item-accent)] text-white" : "border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]",
+                      on ? "bg-[var(--item-accent-fill)] text-white" : "border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]",
                     )}
                   >
                     {w.slice(0, 2)}

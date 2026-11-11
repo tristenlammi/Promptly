@@ -113,7 +113,7 @@ export function AppsPage() {
               }}
               className={cn(
                 "inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium transition",
-                editing ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]",
+                editing ? "border-[var(--accent)] bg-[var(--accent-strong)] text-white" : "border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]",
               )}
             >
               {editing ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
@@ -136,7 +136,7 @@ export function AppsPage() {
           ))}
         </ul>
         <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-[var(--border)] px-6 py-16 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[var(--accent)] text-white shadow-[var(--shadow-md)]">
+          <span className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[var(--accent-strong)] text-white shadow-[var(--shadow-md)]">
             <Sparkles className="h-8 w-8" />
           </span>
           <div className="flex max-w-md flex-col gap-1">
@@ -149,7 +149,7 @@ export function AppsPage() {
           <button
             type="button"
             onClick={() => navigate("/apps/store")}
-            className="inline-flex h-11 items-center gap-2 rounded-xl bg-[var(--accent)] px-5 text-sm font-semibold text-white"
+            className="inline-flex h-11 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-5 text-sm font-semibold text-white"
           >
             <Plus className="h-4 w-4" /> Get apps
           </button>
@@ -221,7 +221,7 @@ export function AppsPage() {
                   onClick={() => void nav.setIconStyle(s)}
                   className={cn(
                     "rounded-md px-2.5 py-1 font-medium transition",
-                    nav.iconStyle === s ? "bg-[var(--accent)] text-white" : "text-[var(--text)] hover:bg-[var(--hover)]",
+                    nav.iconStyle === s ? "bg-[var(--accent-strong)] text-white" : "text-[var(--text)] hover:bg-[var(--hover)]",
                   )}
                 >
                   {s === "line" ? "Simple" : "Colour"}
@@ -295,7 +295,7 @@ function PinButton({ name, pinned, onTogglePin }: { name: string; pinned: boolea
       title={pinned ? "In your sidebar — tap to remove" : "Show in sidebar"}
       className={cn(
         "absolute -top-1.5 right-1 flex h-6 w-6 items-center justify-center rounded-full shadow-[var(--shadow-md)] sm:right-2",
-        pinned ? "bg-[var(--accent)] text-white" : "bg-[var(--surface-2)] text-[var(--text)]",
+        pinned ? "bg-[var(--accent-strong)] text-white" : "bg-[var(--surface-2)] text-[var(--text)]",
       )}
     >
       <Pin className={cn("h-3.5 w-3.5", pinned && "fill-current")} />

@@ -170,7 +170,7 @@ export function ReportSheet({
                     aria-hidden
                     className={cn(
                       "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2",
-                      on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border-strong,var(--border))]",
+                      on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border-strong,var(--border))]",
                     )}
                   >
                     {on && <Check className="h-3.5 w-3.5" />}

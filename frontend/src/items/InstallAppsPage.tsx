@@ -142,7 +142,7 @@ function AndroidAppCard({ kinds, bare }: { kinds: string[]; bare?: boolean }) {
           <a
             href="/downloads/Promptly.apk"
             download
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3.5 font-semibold text-white"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--accent-strong)] px-3.5 font-semibold text-white"
           >
             <Download className="h-4 w-4" /> Download ({(apk.size_bytes / 1048576).toFixed(1)} MB)
           </a>
@@ -210,7 +210,7 @@ function megabytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
-const DOWNLOAD_BUTTON = "inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3.5 font-semibold text-white";
+const DOWNLOAD_BUTTON = "inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--accent-strong)] px-3.5 font-semibold text-white";
 
 /** A version file in /downloads, or null if this server doesn't have that download. */
 function useDownloadInfo<T>(file: string) {
@@ -414,7 +414,7 @@ export function InstallAppsPage() {
         type="button"
         onClick={() => go(row, true)}
         disabled={busy !== null}
-        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3.5 text-sm font-semibold text-white disabled:opacity-60"
+        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--accent-strong)] px-3.5 text-sm font-semibold text-white disabled:opacity-60"
       >
         {busy === row.id + ":i" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
         Install

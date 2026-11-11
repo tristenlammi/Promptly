@@ -71,7 +71,7 @@ export function ShareInvitesPanel({ open, onClose }: Props) {
                       disabled={acceptWs.isPending}
                       className={cn(
                         "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium",
-                        "bg-[var(--accent)] text-white transition hover:opacity-90 disabled:opacity-60"
+                        "bg-[var(--accent-strong)] text-white transition hover:opacity-90 disabled:opacity-60"
                       )}
                     >
                       {acceptWs.isPending && (

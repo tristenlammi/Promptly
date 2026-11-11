@@ -376,7 +376,7 @@ export function SheetAiPanel({
                   type="button"
                   disabled={!onExplain}
                   onClick={() => onExplain?.(`Explain the formula in ${activeRef}: ${activeFormula}`)}
-                  className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
                 >
                   <Sparkles className="h-3.5 w-3.5" /> Explain it
                 </button>
@@ -399,7 +399,7 @@ export function SheetAiPanel({
             type="button"
             onClick={() => void apply()}
             disabled={applying}
-            className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-60"
+            className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-60"
           >
             {applying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Apply
           </button>
@@ -420,7 +420,7 @@ function RunButton({ busy, onClick, label }: { busy: boolean; onClick: () => voi
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-60"
+      className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-strong)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-60"
     >
       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
       {busy ? "Thinking…" : label}

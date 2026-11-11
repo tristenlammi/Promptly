@@ -8,6 +8,8 @@ import { UserAvatar } from "@/rooms/components/ui";
 import { cn } from "@/utils/cn";
 
 const ACCENT = "var(--item-accent, var(--accent))";
+// The ticked circle is a fill with a white tick on it.
+const FILL = "var(--item-accent-fill, var(--accent-strong))";
 
 /** Their face from your Photos when there is one, else their account picture. */
 export function PersonAvatar({ person, size = 32 }: { person: Pick<PickerPerson, "face" | "user" | "name">; size?: number }) {
@@ -167,7 +169,7 @@ export function PeoplePicker({
                 {u && (
                   <span
                     className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full border", on ? "text-white" : "border-[var(--border)]")}
-                    style={on ? { borderColor: ACCENT, background: ACCENT } : undefined}
+                    style={on ? { borderColor: FILL, background: FILL } : undefined}
                   >
                     {on && <Check className="h-3.5 w-3.5" />}
                   </span>

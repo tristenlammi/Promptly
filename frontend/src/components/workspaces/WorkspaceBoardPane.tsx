@@ -515,7 +515,7 @@ export function WorkspaceBoardPane({
               className={cn(
                 "inline-flex items-center gap-1 px-2 py-1 text-xs transition",
                 view === "board"
-                  ? "bg-[var(--accent)] text-white"
+                  ? "bg-[var(--accent-strong)] text-white"
                   : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
               )}
             >
@@ -528,7 +528,7 @@ export function WorkspaceBoardPane({
               className={cn(
                 "inline-flex items-center gap-1 px-2 py-1 text-xs transition",
                 view === "calendar"
-                  ? "bg-[var(--accent)] text-white"
+                  ? "bg-[var(--accent-strong)] text-white"
                   : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
               )}
             >
@@ -548,7 +548,7 @@ export function WorkspaceBoardPane({
                   className={cn(
                     "px-2 py-1 text-xs transition",
                     density === d.key
-                      ? "bg-[var(--accent)] text-white"
+                      ? "bg-[var(--accent-strong)] text-white"
                       : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
                   )}
                 >
@@ -798,7 +798,7 @@ export function WorkspaceBoardPane({
                         title="New item"
                         disabled={create.isPending}
                         onClick={() => addTask(col.id)}
-                        className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-[var(--accent)] text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-[var(--accent-strong)] text-white transition hover:bg-[var(--accent-strong-hover)] disabled:opacity-50"
                       >
                         {create.isPending ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1158,7 +1158,7 @@ function ViewsMenu({
                     <button
                       type="button"
                       onClick={save}
-                      className="shrink-0 rounded bg-[var(--accent)] px-1.5 py-1 text-xs text-white"
+                      className="shrink-0 rounded bg-[var(--accent-strong)] px-1.5 py-1 text-xs text-white"
                     >
                       Save
                     </button>

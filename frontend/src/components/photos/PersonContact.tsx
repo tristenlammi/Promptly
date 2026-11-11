@@ -348,7 +348,7 @@ function LinkContactSheet({ personId, person, onClose }: { personId: string; per
                   </span>
                 )}
                 {person.cover && (
-                  <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent)] text-white ring-2 ring-[var(--bg)]">
+                  <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white ring-2 ring-[var(--bg)]">
                     <UserPlus className="h-3 w-3" />
                   </span>
                 )}

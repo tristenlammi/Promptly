@@ -288,7 +288,7 @@ function WeekRow({
                   aria-label={`Open ${d.toDateString()}`}
                   className={cn(
                     "flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-medium tabular-nums",
-                    isToday ? "bg-[var(--item-accent)] text-white" : d.getMonth() === month ? "text-[var(--text)] hover:bg-[var(--hover)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
+                    isToday ? "bg-[var(--item-accent-fill)] text-white" : d.getMonth() === month ? "text-[var(--text)] hover:bg-[var(--hover)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
                   )}
                 >
                   {d.getDate() === 1 && !compact ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : d.getDate()}

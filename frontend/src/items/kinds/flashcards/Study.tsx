@@ -383,7 +383,7 @@ function WeekAhead({ counts, firstDay }: { counts: number[]; firstDay: number })
               <span className="text-[11px] font-medium tabular-nums text-[var(--text-muted)]">{v}</span>
               <div className="flex h-12 w-full items-end overflow-hidden rounded-md bg-[var(--surface-2)]">
                 <div
-                  className="w-full rounded-md bg-[var(--item-accent)]"
+                  className="w-full rounded-md bg-[var(--item-accent-fill)]"
                   style={{
                     height: `${v ? Math.max(8, (v / max) * 100) : 0}%`,
                     opacity: i === 0 ? 1 : 0.65,

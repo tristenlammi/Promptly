@@ -310,7 +310,7 @@ export function OfflinePanel({ view, moves, onClose, onSquares, onShowArea }: {
             type="button"
             onClick={() => void saveView()}
             disabled={saving || !estimate || tooBig || empty || full}
-            className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
             Save for offline
@@ -473,7 +473,7 @@ function AreaRow({ area, focused, onShow, onChanged, onDeleted }: {
               aria-label={`New name for ${area.name}`}
               className="h-8 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
             />
-            <button type="submit" disabled={busy} className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50">Save</button>
+            <button type="submit" disabled={busy} className="rounded-lg bg-[var(--accent-strong)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50">Save</button>
             <button type="button" onClick={() => {
               setDraft(area.name);
               setRenaming(false);

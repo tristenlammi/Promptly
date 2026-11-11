@@ -216,7 +216,7 @@ export function SelectModelsModal({
                         className={cn(
                           "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition",
                           isOn
-                            ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                            ? "border-[var(--accent)] bg-[var(--accent-strong)] text-white"
                             : "border-[var(--border)] bg-transparent"
                         )}
                         aria-hidden

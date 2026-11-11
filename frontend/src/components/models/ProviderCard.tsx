@@ -132,7 +132,7 @@ export function ProviderCard({ provider }: { provider: Provider }) {
             <span
               className={cn(
                 "absolute inset-0 rounded-full transition",
-                provider.enabled ? "bg-[var(--accent)]" : "bg-black/20 dark:bg-white/20"
+                provider.enabled ? "bg-[var(--accent-strong)]" : "bg-black/20 dark:bg-white/20"
               )}
             />
             <span

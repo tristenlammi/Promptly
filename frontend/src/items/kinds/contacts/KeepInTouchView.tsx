@@ -405,7 +405,7 @@ function RhythmPicker({ item, open, onClose }: { item: Handle; open: boolean; on
                   {fixed ? (
                     <span className="text-xs text-[var(--text-muted)]">{cadenceLabel(c.cadence_days)}</span>
                   ) : (
-                    <span className={cn("h-5 w-5 rounded-md border", on ? "border-[var(--item-accent)] bg-[var(--item-accent)]" : "border-[var(--border)]")} aria-hidden />
+                    <span className={cn("h-5 w-5 rounded-md border", on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)]" : "border-[var(--border)]")} aria-hidden />
                   )}
                 </button>
               </li>

@@ -77,7 +77,7 @@ function Onboarding({ item }: ItemViewProps<Data>) {
   return (
     <Page>
       <div className="flex flex-col items-center gap-2 pt-4 text-center">
-        <span className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[var(--item-accent)] text-white shadow-[var(--shadow-md)]">
+        <span className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[var(--item-accent-fill)] text-white shadow-[var(--shadow-md)]">
           <Dices className="h-8 w-8" />
         </span>
         <h1 className="text-2xl font-bold text-[var(--text)]">Game night, sorted</h1>

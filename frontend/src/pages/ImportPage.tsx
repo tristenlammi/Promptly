@@ -290,7 +290,7 @@ export function ImportJobPage() {
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--text-muted)]" />
                   <span className="min-w-0 flex-1 truncate">{s.name}</span>
                   <span className="w-24 overflow-hidden rounded bg-[var(--hover)]">
-                    <span className="block h-1.5 bg-[var(--accent)]" style={{ width: `${s.total ? (100 * s.sent) / s.total : 0}%` }} />
+                    <span className="block h-1.5 bg-[var(--accent-strong)]" style={{ width: `${s.total ? (100 * s.sent) / s.total : 0}%` }} />
                   </span>
                   <button type="button" aria-label={`Stop ${s.name}`} onClick={() => s.abort.abort()} className="rounded p-0.5 hover:bg-[var(--hover)]">
                     <X className="h-3.5 w-3.5" />
@@ -393,7 +393,7 @@ function Progress({ job }: { job: ImportJob }) {
             {STAGE[p.stage ?? (job.source === "keep" ? "notes" : "photos")] ?? "Importing"} — {p.done.toLocaleString()} of {p.total.toLocaleString()}
           </p>
           <div className="mt-2 h-2 overflow-hidden rounded bg-[var(--hover)]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-            <div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${pct}%` }} />
+            <div className="h-full bg-[var(--accent-strong)] transition-all" style={{ width: `${pct}%` }} />
           </div>
         </>
       )}

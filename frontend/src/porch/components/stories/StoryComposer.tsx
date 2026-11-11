@@ -669,7 +669,7 @@ export function StoryComposer() {
                 type="button"
                 onClick={share}
                 disabled={!has || busy || waiting}
-                className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-[var(--item-accent)] px-5 text-sm font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+                className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-[var(--item-accent-fill)] px-5 text-sm font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"
               >
                 {(busy || waiting) && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                 Share

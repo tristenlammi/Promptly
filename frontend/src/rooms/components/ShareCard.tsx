@@ -131,7 +131,7 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
         <span
           className={
             card.action
-              ? "inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-semibold text-white"
+              ? "inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--accent-strong)] px-2.5 py-1.5 text-xs font-semibold text-white"
               : "inline-flex shrink-0 items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-[var(--accent-text)]"
           }
         >

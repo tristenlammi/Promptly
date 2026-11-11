@@ -55,7 +55,7 @@ export function ThemeToggle() {
             className={cn(
               "inline-flex h-7 w-7 items-center justify-center rounded-full transition",
               active
-                ? "bg-[var(--accent)] text-white"
+                ? "bg-[var(--accent-strong)] text-white"
                 : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
             )}
           >

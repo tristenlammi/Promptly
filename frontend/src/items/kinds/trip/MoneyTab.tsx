@@ -217,7 +217,7 @@ export function ExpenseSheet({ item, open, expense, onClose }: { item: ItemHandl
                       aria-checked={on}
                       aria-label={`${x.name} shares this`}
                       onClick={() => set("people", on ? d.people.filter((p) => p !== x.id) : [...d.people, x.id])}
-                      className={cn("flex h-7 w-7 items-center justify-center rounded-lg border-2 text-xs font-bold", on ? "border-[var(--item-accent)] bg-[var(--item-accent)] text-white" : "border-[var(--border)]")}
+                      className={cn("flex h-7 w-7 items-center justify-center rounded-lg border-2 text-xs font-bold", on ? "border-[var(--item-accent)] bg-[var(--item-accent-fill)] text-white" : "border-[var(--border)]")}
                     >
                       {on ? "✓" : ""}
                     </button>

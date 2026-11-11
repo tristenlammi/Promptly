@@ -42,7 +42,7 @@ type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { kind?: "primary" | "
 
 export function Button({ kind = "plain", small, className = "", ...rest }: BtnProps) {
   const looks = {
-    primary: "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] border-transparent",
+    primary: "bg-[var(--accent-strong)] text-white hover:bg-[var(--accent-strong-hover)] border-transparent",
     plain: "bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--surface-1)] border-[var(--border)]",
     danger: "bg-[var(--surface)] text-[var(--danger)] hover:bg-[var(--surface-1)] border-[var(--danger)]/40",
     ghost: "bg-transparent text-[var(--text)] hover:bg-[var(--surface-1)] border-transparent",

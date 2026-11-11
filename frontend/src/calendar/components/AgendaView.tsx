@@ -53,7 +53,7 @@ export function AgendaView({
             <section key={ymd(day)} aria-label={fmt(day, { weekday: "long", month: "long", day: "numeric" })} className="flex gap-3 border-b border-[var(--border)] py-2.5 last:border-b-0">
               <div className="flex w-12 shrink-0 flex-col items-center pt-0.5">
                 <span className={cn("text-xs font-medium uppercase", isToday ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}>{fmt(day, { weekday: "short" })}</span>
-                <span className={cn("flex h-8 w-8 items-center justify-center rounded-full text-base font-semibold tabular-nums", isToday ? "bg-[var(--item-accent)] text-white" : "text-[var(--text)]")}>
+                <span className={cn("flex h-8 w-8 items-center justify-center rounded-full text-base font-semibold tabular-nums", isToday ? "bg-[var(--item-accent-fill)] text-white" : "text-[var(--text)]")}>
                   {day.getDate()}
                 </span>
                 {day.getDate() === 1 || dayDiff(from, day) === 0 ? (

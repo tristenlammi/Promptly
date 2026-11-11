@@ -214,7 +214,7 @@ function Invitations({ onOpen }: { onOpen: (ev: CalEvent) => void }) {
       <h3 className="flex items-center gap-1.5 pl-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
         <Mail className="h-3.5 w-3.5" />
         Invitations
-        <span className="rounded-full bg-[var(--item-accent)] px-1.5 text-xs font-bold text-white">{invites.length}</span>
+        <span className="rounded-full bg-[var(--item-accent-fill)] px-1.5 text-xs font-bold text-white">{invites.length}</span>
       </h3>
       {invites.map((ev) => {
         const start = ev.all_day ? parseYmd(ev.start) : new Date(ev.start);

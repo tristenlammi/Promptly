@@ -267,7 +267,7 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
                           }
                           className={cn(
                             "h-10 rounded-lg text-xs font-medium transition",
-                            on ? "bg-[var(--item-accent)] text-white" : "bg-[var(--surface)] text-[var(--text-muted)]",
+                            on ? "bg-[var(--item-accent-fill)] text-white" : "bg-[var(--surface)] text-[var(--text-muted)]",
                           )}
                         >
                           {d.slice(0, 2)}

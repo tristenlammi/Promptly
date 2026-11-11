@@ -96,7 +96,7 @@ export function FormsHomePage() {
                     onClick={() => setScope(s)}
                     className={cn(
                       "min-h-[36px] flex-1 rounded-md px-3 text-sm font-medium sm:flex-none",
-                      scope === s ? "bg-[var(--accent)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
+                      scope === s ? "bg-[var(--accent-strong)] text-white" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
                     )}
                   >
                     {s === "mine" ? "Mine" : "Shared with me"}
@@ -141,7 +141,7 @@ export function FormsHomePage() {
                   <button
                     type="button"
                     onClick={() => (isPhone ? setSheetOpen(true) : void create("rsvp", { template: "rsvp" }))}
-                    className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-[var(--accent)] px-5 text-sm font-semibold text-white"
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-[var(--accent-strong)] px-5 text-sm font-semibold text-white"
                   >
                     {creating === "rsvp" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                     {isPhone ? "Make a form" : "Make an RSVP"}
@@ -175,7 +175,7 @@ export function FormsHomePage() {
           type="button"
           aria-label="New form"
           onClick={() => setSheetOpen(true)}
-          className="fixed bottom-[calc(20px+env(safe-area-inset-bottom,0px))] right-4 z-30 grid h-14 w-14 place-items-center rounded-full bg-[var(--accent)] text-white shadow-[var(--shadow-lg)] transition active:scale-95"
+          className="fixed bottom-[calc(20px+env(safe-area-inset-bottom,0px))] right-4 z-30 grid h-14 w-14 place-items-center rounded-full bg-[var(--accent-strong)] text-white shadow-[var(--shadow-lg)] transition active:scale-95"
         >
           <Plus className="h-6 w-6" />
         </button>

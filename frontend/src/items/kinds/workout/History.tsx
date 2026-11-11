@@ -223,7 +223,7 @@ function MonthCalendar({ data, ctx, month, setMonth, day, setDay }: { data: Work
               aria-label={`${fmtDay(d, { long: true })}${info ? `: ${info.n} workout${info.n === 1 ? "" : "s"}${info.pr ? ", with a PR" : ""}` : planned.has(d) ? ": planned" : ""}`}
               className={cn(
                 "relative flex aspect-square items-center justify-center rounded-lg text-xs tabular-nums transition",
-                info ? "bg-[var(--item-accent)] font-semibold text-white" : planned.has(d) ? "border border-dashed border-[var(--item-accent)] text-[var(--text)]" : "text-[var(--text)] hover:bg-[var(--hover)]",
+                info ? "bg-[var(--item-accent-fill)] font-semibold text-white" : planned.has(d) ? "border border-dashed border-[var(--item-accent)] text-[var(--text)]" : "text-[var(--text)] hover:bg-[var(--hover)]",
                 d === today && !info && "ring-1 ring-[var(--item-accent)]",
                 day === d && "ring-2 ring-[var(--text)] ring-offset-1 ring-offset-[var(--surface)]",
               )}
