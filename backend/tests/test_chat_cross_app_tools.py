@@ -254,6 +254,8 @@ def test_routing_prompt_and_untrusted_marking():
         "maps_search", "maps_directions", "maps_chargers", "timeline_day", "timeline_visits",
         # Forms (WP-F1.7).
         "draft_form", "read_form_responses",
+        # Talk phase 2: "any messages?" (WP-T10).
+        "rooms_unread",
     }
     p = build_tools_system_prompt({"apps", "calendar", "items", "rooms"})
     assert "`my_day`" in p and "in one step" in p and "forecast_month_end" in p and "read_room/post_to_room" in p
@@ -261,5 +263,5 @@ def test_routing_prompt_and_untrusted_marking():
     lean = build_tools_system_prompt({"apps", "calendar"})
     assert "use_item" not in lean and "search_photos" not in lean and "read_room" not in lean
     # Room messages are other people's words; the rest is the user's own.
-    assert reads_outside_content("read_room")
+    assert reads_outside_content("read_room") and reads_outside_content("rooms_unread")
     assert not reads_outside_content("my_day") and not reads_outside_content("post_to_room")
