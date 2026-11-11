@@ -193,12 +193,52 @@ object Nav {
         if (!::app.isInitialized) app = context.applicationContext
     }
 
+    private val _theme by lazy {
+        val saved = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).getString("theme", null)
+        MutableStateFlow(MapTheme.entries.firstOrNull { it.name == saved } ?: MapTheme.AUTO)
+    }
+
+    /** Map colours: by the sun, or always light, or always dark. */
+    val themeNow: kotlinx.coroutines.flow.StateFlow<MapTheme> get() = _theme
+
+    /** Whether the phone's map is dark right now. Null until it has been worked out. */
+    private val _dark = MutableStateFlow<Boolean?>(null)
+    val dark = _dark.asStateFlow()
+
+    fun setTheme(theme: MapTheme) {
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit().putString("theme", theme.name).apply()
+        _theme.value = theme
+        watching.launch { applyTheme() }
+    }
+
+    /** The phone's map, kept in step with the sun for as long as [scope] lives: it
+     *  turns dark at sunset and light at sunrise in the middle of a drive. Only the
+     *  colours change; the trip, the route and the camera stay as they are. */
     fun loadStyle(scope: kotlinx.coroutines.CoroutineScope) {
         scope.launch {
-            runCatching { Maps.styleFile(app) }
-                .onSuccess { _style.value = it }
-                .onFailure { _error.value = it.message ?: "Couldn't load the map." }
+            while (isActive) {
+                applyTheme()
+                delay(if (_style.value == null) 5_000 else 60_000)
+            }
         }
+    }
+
+    private val theming = Mutex()
+
+    private suspend fun applyTheme() = theming.withLock {
+        val fix = lastFix?.let { it.coordinates.lat to it.coordinates.lng }
+            ?: runCatching { locationProvider.lastLocation() }.getOrNull()?.let { it.latitude to it.longitude }
+        val dark = Daylight.mapDark(_theme.value, fix)
+        if (dark == _dark.value && _style.value != null) return@withLock
+        runCatching { Maps.styleFile(app, dark) }
+            .onSuccess {
+                _style.value = it
+                _dark.value = dark
+            }
+            .onFailure {
+                // Still showing the other colours: better than no map.
+                if (_style.value == null) _error.value = it.message ?: "Couldn't load the map."
+            }
     }
 
     /** The car's map: light or dark by the car's own setting, not the phone's. */

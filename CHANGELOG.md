@@ -21,6 +21,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- P Maps: the map goes dark at sunset and light at sunrise where you are, worked out on the phone from your position and the date, and it changes mid-drive without disturbing the trip. Pick Automatic, Always light or Always dark under the map's menu (Map colours). The phone's own dark mode no longer decides it.
+- P Maps: just drive. Open the driving map with no destination and, once you're moving, it follows you heading-up with an arrow, shows your speed, the road you're on and its speed limit (when the server knows them), and keeps the screen on. Pan away and a Re-centre button brings it back; "Where to?" stays at the top to start a trip. GPS stops when the screen is off or the app is in the background with no trip.
+- P Maps: a sound button on the driving screen cycles Sound on, Alerts only and Muted.
+
+### Changed
+
+- P Maps: the driving screen has a new look. A bigger next-turn banner with the turn after it, a bottom bar with the arrival time, minutes and distance left and a large End button, a speed badge that turns red over the limit, a road-name pill, larger round buttons (assistant, add a stop, sound, whole route / Re-centre), and matching day and night colours.
+
 ### Fixed
 
 - P Maps: your music no longer stays quiet for the whole trip. It was turned down for every direction even with the voice muted, and never turned back up when a direction was cut off; now it dips only while something is actually being said and comes straight back, including when you mute, end the trip or the phone's voice fails. Camera and hazard warnings dip the music too (they used to talk over it).

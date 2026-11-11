@@ -369,3 +369,42 @@ def test_shapes_decode_as_lat_lon():
 
     points = [(-27.5, 153.0), (-27.51, 153.02)]
     assert decode_polyline(_encode(points)) == points
+
+
+async def test_the_road_you_are_on_with_no_trip(user, client, monkeypatch):
+    from app.maps import engine
+
+    asked = []
+    answer: list = [
+        {
+            "edges": [
+                {"edge_info": {"names": ["Newell Highway", "A39"], "speed_limit": 110}, "edge": {"speed_limit": 110}},
+                {"edge_info": {"names": ["Side St"]}},
+            ]
+        }
+    ]
+
+    async def fake(path, body):
+        asked.append((path, body))
+        if answer and answer[0] == "nowhere":
+            raise HTTPException(422, detail="No route between these places.")
+        return answer
+
+    monkeypatch.setattr(engine, "valhalla", fake)
+    r = await client.get("/api/maps/road?lat=-32.25&lon=148.6&heading=181.4", headers=_hdr(user))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"name": "Newell Highway", "limit": 110}
+    path, body = asked[0]
+    assert path == "/locate"
+    assert body["locations"] == [{"lat": -32.25, "lon": 148.6, "heading": 181, "heading_tolerance": 60}]
+
+    # No limit on the map (0), an unnamed track, and nowhere near a road: blanks, not errors.
+    answer[:] = [{"edges": [{"edge_info": {"speed_limit": 0}, "edge": {"speed_limit": 255}}]}]
+    assert (await client.get("/api/maps/road?lat=-32.25&lon=148.6", headers=_hdr(user))).json() == {"name": None, "limit": None}
+    assert "heading" not in asked[-1][1]["locations"][0]
+    answer[:] = [{"edges": None}]
+    assert (await client.get("/api/maps/road?lat=-32.25&lon=148.6", headers=_hdr(user))).json() == {"name": None, "limit": None}
+    answer[:] = ["nowhere"]
+    assert (await client.get("/api/maps/road?lat=-32.25&lon=148.6", headers=_hdr(user))).json() == {"name": None, "limit": None}
+
+    assert (await client.get("/api/maps/road?lat=-32.25&lon=148.6")).status_code == 401
