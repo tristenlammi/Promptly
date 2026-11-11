@@ -40,8 +40,6 @@ import {
   Plug,
   RefreshCw,
   Square,
-  ThumbsDown,
-  ThumbsUp,
   Trash2,
   User as UserIcon,
   Sparkles,
@@ -186,16 +184,6 @@ interface MessageBubbleProps {
    *  in the action row. The callback receives the cleaned message content
    *  so the parent can open the RememberModal. */
   onRemember?: (content: string) => void;
-  /** Phase 2.5 — current thumbs rating on this assistant reply
-   *  (``null`` when unrated) and its optional reason note. */
-  feedback?: "up" | "down" | null;
-  feedbackReason?: string | null;
-  /** Rate-this-reply hook. When provided (assistant rows), thumbs
-   *  up/down show in the action row. ``rating: null`` clears. */
-  onFeedback?: (
-    rating: "up" | "down" | null,
-    reason?: string
-  ) => Promise<void> | void;
   /** Phase 2.6 — in-thread regeneration versioning. When this message
    *  has more than one sibling version, ``versionIndex`` (1-based) and
    *  ``versionCount`` drive a compact ``‹ 2/3 ›`` pager; ``siblingIds``
@@ -872,9 +860,6 @@ function MessageBubbleImpl({
   onContinue,
   onDelete,
   onRemember,
-  feedback,
-  feedbackReason,
-  onFeedback,
   versionIndex,
   versionCount,
   siblingIds,
@@ -1027,8 +1012,6 @@ function MessageBubbleImpl({
     void tts.speak(plain);
   };
 
-  // Phase 2.5 — thumbs feedback. Assistant replies only.
-  const canFeedback = !isUser && !streaming && !!onFeedback;
   // Phase 2.6 — show the ‹ 2/3 › pager only when this message actually
   // has sibling versions and the parent wired up a switch handler.
   const showVersionPager =
@@ -1037,37 +1020,6 @@ function MessageBubbleImpl({
     versionCount > 1 &&
     !!siblingIds &&
     !!versionIndex;
-  const [reasonOpen, setReasonOpen] = useState(false);
-  const [reasonDraft, setReasonDraft] = useState("");
-  const thumbDownRef = useRef<HTMLButtonElement | null>(null);
-  // Flip the "what went wrong?" note above the thumb when it's near the
-  // bottom of the viewport (e.g. the last reply, just above the input).
-  const reasonFlipUp = usePopoverFlip(reasonOpen, thumbDownRef, 180);
-  const handleThumb = (rating: "up" | "down") => {
-    if (!onFeedback) return;
-    if (feedback === rating) {
-      // Clicking the active thumb again clears the rating.
-      setReasonOpen(false);
-      void onFeedback(null);
-      return;
-    }
-    if (rating === "up") {
-      setReasonOpen(false);
-      void onFeedback("up");
-      return;
-    }
-    // Thumbs-down: persist the rating immediately, then offer an
-    // optional reason note via a small popover.
-    void onFeedback("down");
-    setReasonDraft(feedbackReason ?? "");
-    setReasonOpen(true);
-  };
-  const submitReason = () => {
-    if (!onFeedback) return;
-    void onFeedback("down", reasonDraft.trim() || undefined);
-    setReasonOpen(false);
-  };
-
   // Phase 5 — long-press to copy on touch devices. ~500ms hold copies
   // the message text via the Clipboard API and shows a transient
   // confirmation. Cancelled by movement / pointer release. Skips
@@ -1286,7 +1238,6 @@ function MessageBubbleImpl({
           canCopy ||
           canRemember ||
           canReadAloud ||
-          canFeedback ||
           (showVersionPager && !streaming)) && (
           <div className="mt-1.5 flex items-center gap-1">
             {showVersionPager && !streaming && (
@@ -1372,109 +1323,6 @@ function MessageBubbleImpl({
                 <Microscope className="h-3 w-3" />
                 {!isMobile && <span>Dig deeper</span>}
               </button>
-            )}
-            {canFeedback && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => handleThumb("up")}
-                  className={cn(
-                    "inline-flex items-center rounded-md px-1.5 py-1 text-xs transition",
-                    feedback === "up"
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-                  )}
-                  title="Good response"
-                  aria-label="Good response"
-                  aria-pressed={feedback === "up"}
-                >
-                  <ThumbsUp
-                    className={cn(
-                      "h-3 w-3",
-                      feedback === "up" && "fill-current"
-                    )}
-                  />
-                </button>
-                <div className="relative">
-                  <button
-                    ref={thumbDownRef}
-                    type="button"
-                    onClick={() => handleThumb("down")}
-                    className={cn(
-                      "inline-flex items-center rounded-md px-1.5 py-1 text-xs transition",
-                      feedback === "down"
-                        ? "text-rose-500"
-                        : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-                    )}
-                    title="Bad response"
-                    aria-label="Bad response"
-                    aria-pressed={feedback === "down"}
-                  >
-                    <ThumbsDown
-                      className={cn(
-                        "h-3 w-3",
-                        feedback === "down" && "fill-current"
-                      )}
-                    />
-                  </button>
-                  {reasonOpen && (
-                    <div
-                      className={cn(
-                        // Anchor to the right edge so the 16rem note never
-                        // runs off the right of the screen (the thumb sits
-                        // near the end of the action row), and flip above
-                        // when there's no room below.
-                        "absolute right-0 z-20 w-64 rounded-card border p-2 shadow-lg",
-                        "border-[var(--border)] bg-[var(--surface)]",
-                        reasonFlipUp ? "bottom-full mb-1" : "top-full mt-1"
-                      )}
-                    >
-                      <label
-                        htmlFor={`fb-note-${messageId ?? "x"}`}
-                        className="mb-1 block text-[11px] font-medium text-[var(--text-muted)]"
-                      >
-                        What went wrong? (optional)
-                      </label>
-                      <textarea
-                        id={`fb-note-${messageId ?? "x"}`}
-                        aria-describedby={`fb-note-who-${messageId ?? "x"}`}
-                        value={reasonDraft}
-                        onChange={(e) => setReasonDraft(e.target.value)}
-                        rows={3}
-                        autoFocus
-                        placeholder="e.g. inaccurate, ignored my question…"
-                        className={cn(
-                          "w-full resize-none rounded-md border bg-[var(--bg)] px-2 py-1 text-xs",
-                          "border-[var(--border)] text-[var(--text)]",
-                          "outline-none focus:border-[var(--accent)]"
-                        )}
-                      />
-                      <p
-                        id={`fb-note-who-${messageId ?? "x"}`}
-                        className="mt-1 text-[10.5px] leading-snug text-[var(--text-muted)]"
-                      >
-                        Your server admin sees this note, not the chat.
-                      </p>
-                      <div className="mt-1.5 flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setReasonOpen(false)}
-                          className="rounded-md px-2 py-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text)]"
-                        >
-                          Skip
-                        </button>
-                        <button
-                          type="button"
-                          onClick={submitReason}
-                          className="rounded-md bg-[var(--accent)] px-2 py-1 text-[11px] font-medium text-white hover:opacity-90"
-                        >
-                          Save
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
             )}
             {!streaming &&
               (canRemember ||
@@ -2174,7 +2022,7 @@ function VersionPager({
 
 /** ⋯ overflow menu for the low-frequency message actions (Remember,
  *  Read aloud, Edit, Branch, Delete) on both form factors. Keeps the
- *  action row to the daily drivers — Copy, Regenerate, feedback —
+ *  action row to the daily drivers — Copy, Regenerate —
  *  while everything else stays one tap deeper. */
 function MessageActionOverflow({
   onRemember,

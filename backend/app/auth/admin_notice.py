@@ -105,8 +105,8 @@ async def _email(db: AsyncSession, to: str, user: User, subject: str, para: str)
 
     body = (
         f"Hi {user.username},\n\n{para}\n\n"
-        "You can see every change to your account under Account → Privacy & "
-        "activity → Recent activity. If you didn't expect this, talk to your administrator."
+        "You can see every change to your account under Account → Recent "
+        "activity. If you didn't expect this, talk to your administrator."
     )
     try:
         await send_message(db, to=to, subject=f"Promptly: {subject[0].lower()}{subject[1:]}", text_body=body)

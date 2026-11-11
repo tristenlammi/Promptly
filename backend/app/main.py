@@ -456,6 +456,7 @@ from app.local_models.router import router as local_models_router  # noqa: E402
 from app.billing.router import router as billing_router  # noqa: E402
 from app.research.router import router as research_router  # noqa: E402
 from app.mfa.router import router as mfa_router  # noqa: E402
+from app.feedback.router import admin_router as feedback_admin_router  # noqa: E402
 from app.feedback.router import router as feedback_router  # noqa: E402
 from app.models_config.router import router as models_router  # noqa: E402
 from app.notifications.router import router as notifications_router  # noqa: E402
@@ -502,8 +503,9 @@ app.include_router(
 # Inbound automation webhooks (0136) — the per-task random secret in the
 # path is the credential; see hooks_router for the safety model.
 app.include_router(hooks_router, prefix="/api/hooks", tags=["hooks"])
-# In-app feedback → maintainer inbox via the instance's own SMTP.
+# In-app feedback: kept on this server for its admins (Admin → Feedback).
 app.include_router(feedback_router, prefix="/api/feedback", tags=["feedback"])
+app.include_router(feedback_admin_router, prefix="/api/admin/feedback", tags=["feedback"])
 app.include_router(
     workspaces_router, prefix="/api/workspaces", tags=["workspaces"]
 )

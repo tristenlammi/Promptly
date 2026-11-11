@@ -31,6 +31,8 @@ from fastapi.routing import APIRoute
 # health   — server health, errors and logs without content (AP1/AP2 scrub them)
 # moderate — acts on reported or public things without reading private ones
 # own      — the admin's own things (their custom models, their workspaces)
+# inbox    — what someone wrote to the admins on purpose (Send feedback): the
+#            words and who wrote them, never where they were in the app
 ADMIN_ROUTES: dict[str, str] = {
     # --- users and accounts
     "GET /api/admin/users": "account",
@@ -61,8 +63,6 @@ ADMIN_ROUTES: dict[str, str] = {
     "PUT /api/admin/groups/{group_id}/members": "account",
     # --- usage and analytics
     "GET /api/admin/analytics/by-model": "counts",
-    "GET /api/admin/analytics/feedback": "counts",
-    "GET /api/admin/analytics/feedback/notes": "counts",  # thumbs-down notes, no chat; the box says so (AP8)
     "GET /api/admin/analytics/summary": "counts",
     "GET /api/admin/analytics/timeseries": "counts",
     "GET /api/admin/analytics/users": "counts",
@@ -150,9 +150,13 @@ ADMIN_ROUTES: dict[str, str] = {
     "GET /api/admin/porch/reports": "moderate",  # Everyone only: the admin is a member (G12)
     "POST /api/admin/porch/reports/{report_id}": "moderate",
     "POST /api/admin/porch/posts/{post_id}/remove-from-everyone": "moderate",
+    # --- feedback people sent to the admins
+    "GET /api/admin/feedback": "inbox",
+    "POST /api/admin/feedback/{feedback_id}/read": "inbox",
+    "DELETE /api/admin/feedback/{feedback_id}": "inbox",
 }
 
-CLASSES = {"account", "config", "counts", "health", "moderate", "own"}
+CLASSES = {"account", "config", "counts", "health", "moderate", "own", "inbox"}
 
 
 def _uses(dep, target) -> bool:

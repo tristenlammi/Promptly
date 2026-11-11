@@ -1278,14 +1278,6 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
-    # Phase 2.5 — per-response quality signal. ``"up"`` / ``"down"`` /
-    # NULL (no rating). Set by the conversation owner via the thumbs
-    # affordance on assistant replies; ``feedback_reason`` carries the
-    # optional short note captured on a thumbs-down. Both NULL on user /
-    # system rows and on un-rated assistant replies.
-    feedback: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    feedback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-
     # Talk (0300): a turn that was spoken, ``{spoken, interrupted,
     # heard_chars, stt_ms}``. On a reply cut off by the person talking over
     # it, ``content`` holds only what they heard. NULL on typed turns.

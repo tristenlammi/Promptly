@@ -92,13 +92,6 @@ interface ChatWindowProps {
    *  gets a "Delete" affordance. Omitted on chats the caller can't
    *  mutate. */
   onDelete?: (messageId: string) => Promise<void> | void;
-  /** Phase 2.5 — rate an assistant reply thumbs up/down. When provided,
-   *  persisted assistant rows get the thumbs affordance. */
-  onFeedback?: (
-    messageId: string,
-    rating: "up" | "down" | null,
-    reason?: string
-  ) => Promise<void> | void;
   /** Phase 2.6 — switch to a sibling version from the ``‹ 2/3 ›`` pager.
    *  Receives the id of the sibling to activate. */
   onSelectVersion?: (siblingId: string) => Promise<void> | void;
@@ -126,7 +119,6 @@ interface RowCallbacks {
   digDeeper: () => Promise<void>;
   continue: () => Promise<void>;
   delete: () => Promise<void>;
-  feedback: (rating: "up" | "down" | null, reason?: string) => Promise<void>;
 }
 
 export function ChatWindow({
@@ -140,7 +132,6 @@ export function ChatWindow({
   onRetry,
   onPickAnotherModel,
   onDelete,
-  onFeedback,
   onSelectVersion,
   hideRemember = false,
   onRememberToWorkspace,
@@ -387,11 +378,11 @@ export function ChatWindow({
   // through a ref, so their identity never changes.
   const handlers = useRef({
     onEditAndResend, onEditAssistant, onBranchFrom, onRegenerate, onContinue,
-    onDigDeeper, onDelete, onFeedback, onSelectVersion,
+    onDigDeeper, onDelete, onSelectVersion,
   });
   handlers.current = {
     onEditAndResend, onEditAssistant, onBranchFrom, onRegenerate, onContinue,
-    onDigDeeper, onDelete, onFeedback, onSelectVersion,
+    onDigDeeper, onDelete, onSelectVersion,
   };
   const rowCallbacks = useRef(new Map<string, RowCallbacks>());
   const callbacksFor = useCallback((id: string): RowCallbacks => {
@@ -418,9 +409,6 @@ export function ChatWindow({
         },
         delete: async () => {
           await handlers.current.onDelete?.(id);
-        },
-        feedback: async (rating, reason) => {
-          await handlers.current.onFeedback?.(id, rating, reason);
         },
       };
       rowCallbacks.current.set(id, cb);
@@ -509,15 +497,6 @@ export function ChatWindow({
               onDelete={
                 onDelete && !m.id.startsWith("optimistic-")
                   ? callbacksFor(m.id).delete
-                  : undefined
-              }
-              feedback={m.feedback}
-              feedbackReason={m.feedback_reason}
-              onFeedback={
-                onFeedback &&
-                m.role === "assistant" &&
-                !m.id.startsWith("optimistic-")
-                  ? callbacksFor(m.id).feedback
                   : undefined
               }
               versionIndex={m.version_index ?? undefined}

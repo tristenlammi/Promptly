@@ -504,27 +504,6 @@ export interface AnalyticsModelRow {
   cost_usd_window: number;
 }
 
-/** Thumbs up / down on one model's replies over the window.
- *  ``rated`` is the denominator — two downvotes out of four is a very
- *  different signal from ten out of a thousand. */
-export interface AnalyticsFeedbackRow {
-  model_id: string;
-  up: number;
-  down: number;
-  rated: number;
-  /** Share of rated replies thumbed down, 0-1. */
-  down_rate: number;
-}
-
-/** One thumbs-down with the note the user left. Carries no message
- *  content — the note was written to be read, the conversation wasn't. */
-export interface FeedbackNoteRow {
-  message_id: string;
-  model_id: string | null;
-  reason: string;
-  created_at: string;
-}
-
 // ---- End-user usage dashboard (Phase 8) ----
 /** Self-scoped headline numbers + the caller's own quota posture.
  * Reuses {@link AnalyticsTimeseriesPoint} / {@link AnalyticsModelRow}
@@ -891,11 +870,6 @@ export interface ChatMessage {
    *  / system rows. The UI looks this up against the conversation's
    *  participants to render "from Jane" chips on shared chats. */
   author_user_id?: string | null;
-  /** Phase 2.5 — per-response quality signal on assistant replies.
-   *  ``null`` when unrated. ``feedback_reason`` is the optional short
-   *  note left on a thumbs-down. */
-  feedback?: "up" | "down" | null;
-  feedback_reason?: string | null;
   /** Phase 2.6 — in-thread regeneration versioning. ``parent_id`` is the
    *  lineage link. The pager fields are only present when a message has
    *  more than one sibling version: ``version_index`` is 1-based,

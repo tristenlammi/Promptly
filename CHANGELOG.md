@@ -38,10 +38,13 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Admin → Storage lists damaged or missing files by kind, size and owner, without their names. Each owner gets a notification naming their own files, and the admins' alert gives a count only.
 - Admin → Connectors only lists and attaches to workspaces you're in. For someone else's workspace, give its owner the connector and they turn it on in the workspace's settings. A workspace's owner and admins can now turn off a connector an admin turned on there.
 - Admin → Forms lists reported forms and a count of link forms, not every link form's title and owner.
-<!-- Admin privacy, AP8 -->
-- The thumbs-down note box in chat says who reads it: "Your server admin sees this note, not the chat."
+<!-- Feedback to your admin (replaces AP8) -->
+- Send feedback (account menu) now goes to your server's admins and stays on the server: each admin gets a notification and, if email is set up, an email they can reply to. Admins read the messages under Admin → Feedback, where they can mark them read or delete them. Nothing is sent to an outside address any more, and the `FEEDBACK_EMAIL` setting is gone.
 <!-- Admin privacy, AP10 -->
 - A new admin screen can't ship without a privacy check: the tests list every admin route with what it shows, and fail on one nobody has looked at. They also check that file ids an admin could see open nothing.
+
+### Removed
+- Thumbs up / thumbs down on AI replies, the note box that came with a thumbs-down, and Admin → Analytics → Response quality. To tell your admin something, use Send feedback.
 
 ## [0.36.2] - 2026-11-11
 
