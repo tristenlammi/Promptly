@@ -76,9 +76,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps on Android Auto: with no trip set, the map now keeps you in the middle, heading up, while you drive (it used to centre once and stay put). Move the map yourself and it's left alone for 20 seconds.
 
 ### Changed
+
 - Buttons are now the same deeper terracotta everywhere (the colour of Porch's "New post"), and easier to read: white words on the old light orange were hard to make out. Switches, ticked boxes, count badges and selected tabs follow. Tints, outlines, links and the logo keep the lighter orange.
 - Memory: health, money and other sensitive details are now saved like any other fact instead of waiting as suggestions for you to approve. If you'd rather be asked first, tick "Ask me before saving health, money and other sensitive details" in Account, Memory. Passwords, card numbers and the like are still never saved.
-
 <!-- Admin privacy, AP6 -->
 - Admin → Audit no longer shows other people's workspace, note or item titles, file names, device names or credential names: rows keep ids, kinds and counts. Older rows were cleaned up the same way.
 - Admin → Audit no longer lists every AI tool call: only calls that change something, reach someone, act on your device or fetch a web page (adding an event, sending mail, saving to memory, making a file, setting an alarm or timer, opening an app or directions, fetching a page, connector tools, anything you approved). A row names the tool and how it ended, never the address, destination, label or app. Your own chat still shows every call.
@@ -96,11 +96,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps on Android: the P Maps icon now always opens the map showing where you are, following you as you drive. Saved places, Timeline and People are one tap away under the search bar (they open on top, and Back returns to the map). A phone that hasn't been signed in to the map yet opens the Maps page once; pressing Just drive there signs it in.
 - P Maps: the route line and your arrow are now in Promptly's terracotta, with day and night shades, and traffic colours on the route have a dark edge so they stand apart from it. A leftover shadow from a hidden button on the driving screen is gone.
 - P Maps: the driving screen has a new look. A bigger next-turn banner with the turn after it, a bottom bar with the arrival time, minutes and distance left and a large End button, a speed badge that turns red over the limit, a road-name pill, larger round buttons (assistant, add a stop, sound, whole route / Re-centre), and matching day and night colours.
+- Promptly for Android 1.8.0 brings this release's phone parts: Talk in the car and driving by voice, the new P Maps driving screen, trip sharing, and widgets that refresh sooner. Phones on the server's own download are offered the update.
+- Passwords: the browser extension is now version 0.2.1, with the faster bookmark sync below. The downloads on Install apps are this version.
 
 ### Fixed
-- The first request after start-up no longer waits about four seconds on installs without the Office converter: the check that refuses requests from the converter container now looks its address up in the background, never during a request (it still refuses anything it can't yet vouch for).
 
+- The first request after start-up no longer waits about four seconds on installs without the Office converter: the check that refuses requests from the converter container now looks its address up in the background, never during a request (it still refuses anything it can't yet vouch for).
 - Calls: the calls service's config uses LiveKit's current name for the metrics port setting, so its log no longer warns that `prometheus_port` is deprecated.
+- Calls: the green "Voice connected" words in the voice panel (and the amber "Connecting…" ones) are a little darker in the light theme, so they're easier to read on the panel's grey.
 - Mail: a reply you send now shows in its conversation straight away ("Sending…", then sent), instead of only after Sent was next checked, and a reply that couldn't go says so there with Try again. Replies sent from another mail app show within seconds, and an answer that arrives before your reply (such as an out-of-office) no longer ends up in a conversation of its own. Replies and forwards always go from the mailbox the email is in.
 - Passwords: a bookmark added, changed or deleted in one browser now shows in your other browsers in a second or two instead of up to a minute or more. The extension sends a change about a second after it's made, the server tells your other unlocked browsers to fetch it over a new live connection (`/api/passwords/live`, which carries only "this vault changed", never your data), and the minute's background sync no longer keeps getting pushed back. Passwords and other vault changes made elsewhere arrive just as fast. Needs the new server and a new extension version.
 - Photo widget: photos are cropped round the people and pets in them, not round the middle, so a subject at the side of a photo is no longer cut off. The server sends where they are (from faces and animals Photos has already found; nothing new is scanned) and the phone keeps it with the saved photo. Photos with no one found are cropped as before. Needs the next Android build.
