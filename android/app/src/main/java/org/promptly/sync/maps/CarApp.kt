@@ -16,6 +16,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.maplibre.compose.camera.CameraPosition
 import org.maplibre.spatialk.geojson.Position
 import androidx.car.app.media.CarAudioRecord
+import org.promptly.sync.talk.CarTalk
 import androidx.car.app.versioning.CarAppApiLevels
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
@@ -215,6 +216,22 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             }
         }.launchIn(scope)
         Voice.inCar = true
+        // Talk's microphone icon (listening, thinking) follows the conversation.
+        Voice.state.drop(1).onEach { invalidate() }.launchIn(scope)
+        // A question Talk asked ("Send it?"): the car's own Yes / No alert, next to
+        // the spoken question. Either answers it, and so does saying it.
+        var alertShown: Int? = null
+        CarTalk.question.onEach { q ->
+            if (carContext.carAppApiLevel < CarAppApiLevels.LEVEL_5) return@onEach
+            val apps = carContext.getCarService(androidx.car.app.AppManager::class.java)
+            alertShown?.let { id -> runCatching { apps.dismissAlert(id) } }
+            alertShown = null
+            if (q != null) {
+                val id = (q.id.hashCode() and 0x7FFFFFFF)
+                alertShown = id
+                runCatching { apps.showAlert(CarTemplates.question(q.text, id, onYes = { CarTalk.confirm(true) }, onNo = { CarTalk.confirm(false) })) }
+            }
+        }.launchIn(scope)
         // A warning on the car's screen as you come up to it; the voice comes from the phone.
         var shown: String? = null
         Nav.hazard.onEach { alert ->
@@ -225,6 +242,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         }.launchIn(scope)
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) {
+                CarTalk.carGone()
                 Voice.inCar = false
                 // The car's screen going away is where you parked.
                 val at = uiState?.location
@@ -311,12 +329,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         builder.setMapActionStrip(
             ActionStrip.Builder()
                 .addAction(Action.Builder().setIcon(icons.mute(state.isMuted ?: false)).setOnClickListener { vm.toggleMute() }.build())
-                .addAction(
-                    Action.Builder()
-                        .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_map_mic)).build())
-                        .setOnClickListener { askFromCar() }
-                        .build(),
-                )
+                .addAction(CarTemplates.mic(carContext, { askFromCar() }, Voice.state.value))
                 .build(),
         )
         // Our own card rather than Ferrostar's: it adds the lanes (with their picture,
@@ -348,8 +361,18 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
 
     private val listening = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    /** The car's own microphone, only when you press its button. */
+    /** The car's own microphone, only when you press its button: a Talk turn
+     *  ([CarTalk]: one press, one turn). Pressed while it's talking, it stops it. */
     private fun askFromCar() {
+        if (carContext.carAppApiLevel < CarAppApiLevels.LEVEL_5) {
+            CarToast.makeText(carContext, "This car can't use its microphone for this", CarToast.LENGTH_LONG).show()
+            return
+        }
+        CarTalk.press(carContext, carContext) { askOneShot() }?.let { CarToast.makeText(carContext, it, CarToast.LENGTH_LONG).show() }
+    }
+
+    /** One question at a time over `/api/assistant`: only for a server without Talk. */
+    private fun askOneShot() {
         if (!org.promptly.sync.maps.offline.Offline.online(carContext)) {
             // The assistant needs your server: no signal is said plainly (Voice.press), with no mic.
             Voice.press(carContext)
@@ -439,6 +462,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             onWhereTo = { screenManager.push(PlacesScreen(carContext)) },
             onPlace = { CarPreview.show(carContext, it) },
             onMic = { askFromCar() },
+            micState = Voice.state.value,
         )
     }
 }

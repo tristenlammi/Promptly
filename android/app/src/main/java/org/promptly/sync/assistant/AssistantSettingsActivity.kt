@@ -88,27 +88,27 @@ class AssistantSettingsActivity : ComponentActivity() {
     @Composable
     private fun TalkSettings() {
         val context = this@AssistantSettingsActivity
-        var live by remember { mutableStateOf(Talk.enabled(context)) }
+        var tap by remember { mutableStateOf(Talk.tapToTalk(context)) }
         var route by remember { mutableStateOf(Talk.playbackRoute(context)) }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Talking", style = MaterialTheme.typography.titleMedium)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(Modifier.weight(1f)) {
-                        Text("Hands-free conversations")
+                        Text("Tap to talk")
                         Text(
-                            if (live) "Just talk: it answers, and you can talk over it. Say \"that's all\" to finish. Nothing is saved as a chat."
-                            else "One question at a time: tap Ask for each.",
+                            if (tap) "Press the button when it's your turn, and again when you've finished. Better in noisy places."
+                            else "Just talk: it answers when you pause, and you can talk over it. Say \"that's all\" to finish. Nothing is saved as a chat.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = live, onCheckedChange = {
-                        live = it
-                        Talk.setEnabled(context, it)
+                    Switch(checked = tap, onCheckedChange = {
+                        tap = it
+                        Talk.setTapToTalk(context, it)
                     })
                 }
-                if (live) {
+                run {
                     Text("Play answers as", style = MaterialTheme.typography.labelLarge)
                     RouteChoice(
                         "Call audio (recommended)",

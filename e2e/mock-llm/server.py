@@ -21,6 +21,7 @@ Spoken turns (Talk, WP-T4) can't carry markers, so plain words do:
     "dentist" + tools  call calendar_add_event for "Dentist" next week at 9
     "timer" + tools    call set_timer for 10 minutes (the phone, WP-T5)
     "alarm" + tools    call set_alarm for 6:30 (held for a yes)
+    "phone" + tools    call send_to_phone for the latest thing (Talk phase 2)
 
 Requests the backend makes on its own are recognised by their system
 prompt: the chat titler gets "E2E chat", memory capture gets "[]", and
@@ -106,6 +107,9 @@ def _tool_call_for(body: dict) -> tuple[str, str] | None:
             return "set_timer", json.dumps({"seconds": 600, "label": "Tea"})
         if re.search(r"\balarm\b", text, re.I) and "set_alarm" in offered:
             return "set_alarm", json.dumps({"hour": 6, "minute": 30})
+        # Talk phase 2: "send that to my phone" (the latest thing it found).
+        if re.search(r"\bphone\b", text, re.I) and "send_to_phone" in offered:
+            return "send_to_phone", json.dumps({"item": 1})
         return None
     return m.group(1), m.group(2) or "{}"
 

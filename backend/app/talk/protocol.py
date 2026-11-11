@@ -20,7 +20,11 @@ Client -> server, JSON text
     ``confirm {answer: yes|no}`` (the Yes / No buttons under a question),
     ``text {words}`` (Type instead), ``prefs {voice?, speed?}`` (a voice
     picked mid-conversation: used from the next thing it says), ``ping {t}``
-    (answered at once with ``pong {t}``, to time the connection), ``bye``.
+    (answered at once with ``pong {t}``, to time the connection), ``bye``,
+    ``trip {to, arrive_at, left_s, left_m, delay_min, next_stop?, lat?, lon?,
+    shape?}`` (phase 2: the trip now, sent any time, the latest wins; the
+    position and road are for the server's own look-ups, never the model's).
+    ``device: car`` always means tap to interrupt.
 Client -> server, binary
     4-byte big-endian sequence number + one Opus packet, or PCM16 mono 16 kHz.
 
@@ -34,7 +38,9 @@ Server -> client, JSON text
     ``reply.text`` has started playing), ``tool {label, name}`` (a tool is
     running: "Checking your calendar"), ``card {kind, message_id, meta}``
     (something to look at from a tool: a map, photos, an event link),
-    ``ask {question, approval_id, message_id?, call_id?, expires_in}`` (a
+    ``ask {question, approval_id, message_id?, call_id?, expires_in,
+    listen_s}`` (``listen_s``: how long the car's microphone may open again for
+    the answer once the question has been said, 6 in the car, else 0) (a
     change or a command waiting for a yes: answer by saying it, or with
     ``confirm``; a held change is also a card in the chat, and tapping that
     decides it too), ``ask_done {approval_id, outcome:
@@ -42,7 +48,8 @@ Server -> client, JSON text
     (for the phone, only kinds its ``hello.caps`` listed: ``set_timer
     {seconds, label?}``, ``set_alarm {hour, minute, label?}``, ``dial
     {name?, number?}``, ``message {name?, number?, text?}``, ``open_app
-    {app}``, ``go {stop: {lat, lon, name}}`` for ``navigate``; the same
+    {app}``, ``go {stop: {lat, lon, name}}`` for ``navigate``, and on a trip
+    ``add_stop {stop}`` and ``end_trip``; the same
     shapes ``/api/assistant`` returns), ``stop_audio``,
     ``error {code, say, show}``, ``bye {reason}``.
 Server -> client, binary
@@ -88,6 +95,10 @@ class Hello(BaseModel):
     turn_mode: Literal["hands_free", "tap"] | None = None
     interrupt_mode: Literal["talk", "tap"] | None = None
     trip: dict[str, Any] | None = None
+    # Phase 2 (WP-T13): started from a Bluetooth button on a locked phone (the
+    # person allowed it in Account -> Voice). Their email, files, photos and
+    # timeline stay behind the lock for this conversation.
+    locked: bool = False
 
     @field_validator("caps")
     @classmethod

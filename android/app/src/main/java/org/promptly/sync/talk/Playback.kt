@@ -17,7 +17,11 @@ interface Track {
  *  `played_ms`), and stops within a frame: what's queued and what the track holds
  *  are both dropped. Thread-safe: the socket pushes, a writer thread [pump]s, the
  *  screen and the microphone stop and duck. */
-class Playback(private val track: Track, private val sampleRate: Int = TalkProtocol.SPEECH_RATE) {
+class Playback(
+    private val track: Track,
+    private val sampleRate: Int = TalkProtocol.SPEECH_RATE,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
     private val lock = Any()
     private val queue = ArrayDeque<ByteArray>()
     private var current: ByteArray? = null
@@ -33,6 +37,12 @@ class Playback(private val track: Track, private val sampleRate: Int = TalkProto
 
     /** Told when sound starts and when it runs out. Called on the writer thread. */
     var onPlaying: ((Boolean) -> Unit)? = null
+
+    /** In the car: true while a reply mustn't start yet (directions are being said,
+     *  or a turn is close). A reply already playing isn't cut. Held at most
+     *  [MAX_HOLD_MS], so an answer can't wait forever at a red light. */
+    var hold: (() -> Boolean)? = null
+    private var holdingSince: Long? = null
 
     fun push(pcm: ByteArray) {
         if (pcm.isEmpty()) return
@@ -52,6 +62,7 @@ class Playback(private val track: Track, private val sampleRate: Int = TalkProto
         val busy: Boolean
         synchronized(lock) {
             while (true) {
+                if (current == null && newReply && queue.isNotEmpty() && holding()) break
                 val frame = current ?: queue.removeFirstOrNull()?.also {
                     current = it
                     offset = 0
@@ -76,6 +87,16 @@ class Playback(private val track: Track, private val sampleRate: Int = TalkProto
         }
         changed?.let { onPlaying?.invoke(it) }
         return busy
+    }
+
+    private fun holding(): Boolean {
+        val wants = runCatching { hold?.invoke() == true }.getOrDefault(false)
+        if (!wants) {
+            holdingSince = null
+            return false
+        }
+        val since = holdingSince ?: clock().also { holdingSince = it }
+        return clock() - since < MAX_HOLD_MS
     }
 
     val playing: Boolean get() = synchronized(lock) { playingNow || current != null || queue.isNotEmpty() }
@@ -106,6 +127,7 @@ class Playback(private val track: Track, private val sampleRate: Int = TalkProto
             written = track.head()
             replyStart = null
             newReply = true
+            holdingSince = null
             wasPlaying = playingNow
             playingNow = false
         }
@@ -127,5 +149,6 @@ class Playback(private val track: Track, private val sampleRate: Int = TalkProto
 
     companion object {
         const val DUCK_GAIN = 0.3f
+        const val MAX_HOLD_MS = 20_000L
     }
 }

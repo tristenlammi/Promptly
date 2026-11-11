@@ -257,7 +257,8 @@ object Nav {
             tts = t
         }
         observer.setMuted(savedMuted())
-        built.spokenInstructionObserver = observer
+        // Watched, so the car's Talk answer waits until a direction has been said.
+        built.spokenInstructionObserver = PromptWatch(observer)
         // A new route within a few seconds of leaving the old one, and again soon
         // after if you keep going your own way (the library waits 5 s and 50 m).
         built.minimumTimeBeforeRecalculation = 3.seconds
@@ -509,8 +510,48 @@ object Nav {
         talk(text)
     }
 
+    /** Nav's own sentences still to be said (warnings, answers with no signal). */
+    private val saying = java.util.concurrent.atomic.AtomicInteger()
+
+    /** A direction or warning is being said, or is about to be: the car's Talk answer
+     *  waits for it (WP-T8). Ferrostar's prompts are timed from their words. */
+    fun promptPlaying(): Boolean = saying.get() > 0 || System.currentTimeMillis() < promptUntil
+
+    @Volatile internal var promptUntil = 0L
+
+    /** Metres to the next turn on a trip, else null. */
+    fun metresToTurn(): Double? {
+        val state = model?.navigationUiState?.value ?: return null
+        if (!state.isNavigating()) return null
+        return state.progress?.distanceToNextManeuver
+    }
+
+    /** The trip, for Talk (WP-T8): sent before each turn so "how long to go?" and
+     *  "add a stop for fuel" use the real trip. The position and the road ahead are
+     *  for the server's own look-ups; the model never sees them. Null with no trip. */
+    fun tripForTalk(): JSONObject? {
+        val state = model?.navigationUiState?.value ?: return null
+        val progress = state.progress
+        if (!state.isNavigating() || progress == null) return null
+        val to = destination ?: return null
+        val traffic = _traffic.value
+        val arrive = traffic?.arriveAt ?: Instant.now().plusSeconds(progress.durationRemaining.toLong())
+        val out = JSONObject()
+            .put("to", JSONObject().put("name", to.name).put("lat", to.lat).put("lon", to.lon))
+            .put("arrive_at", arrive.toString())
+            .put("left_s", progress.durationRemaining.toLong())
+            .put("left_m", progress.distanceRemaining.toLong())
+            .put("delay_min", traffic?.addsMinutes ?: 0)
+        _addedStop.value?.let { out.put("next_stop", it.name) }
+        state.location?.let { at -> out.put("lat", at.coordinates.lat).put("lon", at.coordinates.lng) }
+        val line = state.remainingSteps.orEmpty().flatMap { it.geometry }.map { it.lat to it.lng }
+        if (line.size >= 2) out.put("shape", Maps.encodeShape(line))
+        return out
+    }
+
     private fun talk(text: String, done: (() -> Unit)? = null) {
         val id = "promptly-${utterances.incrementAndGet()}"
+        saying.incrementAndGet()
         if (done != null) afterSpeech[id] = done
         val s = speaker
         if (s != null) {
@@ -535,6 +576,7 @@ object Nav {
     }
 
     private fun spoke(id: String?) {
+        if (id?.startsWith("promptly-") == true) saying.updateAndGet { maxOf(0, it - 1) }
         id?.let { afterSpeech.remove(it)?.invoke() }
     }
 
@@ -878,6 +920,27 @@ object Nav {
         model?.stopNavigation()
         _ended.tryEmit(Unit)
     }
+}
+
+/** Ferrostar's spoken directions, passed through, noting how long each one takes to
+ *  say (about 2.6 words a second, plus a breath), so Talk in the car can wait for it. */
+class PromptWatch(private val inner: com.stadiamaps.ferrostar.core.SpokenInstructionObserver) : com.stadiamaps.ferrostar.core.SpokenInstructionObserver {
+    override fun onSpokenInstructionTrigger(spokenInstruction: uniffi.ferrostar.SpokenInstruction) {
+        if (!inner.isMuted) {
+            val words = spokenInstruction.text.split(' ', '\n', '\t').count { it.isNotBlank() }
+            Nav.promptUntil = System.currentTimeMillis() + 600L + words * 380L
+        }
+        inner.onSpokenInstructionTrigger(spokenInstruction)
+    }
+
+    override fun stopAndClearQueue() {
+        Nav.promptUntil = 0L
+        inner.stopAndClearQueue()
+    }
+
+    override fun setMuted(isMuted: Boolean) = inner.setMuted(isMuted)
+
+    override val muteState: kotlinx.coroutines.flow.StateFlow<Boolean> get() = inner.muteState
 }
 
 /** The trip's state, with your own location shown before it starts. */

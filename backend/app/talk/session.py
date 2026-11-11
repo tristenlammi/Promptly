@@ -43,7 +43,9 @@ from typing import Any
 
 from app.auth.models import User
 
-from . import confirm, fastpath, links, readback, reply as chat, tools as voice_tools
+from . import confirm, drive, fastpath, followup, links, lists, readback, reply as chat, tools as voice_tools
+from app.today import briefing
+
 from .access import SPEEDS, VoicePrefs, answer_source, record_turn
 from .audio import FRAME_MS, TTS_SAMPLE_RATE, Playhead, split_seq, with_seq
 from .protocol import CLOSE_UNAVAILABLE, PROTOCOL_VERSION, Hello, Transport
@@ -64,6 +66,11 @@ MODEL_FAILED = "Sorry, I couldn't get an answer just now."
 # sentence in ~1 s on a busy box (WP-T0), so 3 s keeps playback fed without
 # spending CPU on sentences a barge-in throws away.
 SPEECH_AHEAD_MS = 3000
+# In the car (WP-T9): after its own question, the microphone may open again for
+# this long for the answer; and a tool still running after TOOL_SAY_S says what
+# it's doing, once ("Checking your calendar."), since there's no screen.
+CAR_LISTEN_S = 6
+TOOL_SAY_S = 2.0
 
 _END = object()
 # A Kokoro voice id, as Account -> Voice stores it (``auth/schemas.py``).
@@ -130,6 +137,8 @@ class Reply:
     tool_started: dict[str, float] = field(default_factory=dict)
     ask: dict[str, Any] | None = None  # a change held for a yes in this reply
     cards: list[dict[str, Any]] = field(default_factory=list)
+    said_tool: bool = False  # the car heard "Checking your calendar." already
+    cut: dict[str, str] | None = None  # in the car: a gist of this; the rest goes to the phone
 
     def __post_init__(self) -> None:
         self.release.set()
@@ -203,7 +212,11 @@ class Ask:
 
 
 # Device actions a phone may be sent, by the ``hello.caps`` entry they need.
-_ACTION_CAPS = {"set_timer": "timer", "set_alarm": "alarm", "dial": "dial", "message": "message", "open_app": "open_app", "go": "navigate"}
+_ACTION_CAPS = {
+    "set_timer": "timer", "set_alarm": "alarm", "dial": "dial", "message": "message", "open_app": "open_app", "go": "navigate",
+    # The trip (WP-T9): a phone that can navigate can change its trip.
+    "add_stop": "navigate", "end_trip": "navigate",
+}
 
 
 # Live sessions by id: for resume, and the server's live-slot count.
@@ -238,7 +251,11 @@ class TalkSession:
         self.prefs = prefs
         self.connection = connection  # stands in for the request in audit rows
         self.turn_mode = hello.turn_mode or prefs.turn_mode
-        self.interrupt_mode = hello.interrupt_mode or prefs.interrupt
+        # No talking over it in the car: road noise, and the car's speakers give
+        # the phone no echo reference (WP-T9).
+        self.interrupt_mode = "tap" if hello.device == "car" else (hello.interrupt_mode or prefs.interrupt)
+        # The trip, while one is running (``drive.py``); the latest ``trip`` wins.
+        self.trip: dict[str, Any] | None = drive.parse(hello.trip)
         self.play_format = hello.play_format
         self.transport: Transport | None = None
         self.state = "listening"
@@ -262,6 +279,12 @@ class TalkSession:
         self._resume_timer: asyncio.Task | None = None
         self._side: set[asyncio.Task] = set()
         self.asking: Ask | None = None
+        # The last list add that ran without a yes, for "undo" (WP-T10).
+        self.undoable: dict[str, Any] | None = None
+        # Things this conversation found that could go to your phone, newest
+        # first, and how many have gone (WP-T11, ``followup.py``).
+        self.links: list[dict[str, str]] = []
+        self.sent = 0
 
     # ------------------------------------------------------------ lifecycle
     async def start(self, transport: Transport) -> None:
@@ -404,6 +427,8 @@ class TalkSession:
             await self._forget_heard()
         elif kind == "approval_decided":
             await self._decided_elsewhere(data["decision"])
+        elif kind == "tool_slow":
+            await self._tool_slow(data["reply"], data["key"], data["label"])
         elif kind == "ask_expired":
             await self._ask_expired(data["ask"])
         elif kind == "end":
@@ -465,6 +490,9 @@ class TalkSession:
             speed = msg.get("speed")
             if isinstance(speed, (int, float)) and not isinstance(speed, bool):
                 self.prefs.speed = min(SPEEDS[1], max(SPEEDS[0], float(speed)))
+        elif kind == "trip":
+            # Where the trip is now, from the phone (WP-T9). No ``to``: it ended.
+            self.trip = drive.parse(msg)
         elif kind == "bye":
             await self._close("bye")
         elif kind == "hello":
@@ -680,6 +708,12 @@ class TalkSession:
             turn.pending = True
             return
         turn.pending = False
+        if self._can_undo(turn):
+            await self._undo(turn)
+            return
+        if turn.pending_action is None and briefing.asked(turn.text):
+            await self._briefing(turn)
+            return
         if not turn.commands_checked and turn.pending_action is None:
             if any(not h.over_speech for h in self.heard.values()):
                 # A command does something that can't be thrown away like
@@ -697,6 +731,43 @@ class TalkSession:
                 await self._command(turn, hit)
                 return
         await self._start_model(turn)
+
+    async def _briefing(self, turn: UserTurn) -> None:
+        """ "Read me my day": written from Today, no model (WP-T12). In the car,
+        without the email count."""
+        from app.database import SessionLocal
+
+        await self._set_state("thinking")
+        try:
+            async with SessionLocal() as db:
+                me = await db.get(User, self.user.id)
+                built = await briefing.build(db, me, car=self.in_car) if me is not None else None
+            said = built["script"] if built else "I couldn't read your day just now."
+        except Exception:  # noqa: BLE001 - say so, don't go quiet
+            logger.exception("talk: the briefing failed")
+            said = "I couldn't read your day just now."
+        message_id = None
+        if turn.message_id is not None:
+            message_id = await chat.add_reply(
+                self.conv, self.user, turn.message_id, said, voice={"spoken": True, "interrupted": False, "fast_path": True}
+            )
+        await self._speak(said, turn, message_id=message_id)
+
+    def _can_undo(self, turn: UserTurn) -> bool:
+        held = self.undoable
+        return bool(held and time.monotonic() - held["at"] <= lists.UNDO_S and lists.is_undo(turn.text))
+
+    async def _undo(self, turn: UserTurn) -> None:
+        """ "Undo": take back the list add, without the model (owner decision 5)."""
+        held, self.undoable = self.undoable, None
+        await self._set_state("thinking")
+        said = await lists.undo(self.user, held or {})
+        message_id = None
+        if turn.message_id is not None:
+            message_id = await chat.add_reply(
+                self.conv, self.user, turn.message_id, said, voice={"spoken": True, "interrupted": False, "fast_path": True}
+            )
+        await self._speak(said, turn, message_id=message_id)
 
     async def _start_model(self, turn: UserTurn) -> None:
         try:
@@ -718,12 +789,27 @@ class TalkSession:
         ]
         await self._set_state("thinking")
 
+    @property
+    def in_car(self) -> bool:
+        return self.hello.device == "car" or self.trip is not None
+
     def _talk_info(self, turn: UserTurn) -> dict[str, Any]:
-        """What the chat generator needs to give this turn the voice tools."""
+        """What the chat generator needs to give this turn the voice tools.
+        ``said`` is this turn's own words (the "your own words" check);
+        ``trip`` stays server-side: the model gets a line without coordinates."""
+        caps = list(self.hello.caps)
+        if self.in_car:
+            caps = [c for c in caps if c not in ("dial", "message", "open_app")]
         info: dict[str, Any] = {
             "device": self.hello.device,
-            "caps": list(self.hello.caps),
-            "driving": bool((self.hello.trip or {}).get("to")),
+            "caps": caps,
+            "driving": self.trip is not None,
+            "trip": self.trip,
+            "said": turn.text[:2000],
+            "tz": self.hello.tz,
+            "links": list(self.links),
+            "sent": self.sent,
+            "locked": bool(self.hello.locked),
         }
         if turn.pending_action:
             info["pending"] = turn.pending_action
@@ -740,7 +826,19 @@ class TalkSession:
         ask = Ask(kind="command", question=hit.question(), turn=turn, hit=hit)
         self.asking = ask
         ask.reply = await self._speak(ask.question, turn, message_id=None)
-        await self.send({"type": "ask", "question": ask.question, "approval_id": ask.approval_id, "expires_in": int(confirm.ASK_TTL_S)})
+        await self.send(
+            {
+                "type": "ask",
+                "question": ask.question,
+                "approval_id": ask.approval_id,
+                "expires_in": int(confirm.ASK_TTL_S),
+                "listen_s": self._listen_s(),
+            }
+        )
+
+    def _listen_s(self) -> int:
+        """How long the car's microphone may open for the answer to a question."""
+        return CAR_LISTEN_S if self.hello.device == "car" else 0
 
     async def _run_command(self, turn: UserTurn, hit: fastpath.Hit, timing: UserTurn | None = None) -> None:
         await self._set_state("thinking")
@@ -894,6 +992,11 @@ class TalkSession:
         )
         if decision.device_action:
             await self._device_action(decision.device_action)
+        if decision.outcome == "approved":
+            # What a yes made (an event, a note) can go to the phone after (WP-T11).
+            found = followup.link_of(str(decision.call.get("name") or ""), decision.call.get("meta") or {})
+            if found is not None:
+                self.links = followup.remember(self.links, found)
         if decision.say:
             r = await self._speak(decision.say, said_to, message_id=None)
             r.tool_ms = tool_ms or 0
@@ -1061,9 +1164,12 @@ class TalkSession:
             await self.send({"type": "reply", "text": r.caption()})
         elif ev.get("event") == "tool_started":
             name = str(ev.get("name") or "")
-            r.tool_started[str(ev.get("id") or name)] = time.monotonic()
+            key = str(ev.get("id") or name)
+            r.tool_started[key] = time.monotonic()
             label = ev.get("label") or voice_tools.label(name) or "Working on it"
             await self.send({"type": "tool", "label": str(label)[:120], "name": name})
+            if self.hello.device == "car" and not r.said_tool:
+                self._later(TOOL_SAY_S, "tool_slow", reply=r, key=key, label=str(label)[:80])
         elif ev.get("event") == "tool_finished":
             await self._tool_finished(r, ev)
         elif "error" in ev and not ev.get("done"):
@@ -1079,6 +1185,18 @@ class TalkSession:
             for piece in r.splitter.finish():
                 r.pieces.append(piece)
                 r.piece_q.put_nowait(piece)
+            if r.cut is not None and not r.failed_say:
+                # The car only got a gist: the rest goes to the phone (owner
+                # decision 6), at most 3 a conversation, said once.
+                line = await followup.auto_send(self.user.id, r.cut, self.sent)
+                if line is not None:
+                    self.sent += 1
+                    if line:
+                        at = r.splitter.spoken_upto
+                        r.splitter._count += 1
+                        extra = Piece(text=line, raw_start=at, raw_end=at, gap_ms=0, index=r.splitter._count - 1)
+                        r.pieces.append(extra)
+                        r.piece_q.put_nowait(extra)
             if r.failed_say and not r.pieces:
                 # Nothing came back to say: say why, out loud (not saved).
                 end = len(r.splitter.raw)
@@ -1119,9 +1237,39 @@ class TalkSession:
         action = meta.get("device_action")
         if ev.get("ok") and isinstance(action, dict):
             await self._device_action(action)
+        if ev.get("ok"):
+            found = followup.link_of(str(ev.get("name") or ""), meta)
+            if found is not None:
+                self.links = followup.remember(self.links, found)
+                if self.hello.device == "car" and ev.get("name") in followup.CUT:
+                    r.cut = found
+            if isinstance(meta.get("followup"), dict):
+                self.sent += 1
+        if ev.get("ok") and ev.get("name") in lists.QUICK and isinstance(meta.get("undo"), dict):
+            self.undoable = {"undo": meta["undo"], "items": meta.get("items") or [], "title": meta.get("title"), "at": time.monotonic()}
         card = voice_tools.card_of(ev)
         if card is not None:
             r.cards.append(card)
+
+    def _later(self, seconds: float, kind: str, **data: Any) -> None:
+        async def _go() -> None:
+            await asyncio.sleep(seconds)
+            self.post(kind, **data)
+
+        task = asyncio.create_task(_go())
+        self._side.add(task)
+        task.add_done_callback(self._side.discard)
+
+    async def _tool_slow(self, r: Reply, key: str, label: str) -> None:
+        """In the car, a tool still running after 2 s says what it's doing, once."""
+        if r is not self.reply or r.cancelled or r.generated or r.said_tool or key not in r.tool_started:
+            return
+        r.said_tool = True
+        at = r.splitter.spoken_upto
+        r.splitter._count += 1  # the piece takes the next index; the reply's own text isn't touched
+        piece = Piece(text=f"{label.rstrip('.')}.", raw_start=at, raw_end=at, gap_ms=150, index=r.splitter._count - 1)
+        r.pieces.append(piece)
+        r.piece_q.put_nowait(piece)
 
     async def _ask_approval(self, r: Reply) -> None:
         """The reply ended with a read-back: wait for the answer."""
@@ -1150,6 +1298,7 @@ class TalkSession:
                 "message_id": None if self.conv.ephemeral else str(ask.message_id),
                 "call_id": ask.call_id,
                 "expires_in": int(confirm.ASK_TTL_S),
+                "listen_s": self._listen_s(),
             }
         )
         if r.played or r.cancelled:

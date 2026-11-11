@@ -148,6 +148,18 @@ REGISTRY: list[Tool] = [
 from app.chat.tools.device import DEVICE_TOOLS  # noqa: E402
 
 REGISTRY.extend(DEVICE_TOOLS)
+# Talk phase 2: the trip's tools (category "trip"), only on a spoken turn with a trip running.
+from app.chat.tools.trip import DRIVE_TOOLS  # noqa: E402
+
+REGISTRY.extend(DRIVE_TOOLS)
+# Talk phase 2: "any messages?" (category "rooms").
+from app.chat.tools.talk_rooms import TALK_ROOMS_TOOLS  # noqa: E402
+
+REGISTRY.extend(TALK_ROOMS_TOOLS)
+# Talk phase 2: "send that to my phone" (category "talk").
+from app.chat.tools.talk_phone import TALK_PHONE_TOOLS  # noqa: E402
+
+REGISTRY.extend(TALK_PHONE_TOOLS)
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the
 # registry on every model-emitted call. Built once at import time and

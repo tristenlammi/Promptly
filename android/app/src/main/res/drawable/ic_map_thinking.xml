@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Talk in the car is working out its answer (WP-T8): three dots. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M6,10.5a1.5,1.5 0,1 0,0 3a1.5,1.5 0,1 0,0 -3zM12,10.5a1.5,1.5 0,1 0,0 3a1.5,1.5 0,1 0,0 -3zM18,10.5a1.5,1.5 0,1 0,0 3a1.5,1.5 0,1 0,0 -3z" />
+</vector>

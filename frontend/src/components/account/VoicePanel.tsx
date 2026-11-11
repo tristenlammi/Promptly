@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AudioLines, Check, Loader2, Sparkle, Volume2 } from "lucide-react";
 
 import { authApi } from "@/api/auth";
+import type { BriefingSection } from "@/api/types";
 import { Button } from "@/components/shared/Button";
 import { useTextToSpeech } from "@/hooks/useTextToSpeech";
 import { useAuthStore } from "@/store/authStore";
@@ -180,7 +181,7 @@ export function VoicePanel() {
   );
 }
 
-type TalkKey = "tts_speed" | "talk_turn_mode" | "talk_interrupt" | "talk_captions" | "talk_save";
+type TalkKey = "tts_speed" | "talk_turn_mode" | "talk_interrupt" | "talk_captions" | "talk_save" | "talk_bluetooth_locked";
 
 /** How Talk behaves (WP-T4). Saved in ``users.settings`` like the voice,
  *  so it follows you to the phone and every browser. */
@@ -316,11 +317,82 @@ function TalkSettings() {
         ],
         settings?.talk_save === "temporary" ? "temporary" : "chat"
       )}
+      {choice(
+        "talk_bluetooth_locked",
+        "Bluetooth button on a locked phone",
+        "Lets a car's or headset's voice button start Talk on the Android app while your phone is locked. Your email, files, photos and timeline still need an unlock.",
+        [
+          [true, "Allow"],
+          [false, "Unlock first"],
+        ],
+        settings?.talk_bluetooth_locked === true
+      )}
       {error && (
         <p role="alert" className="text-xs text-[var(--danger)]">
           Couldn't save that: {error}
         </p>
       )}
+      <BriefingSettings />
     </div>
+  );
+}
+
+const BRIEFING: { key: BriefingSection; label: string }[] = [
+  { key: "weather", label: "Weather" },
+  { key: "events", label: "Today's events, and when to leave" },
+  { key: "tasks", label: "Tasks due and overdue" },
+  { key: "bills", label: "Bills due" },
+  { key: "birthdays", label: "Birthdays today and tomorrow" },
+  { key: "mail", label: "How many unread emails" },
+];
+
+/** What "Read me my day" reads (Talk phase 2). Saved in ``users.settings``. */
+function BriefingSettings() {
+  const settings = useAuthStore((s) => s.user?.settings);
+  const setUser = useAuthStore((s) => s.setUser);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const saved = settings?.briefing_sections ?? BRIEFING.map((b) => b.key);
+  // Shown at once; put back if saving fails.
+  const [shown, setShown] = useState<BriefingSection[]>(saved);
+  const savedKey = saved.join(",");
+  useEffect(() => setShown(savedKey ? (savedKey.split(",") as BriefingSection[]) : []), [savedKey]);
+  const on = new Set<BriefingSection>(shown);
+
+  const flip = async (key: BriefingSection, next: boolean) => {
+    const chosen = BRIEFING.map((b) => b.key).filter((k) => (k === key ? next : on.has(k)));
+    const before = shown;
+    setShown(chosen);
+    setBusy(true);
+    setError(null);
+    try {
+      setUser(await authApi.updatePreferences({ briefing_sections: chosen }));
+    } catch (err) {
+      setShown(before);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <fieldset className="space-y-1.5 border-t border-[var(--border)] pt-4">
+      <legend className="text-sm font-medium text-[var(--text)]">Read me my day</legend>
+      <p className="text-xs text-[var(--text-muted)]">
+        What the "Read me my day" button on Today (or saying "read me my day" in Talk) reads out. In the car it
+        leaves out email.
+      </p>
+      {BRIEFING.map((b) => (
+        <label key={b.key} className="flex items-center gap-2 text-sm text-[var(--text)]">
+          <input type="checkbox" checked={on.has(b.key)} disabled={busy} onChange={(e) => void flip(b.key, e.target.checked)} />
+          {b.label}
+        </label>
+      ))}
+      {error && (
+        <p role="alert" className="text-xs text-[var(--danger)]">
+          Couldn't save that: {error}
+        </p>
+      )}
+    </fieldset>
   );
 }

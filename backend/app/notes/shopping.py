@@ -79,6 +79,8 @@ class Added:
     note: Note | None = None
     tasks_file_id: uuid.UUID | None = None
     item_ids: list[uuid.UUID] = field(default_factory=list)
+    # The tasks made in Tasks (Talk's "undo", phase 2).
+    task_ids: list[str] = field(default_factory=list)
 
     def said(self) -> str:
         from .service import display_title
@@ -141,8 +143,8 @@ async def add(db: AsyncSession, user: User, texts: list[str]) -> Added:
         note = await access.load(db, user, note.id, lock=True)
         ids = await add_items(db, user, note, texts)
         return Added(where="note", count=len(texts), note=note, item_ids=ids)
-    fid, _ids = await add_to_tasks(db, user, texts)
-    return Added(where="tasks", count=len(texts), tasks_file_id=fid)
+    fid, tids = await add_to_tasks(db, user, texts)
+    return Added(where="tasks", count=len(texts), tasks_file_id=fid, task_ids=[str(t) for t in tids or []])
 
 
 __all__ = ["ASKED", "Added", "NAMES", "TASKS_LIST", "add", "add_items", "add_to_tasks", "find_note", "means_shopping"]

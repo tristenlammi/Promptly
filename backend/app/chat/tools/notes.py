@@ -381,21 +381,36 @@ class AddToNoteTool(Tool):
                     await _tell(ctx, added.note)
                     return ToolResult(
                         content=added.said(),
-                        meta={"note": str(added.note.id), "url": _url(added.note.id), "summary": added.said()},
+                        meta={
+                            "note": str(added.note.id), "url": _url(added.note.id), "summary": added.said(),
+                            # What Talk's "undo" takes back (phase 2).
+                            "title": display_title(added.note), "items": texts,
+                            "undo": {"note": str(added.note.id), "items": [str(i) for i in added.item_ids]} if added.item_ids else None,
+                        },
                     )
                 return ToolResult(
                     content=added.said(),
-                    meta={"item": str(added.tasks_file_id), "url": f"/apps/tasks/{added.tasks_file_id}", "summary": added.said()},
+                    meta={
+                        "item": str(added.tasks_file_id), "url": f"/apps/tasks/{added.tasks_file_id}", "summary": added.said(),
+                        "title": f"{shopping.TASKS_LIST} in Tasks", "items": texts,
+                        "undo": {"tasks": str(added.tasks_file_id), "items": added.task_ids} if added.task_ids else None,
+                    },
                 )
             note = await _resolve(ctx, ref, lock=True)
-            await shopping.add_items(ctx.db, ctx.user, note, texts)
+            made = await shopping.add_items(ctx.db, ctx.user, note, texts)
             await ctx.db.commit()
         except (BodyError, HTTPException, ItemError, ItemNotFound) as e:
             await ctx.db.rollback()
             raise ToolError(str(getattr(e, "detail", e)) or "Couldn't add to that note.") from e
         await _tell(ctx, note)
         said = f"Added {len(texts)} item{'' if len(texts) == 1 else 's'} to the note “{display_title(note)}”."
-        return ToolResult(content=said, meta={"note": str(note.id), "url": _url(note.id), "summary": said})
+        return ToolResult(
+            content=said,
+            meta={
+                "note": str(note.id), "url": _url(note.id), "summary": said, "title": display_title(note), "items": texts,
+                "undo": {"note": str(note.id), "items": [str(i) for i in made]} if made else None,
+            },
+        )
 
 
 class TickNoteItemsTool(Tool):

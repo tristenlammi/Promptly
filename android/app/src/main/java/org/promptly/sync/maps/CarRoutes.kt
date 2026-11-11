@@ -312,11 +312,23 @@ internal object CarTemplates {
         return builder.build()
     }
 
-    fun mic(context: Context, onClick: () -> Unit): Action =
-        Action.Builder().setIcon(icon(context, R.drawable.ic_map_mic)).setOnClickListener { onClick() }.build()
+    /** The microphone (WP-T8): plain when it's shut, terracotta while it listens,
+     *  three dots while Talk works out the answer. */
+    fun mic(context: Context, onClick: () -> Unit, state: Voice.State = Voice.State.OFF): Action {
+        val icon = when (state) {
+            Voice.State.HEARD -> CarIcon.Builder(IconCompat.createWithResource(context, R.drawable.ic_map_mic))
+                .setTint(CarColor.createCustom(TERRACOTTA, TERRACOTTA_NIGHT)).build()
+            Voice.State.THINKING -> icon(context, R.drawable.ic_map_thinking)
+            Voice.State.OFF -> icon(context, R.drawable.ic_map_mic)
+        }
+        return Action.Builder().setIcon(icon).setOnClickListener { onClick() }.build()
+    }
+
+    private const val TERRACOTTA = 0xFFD97757.toInt()
+    private const val TERRACOTTA_NIGHT = 0xFFE8896B.toInt()
 
     /** The map, ready to go: where to, and home and work a tap away. */
-    fun landing(context: Context, home: Stop?, work: Stop?, onWhereTo: () -> Unit, onPlace: (Stop) -> Unit, onMic: () -> Unit): Template {
+    fun landing(context: Context, home: Stop?, work: Stop?, onWhereTo: () -> Unit, onPlace: (Stop) -> Unit, onMic: () -> Unit, micState: Voice.State = Voice.State.OFF): Template {
         val strip = ActionStrip.Builder().addAction(
             Action.Builder().setTitle("Where to?").setIcon(icon(context, R.drawable.ic_map_search)).setFlags(Action.FLAG_PRIMARY).setOnClickListener { onWhereTo() }.build(),
         )
@@ -324,7 +336,7 @@ internal object CarTemplates {
         work?.let { s -> strip.addAction(Action.Builder().setTitle("Work").setIcon(icon(context, R.drawable.ic_map_work)).setOnClickListener { onPlace(s) }.build()) }
         return NavigationTemplate.Builder()
             .setActionStrip(strip.build())
-            .setMapActionStrip(ActionStrip.Builder().addAction(mic(context, onMic)).build())
+            .setMapActionStrip(ActionStrip.Builder().addAction(mic(context, onMic, micState)).build())
             .build()
     }
 
@@ -456,4 +468,16 @@ internal object CarTemplates {
             .addAction(Action.Builder().setTitle("End trip").setBackgroundColor(CarColor.RED).setOnClickListener { onEnd() }.build())
             .addAction(Action.Builder().setTitle("Keep going").setOnClickListener { onKeep() }.build())
             .build()
+
+    /** Talk asked something ("Message Sam on Promptly: 'I'm ten minutes away.' Send
+     *  it?"): the car's alert, Yes and No, for the 10 s the car guide recommends. A
+     *  spoken yes or no answers it as well. Only over a NavigationTemplate, which both
+     *  of P Maps' map screens are. */
+    fun question(text: String, id: Int, onYes: () -> Unit, onNo: () -> Unit): androidx.car.app.model.Alert =
+        androidx.car.app.model.Alert.Builder(id, CarText.create(text.take(160)), QUESTION_MS)
+            .addAction(Action.Builder().setTitle("Yes").setFlags(Action.FLAG_PRIMARY).setOnClickListener { onYes() }.build())
+            .addAction(Action.Builder().setTitle("No").setOnClickListener { onNo() }.build())
+            .build()
+
+    const val QUESTION_MS = 10_000L
 }

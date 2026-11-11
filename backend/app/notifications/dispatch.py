@@ -92,6 +92,9 @@ Category = Literal[
     # Porch (0272): posts, comments, mentions, tags, invites, reactions,
     # birthdays — one switch here; per kind in Porch → Settings.
     "porch",
+    # Talk (0370): "send that to my phone", and car answers cut short.
+    # You asked a moment ago, so quiet hours don't hold it.
+    "talk_followup",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -119,6 +122,8 @@ CATEGORIES: tuple[str, ...] = (
     "call",
     "notes",
     "porch",
+    # Talk
+    "talk_followup",
     "test",
 )
 
@@ -209,6 +214,8 @@ RULES: dict[str, Rule] = {
             ("report", "report", "reports"),
         ),
     ),
+    # Talk (phase 2): asked for a moment ago; never held, never summarised.
+    "talk_followup": Rule(False),
 }
 _missing = set(CATEGORIES) - set(RULES)
 assert not _missing, f"notification categories without a quiet-hours rule: {_missing}"

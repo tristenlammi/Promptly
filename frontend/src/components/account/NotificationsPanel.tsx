@@ -438,6 +438,14 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("notes", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Sent from Talk"
+                subtitle="Something you asked Talk to send to your phone, like an email or a place, and details a car answer had to leave out. Comes straight away, even in quiet hours."
+                checked={prefs.talk_followup ?? true}
+                busy={prefsBusy === "talk_followup"}
+                onChange={(v) => toggle("talk_followup", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

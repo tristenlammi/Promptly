@@ -31,6 +31,8 @@ export interface NotificationPreferences {
   notes: boolean;
   /** Porch: which kinds, and how, are chosen in Porch → Settings. */
   porch?: boolean;
+  /** Talk: things you asked to have sent to your phone ("send that to my phone"). */
+  talk_followup?: boolean;
   /** Quiet hours, "HH:MM" in your own time zone (one setting for all of Promptly). */
   quiet_enabled: boolean;
   quiet_start: string;
@@ -70,7 +72,9 @@ export type NotificationSwitch =
   | "call"
   | "call_quiet_hold"
   | "notes"
-  | "porch";
+  | "porch"
+  // Talk
+  | "talk_followup";
 
 export interface NotificationRow {
   id: string;

@@ -26,6 +26,8 @@ interface TalkAdmin {
   group_ids: string[];
   live_slots: number;
   max_live_slots: number;
+  /** "Read me my day": one line of weather from Open-Meteo (phase 2). */
+  weather?: boolean;
   talking_now: number;
   answers: {
     voice_model_set: boolean;
@@ -103,7 +105,7 @@ export function TalkAdminPanel() {
   });
   const groups = useQuery({ queryKey: ["admin", "groups"], queryFn: groupsApi.list });
   const patch = useMutation({
-    mutationFn: async (body: Partial<Pick<TalkAdmin, "enabled" | "group_ids" | "live_slots">>) =>
+    mutationFn: async (body: Partial<Pick<TalkAdmin, "enabled" | "group_ids" | "live_slots" | "weather">>) =>
       (await apiClient.patch<TalkAdmin>("/admin/talk", body)).data,
     // Shown at once; put back if the server says no.
     onMutate: async (body) => {
@@ -179,6 +181,23 @@ export function TalkAdminPanel() {
           />
 
           <LiveSlots data={data} busy={patch.isPending} onSave={(n) => patch.mutate({ live_slots: n })} />
+
+          <label className="flex items-start gap-2 text-sm text-[var(--text)]">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={data.weather ?? true}
+              disabled={patch.isPending}
+              onChange={(e) => patch.mutate({ weather: e.target.checked })}
+            />
+            <span>
+              Weather in &ldquo;Read me my day&rdquo;
+              <span className="block text-xs text-[var(--text-muted)]">
+                One line of weather from Open-Meteo, a free forecast service. Only each person&apos;s Home place,
+                rounded to about 10 km, is sent, and answers are shared for 30 minutes.
+              </span>
+            </span>
+          </label>
         </div>
       </SettingsCard>
 

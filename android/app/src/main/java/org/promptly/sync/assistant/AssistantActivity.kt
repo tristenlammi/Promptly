@@ -151,6 +151,13 @@ class AssistantActivity : ComponentActivity() {
             begin()
             return
         }
+        // A car's or headset's voice button (Bluetooth's voice-recognition command
+        // arrives as VOICE_COMMAND) on a locked phone: only if you allowed it in
+        // Account -> Voice (owner decision 4). Private reads still need an unlock.
+        if (intent?.action == Intent.ACTION_VOICE_COMMAND && Talk.bluetoothLocked(this)) {
+            begin(locked = true)
+            return
+        }
         gate.value = Gate.UNLOCK
         unlocking = true
         keyguard.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
@@ -171,9 +178,10 @@ class AssistantActivity : ComponentActivity() {
         })
     }
 
-    private fun begin() {
-        // From here on it's your answers: lock the phone and they're gone.
-        setShowWhenLocked(false)
+    private fun begin(locked: Boolean = false) {
+        // From here on it's your answers: lock the phone and they're gone. Started
+        // locked from a Bluetooth button, the sheet stays over the lock screen.
+        setShowWhenLocked(locked)
         if (Maps.server(this) == null) {
             gate.value = Gate.NOT_LINKED
             return
@@ -190,16 +198,14 @@ class AssistantActivity : ComponentActivity() {
             return
         }
         Talk.dismissEnded()
-        if (Talk.enabled(this)) {
-            mode.value = Mode.TALK
-            startTalk()
-        } else {
-            classic(null)
-        }
+        // One engine (WP-T14): always Talk; one question at a time is only the
+        // fallback when Talk can't start (an older server, a weak connection).
+        mode.value = Mode.TALK
+        startTalk(locked)
     }
 
-    private fun startTalk() {
-        Talk.start(this)
+    private fun startTalk(locked: Boolean = false) {
+        Talk.start(this, locked)
         // The notification that keeps it going after the screen locks may only start
         // while this is on screen; onResume does it when that's still to come.
         if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) TalkService.start(this)

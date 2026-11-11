@@ -38,6 +38,19 @@ async def today(db: AsyncSession = Depends(get_db), user: User = Depends(get_cur
     return out
 
 
+@router.get("/briefing")
+async def briefing(
+    car: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """ "Read me my day": the script to speak, and its parts for the captions
+    (Talk phase 2). Built from Today's own sections, no model call."""
+    from . import briefing as b
+
+    return await b.build(db, user, car=car)
+
+
 class MorningIn(BaseModel):
     on: bool
     time: str = Field(default="08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
