@@ -3,13 +3,10 @@ package org.promptly.sync.maps
 import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.lifecycle.viewModelScope
 import com.stadiamaps.ferrostar.composeui.notification.DefaultForegroundNotificationBuilder
 import com.stadiamaps.ferrostar.core.AlternativeRouteProcessor
-import com.stadiamaps.ferrostar.core.AndroidTtsObserver
-import com.stadiamaps.ferrostar.core.AndroidTtsStatusListener
 import com.stadiamaps.ferrostar.core.DefaultNavigationViewModel
 import com.stadiamaps.ferrostar.core.CorrectiveAction
 import com.stadiamaps.ferrostar.core.FerrostarCore
@@ -88,7 +85,7 @@ object Nav {
     private var routes: HybridRouteProvider? = null
     // Lives as long as the app: watches the one trip for both screens.
     private val watching = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var tts: AndroidTtsObserver? = null
+    private var voice: NavVoice? = null
     private var liveJob: Job? = null
     private var lastOptions: TripOptions? = null
     private val _style = MutableStateFlow<String?>(null)
@@ -241,22 +238,8 @@ object Nav {
             config,
             FerrostarForegroundServiceManager(app, DefaultForegroundNotificationBuilder(app)),
         )
-        val observer = tts ?: AndroidTtsObserver(app).also { t ->
-            t.statusObserver = object : AndroidTtsStatusListener {
-                override fun onTtsInitialized(tts: TextToSpeech?, status: Int) {
-                    tts?.language = Locale.forLanguageTag("en-AU")
-                }
-
-                override fun onTtsSpeakError(utteranceId: String, status: Int) {
-                    Log.w(TAG, "Couldn't speak an instruction: $status")
-                }
-
-                override fun onTtsShutdownAndRelease() = Unit
-            }
-            t.start()
-            tts = t
-        }
-        observer.setMuted(savedMuted())
+        val observer = voice()
+        observer.setMuted(sound() != Sound.ALL)
         built.spokenInstructionObserver = observer
         // A new route within a few seconds of leaving the old one, and again soon
         // after if you keep going your own way (the library waits 5 s and 50 m).
@@ -446,19 +429,37 @@ object Nav {
         }
     }
 
-    private fun savedMuted(): Boolean =
-        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).getBoolean("muted", false)
+    private fun voice(): NavVoice = voice ?: NavVoice(app).also { voice = it }
 
-    /** You turned the voice off, so it stays off, this trip and the next, until you turn it on. */
-    fun setMuted(muted: Boolean) {
-        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit().putBoolean("muted", muted).apply()
-        tts?.setMuted(muted)
+    private val _sound by lazy {
+        val prefs = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE)
+        val saved = prefs.getString("sound", null)?.let { name -> Sound.entries.firstOrNull { it.name == name } }
+        // Before there were three choices there was a mute switch.
+        MutableStateFlow(saved ?: if (prefs.getBoolean("muted", false)) Sound.MUTE else Sound.ALL)
     }
+
+    /** What's said on a trip: everything, warnings only, or nothing. */
+    val soundNow: kotlinx.coroutines.flow.StateFlow<Sound> get() = _sound
+
+    fun sound(): Sound = _sound.value
+
+    /** You chose it, so it stays, this trip and the next, until you change it. */
+    fun setSound(sound: Sound) {
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit()
+            .putString("sound", sound.name).putBoolean("muted", sound == Sound.MUTE).apply()
+        _sound.value = sound
+        voice?.setMuted(sound != Sound.ALL)
+        // Whatever was mid-sentence is no longer wanted.
+        if (sound != Sound.ALL) voice?.stopAndClearQueue()
+    }
+
+    /** The car's mute button: directions on or everything off. */
+    fun setMuted(muted: Boolean) = setSound(if (muted) Sound.MUTE else Sound.ALL)
 
     /** Warn once for each camera ahead. */
     fun onLocation(lat: Double, lon: Double) {
         // Anything else that switched it back on doesn't get to decide.
-        tts?.let { if (it.isMuted != savedMuted()) it.setMuted(savedMuted()) }
+        voice?.let { if (it.isMuted != (sound() != Sound.ALL)) it.setMuted(sound() != Sound.ALL) }
         checkHazards()
         val point = FloatArray(1)
         var nearest: Pair<Camera, Float>? = null
@@ -484,10 +485,6 @@ object Nav {
         }
     }
 
-    private var speaker: TextToSpeech? = null
-
-    // Called when the sentence with this id has finished, or couldn't be said.
-    private val afterSpeech = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
     private val utterances = java.util.concurrent.atomic.AtomicInteger()
 
     /** An answer you asked for, so it's spoken even with directions muted. */
@@ -498,44 +495,20 @@ object Nav {
     /** You've moved on: stop saying it. */
     fun hush() {
         SpokenAnswer.stop()
-        speaker?.stop()
+        voice?.stopAndClearQueue()
     }
 
     /** Are you being given directions right now? */
     fun onTrip(): Boolean = model?.navigationUiState?.value?.isNavigating() == true
 
+    // A warning (camera, hazard, faster route): said unless you've muted everything.
     private fun speak(text: String) {
-        if (tts?.isMuted == true) return
+        if (sound() == Sound.MUTE) return
         talk(text)
     }
 
     private fun talk(text: String, done: (() -> Unit)? = null) {
-        val id = "promptly-${utterances.incrementAndGet()}"
-        if (done != null) afterSpeech[id] = done
-        val s = speaker
-        if (s != null) {
-            if (s.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) spoke(id)
-        } else {
-            speaker = TextToSpeech(app) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    speaker?.language = Locale.forLanguageTag("en-AU")
-                    speaker?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                        override fun onStart(utteranceId: String?) = Unit
-                        override fun onDone(utteranceId: String?) = spoke(utteranceId)
-                        @Deprecated("Deprecated in Java")
-                        override fun onError(utteranceId: String?) = spoke(utteranceId)
-                        override fun onStop(utteranceId: String?, interrupted: Boolean) = spoke(utteranceId)
-                    })
-                    speaker?.speak(text, TextToSpeech.QUEUE_ADD, null, id)
-                } else {
-                    spoke(id)
-                }
-            }
-        }
-    }
-
-    private fun spoke(id: String?) {
-        id?.let { afterSpeech.remove(it)?.invoke() }
+        voice().say(text, "promptly-${utterances.incrementAndGet()}", done)
     }
 
     /** You're there: both screens say so, whichever started the trip. */
@@ -876,6 +849,8 @@ object Nav {
         cameraJob?.cancel()
         _camera.value = CameraAlert.None
         model?.stopNavigation()
+        // Nothing left to say about a trip that's over, and the music comes back up.
+        voice?.stopAndClearQueue()
         _ended.tryEmit(Unit)
     }
 }

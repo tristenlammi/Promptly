@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- P Maps: your music no longer stays quiet for the whole trip. It was turned down for every direction even with the voice muted, and never turned back up when a direction was cut off; now it dips only while something is actually being said and comes straight back, including when you mute, end the trip or the phone's voice fails. Camera and hazard warnings dip the music too (they used to talk over it).
+
 ## [0.36.2] - 2026-11-11
 
 ### Added
