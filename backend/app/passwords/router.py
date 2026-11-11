@@ -23,7 +23,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.notifications.dispatch import notify_user
 from app.passwords import schemas as s
-from app.passwords import service
+from app.passwords import live as live_channel, service
 from app.passwords.deps import (
     SCOPE_MAIL_CODES,
     SCOPE_VAULT,
@@ -874,6 +874,9 @@ async def write_items(vault_id: str, body: s.ItemBatch, session: VaultSession = 
     entries = [{"id": e.id, "base_revision": e.base_revision, "blob": e.blob, "deleted": e.deleted, "purge": e.purge} for e in body.items]
     result = await service.write_batch(db, vault.id, entries)
     await db.commit()
+    if result["applied"]:
+        # Every member's other devices pull now rather than on their next minute (live.py).
+        await live_channel.vault_changed(db, vault.id, result["revision"])
     gone = [e.id for e in body.items if (e.deleted or e.purge) and str(e.id) in result["applied"]]
     if gone:
         from app.passwords.reminders import remove_for_items
@@ -1100,6 +1103,7 @@ async def rotate_vault(vault_id: str, body: s.Rotate, session: VaultSession = De
     for removed in body.remove_user_ids:
         await service.activity(db, removed, "vault_removed")
     await db.commit()
+    await live_channel.vault_changed(db, vault.id, rev)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

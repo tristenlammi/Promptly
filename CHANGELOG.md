@@ -29,6 +29,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- Passwords: a bookmark added, changed or deleted in one browser now shows in your other browsers in a second or two instead of up to a minute or more. The extension sends a change about a second after it's made, the server tells your other unlocked browsers to fetch it over a new live connection (`/api/passwords/live`, which carries only "this vault changed", never your data), and the minute's background sync no longer keeps getting pushed back. Passwords and other vault changes made elsewhere arrive just as fast. Needs the new server and a new extension version.
 - Calls on Unraid: new optional `LIVEKIT_INTERFACES` in `.env` (e.g. `br0`) limits the calls service to your LAN interface. With "host access to custom networks" on, Unraid adds a second interface with the same address, and the calls service kept restarting with "address already in use".
 
 ### Changed

@@ -735,6 +735,11 @@ app.include_router(passwords_reminders_router, prefix="/api/passwords", tags=["p
 app.include_router(passwords_breaches_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_breach_admin_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_browsersync_router, prefix="/api/passwords", tags=["passwords"])
+# Its live "pull now" channel: a WebSocket, outside the router above, whose
+# dependencies would hold a DB connection for as long as the socket is open.
+from app.passwords.live import router as passwords_live_router  # noqa: E402
+
+app.include_router(passwords_live_router, prefix="/api/passwords", tags=["passwords"])
 
 app.include_router(passwords_admin_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_router, prefix="/api/passwords", tags=["passwords"])
