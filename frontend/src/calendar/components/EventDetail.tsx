@@ -1,7 +1,7 @@
 import { mapsSearchLink } from "@/maps/links";
 import { useMapsReady } from "@/maps/useMapsReady";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, CalendarDays, ClipboardList, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Tag as TagIcon, Text, Trash2, Users, X } from "lucide-react";
+import { Bell, BellOff, CalendarDays, ClipboardList, Clock, EyeOff, Hash, Mail, MapPin, Palette, Pencil, Repeat as RepeatIcon, Send, Tag as TagIcon, Text, Trash2, Users, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -21,6 +21,7 @@ import { zoneNote } from "../dates";
 import { addUsers, useCalUsers, useRefreshEvents } from "../data";
 import { describeRepeat, describeWhen, REMINDER_OPTIONS, reminderLabel, type ViewEvent } from "../model";
 import { EventPhotos } from "./EventPhotos";
+import { EventLabel, useSetEventLabel } from "./Labels";
 import { ShareToRoomSheet } from "./ShareToRoomSheet";
 import { PorchSourceBadge } from "./PorchSourceBadge";
 import { TaskSourceBadge } from "./TaskSourceBadge";
@@ -76,6 +77,7 @@ export function EventDetail({
   // The room whose "starting soon" post options are open.
   const [roomMenu, setRoomMenu] = useState<string | null>(null);
   const qc = useQueryClient();
+  const setEventLabel = useSetEventLabel();
 
   const setRoomReminder = (roomId: string, minutes: number | null) =>
     run(async () => {
@@ -232,6 +234,20 @@ export function EventDetail({
         <div>{cal ? cal.name : "Invited"}</div>
         {organiser && <div className="text-xs text-[var(--text-muted)]">Organised by {organiser.id === b.me.id ? "you" : organiser.username}</div>}
       </Row>
+
+      {!v.extra && !ev.busy_only && (
+        <Row icon={<Palette className="h-4 w-4" />}>
+          <EventLabel
+            labels={b.labels ?? []}
+            labelId={ev.label_id ?? null}
+            onPick={async (id) => {
+              const ok = await setEventLabel(ev.event_id, id);
+              if (ok) onChanged({ ...ev, label_id: id });
+              return ok;
+            }}
+          />
+        </Row>
+      )}
 
       {!v.extra && !ev.busy_only && (
         <Row icon={<TagIcon className="h-4 w-4" />}>

@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo } from "react";
 import { create } from "zustand";
 
-import { calendarApi, type CalUser, type Calendar, type CalendarBootstrap, type CalendarPrefs } from "@/api/calendar";
+import { calendarApi, type CalUser, type Calendar, type CalendarBootstrap, type CalendarPrefs, type CalLabel } from "@/api/calendar";
 
 import { ymd } from "./dates";
 import { extrasToView, toView, type ViewEvent } from "./model";
@@ -42,8 +42,13 @@ export function useCalendarsMap(cals: Calendar[] | undefined) {
   return useMemo(() => new Map((cals ?? []).map((c) => [c.id, c])), [cals]);
 }
 
-/** Occurrences in [from, to) as drawable events, hidden calendars left out. */
-export function useEvents(from: Date, to: Date, cals: Calendar[] | undefined, enabled = true) {
+export function useLabelsMap(labels: CalLabel[] | undefined) {
+  return useMemo(() => new Map((labels ?? []).map((l) => [l.id, l])), [labels]);
+}
+
+/** Occurrences in [from, to) as drawable events, hidden calendars and
+ *  hidden labels (mine, unticked) left out; my label's colour on each. */
+export function useEvents(from: Date, to: Date, cals: Calendar[] | undefined, enabled = true, labels?: CalLabel[]) {
   // Local midnights as instants: a bare date would be read as UTC midnight,
   // losing events early in the day for anyone east of UTC.
   const start = from.toISOString();
@@ -63,15 +68,17 @@ export function useEvents(from: Date, to: Date, cals: Calendar[] | undefined, en
   const qc = useQueryClient();
   const meId = qc.getQueryData<CalendarBootstrap>(BOOTSTRAP_KEY)?.me.id;
   const map = useCalendarsMap(cals);
+  const labelMap = useLabelsMap(labels);
   const events: ViewEvent[] = useMemo(() => {
     if (!q.data) return [];
     return q.data.events
       .filter((e) => {
         const c = map.get(e.calendar_id);
-        return !(e.on_my_calendar && c?.hidden);
+        if (e.on_my_calendar && c?.hidden) return false;
+        return !(e.label_id && labelMap.get(e.label_id)?.hidden);
       })
-      .map((e) => toView(e, map, meId));
-  }, [q.data, map, meId]);
+      .map((e) => toView(e, map, meId, labelMap));
+  }, [q.data, map, meId, labelMap]);
   return { ...q, events };
 }
 

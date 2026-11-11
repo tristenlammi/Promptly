@@ -96,6 +96,8 @@ export interface CalEvent {
   source?: EventSource | null;
   /** Rooms (that I'm in) it was planned in or shared to — only on single-event fetches. */
   rooms?: EventRoom[];
+  /** My own label on it (only ever mine; nobody else sees it). */
+  label_id?: string | null;
   /** Its RSVP form (Forms), for people who can change the event. */
   rsvp_form?: { file_id: string; title: string; answers: number; state: "open" | "closed" | "trashed" } | null;
 }
@@ -252,8 +254,20 @@ export interface CalBirthday {
   color: string | null;
 }
 
+/** One of my own labels ("Personal", green). Private to me. */
+export interface CalLabel {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  /** Unticked: events with it are hidden from my view. */
+  hidden: boolean;
+}
+
 export interface CalendarBootstrap {
   me: CalUser;
+  /** My labels (seeded with Personal and Work the first time). */
+  labels: CalLabel[];
   tz: string;
   calendars: Calendar[];
   users: Record<string, CalUser>;
@@ -277,6 +291,8 @@ export interface EventInput {
   guests?: string[];
   guests_can_edit?: boolean;
   color?: string | null;
+  /** One of my own labels (null takes mine off). */
+  label_id?: string | null;
   /** Planned in a room: everyone in it is invited and a card is posted there (create only). */
   room_id?: string | null;
   /** What it's made from: a task planned into a time slot (create only). */
@@ -374,6 +390,25 @@ export const calendarApi = {
   /** The owner removes someone, or pass your own id to leave. */
   async removeMember(id: string, userId: string): Promise<void> {
     await apiClient.delete(`/calendar/calendars/${id}/members/${userId}`);
+  },
+
+  /** My labels (private to me). */
+  async labels(): Promise<{ labels: CalLabel[] }> {
+    return (await apiClient.get("/calendar/labels")).data;
+  },
+  async createLabel(body: { name: string; color: string }): Promise<CalLabel> {
+    return (await apiClient.post("/calendar/labels", body)).data;
+  },
+  async updateLabel(id: string, body: { name?: string; color?: string; position?: number; hidden?: boolean }): Promise<CalLabel> {
+    return (await apiClient.patch(`/calendar/labels/${id}`, body)).data;
+  },
+  /** Delete one of my labels; the events it was on just lose it. */
+  async deleteLabel(id: string): Promise<void> {
+    await apiClient.delete(`/calendar/labels/${id}`);
+  },
+  /** My label on any event I can see (null takes it off). */
+  async setEventLabel(eventId: string, labelId: string | null): Promise<{ event_id: string; label_id: string | null }> {
+    return (await apiClient.put(`/calendar/events/${eventId}/label`, { label_id: labelId })).data;
   },
 
   /** Make (or replace) the private subscribe link; returns its token. */

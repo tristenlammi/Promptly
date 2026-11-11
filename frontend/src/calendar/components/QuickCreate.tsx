@@ -7,6 +7,7 @@ import { toast } from "@/store/toastStore";
 
 import { addUsers, useRefreshEvents } from "../data";
 import { addDays, localZone, shortDay, timeRange, ymd } from "../dates";
+import { LabelPicker } from "./Labels";
 import { Popover } from "./ui";
 
 /** A slot picked on the grid: ``end`` is exclusive (the day after, for all-day). */
@@ -21,6 +22,7 @@ export interface NewSlot {
 export interface SlotDraft {
   title: string;
   calendarId: string;
+  labelId: string | null;
 }
 
 function slotWhen(s: NewSlot): string {
@@ -51,6 +53,7 @@ export function QuickCreate({
   const writable = b.calendars.filter((c) => c.role === "owner" || c.role === "editor");
   const [title, setTitle] = useState("");
   const [calendarId, setCalendarId] = useState(() => b.calendars.find((c) => c.personal)?.id ?? writable[0]?.id ?? "");
+  const [labelId, setLabelId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const refresh = useRefreshEvents();
 
@@ -68,6 +71,7 @@ export function QuickCreate({
         ...(slot.allDay ? { start: ymd(slot.start), end: ymd(addDays(slot.end, -1)) } : { start: slot.start.toISOString(), end: slot.end.toISOString() }),
         tz: localZone(),
         calendar_id: calendarId || null,
+        label_id: labelId,
       });
       addUsers(r.users);
       refresh();
@@ -98,8 +102,9 @@ export function QuickCreate({
           ))}
         </Select>
       )}
+      <LabelPicker labels={b.labels ?? []} value={labelId} onChange={setLabelId} compact />
       <div className="flex items-center justify-between gap-2 pt-1">
-        <ItemButton variant="ghost" onClick={() => onMore(slot, { title: title.trim(), calendarId })}>
+        <ItemButton variant="ghost" onClick={() => onMore(slot, { title: title.trim(), calendarId, labelId })}>
           More options
         </ItemButton>
         <ItemButton variant="primary" type="submit" disabled={saving || !title.trim()}>

@@ -33,7 +33,7 @@ import { SubscribeSheet } from "./components/SubscribeDialog";
 import { TimeGridView } from "./components/TimeGridView";
 import { TravelNotice } from "./components/TravelNotice";
 import { Popover, ScopeHost } from "./components/ui";
-import { addUsers, useBootstrap, useCalendarsMap, useEvents, useExtras, useRefreshEventsAsync } from "./data";
+import { addUsers, useBootstrap, useCalendarsMap, useEvents, useExtras, useLabelsMap, useRefreshEventsAsync } from "./data";
 import { applyMoves, commitMove, dragging, useMoved, useTouchDragGuard } from "./drag";
 import { addDays, addMonths, fmt, monthGrid, sameDay, startOfDay, startOfMonth, startOfWeek, ymd } from "./dates";
 import { onDay, toView, type View, type ViewEvent } from "./model";
@@ -96,6 +96,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   const openPromptlyNav = useUIStore((s) => s.openMobileNav);
   const { data: b, isLoading, isError, refetch } = useBootstrap();
   const calMap = useCalendarsMap(b?.calendars);
+  const labelMap = useLabelsMap(b?.labels);
 
   const [view, setViewState] = useState<View>(() => readView(isPhone));
   const [cursor, setCursor] = useState(() => startOfDay(new Date()));
@@ -164,7 +165,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
         return { from: cursor, to: addDays(cursor, agendaDays) };
     }
   }, [view, cursor, agendaDays, isPhone, weekDays]);
-  const { events: fetched, isLoading: eventsLoading } = useEvents(range.from, range.to, b?.calendars);
+  const { events: fetched, isLoading: eventsLoading } = useEvents(range.from, range.to, b?.calendars, true, b?.labels);
   // Tasks and birthdays among the events; moved events at their new times while they save.
   const extras = useExtras(range.from, range.to, b?.prefs, !!b);
   const moved = useMoved((st) => st.moved);
@@ -179,7 +180,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   // Dots on the phone's mini month.
   const miniGrid = monthGrid(miniMonth);
   const showMini = isPhone && view === "agenda" && miniOpen;
-  const { events: miniEvents } = useEvents(miniGrid.start, addDays(miniGrid.start, miniGrid.weeks * 7), b?.calendars, showMini);
+  const { events: miniEvents } = useEvents(miniGrid.start, addDays(miniGrid.start, miniGrid.weeks * 7), b?.calendars, showMini, b?.labels);
   const dots = useMemo(() => {
     const s = new Set<string>();
     for (let i = 0; i < miniGrid.weeks * 7; i++) {
@@ -230,12 +231,12 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   // Jump to an event and open it (search results, a quick-added event).
   const showEvent = useCallback(
     (ev: CalEvent) => {
-      const v = toView(ev, calMap, meId);
+      const v = toView(ev, calMap, meId, labelMap);
       setCursor(startOfDay(v.start));
       if (view === "agenda") setAgendaDays(AGENDA_DAYS);
       setDetail({ v, anchor: null });
     },
-    [calMap, meId, view],
+    [calMap, meId, view, labelMap],
   );
   // Quick add's "More options": the full editor, filled in.
   const quickMore = (q: QuickEvent | null, text: string) => {
@@ -316,14 +317,14 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
       try {
         const r = await calendarApi.event(eventId);
         addUsers(r.users);
-        const v = toView(r.event, calMap, meId);
+        const v = toView(r.event, calMap, meId, labelMap);
         setCursor(startOfDay(v.start));
         setDetail({ v, anchor: null });
       } catch (err) {
         toast.error(extractError(err) || "That event isn't available.");
       }
     },
-    [calMap, meId],
+    [calMap, meId, labelMap],
   );
   const linkEvent = params.get("event");
   useEffect(() => {
@@ -639,7 +640,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
           setDetail(null);
           setEditor({ mode: "edit", v });
         }}
-        onChanged={(ev) => setDetail((d) => (d ? { ...d, v: toView(ev, calMap, meId) } : d))}
+        onChanged={(ev) => setDetail((d) => (d ? { ...d, v: toView(ev, calMap, meId, labelMap) } : d))}
       />
     ));
 
@@ -687,7 +688,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
                   mode: "new",
                   start: s.start,
                   allDay: s.allDay,
-                  prefill: { title: d.title || undefined, end: s.allDay ? addDays(s.end, -1) : s.end, calendarId: d.calendarId || undefined },
+                  prefill: { title: d.title || undefined, end: s.allDay ? addDays(s.end, -1) : s.end, calendarId: d.calendarId || undefined, labelId: d.labelId || undefined },
                 });
               }}
             />

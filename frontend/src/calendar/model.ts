@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-import type { CalAppointment, CalBill, CalBirthday, CalEvent, CalExtras, CalHoliday, Calendar, CalMeal, CalTask, CalTrip, CalWorkout, Repeat, RsvpStatus } from "@/api/calendar";
+import type { CalAppointment, CalBill, CalBirthday, CalEvent, CalExtras, CalHoliday, Calendar, CalLabel, CalMeal, CalTask, CalTrip, CalWorkout, Repeat, RsvpStatus } from "@/api/calendar";
 
 import { addDays, DAY_MS, dayDiff, fmt, ordinal, parseYmd, sameDay, shortTime, startOfDay, timeLabel, WEEKDAYS_MON, weekdayIndexMon } from "./dates";
 
@@ -44,8 +44,9 @@ export interface ViewEvent {
 }
 
 /** ``meId``: a shared calendar's member who only set their own reminders
- *  has an (unanswered, non-guest) row — that isn't an invitation. */
-export function toView(ev: CalEvent, cals: Map<string, Calendar>, meId?: string): ViewEvent {
+ *  has an (unanswered, non-guest) row — that isn't an invitation.
+ *  ``labels``: my labels — my label's colour wins over the event's / calendar's. */
+export function toView(ev: CalEvent, cals: Map<string, Calendar>, meId?: string, labels?: Map<string, CalLabel>): ViewEvent {
   let start: Date;
   let end: Date;
   if (ev.all_day) {
@@ -58,7 +59,8 @@ export function toView(ev: CalEvent, cals: Map<string, Calendar>, meId?: string)
   }
   const cal = cals.get(ev.calendar_id);
   const mine = ev.on_my_calendar && !!cal;
-  const color = ev.color ?? (mine ? cal!.color : INVITED_COLOR);
+  const label = ev.label_id ? labels?.get(ev.label_id) : undefined;
+  const color = label?.color ?? ev.color ?? (mine ? cal!.color : INVITED_COLOR);
   let look: Look = mine ? "solid" : "invited";
   const myRow = meId ? ev.attendees.find((a) => a.user_id === meId) : undefined;
   const memberRow = mine && !!myRow && !myRow.guest;

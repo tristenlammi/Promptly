@@ -42,6 +42,7 @@ export function EventChip({
       <button
         type="button"
         onClick={(e) => openFrom(e, v, onOpen)}
+        data-color={v.color}
         aria-label={label}
         title={title}
         className={cn(
@@ -64,6 +65,7 @@ export function EventChip({
     <button
       type="button"
       onClick={(e) => openFrom(e, v, onOpen)}
+      data-color={v.color}
       aria-label={label}
       style={style}
       className={cn(

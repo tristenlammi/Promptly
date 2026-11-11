@@ -21,6 +21,7 @@ import { DateField, TimeField } from "./DateTimeFields";
 import { EmailGuestsField, type DraftEmailGuest } from "./EmailGuestsField";
 import { AvailabilityTag, availabilityText, FREE_COLOR, BUSY_COLOR, overlaps, useBusy } from "./Availability";
 import { FindTime } from "./FindTime";
+import { LabelPicker } from "./Labels";
 import { RepeatPicker } from "./RepeatPicker";
 import { askScope, StatusBadge } from "./ui";
 
@@ -40,6 +41,8 @@ interface Draft {
   description: string;
   reminders: number[];
   guestsCanEdit: boolean;
+  /** My own label (only I see it). */
+  labelId: string | null;
 }
 
 function initial(t: EditorTarget, b: CalendarBootstrap, users: Record<string, CalUser>): Draft {
@@ -67,6 +70,7 @@ function initial(t: EditorTarget, b: CalendarBootstrap, users: Record<string, Ca
       description: p.description ?? "",
       reminders: t.allDay ? [] : [10],
       guestsCanEdit: false,
+      labelId: p.labelId && (b.labels ?? []).some((l) => l.id === p.labelId) ? p.labelId : null,
     };
   }
   const { v } = t;
@@ -86,6 +90,7 @@ function initial(t: EditorTarget, b: CalendarBootstrap, users: Record<string, Ca
     description: ev.description,
     reminders: [...ev.event_reminders],
     guestsCanEdit: ev.guests_can_edit,
+    labelId: ev.label_id ?? null,
   };
 }
 
@@ -263,6 +268,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
           body: porchGroup.body ?? "",
         });
         addUsers(r.users);
+        if (d.labelId) await calendarApi.setEventLabel(r.event.event_id, d.labelId).catch(() => undefined);
         toast.success(`Event posted in ${porchGroup.name}`);
         refresh();
         porchGroup.onPosted?.(r.post.id);
@@ -283,6 +289,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
           guests: guestIds,
           guests_can_edit: guestIds.length ? d.guestsCanEdit : false,
           room_id: room?.id ?? null,
+          label_id: d.labelId,
           ...(source ? { source } : {}),
         });
         addUsers(r.users);
@@ -294,6 +301,11 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
       }
 
       const v = (target as { v: ViewEvent }).v;
+      // My label is mine alone and covers the whole series: saved on its own.
+      const labelChanged = d.labelId !== (ev.label_id ?? null);
+      const saveLabel = async (eventId: string) => {
+        if (labelChanged) await calendarApi.setEventLabel(eventId, d.labelId);
+      };
       const patch: EventPatch = {};
       if (d.title.trim() !== ev.title) patch.title = d.title.trim();
       if (d.description !== ev.description) patch.description = d.description;
@@ -313,10 +325,9 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
       let scope: EditScope = "all";
       if (ev.repeat) {
         if (!timesChanged && !repeatChanged && Object.keys(patch).length === 0) {
-          if (emailChanged) {
-            await syncEmailGuests(ev.event_id);
-            refresh();
-          }
+          await saveLabel(ev.event_id);
+          if (emailChanged) await syncEmailGuests(ev.event_id);
+          if (emailChanged || labelChanged) refresh();
           onClose();
           return;
         }
@@ -345,10 +356,9 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         }
       }
       if (Object.keys(patch).length === 0) {
-        if (emailChanged) {
-          await syncEmailGuests(ev.event_id);
-          refresh();
-        }
+        await saveLabel(ev.event_id);
+        if (emailChanged) await syncEmailGuests(ev.event_id);
+        if (emailChanged || labelChanged) refresh();
         onClose();
         return;
       }
@@ -356,7 +366,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         patch.scope = scope;
         patch.occurrence = ev.occurrence;
       }
-      const r = await calendarApi.update(ev.event_id, patch);
+      const r = await calendarApi.update(ev.event_id, labelChanged ? { ...patch, label_id: d.labelId } : patch);
       addUsers(r.users);
       toast.success("Event updated");
       if (emailChanged) await syncEmailGuests(ev.event_id);
@@ -432,6 +442,8 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         {invalid && <p className="-mt-2 text-xs text-[var(--danger)]">The end must be after the start.</p>}
 
         <RepeatPicker value={d.repeat} onChange={(r) => set({ repeat: r })} start={start} custom={customRepeat} onCustom={setCustomRepeat} />
+
+        <LabelPicker labels={b.labels ?? []} value={d.labelId} onChange={(labelId) => set({ labelId })} />
 
         {canMove ? (
           writable.length > 1 && (

@@ -173,3 +173,26 @@ class CalExternalGuest(UUIDPKMixin, Base):
     invited_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CalLabel(UUIDPKMixin, CreatedAtMixin, Base):
+    """One of a person's own labels ("Personal", green): theirs alone —
+    nobody else ever sees its name, its colour or what it's on."""
+
+    __tablename__ = "cal_labels"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    color: Mapped[str] = mapped_column(String(9), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")  # unticked: its events hidden
+
+
+class CalEventLabel(Base):
+    """The label a person put on an event (one each; the whole series)."""
+
+    __tablename__ = "cal_event_labels"
+
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cal_events.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    label_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cal_labels.id", ondelete="CASCADE"), nullable=False, index=True)

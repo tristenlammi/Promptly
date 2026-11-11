@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- **Calendar labels** — colour-code events with your own labels (Personal is green and Work is blue to start; rename, recolour, delete or add up to 30). Pick one when making or editing an event, change it from the event, and tick a label in the side panel to show or hide its events. Labels are yours alone: on a shared event or an invitation each person colours it their own way and nobody sees anyone else's. Chat can set one of your labels when it adds or changes an event.
+
 ### Fixed
 
 - Calls: the calls service's config uses LiveKit's current name for the metrics port setting, so its log no longer warns that `prometheus_port` is deprecated.

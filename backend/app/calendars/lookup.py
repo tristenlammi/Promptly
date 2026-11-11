@@ -116,7 +116,11 @@ async def search(db: AsyncSession, user: User, q: str, limit: int = 40) -> list[
             past.append((s, _at(base, ev, s, e)))
     upcoming.sort(key=lambda x: x[0])
     past.sort(key=lambda x: x[0], reverse=True)
-    return [o for _, o in upcoming + past][:limit]
+    found = [o for _, o in upcoming + past][:limit]
+    from .labels import fill
+
+    await fill(db, user, found)
+    return found
 
 
 def _at(base: dict, ev: CalEvent, s: datetime, e: datetime) -> dict:
