@@ -60,7 +60,7 @@ _MASKED = re.compile(r"^.{0,2}… \(\d+\)$")
 
 def _ext(quoted: str) -> str:
     name = quoted[1:-1] if len(quoted) >= 2 and quoted[0] in "'\"" else ""
-    name = name.replace("\\", "/").rsplit("/", 1)[-1]
+    name = re.split(r"[\\/]", name)[-1]  # the last path part, either slash
     stem, dot, ext = name.rpartition(".")
     if not dot or not stem.strip():
         return "''"
