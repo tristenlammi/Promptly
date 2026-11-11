@@ -7,6 +7,7 @@ import {
   useWorkspaceInvites,
 } from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
+import { SkeletonRows } from "@/components/shared/Skeleton";
 
 interface Props {
   open: boolean;
@@ -38,7 +39,7 @@ export function ShareInvitesPanel({ open, onClose }: Props) {
       widthClass="max-w-xl"
     >
       {isLoading ? (
-        <div className="text-xs text-[var(--text-muted)]">Loading…</div>
+        <SkeletonRows count={3} label="Loading" />
       ) : empty ? (
         <div className="rounded-md border border-dashed border-[var(--border)] px-3 py-6 text-center text-xs text-[var(--text-muted)]">
           No pending invites right now.

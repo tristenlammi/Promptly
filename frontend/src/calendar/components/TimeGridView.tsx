@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import type { CalTask } from "@/api/calendar";
+import { Skeleton } from "@/components/shared/Skeleton";
 import { cn } from "@/utils/cn";
 
-import { beginPress, snap15 } from "../drag";
-import { addDays, fmt, hourLabel, localZone, sameDay, shortTime, startOfDay, timeRange, zoneCity, zoneNote, zoneShort } from "../dates";
+import { beginPress, snap15, stretchDays } from "../drag";
+import { addDays, fmt, hourLabel, localZone, sameDay, shortTime, startOfDay, timeRange, uses12h, zoneCity, zoneNote, zoneShort } from "../dates";
 import { layoutDay, layoutSpans, lookStyle, onDay, withTimes, type ViewEvent } from "../model";
 import { EventChip, openFrom, type OpenEvent } from "./EventChip";
 import { AppointmentMarker, TaskMarker } from "./ExtrasChips";
@@ -21,7 +22,7 @@ const PLAN_MIN = 60;
 /** A timed event being dragged (or a task being planned): where it would land. */
 interface GridDrag {
   v: ViewEvent;
-  mode: "move" | "resize" | "plan";
+  mode: "move" | "resize" | "resize-start" | "plan";
   origin: { day: number; min: number };
   start: Date;
   end: Date;
@@ -29,11 +30,12 @@ interface GridDrag {
   over?: boolean;
 }
 
-/** "9am" / "9:30am" as the clock reads in ``tz``. */
+/** "9 am" / "09:00" as the clock reads in ``tz`` (a half-hour zone shows its minutes). */
 function hourIn(d: Date, tz: string): string {
   try {
-    const s = new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(d);
-    return s.replace(/:00(?=\D|$)/, "").replace(/\s?([AP])M$/i, (_m, p: string) => p.toLowerCase() + "m");
+    if (!uses12h()) return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+    const s = new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "numeric", minute: "2-digit", hourCycle: "h12" }).format(d);
+    return s.replace(/:00(?=\D|$)/, "").replace(/\s?([AP])M$/i, (_m, p: string) => " " + p.toLowerCase() + "m");
   } catch {
     return "";
   }
@@ -44,6 +46,22 @@ interface DayDrag {
   v: ViewEvent;
   origin: number;
   shift: number;
+  /** Stretching one end instead of moving the whole bar. */
+  edge?: "start" | "end";
+}
+
+/** A new event being drawn on the hour grid (minutes on one day). */
+interface Make {
+  day: number;
+  a: number;
+  b: number;
+}
+
+/** The slot a new event is being made for (drawn, or waiting in the quick-add bubble). */
+export interface DraftSlot {
+  start: Date;
+  end: Date;
+  allDay: boolean;
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -60,14 +78,21 @@ export function TimeGridView({
   onMove,
   onPlanTask,
   secondTz,
+  draft,
+  loading,
 }: {
   from: Date;
   days: number;
   events: ViewEvent[];
   compact: boolean;
   onOpen: OpenEvent;
-  onCreate: (start: Date, allDay: boolean) => void;
+  /** An empty slot was clicked, or a stretch of time drawn: [start, end) and where on screen. */
+  onCreate: (start: Date, allDay: boolean, end?: Date, anchor?: DOMRect) => void;
   onDay: (d: Date) => void;
+  /** The new event waiting in the quick-add bubble (shown in place). */
+  draft?: DraftSlot | null;
+  /** Events are still arriving: show placeholder blocks. */
+  loading?: boolean;
   /** An event was dragged to [start, end). */
   onMove: (v: ViewEvent, start: Date, end: Date) => void;
   /** A task chip was dragged onto the hour grid: plan it for [start, end). */
@@ -82,7 +107,8 @@ export function TimeGridView({
   const spanEvents = useMemo(() => {
     const all = events.filter((v) => v.spanning);
     if (!dayDrag?.shift) return all;
-    return all.map((v) => (v.ev.id === dayDrag.v.ev.id ? withTimes(v, addDays(v.start, dayDrag.shift), addDays(v.end, dayDrag.shift)) : v));
+    const to = stretchDays(dayDrag.v, dayDrag.shift, dayDrag.edge);
+    return all.map((v) => (v.ev.id === dayDrag.v.ev.id ? withTimes(v, to.start, to.end) : v));
   }, [events, dayDrag]);
   const spans = useMemo(() => layoutSpans(spanEvents, from, days), [spanEvents, from, days]);
   // Timed tasks are markers, not blocks.
@@ -131,7 +157,60 @@ export function TimeGridView({
     const r = grid.current!.getBoundingClientRect();
     return { day: clamp(Math.floor((x - r.left) / (r.width / days)), 0, days - 1), min: clamp(((y - r.top) / HOUR) * 60, 0, 24 * 60) };
   };
+  // ---- drawing a new event on empty time
+  const [make, setMakeState] = useState<Make | null>(null);
+  const makeRef = useRef<Make | null>(null);
+  const setMake = (m: Make | null) => {
+    makeRef.current = m;
+    setMakeState(m);
+  };
+  /** Where a slot sits on screen (the quick-add bubble opens beside it). */
+  const slotRect = (day: number, fromMin: number, toMin: number) => {
+    const r = grid.current!.getBoundingClientRect();
+    const w = r.width / days;
+    return new DOMRect(r.left + day * w, r.top + (fromMin / 60) * HOUR, w, ((toMin - fromMin) / 60) * HOUR);
+  };
+  const createAt = (day: number, fromMin: number, toMin: number) => {
+    const a = clamp(fromMin, 0, 24 * 60 - 15);
+    const b = clamp(toMin, a + 15, 24 * 60);
+    const start = startOfDay(cols[day]);
+    start.setMinutes(a);
+    const end = startOfDay(cols[day]);
+    end.setMinutes(b);
+    onCreate(start, false, end, slotRect(day, a, b));
+  };
+  const pressEmpty = (e: ReactPointerEvent<HTMLElement>, day: number) => {
+    // Only empty time: a press on an event is that event's.
+    if (e.target !== e.currentTarget) return;
+    beginPress(e, {
+      cursor: "ns-resize",
+      start: (x, y) => {
+        lastPt.current = { x, y };
+        const a = Math.floor(slotAt(x, y).min / 15) * 15;
+        setMake({ day, a, b: a });
+      },
+      move: follow,
+      drop: () => {
+        const m = makeRef.current;
+        setMake(null);
+        if (!m) return;
+        const lo = Math.min(m.a, m.b);
+        const hi = Math.max(m.a, m.b);
+        // A press that never stretched is an hour, like a click.
+        createAt(m.day, lo, hi - lo < 15 ? lo + 60 : hi);
+      },
+      cancel: () => setMake(null),
+    });
+  };
+
   const follow = (x: number, y: number) => {
+    const m = makeRef.current;
+    if (m && grid.current) {
+      lastPt.current = { x, y };
+      const b = snap15(slotAt(x, y).min);
+      if (b !== m.b) setMake({ ...m, b });
+      return;
+    }
     const d = dragRef.current;
     if (!d || !grid.current) return;
     lastPt.current = { x, y };
@@ -148,7 +227,12 @@ export function TimeGridView({
     }
     let start = d.v.start;
     let end: Date;
-    if (d.mode === "move") {
+    if (d.mode === "resize-start") {
+      end = d.v.end;
+      const at = startOfDay(addDays(from, s.day));
+      at.setMinutes(snap15(s.min));
+      start = end.getTime() - at.getTime() < MIN_LEN ? new Date(end.getTime() - MIN_LEN) : at;
+    } else if (d.mode === "move") {
       const startMin = d.v.start.getHours() * 60 + d.v.start.getMinutes();
       const min = clamp(snap15(startMin + s.min - d.origin.min), 0, 24 * 60 - 15);
       start = startOfDay(addDays(d.v.start, s.day - d.origin.day));
@@ -163,9 +247,10 @@ export function TimeGridView({
   };
   const pressBlock = (e: ReactPointerEvent<HTMLElement>, v: ViewEvent, mode: GridDrag["mode"]) => {
     if (!v.ev.can_edit || v.extra) return;
-    if (mode === "resize") e.stopPropagation();
+    const resizing = mode === "resize" || mode === "resize-start";
+    if (resizing) e.stopPropagation();
     beginPress(e, {
-      cursor: mode === "resize" ? "ns-resize" : "grabbing",
+      cursor: resizing ? "ns-resize" : "grabbing",
       start: (x, y) => {
         lastPt.current = { x, y };
         setDrag({ v, mode, origin: slotAt(x, y), start: v.start, end: v.end });
@@ -179,7 +264,7 @@ export function TimeGridView({
       cancel: () => setDrag(null),
     });
   };
-  const dragging = !!drag;
+  const dragging = !!drag || !!make;
   useEffect(() => {
     if (!dragging) return;
     let raf = 0;
@@ -240,11 +325,13 @@ export function TimeGridView({
       cancel: () => setDrag(null),
     });
   };
-  const pressSpan = (e: ReactPointerEvent<HTMLElement>, v: ViewEvent) => {
-    if (v.extra?.kind === "task" && onPlanTask) return pressTask(e, v, v.extra.task);
+  const pressSpan = (e: ReactPointerEvent<HTMLElement>, v: ViewEvent, edge?: "start" | "end") => {
+    if (edge) e.stopPropagation();
+    else if (v.extra?.kind === "task" && onPlanTask) return pressTask(e, v, v.extra.task);
     if (!v.ev.can_edit || v.extra) return;
     beginPress(e, {
-      start: (x) => setDayDrag({ v, origin: dayAt(x), shift: 0 }),
+      cursor: edge ? "ew-resize" : "grabbing",
+      start: (x) => setDayDrag({ v, origin: dayAt(x), shift: 0, edge }),
       move: (x) => {
         const d = dayDragRef.current;
         if (d && d.shift !== dayAt(x) - d.origin) setDayDrag({ ...d, shift: dayAt(x) - d.origin });
@@ -252,18 +339,33 @@ export function TimeGridView({
       drop: () => {
         const d = dayDragRef.current;
         setDayDrag(null);
-        if (d?.shift) onMove(d.v, addDays(d.v.start, d.shift), addDays(d.v.end, d.shift));
+        if (!d?.shift) return;
+        const to = stretchDays(d.v, d.shift, d.edge);
+        onMove(d.v, to.start, to.end);
       },
       cancel: () => setDayDrag(null),
     });
   };
+
+  // The slot being drawn, or the one waiting in the quick-add bubble.
+  let pending: DraftSlot | null = draft ?? null;
+  if (make) {
+    const lo = Math.min(make.a, make.b);
+    const hi = Math.max(Math.max(make.a, make.b), lo + 15);
+    const start = startOfDay(cols[make.day]);
+    start.setMinutes(lo);
+    const end = startOfDay(cols[make.day]);
+    end.setMinutes(hi);
+    pending = { start, end, allDay: false };
+  }
+  const tightCols = compact && days > 3;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Day headers + all-day row */}
       <div className="shrink-0 border-b border-[var(--border)]" style={{ paddingRight: sbw }}>
         <div className="flex">
-          <div style={{ width: gutter }} className="flex shrink-0 items-end justify-end pb-1 text-[9px] font-medium uppercase leading-none text-[var(--text-muted)]">
+          <div style={{ width: gutter }} className="flex shrink-0 items-end justify-end pb-1 text-xs font-medium uppercase leading-none text-[var(--text-muted)]">
             {tz2 && (
               <>
                 <span style={{ width: GUTTER2 }} className="truncate pr-1 text-right" title={`${zoneCity(tz2)} time`}>
@@ -286,8 +388,8 @@ export function TimeGridView({
                   disabled={days === 1}
                   className="flex flex-col items-center gap-0.5 py-1.5 disabled:cursor-default"
                 >
-                  <span className={cn("text-[11px] font-medium uppercase", isToday ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}>
-                    {fmt(d, { weekday: compact && days > 1 ? "narrow" : "short" })}
+                  <span className={cn("text-xs font-medium uppercase", isToday ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}>
+                    {fmt(d, { weekday: tightCols ? "narrow" : "short" })}
                   </span>
                   <span
                     className={cn(
@@ -303,7 +405,7 @@ export function TimeGridView({
           </div>
         </div>
         <div className="flex">
-          <div style={{ width: gutter }} className="flex shrink-0 items-start justify-end pr-2 pt-1 text-[10px] text-[var(--text-muted)]">
+          <div style={{ width: gutter }} className="flex shrink-0 items-start justify-end pr-2 pt-1 text-xs text-[var(--text-muted)]">
             {lanes > 3 ? (
               <button type="button" onClick={() => setExpanded((x) => !x)} className="rounded px-1 hover:bg-[var(--hover)] hover:text-[var(--text)]">
                 {expanded ? "less" : `+${hiddenSpans}`}
@@ -317,10 +419,11 @@ export function TimeGridView({
               {cols.map((d, i) => (
                 <div
                   key={i}
-                  onClick={() => onCreate(startOfDay(d), true)}
+                  onClick={(e) => onCreate(startOfDay(d), true, undefined, e.currentTarget.getBoundingClientRect())}
                   className={cn(
                     "cursor-pointer border-l border-[var(--border)] hover:bg-[var(--hover)]",
-                    dayDrag && i === clamp(dayDrag.origin + dayDrag.shift, 0, days - 1) && "bg-[color-mix(in_srgb,var(--item-accent)_10%,transparent)]",
+                    dayDrag && !dayDrag.edge && i === clamp(dayDrag.origin + dayDrag.shift, 0, days - 1) && "bg-[color-mix(in_srgb,var(--item-accent)_10%,transparent)]",
+                    pending?.allDay && sameDay(pending.start, d) && "bg-[color-mix(in_srgb,var(--item-accent)_22%,transparent)]",
                   )}
                 />
               ))}
@@ -339,6 +442,13 @@ export function TimeGridView({
                   style={{ top: 3 + s.lane * LANE, height: LANE - 2, left: `${(s.col / days) * 100}%`, width: `${(s.span / days) * 100}%` }}
                 >
                   <EventChip v={s.v} onOpen={onOpen} continuesLeft={s.v.start < from} continuesRight={s.v.end > addDays(from, days)} />
+                  {/* Stretch it over more (or fewer) days from either end. */}
+                  {s.v.ev.can_edit && !s.v.extra && s.v.start >= from && (
+                    <span aria-hidden onPointerDown={(e) => pressSpan(e, s.v, "start")} className="absolute inset-y-0 left-0 w-2 cursor-ew-resize [@media(pointer:coarse)]:w-3" />
+                  )}
+                  {s.v.ev.can_edit && !s.v.extra && s.v.end <= addDays(from, days) && (
+                    <span aria-hidden onPointerDown={(e) => pressSpan(e, s.v, "end")} className="absolute inset-y-0 right-0 w-2 cursor-ew-resize [@media(pointer:coarse)]:w-3" />
+                  )}
                 </div>
               ))}
           </div>
@@ -351,7 +461,7 @@ export function TimeGridView({
           {tz2 && (
             <div style={{ width: GUTTER2 }} className="relative shrink-0" aria-label={`${zoneCity(tz2)} time`}>
               {Array.from({ length: 23 }, (_, i) => (
-                <span key={i} className="absolute right-1 -translate-y-1/2 text-[10px] tabular-nums text-[var(--text-muted)] opacity-80" style={{ top: (i + 1) * HOUR }}>
+                <span key={i} className="absolute right-1 -translate-y-1/2 whitespace-nowrap text-xs tabular-nums text-[var(--text-muted)] opacity-80" style={{ top: (i + 1) * HOUR }}>
                   {hourIn(new Date(from.getFullYear(), from.getMonth(), from.getDate(), i + 1), tz2)}
                 </span>
               ))}
@@ -359,7 +469,7 @@ export function TimeGridView({
           )}
           <div style={{ width: GUTTER }} className="relative shrink-0">
             {Array.from({ length: 23 }, (_, i) => (
-              <span key={i} className="absolute right-2 -translate-y-1/2 text-[10px] tabular-nums text-[var(--text-muted)]" style={{ top: (i + 1) * HOUR }}>
+              <span key={i} className="absolute right-2 -translate-y-1/2 whitespace-nowrap text-xs tabular-nums text-[var(--text-muted)]" style={{ top: (i + 1) * HOUR }}>
                 {hourLabel(i + 1)}
               </span>
             ))}
@@ -379,8 +489,12 @@ export function TimeGridView({
                 markers={markers}
                 now={now}
                 onOpen={onOpen}
-                onCreate={onCreate}
-                narrow={compact && days > 1}
+                index={i}
+                onCreate={(fromMin) => createAt(i, fromMin, fromMin + 60)}
+                onPressEmpty={(e) => pressEmpty(e, i)}
+                pending={pending && !pending.allDay ? pending : null}
+                loading={!!loading}
+                narrow={tightCols}
                 drag={drag}
                 onPress={pressBlock}
               />
@@ -398,7 +512,11 @@ function DayColumn({
   markers,
   now,
   onOpen,
+  index,
   onCreate,
+  onPressEmpty,
+  pending,
+  loading,
   narrow,
   drag,
   onPress,
@@ -408,7 +526,12 @@ function DayColumn({
   markers: ViewEvent[];
   now: Date;
   onOpen: OpenEvent;
-  onCreate: (start: Date, allDay: boolean) => void;
+  index: number;
+  /** Empty time was clicked, at this many minutes into the day. */
+  onCreate: (fromMin: number) => void;
+  onPressEmpty: (e: ReactPointerEvent<HTMLElement>) => void;
+  pending: DraftSlot | null;
+  loading: boolean;
   narrow: boolean;
   drag: GridDrag | null;
   onPress: (e: ReactPointerEvent<HTMLElement>, v: ViewEvent, mode: GridDrag["mode"]) => void;
@@ -437,25 +560,44 @@ function DayColumn({
     const bottom = ((Math.min(drag.end.getTime(), dayEnd) - dayStart) / 3_600_000) * HOUR;
     ghost = { top, height: Math.max(HOUR / 4, bottom - top) };
   }
+  // The new event being drawn (or waiting in its bubble), on this day.
+  let fresh: { top: number; height: number } | null = null;
+  if (pending && pending.start.getTime() < dayEnd && pending.end.getTime() > dayStart) {
+    const top = ((Math.max(pending.start.getTime(), dayStart) - dayStart) / 3_600_000) * HOUR;
+    const bottom = ((Math.min(pending.end.getTime(), dayEnd) - dayStart) / 3_600_000) * HOUR;
+    fresh = { top, height: Math.max(HOUR / 4, bottom - top) };
+  }
 
   return (
     <div
       className="relative border-l border-[var(--border)]"
+      onPointerDown={onPressEmpty}
       onClick={(e) => {
+        if (e.target !== e.currentTarget) return;
         const r = e.currentTarget.getBoundingClientRect();
         const min = Math.floor(((e.clientY - r.top) / HOUR) * 2) * 30;
-        const start = startOfDay(day);
-        start.setMinutes(Math.max(0, Math.min(min, 23 * 60 + 30)));
-        onCreate(start, false);
+        onCreate(Math.max(0, Math.min(min, 23 * 60)));
       }}
     >
+      {loading &&
+        [0, 1].map((n) => (
+          // A believable morning and afternoon, staggered from day to day.
+          <div
+            key={n}
+            className="pointer-events-none absolute left-[2px] right-[4px] opacity-70"
+            style={{ top: (8.5 + n * 4.5 + ((index * 3 + n) % 4) * 0.75) * HOUR, height: (n ? 1.5 : 1) * HOUR }}
+          >
+            <Skeleton className="h-full w-full" />
+          </div>
+        ))}
       {items.map(({ v, top, bottom, col, cols }) => {
         const { style, className } = lookStyle(v);
         const h = ((bottom - top) / 60) * HOUR;
         const short = h < 34;
         const lifted = drag?.v.ev.id === v.ev.id;
-        // The resize handle sits on the day the event ends.
+        // The resize handles sit on the days the event starts and ends.
         const resizable = v.ev.can_edit && v.end.getTime() <= dayEnd;
+        const resizableTop = v.ev.can_edit && v.start.getTime() >= dayStart && !short;
         return (
           <button
             key={v.ev.id}
@@ -468,7 +610,7 @@ function DayColumn({
               return z ? `${v.ev.title} · ${z}` : undefined;
             })()}
             className={cn(
-              "group/block absolute select-none overflow-hidden rounded-md px-1.5 text-left text-[11px] leading-tight shadow-[0_0_0_1px_var(--bg)] transition-opacity [-webkit-touch-callout:none] hover:z-10 hover:brightness-95",
+              "group/block absolute select-none overflow-hidden rounded-md px-1.5 text-left text-xs leading-tight shadow-[0_0_0_1px_var(--bg)] transition-opacity [-webkit-touch-callout:none] hover:z-10 hover:brightness-95",
               short ? "py-0" : "py-1",
               lifted && "opacity-40",
               className,
@@ -495,6 +637,13 @@ function DayColumn({
                 {v.ev.location && !narrow && <span className="block truncate opacity-80">{v.ev.location}</span>}
               </>
             )}
+            {resizableTop && (
+              <span
+                aria-hidden
+                onPointerDown={(e) => onPress(e, v, "resize-start")}
+                className="absolute inset-x-0 top-0 h-2 cursor-ns-resize [@media(pointer:coarse)]:h-3 after:absolute after:left-1/2 after:top-[2px] after:h-[3px] after:w-6 after:-translate-x-1/2 after:rounded-full after:bg-current after:opacity-0 after:transition group-hover/block:after:opacity-50"
+              />
+            )}
             {resizable && (
               <span
                 aria-hidden
@@ -516,7 +665,7 @@ function DayColumn({
         <div
           aria-hidden
           className={cn(
-            "pointer-events-none absolute left-[1px] right-[3px] z-30 overflow-hidden rounded-md px-1.5 py-1 text-[11px] leading-tight shadow-[0_8px_24px_rgba(0,0,0,0.28)] ring-2 ring-[var(--bg)]",
+            "pointer-events-none absolute left-[1px] right-[3px] z-30 overflow-hidden rounded-md px-1.5 py-1 text-xs leading-tight shadow-[0_8px_24px_rgba(0,0,0,0.28)] ring-2 ring-[var(--bg)]",
             lookStyle(drag.v).className.replace("line-through", ""),
           )}
           style={{ ...lookStyle(drag.v).style, top: ghost.top + 1, height: ghost.height - 2 }}
@@ -525,10 +674,19 @@ function DayColumn({
           <span className="block truncate tabular-nums">{timeRange(drag.start, drag.end)}</span>
         </div>
       )}
+      {fresh && pending && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-[1px] right-[3px] z-30 overflow-hidden rounded-md border border-[var(--item-accent)] bg-[color-mix(in_srgb,var(--item-accent)_22%,var(--bg))] px-1.5 py-0.5 text-xs leading-tight text-[var(--text)] shadow-[0_4px_14px_rgba(0,0,0,0.18)]"
+          style={{ top: fresh.top + 1, height: fresh.height - 2 }}
+        >
+          <span className="block truncate font-semibold tabular-nums">{timeRange(pending.start, pending.end)}</span>
+        </div>
+      )}
       {isToday && (
         <div className="pointer-events-none absolute left-0 right-0 z-20" style={{ top: (nowMin / 60) * HOUR }}>
-          <div className="relative h-[2px] bg-[#EA4335]">
-            <span className="absolute -left-[5px] -top-[4px] h-[10px] w-[10px] rounded-full bg-[#EA4335]" />
+          <div className="relative h-[2px] bg-[var(--danger)]">
+            <span className="absolute -left-[5px] -top-[4px] h-[10px] w-[10px] rounded-full bg-[var(--danger)]" />
           </div>
         </div>
       )}

@@ -144,6 +144,19 @@ export function useTouchDragGuard() {
   }, []);
 }
 
+/** A bar dragged by whole days: moved, or stretched from one end (never shorter than a day). */
+export function stretchDays(v: ViewEvent, shift: number, edge?: "start" | "end"): { start: Date; end: Date } {
+  if (!edge) return { start: addDays(v.start, shift), end: addDays(v.end, shift) };
+  if (edge === "start") {
+    let start = addDays(v.start, shift);
+    while (start.getTime() >= v.end.getTime()) start = addDays(start, -1);
+    return { start, end: v.end };
+  }
+  let end = addDays(v.end, shift);
+  while (end.getTime() <= v.start.getTime()) end = addDays(end, 1);
+  return { start: v.start, end };
+}
+
 /** Snap minutes to the 15-minute grid. */
 export const snap15 = (min: number) => Math.round(min / 15) * 15;
 
@@ -179,7 +192,17 @@ function shiftRepeat(r: Repeat | null, days: number): Repeat | null {
   return { ...r, weekdays: Array.from(new Set(r.weekdays.map((w) => (((w + days) % 7) + 7) % 7))).sort() };
 }
 
-function movedLabel(v: ViewEvent, start: Date): string {
+const lowerTime = (d: Date) => timeLabel(d).replace(/\s?([AP])M$/i, (_m, p: string) => ` ${p.toLowerCase()}m`);
+
+/** What the toast says: where it went, or (start unchanged) when it now ends. */
+function movedLabel(v: ViewEvent, start: Date, end: Date): string {
+  if (start.getTime() === v.start.getTime()) {
+    return v.allDay ? `Now ends ${shortDay(addDays(end, -1))}` : `Now ends ${dayDiff(start, end) ? `${shortDay(end)}, ` : "at "}${lowerTime(end)}`;
+  }
+  return `Moved to ${movedLabelAt(v, start)}`;
+}
+
+function movedLabelAt(v: ViewEvent, start: Date): string {
   return v.allDay ? shortDay(start) : `${shortDay(start)}, ${timeLabel(start).replace(/\s?([AP])M$/i, (_m, p: string) => ` ${p.toLowerCase()}m`)}`;
 }
 
@@ -227,25 +250,37 @@ export async function commitMove(v: ViewEvent, start: Date, end: Date, refresh: 
     const r = await calendarApi.update(ev.event_id, patch);
     addUsers(r.users);
     await refresh();
-    const undo = ev.repeat
-      ? undefined
-      : {
-          label: "Undo",
-          onClick: () => {
-            void (async () => {
-              setMoved(ev.id, { start: v.start, end: v.end });
-              try {
-                await calendarApi.update(ev.event_id, { tz: localZone(), ...wire(v.start, v.end, v.allDay) });
-                await refresh();
-              } catch (err) {
-                toast.error(extractError(err) || "Couldn't undo that.");
-              } finally {
-                setMoved(ev.id, null);
-              }
-            })();
-          },
-        };
-    toast.success(`Moved to ${movedLabel(v, start)}`, undo ? { action: undo } : undefined);
+    // Undo puts things back where they were. For a repeating event: the whole
+    // series returns to its old start; one occurrence (now on its own) or the
+    // later part of a split series goes back to its old time.
+    let back: { id: string; patch: EventPatch };
+    if (!ev.repeat) {
+      back = { id: ev.event_id, patch: { tz: localZone(), ...wire(v.start, v.end, v.allDay) } };
+    } else if (scope === "all") {
+      back = { id: ev.event_id, patch: { tz: ev.tz, start: ev.series_start, end: ev.series_end, scope: "all", ...(patch.repeat ? { repeat: ev.repeat } : {}) } };
+    } else if (scope === "this") {
+      back = { id: r.event.event_id, patch: { tz: ev.tz, ...wire(v.start, v.end, v.allDay) } };
+    } else {
+      const rep = patch.repeat && r.event.repeat ? { repeat: { ...r.event.repeat, weekdays: ev.repeat.weekdays } } : {};
+      back = { id: r.event.event_id, patch: { tz: ev.tz, ...wire(v.start, v.end, v.allDay), scope: "all", ...rep } };
+    }
+    const undo = {
+      label: "Undo",
+      onClick: () => {
+        void (async () => {
+          if (!ev.repeat) setMoved(ev.id, { start: v.start, end: v.end });
+          try {
+            await calendarApi.update(back.id, back.patch);
+            await refresh();
+          } catch (err) {
+            toast.error(extractError(err) || "Couldn't undo that.");
+          } finally {
+            setMoved(ev.id, null);
+          }
+        })();
+      },
+    };
+    toast.success(movedLabel(v, start, end), { action: undo });
   } catch (err) {
     toast.error(extractError(err) || "Couldn't move the event.");
   } finally {

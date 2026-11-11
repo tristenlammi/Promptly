@@ -32,6 +32,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { RecentStrip } from "@/components/today/RecentStrip";
+import { InstallNudge } from "@/components/today/InstallNudge";
 import {
   AttentionStrip,
   AutomationsCard,
@@ -106,6 +107,7 @@ export function TodayPage() {
       />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-7xl px-4 py-5 md:py-8">
+          <InstallNudge />
           {isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-10 w-64" />

@@ -21,6 +21,8 @@ export function PostActions({ post, onComments, preview = true }: { post: PorchP
   const [picker, setPicker] = useState<{ x: number; y: number } | null>(null);
   const [who, setWho] = useState(false);
   const press = useLongPress((at) => setPicker(at));
+  // The little pop is for a tap just now, not for every post you liked before.
+  const [pop, setPop] = useState(false);
   const r = post.reactions;
   const mine = r.mine;
   const author = post.author?.name ?? "Someone";
@@ -34,6 +36,7 @@ export function PostActions({ post, onComments, preview = true }: { post: PorchP
             {...press.handlers}
             onClick={() => {
               if (press.consumed()) return;
+              setPop(!mine);
               void react(post, mine ? null : HEART);
             }}
             aria-pressed={!!mine}
@@ -46,7 +49,7 @@ export function PostActions({ post, onComments, preview = true }: { post: PorchP
                 {mine}
               </span>
             ) : (
-              <Heart className={cn("h-6 w-6", mine && "fill-[var(--danger)] text-[var(--danger)]")} aria-hidden />
+              <Heart className={cn("h-6 w-6", mine && pop && "porch-pop", mine && "fill-[var(--danger)] text-[var(--danger)]")} aria-hidden />
             )}
           </button>
           <button
@@ -57,13 +60,19 @@ export function PostActions({ post, onComments, preview = true }: { post: PorchP
               const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
               setPicker({ x: b.left + b.width / 2, y: b.top });
             }}
-            className="-ml-1 inline-flex h-10 w-6 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+            className="-ml-1 inline-flex h-10 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
           >
             <ChevronDown className="h-4 w-4" aria-hidden />
           </button>
         </div>
         <button type="button" onClick={() => onComments(true)} className={btn} aria-label={post.comment_count ? `Comment (${post.comment_count} so far)` : "Comment"}>
           <MessageCircle className="h-6 w-6" aria-hidden />
+          {/* Phones: how many, beside the icon. Bigger screens: the word. */}
+          {post.comment_count > 0 && (
+            <span aria-hidden className="text-sm font-semibold tabular-nums md:hidden">
+              {post.comment_count}
+            </span>
+          )}
           <span className="sr-only md:not-sr-only">Comment</span>
         </button>
         <button

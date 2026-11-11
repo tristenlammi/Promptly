@@ -422,16 +422,21 @@ async def navigate_route(
     locations = body.get("locations")
     if not isinstance(locations, list) or not 2 <= len(locations) <= 20:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Two to twenty stops.")
-    check = await incidents.closures_due(user.id, request.headers.get("x-promptly-reroute") == "1")
+    rerouting = request.headers.get("x-promptly-reroute") == "1"
+    check = await incidents.closures_due(user.id, rerouting)
     ask = {k: v for k, v in body.items() if k in _NAV_FIELDS}
-    # A plain A to B follows the way you prefer, including after a wrong turn.
+    # A plain A to B follows the way you prefer. After a wrong turn too, unless getting
+    # back to it costs more than you said you'd put up with for it.
     from . import planning
 
     if len(locations) == 2 and all(isinstance(p, dict) and isinstance(p.get("lat"), (int, float)) and isinstance(p.get("lon"), (int, float)) for p in locations):
         mode = {"auto": "drive", "pedestrian": "walk", "bicycle": "cycle"}.get(str(ask.get("costing")), "drive")
         found = await planning.find_preferred(db, user.id, locations[0], locations[1], mode)
         if found:
+            direct = ask
             ask = {**planning.with_through(ask, found[1]), "alternates": ask.get("alternates", 0)}
+            if rerouting and found[1] and not await planning.worth_rejoining(ask, direct, found[0].tolerance_minutes):
+                return await planning.around_for_navigation(db, direct, check)
             try:
                 return await planning.around_for_navigation(db, ask, check)
             except HTTPException:

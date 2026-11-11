@@ -137,7 +137,7 @@ export function UsersPanel() {
   };
 
   const handleCreate = async (values: UserFormValues) => {
-    await createUser.mutateAsync({
+    return await createUser.mutateAsync({
       email: values.email,
       username: values.username,
       password: values.password,
@@ -146,7 +146,6 @@ export function UsersPanel() {
       // These were collected by the dialog and then dropped, so a user
       // meant to be locked down got every capability (R-260).
       can_generate_images: values.can_generate_images,
-      can_execute_code: values.can_execute_code,
       can_reach_private_network: values.can_reach_private_network,
       can_use_automations: values.can_use_automations,
       model_locked: values.model_locked,
@@ -183,10 +182,6 @@ export function UsersPanel() {
         can_generate_images:
           values.can_generate_images !== target.can_generate_images
             ? values.can_generate_images
-            : undefined,
-        can_execute_code:
-          values.can_execute_code !== target.can_execute_code
-            ? values.can_execute_code
             : undefined,
         can_reach_private_network:
           values.can_reach_private_network !== target.can_reach_private_network
@@ -241,7 +236,7 @@ export function UsersPanel() {
   // a sort, all on what's already loaded.
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "disabled" | "locked" | "admins">("all");
-  const [sortBy, setSortBy] = useState<"name" | "seen" | "created">("name");
+  const [sortBy, setSortBy] = useState<"name" | "seen" | "created" | "storage">("name");
   const visibleUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     const seen = (u: AdminUser) => new Date(u.last_seen_at ?? u.last_login_at ?? 0).getTime();
@@ -262,6 +257,8 @@ export function UsersPanel() {
       .sort((a, b) =>
         sortBy === "seen"
           ? seen(b) - seen(a)
+          : sortBy === "storage"
+            ? (b.storage_used_bytes ?? 0) - (a.storage_used_bytes ?? 0)
           : sortBy === "created"
             ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             : a.username.localeCompare(b.username)
@@ -333,6 +330,7 @@ export function UsersPanel() {
             <option value="name">Sort: name</option>
             <option value="seen">Sort: last seen</option>
             <option value="created">Sort: newest</option>
+            <option value="storage">Sort: most storage</option>
           </select>
           <input
             ref={importInputRef}
@@ -410,6 +408,7 @@ export function UsersPanel() {
                 <th className="px-4 py-2.5 font-semibold">Status</th>
                 <th className="px-4 py-2.5 font-semibold">Last seen</th>
                 <th className="px-4 py-2.5 font-semibold">Model access</th>
+                <th className="px-4 py-2.5 font-semibold">Storage</th>
                 <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
               </tr>
             </thead>
@@ -622,6 +621,9 @@ function UserRow({
       </td>
 
       <td className="px-4 py-3 text-xs text-[var(--text-muted)]">{accessLabel}</td>
+      <td className="px-4 py-3">
+        <StorageCell used={user.storage_used_bytes ?? 0} limit={user.storage_limit_bytes ?? null} />
+      </td>
 
       <td className="px-4 py-3">
         <div className="flex items-center justify-end gap-1">
@@ -1045,4 +1047,41 @@ function formatRelative(when: Date): string {
   if (diffSec < 86_400) return `${Math.floor(diffSec / 3600)}h ago`;
   if (diffSec < 7 * 86_400) return `${Math.floor(diffSec / 86_400)}d ago`;
   return when.toLocaleDateString();
+}
+
+/** Storage used, as a small bar and "used / limit". No limit: just the amount. */
+function StorageCell({ used, limit }: { used: number; limit: number | null }) {
+  const size = (n: number) => {
+    if (n < 1024 * 1024) return n < 1024 ? `${n} B` : `${Math.round(n / 1024)} KB`;
+    const mb = n / (1024 * 1024);
+    if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+    const gb = mb / 1024;
+    return `${gb < 10 ? gb.toFixed(2) : gb < 100 ? gb.toFixed(1) : Math.round(gb)} GB`;
+  };
+  if (limit === null) {
+    return (
+      <span className="whitespace-nowrap text-xs tabular-nums text-[var(--text-muted)]">
+        {size(used)} <span className="opacity-70">/ no limit</span>
+      </span>
+    );
+  }
+  const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 100;
+  const tone = pct >= 95 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-[var(--accent)]";
+  return (
+    <div className="flex items-center gap-2 whitespace-nowrap">
+      <div
+        className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--border)]"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label={`${pct}% of storage used`}
+      >
+        <div className={`h-full rounded-full ${tone}`} style={{ width: `${used > 0 ? Math.max(pct, 3) : 0}%` }} />
+      </div>
+      <span className="text-xs tabular-nums text-[var(--text-muted)]">
+        {pct}% · {size(used)} / {size(limit)}
+      </span>
+    </div>
+  );
 }

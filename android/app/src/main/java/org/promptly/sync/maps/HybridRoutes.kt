@@ -88,6 +88,12 @@ class HybridRouting(
 
         /** The squares a trip's points are in. */
         fun cellsOf(points: List<Pair<Double, Double>>): List<String> = points.map { (lat, lon) -> Cells.of(lat, lon) }.distinct()
+
+        /** Where a route starts from. Which way you're facing is only sent when you're
+         *  moving: stopped, the phone's idea of it is noise, and a route that believes
+         *  it starts with a lap of the block. */
+        fun startFrom(at: UserLocation): UserLocation =
+            if ((at.speed?.value ?: 0.0) >= 2.0) at else at.copy(courseOverGround = null)
     }
 }
 
@@ -149,7 +155,7 @@ class HybridRouteProvider(
         val server = Maps.server(app)
         val endpoint = (server ?: "https://promptly.invalid") + "/api/maps/navigate/route"
         val generator = createValhallaRequestGenerator(endpoint, ServerRoutes.profileOf(wanted), ServerRoutes.requestOptions(wanted).toString())
-        val request = generator.generateRequest(userLocation, waypoints) as? RouteRequest.HttpPost
+        val request = generator.generateRequest(HybridRouting.startFrom(userLocation), waypoints) as? RouteRequest.HttpPost
             ?: throw IOException("Unexpected route request")
         val points = listOf(userLocation.coordinates.lat to userLocation.coordinates.lng) + waypoints.map { it.coordinate.lat to it.coordinate.lng }
         val answer = try {

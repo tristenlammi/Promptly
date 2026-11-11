@@ -149,7 +149,8 @@ test.describe("notes: across Promptly", () => {
     await expect(ev).toBeVisible({ timeout: 20_000 });
     await expect(ev.getByLabel("Title")).toHaveValue("E2E event");
     await expect(ev.getByPlaceholder("Add a place")).toHaveValue("The workshop");
-    await expect(ev.getByLabel("Start time")).toHaveValue("10:00");
+    // Calendar's own time picker: a button that says the time it holds.
+    await expect(ev.getByRole("button", { name: /^Start time: 10:00(?!\d)/ })).toBeVisible();
     await expect(ev.getByPlaceholder("Add notes")).toHaveValue(words);
     await page.screenshot({ path: shots("event") });
     await page.keyboard.press("Escape");

@@ -138,8 +138,13 @@ async def shared_rooms(db: AsyncSession, event_id: uuid.UUID, user: User) -> lis
 
 
 async def shared_with_me(db: AsyncSession, event_id: uuid.UUID, user: User) -> bool:
-    """Shared to a room you're in — you can see it, and add yourself."""
-    return bool(await shared_rooms(db, event_id, user))
+    """Shared to a room you're in — you can see it, and add yourself. Or
+    (Porch WP-P3.2) it's on a Porch post you can see: answer from its card."""
+    if await shared_rooms(db, event_id, user):
+        return True
+    from app.porch.plans import event_post_for
+
+    return await event_post_for(db, event_id, user) is not None
 
 
 def can_edit(ev: CalEvent, m: CalMember | None, att: CalAttendee | None, user: User) -> bool:

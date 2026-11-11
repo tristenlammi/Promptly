@@ -32,6 +32,10 @@ for f in "$version_file" "$pkg_file" "$changelog_file"; do
   [ -f "$f" ] || { echo "error: missing $f" >&2; exit 1; }
 done
 
+# The Android app people download from this server has to be this source's app.
+# SKIP_ANDROID_CHECK=1 skips it.
+[ "${SKIP_ANDROID_CHECK:-}" = "1" ] || "$script_dir/check-android-download.sh"
+
 date_str="$(date +%F)"
 
 if grep -qF "## [$version]" "$changelog_file"; then

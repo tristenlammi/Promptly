@@ -106,7 +106,7 @@ export function UploadProgressPanel() {
         onClick={() => setPillOpen(true)}
         aria-label="Show uploads"
         className={cn(
-          "fixed z-40 right-2 sm:right-4 bottom-[max(env(safe-area-inset-bottom,0),1rem)]",
+          "fixed z-40 right-2 sm:right-4 bottom-[calc(max(env(safe-area-inset-bottom,0px),1rem)+var(--selection-bar-lift,0px))]",
           "inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5",
           "text-xs font-medium text-[var(--text)] shadow-lg hover:bg-[var(--hover)]"
         )}
@@ -142,7 +142,7 @@ export function UploadProgressPanel() {
         // tappable.
         "fixed z-40 w-[min(92vw,22rem)]",
         "right-2 sm:right-4",
-        "bottom-[max(env(safe-area-inset-bottom,0),1rem)]",
+        "bottom-[calc(max(env(safe-area-inset-bottom,0px),1rem)+var(--selection-bar-lift,0px))] transition-[bottom] duration-200",
         "rounded-card border border-[var(--border)] bg-[var(--surface)]",
         "text-[var(--text)] shadow-xl"
       )}

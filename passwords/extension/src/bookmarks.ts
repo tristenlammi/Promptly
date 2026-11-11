@@ -1,6 +1,6 @@
 // The browser's side of bookmark sync, and the vault's: frontend/src/passwords/core/bookmarks.ts
 // decides what changes. See passwords/BOOKMARKS.md.
-import { type BookmarkItem, type BookmarkNode, type BookmarkRoot, type BrowserSide, isRootKey, rootKey, syncableNode, syncableUrl, type VaultSide } from "../../../frontend/src/passwords/core/bookmarks";
+import { type BookmarkItem, type BookmarkNode, type BookmarkRoot, type BrowserSide, type DeletedBookmark, isRootKey, rootKey, syncableNode, syncableUrl, type VaultSide } from "../../../frontend/src/passwords/core/bookmarks";
 import { newBody } from "../../../frontend/src/passwords/core/model";
 import type { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { ext } from "./rpc";
@@ -65,7 +65,7 @@ export class BrowserBookmarks implements BrowserSide {
           walk(c, rootKey(standsFor), true);
           return;
         }
-        out.push({ node: c.id, parent, title: c.title ?? "", url: c.url, index });
+        out.push({ node: c.id, parent, title: c.title ?? "", url: c.url, index, added: c.dateAdded });
         if (c.url === undefined) walk(c, c.id, inMenuFolder);
       });
     };
@@ -130,6 +130,14 @@ export class VaultBookmarks implements VaultSide {
       .allItems({ includeSystem: true })
       .filter((i) => i.body.kind === "bookmark" && i.vaultId === this.vaultId && !i.deleted && i.body.bookmark)
       .map((i) => ({ id: i.id, title: i.body.title, parent: i.body.bookmark!.parent, url: i.body.bookmark!.url, pos: i.body.bookmark!.pos }));
+  }
+
+  /** What's in "Recently deleted". The time is the server's, from when the deletion reached it. */
+  async deleted(): Promise<DeletedBookmark[]> {
+    return this.client
+      .allItems({ includeSystem: true, includeDeleted: true })
+      .filter((i) => i.body.kind === "bookmark" && i.vaultId === this.vaultId && i.deleted && i.body.bookmark)
+      .map((i) => ({ id: i.id, title: i.body.title, parent: i.body.bookmark!.parent, url: i.body.bookmark!.url, pos: i.body.bookmark!.pos, at: Date.parse(i.updatedAt) }));
   }
 
   async create(i: BookmarkItem): Promise<void> {

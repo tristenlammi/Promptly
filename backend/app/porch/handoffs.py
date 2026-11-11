@@ -69,6 +69,8 @@ def what(post: PorchPost, author_name: str, n_media: int) -> str:
         return f"{author_name}'s photo" if n_media <= 1 else f"{author_name}'s {n_media} photos"
     if post.kind == "poll":
         return f"{author_name}'s poll"
+    if post.event_title:
+        return post.event_title
     if post.link:
         return str(post.link.get("title") or post.link.get("url") or "") or f"{author_name}'s post"
     return f"{author_name}'s post"
@@ -110,6 +112,7 @@ async def summaries(db: AsyncSession, viewer: User, posts: list[PorchPost]) -> d
             "thumb": thumb,
             "href": f"/porch/p/{p.id}",
             "created_at": p.created_at.isoformat() if p.created_at else None,
+            "where": where,
         }
     return out
 
@@ -132,6 +135,8 @@ async def card(db: AsyncSession, viewer: User, post_id: uuid.UUID | str | None) 
         "subtitle": "Porch · " + s["subtitle"],
         "thumb": s["thumb"],
         "href": s["href"],
+        # "Posted in Family" (an event's page, WP-P3.2): only your own groups.
+        "where": s["where"],
     }
 
 

@@ -73,6 +73,10 @@ class PorchPost(UUIDPKMixin, CreatedAtMixin, Base):
     uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # A poll's closing time (0271); NULL: never closes, or not a poll.
     poll_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A Calendar event the post carries (0396, WP-P3.2), and its name, kept
+    # for "Cancelled: Family BBQ" once the event's deleted.
+    event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("cal_events.id", ondelete="SET NULL"), nullable=True)
+    event_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # body_tsv: a generated column, searched with raw SQL (not mapped).
 
 
@@ -115,6 +119,8 @@ class PorchProfile(Base):
     welcomed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # The audience picker's starting choice: "all" or a list of group ids.
     last_groups: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    # The story maker's own starting choice (0394), apart from posts'.
+    last_story_groups: Mapped[Any] = mapped_column(JSONB, nullable=True)
     # Per-kind push modes (on / summary / off), WP-P1.7.
     push: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     # The local day today's birthday pushes went (0272): claimed once a day.
@@ -257,7 +263,78 @@ class PorchRemoval(UUIDPKMixin, CreatedAtMixin, Base):
     removed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
+# ------------------------------------------------------------------ stories (0393, WP-P2.1)
+
+STORY_KINDS = ("photo", "video", "text")
+
+
+class PorchStory(UUIDPKMixin, CreatedAtMixin, Base):
+    """A photo, video or text story, gone from view 24 hours after it was
+    posted (``expires_at``; read-time, no job). The row stays for your own
+    archive and highlights. Who sees it: :func:`app.porch.access.visible_story`."""
+
+    __tablename__ = "porch_stories"
+
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    # Your own library photo or video; purging it ends the story.
+    file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=True)
+    # Its 9:16 crop for this story only (``photos/edits.py`` ops).
+    edit: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    text: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
+    background: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Stickers: [{type: text|mention|place, x, y, scale, rotate, style, ...}].
+    overlays: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    mentions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    alt_text: Mapped[str] = mapped_column(String(1000), nullable=False, default="", server_default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PorchStoryGroup(Base):
+    """The groups a story went to, fixed when it was posted."""
+
+    __tablename__ = "porch_story_groups"
+
+    story_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_stories.id", ondelete="CASCADE"), primary_key=True)
+    group_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_groups.id", ondelete="CASCADE"), primary_key=True)
+
+
+class PorchStoryView(Base):
+    """Someone saw a story. Only the poster ever sees the list."""
+
+    __tablename__ = "porch_story_views"
+
+    story_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_stories.id", ondelete="CASCADE"), primary_key=True)
+    viewer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+# ------------------------------------------------------------------ highlights (0394, WP-P2.4)
+
+
+class PorchHighlight(UUIDPKMixin, CreatedAtMixin, Base):
+    """Stories you keep on your profile, under a name and a cover. Each
+    story in it still shows only to the people in its groups."""
+
+    __tablename__ = "porch_highlights"
+
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    cover_story_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("porch_stories.id", ondelete="SET NULL"), nullable=True)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+
+
+class PorchHighlightItem(Base):
+    __tablename__ = "porch_highlight_items"
+
+    highlight_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_highlights.id", ondelete="CASCADE"), primary_key=True)
+    story_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_stories.id", ondelete="CASCADE"), primary_key=True)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+
+
 __all__ = [
-    "KINDS", "NOTIFY", "ROLES", "STATUSES", "TAG_STATUSES", "PorchAlert", "PorchComment", "PorchGroup", "PorchGroupMember", "PorchPollOption",
-    "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile", "PorchReaction", "PorchRemoval", "PorchReport", "PorchSave", "PorchTag",
+    "KINDS", "NOTIFY", "ROLES", "STATUSES", "STORY_KINDS", "TAG_STATUSES", "PorchAlert", "PorchComment", "PorchGroup", "PorchGroupMember",
+    "PorchHighlight", "PorchHighlightItem", "PorchPollOption", "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile",
+    "PorchReaction", "PorchRemoval", "PorchReport", "PorchSave", "PorchStory", "PorchStoryGroup", "PorchStoryView", "PorchTag",
 ]

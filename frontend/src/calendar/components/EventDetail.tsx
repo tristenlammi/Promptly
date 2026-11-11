@@ -2,7 +2,7 @@ import { mapsSearchLink } from "@/maps/links";
 import { useMapsReady } from "@/maps/useMapsReady";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, BellOff, CalendarDays, ClipboardList, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Tag as TagIcon, Text, Trash2, Users, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { calendarApi, type CalendarBootstrap, type RsvpStatus } from "@/api/calendar";
@@ -137,6 +137,28 @@ export function EventDetail({
       refresh();
       onClose();
     });
+
+  // Keys while it's open (desktop): e edits, Delete deletes.
+  const keys = useRef({ edit: onEdit, remove, busy });
+  keys.current = { edit: onEdit, remove, busy };
+  const canEditKey = ev.can_edit && !v.extra;
+  const canDeleteKey = ev.can_delete && !v.extra;
+  useEffect(() => {
+    if (!canEditKey && !canDeleteKey) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented || e.repeat || keys.current.busy) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      // Not under a sheet or a confirm (on a phone the details are a sheet themselves).
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (e.key === "e" && canEditKey) keys.current.edit();
+      else if ((e.key === "Delete" || e.key === "Backspace") && canDeleteKey) void keys.current.remove();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canEditKey, canDeleteKey]);
 
   const hide = () =>
     run(async () => {

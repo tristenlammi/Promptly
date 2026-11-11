@@ -133,7 +133,7 @@ export function PickImage({ pick, big = false, label, className }: { pick: Pick;
     <div className={cn("relative overflow-hidden bg-[var(--surface-2)]", className)}>
       {inner}
       {pick.kind === "video" && (
-        <span className="pointer-events-none absolute bottom-1 left-1 inline-flex items-center gap-0.5 rounded bg-black/60 px-1 text-[11px] font-medium text-white">
+        <span className="pointer-events-none absolute bottom-1 left-1 inline-flex items-center gap-0.5 rounded bg-black/60 px-1 text-xs font-medium text-white">
           <Play className="h-3 w-3" aria-hidden />
           {duration(pick.durationMs)}
         </span>

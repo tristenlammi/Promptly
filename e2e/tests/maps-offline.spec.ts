@@ -169,7 +169,8 @@ test("a route's roads saved for offline, and the panel at phone width", async ({
     }),
   );
   await page.goto("/maps?route=-32.25,148.6,Dubbo;-33.28,149.1,Orange");
-  await expect(page.getByRole("button", { name: "Start" })).toBeVisible({ timeout: 20_000 });
+  // The route is up: on a computer its main button sends the trip to your phone.
+  await expect(page.getByRole("button", { name: "Send to my phone" })).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: "Save for offline" }).click();
   await expect(page.getByText(/Saved Dubbo to Orange for offline \(about \d+ MB\)/)).toBeVisible();
   const areas = (await (await page.request.get("/api/maps/offline", { headers: auth })).json()).areas as { kind: string; name: string; cells: string[]; shape: string }[];

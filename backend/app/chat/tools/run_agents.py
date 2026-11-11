@@ -241,6 +241,7 @@ class RunAgentsTool(Tool):
                 tools_payload=agent_tools,
                 per_tool_caps=dict(_AGENT_TOOL_CAPS),
                 on_progress=_agent_progress(index),
+                parent_turn=ctx.turn,
             )
             return index, res
 

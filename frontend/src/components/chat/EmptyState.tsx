@@ -5,10 +5,10 @@ import { useWorkspace } from "@/hooks/useWorkspaces";
 import { useAuthStore } from "@/store/authStore";
 
 const GENERAL_SUGGESTIONS = [
-  "Explain a hard concept simply",
-  "Draft a project kickoff plan",
-  "Summarise a document I'll attach",
-  "What's the latest news on…",
+  "Plan meals for this week",
+  "Help me write a birthday message",
+  "Ideas for a rainy day with the kids",
+  "Explain something simply",
 ];
 
 const WORKSPACE_SUGGESTIONS = [

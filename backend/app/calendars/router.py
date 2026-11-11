@@ -429,10 +429,20 @@ async def create_event(body: EventIn, db: AsyncSession = Depends(get_db), user: 
     ev = await service.create_event(db, user, f, ping_guests=body.room_id is None)
     if body.source is not None:
         ev.source = body.source.model_dump(mode="json")
+    porch_post = None
+    if isinstance(body.source, PorchPostSource):
+        # Porch WP-P3.2: your own post carries the event (its card).
+        from app.porch.plans import attach
+
+        porch_post = body.source.post_id if await attach(db, user, body.source.post_id, ev) else None
     card = await sharing.share_to_room(db, user, ev, body.room_id, invite_all=True) if body.room_id else None
     await db.commit()
     if card:
         await sharing.publish_card(db, *card)
+    if porch_post:
+        from app.porch.plans import changed
+
+        await changed(db, ev.id)
     return await get_event(ev.id, db, user)
 
 
@@ -502,7 +512,12 @@ async def update_event(event_id: uuid.UUID, body: EventPatch, db: AsyncSession =
         color=body.color, color_set="color" in given,
     )
     ev = await service.update_event(db, user, event_id, f, scope=body.scope, occurrence=body.occurrence)
+    # Porch WP-P3.2: a post carrying it keeps its name for "Cancelled: …".
+    from app.porch import plans as porch_plans
+
+    await porch_plans.renamed(db, ev)
     await db.commit()
+    await porch_plans.changed(db, ev.id)
     return await get_event(ev.id, db, user)
 
 
@@ -514,8 +529,15 @@ async def delete_event(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
+    # Porch WP-P3.2: the posts carrying it show "Cancelled" (their link
+    # goes with the event); tell the people looking at them.
+    from app.porch import plans as porch_plans
+
+    posts = await porch_plans.post_ids(db, event_id)
+    who = await porch_plans.post_audiences(db, event_id) if posts else set()
     await service.delete_event(db, user, event_id, scope=scope, occurrence=occurrence)
     await db.commit()
+    await porch_plans.tell(posts, who)
 
 
 class RsvpIn(BaseModel):
@@ -526,6 +548,9 @@ class RsvpIn(BaseModel):
 async def rsvp(event_id: uuid.UUID, body: RsvpIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     await service.rsvp(db, user, event_id, body.status)
     await db.commit()
+    from app.porch.plans import changed
+
+    await changed(db, event_id)
     return await get_event(event_id, db, user)
 
 

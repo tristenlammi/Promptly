@@ -126,12 +126,6 @@ def build_tools_system_prompt(
             "before saying you don't remember something they told you, call "
             "`search_past_chats`."
         )
-    if "code" in categories:
-        guidelines.append(
-            "- After `code_interpreter` runs, interpret the results briefly "
-            "rather than repeating the raw output; charts it saves are "
-            "attached automatically."
-        )
     if "search" in categories:
         guidelines.append(
             "- For anything that may have changed since your training "

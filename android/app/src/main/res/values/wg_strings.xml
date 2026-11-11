@@ -9,4 +9,6 @@
     <string name="wg_notes_description">Your pinned and latest notes, with a note, list or voice note a tap away. Works with no signal.</string>
     <string name="wg_one_note_name">One note</string>
     <string name="wg_one_note_description">A note or list you choose. Tick items off, even with no signal.</string>
+    <string name="wg_photo_name">Photo</string>
+    <string name="wg_photo_description">A photo from an album you choose, in the shape you like. A new one every half hour, even with no signal.</string>
 </resources>

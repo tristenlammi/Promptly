@@ -103,7 +103,6 @@ test.describe("files", () => {
 
     await row(page, folder).getByRole("button", { name: "More actions" }).click();
     await page.getByRole("button", { name: "Trash", exact: true }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Move to trash" }).click();
     await expect(row(page, folder)).toHaveCount(0);
 
     // R-209: the trashed folder shows where it was; restore names the place.
@@ -136,7 +135,7 @@ test.describe("files", () => {
     // folder list has the file too). Once the upload lands the list scrolls
     // to the new file and focuses it, which can close a dropdown already
     // open — so type again if it does.
-    const box = page.getByPlaceholder("Search Drive…");
+    const box = page.getByPlaceholder("Search Files…");
     const dropdown = box.locator("xpath=ancestor::form[1]");
     await expect(async () => {
       await box.click();
@@ -191,7 +190,7 @@ test.describe("files", () => {
     // From inside the folder, the box searches that folder.
     await page.goto(`/files/folder/${folderId}`);
     await ready(page);
-    const box = page.getByPlaceholder("Search Drive…");
+    const box = page.getByPlaceholder("Search Files…");
     await box.click();
     await box.fill(`milestones${stamp}`);
     const dropdown = box.locator("xpath=ancestor::form[1]");
@@ -842,11 +841,13 @@ test.describe("files", () => {
     // flooded; it's turned off again at the end (which wipes the index).
     const folder = `E2E private ${stamp}`;
     await openDrive(page);
-    await page.getByRole("button", { name: "New", exact: true }).click();
+    // The rail's New: an empty folder also offers New in its empty state.
+    const newMenu = page.getByRole("complementary", { name: "Files" }).getByRole("button", { name: "New", exact: true });
+    await newMenu.click();
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("menuitem", { name: "Upload files" }).click();
     await (await chooser).setFiles(pdf(`e2e-ai-${stamp}.pdf`, `Boiler service quote ${stamp}`));
-    await page.getByRole("button", { name: "New", exact: true }).click();
+    await newMenu.click();
     await page.getByRole("menuitem", { name: "Folder", exact: true }).click();
     await page.getByRole("dialog").getByRole("textbox").fill(folder);
     await page.getByRole("dialog").getByRole("button", { name: /Create/ }).click();

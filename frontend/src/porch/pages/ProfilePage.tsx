@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Bell, Bookmark, Cake, ContactRound, MessageCircle, MoreHorizontal, Pencil, Sparkles, UserX } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Archive, Bell, Bookmark, Cake, ContactRound, MessageCircle, MoreHorizontal, Pencil, Search, Settings, Sparkles, UserX } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { porchApi, type Profile, type ProfileTab } from "@/api/porch";
@@ -9,14 +9,17 @@ import { roomsApi } from "@/api/rooms";
 import { EmptyState, Field, ItemButton, List, ListRow, Segmented, Sheet, TextArea, TextInput, Toggle } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
+import { cn } from "@/utils/cn";
 
 import { useBlock } from "../actions";
-import { BOOTSTRAP_KEY, listPosts, profileKey, userPostsKey } from "../cache";
+import { BOOTSTRAP_KEY, listPosts, profileKey, userPostsKey, userStoriesKey } from "../cache";
 import { LIFE_EVENTS, PostCard, PostList } from "../components/PostCard";
 import { ActionSheet, Column, LoadError, PageHeader, PorchAvatar, PostSkeleton, dayWords, type MenuAction } from "../components/ui";
 import { usePorch } from "../context";
+import { usePorchStore } from "../store";
 import { AlertButton } from "../notify";
 import { useSentinel } from "../scroll";
+import { HighlightsRow } from "../components/stories/HighlightsRow";
 import { PhotoGrid } from "./GroupPage";
 import { Unavailable } from "./PostPage";
 
@@ -26,6 +29,29 @@ function relationLine(p: Profile): string | null {
   if (!r) return null;
   if (r.label) return `${p.user.name}, your ${r.label.toLowerCase()}`;
   return r.name && r.name !== p.user.name ? `${r.name} in your People` : "In your People";
+}
+
+/** Their picture, ringed while they have a story up that you can see
+ *  (terracotta when there's one you haven't seen): tap to watch. */
+function AvatarRing({ userId, me, children }: { userId: string; me: boolean; children: ReactNode }) {
+  const navigate = useNavigate();
+  const q = useQuery({ queryKey: userStoriesKey(userId, false), queryFn: () => porchApi.userStories(userId, false), staleTime: 30_000 });
+  const stories = q.data?.stories ?? [];
+  if (!stories.length) return <>{children}</>;
+  const fresh = !me && stories.some((s) => !s.seen);
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(`/porch/stories/${userId}`)}
+      aria-label={me ? "Your story" : `${q.data?.user.name ?? "Their"} story${fresh ? " (new)" : ""}`}
+      className={cn(
+        "shrink-0 rounded-full p-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-2",
+        fresh ? "bg-[var(--item-accent)]" : "bg-[var(--border)]",
+      )}
+    >
+      <span className="block rounded-full bg-[var(--bg)] p-[2px]">{children}</span>
+    </button>
+  );
 }
 
 /** ``/porch/u/:id``: someone's profile, as you're allowed to see it. */
@@ -101,12 +127,36 @@ export function ProfilePage({ userId }: { userId: string }) {
             >
               <MoreHorizontal className="h-5 w-5" />
             </button>
-          ) : undefined
+          ) : (
+            // Your own page: the places the bottom bar has no room for.
+            <>
+              {(
+                [
+                  ["Search Porch", Search, () => usePorchStore.getState().setSearchOpen(true)],
+                  ["Saved posts", Bookmark, () => navigate("/porch/saved")],
+                  ["Porch settings", Settings, () => navigate("/porch/settings")],
+                ] as const
+              ).map(([label, Icon, go]) => (
+                <button
+                  key={label}
+                  type="button"
+                  aria-label={label}
+                  title={label}
+                  onClick={go}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:hidden"
+                >
+                  <Icon className="h-5 w-5" aria-hidden />
+                </button>
+              ))}
+            </>
+          )
         }
       />
       <div className="flex flex-col gap-3 px-4 pt-2 md:px-0">
         <div className="flex items-center gap-4">
-          <PorchAvatar user={p.user} size={76} />
+          <AvatarRing userId={p.user.id} me={me}>
+            <PorchAvatar user={p.user} size={76} />
+          </AvatarRing>
           <div className="min-w-0">
             <h2 className="truncate text-xl font-bold text-[var(--text)]">{p.user.name}</h2>
             <p className="truncate text-sm text-[var(--text-muted)]">@{p.user.username}</p>
@@ -160,6 +210,7 @@ export function ProfilePage({ userId }: { userId: string }) {
           )}
         </div>
       </div>
+      <HighlightsRow userId={p.user.id} me={me} />
       <div className="px-4 pt-5 md:px-0">
         <Segmented
           className="w-full"
@@ -180,6 +231,7 @@ export function ProfilePage({ userId }: { userId: string }) {
           <h2 className="px-1 text-sm font-semibold text-[var(--text)]">Settings</h2>
           <List>
             <ListRow leading={<Bookmark className="h-4 w-4 text-[var(--text-muted)]" />} title="Saved" subtitle="Posts you've saved. Only you can see them." onClick={() => navigate("/porch/saved")} />
+            <ListRow leading={<Archive className="h-4 w-4 text-[var(--text-muted)]" />} title="Story archive" subtitle="Every story you've posted. Only you can see it." onClick={() => navigate("/porch/archive")} />
             <ListRow leading={<Bell className="h-4 w-4 text-[var(--text-muted)]" />} title="Notifications" subtitle="What Porch tells you about, and when" onClick={() => navigate("/porch/settings")} />
             <ListRow leading={<UserX className="h-4 w-4 text-[var(--text-muted)]" />} title="Blocked people" subtitle="Set in Account → Blocked people" onClick={() => navigate("/account/blocked")} />
           </List>

@@ -1,3 +1,4 @@
+import { RowsSkeleton } from "../components/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, BellOff, Moon, UserRound } from "lucide-react";
 import { useId, useState } from "react";
@@ -5,6 +6,8 @@ import { Link } from "react-router-dom";
 
 import { porchApi, type NotificationSettings, type PushKind, type PushMode } from "@/api/porch";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { IosPushNote } from "@/components/pwa/IosPushNote";
+import { useInstallPrompt } from "@/lib/installPrompt";
 import { EmptyState, ItemButton, List, Section } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -55,6 +58,9 @@ function ModeSwitch({ label, value, onChange, disabled }: { label: string; value
 /** Whether this device gets notifications at all. */
 function ThisDevice() {
   const push = usePushSubscription();
+  const install = useInstallPrompt();
+  // iPhone in Safari can't get push until Porch is on the Home Screen.
+  if (install.ios && !install.standalone && push.serverConfigured !== false) return <IosPushNote appName="Porch" what="Porch notifications" />;
   if (push.loading || !push.supported || push.serverConfigured !== true || push.subscribed) return null;
   if (push.permission === "denied") {
     return (
@@ -122,7 +128,7 @@ export function SettingsPage() {
     return (
       <Column>
         <PageHeader title="Notifications" back />
-        <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">Loading…</p>
+        <RowsSkeleton rows={5} className="px-4 md:px-0" />
       </Column>
     );
   }
@@ -195,7 +201,7 @@ export function SettingsPage() {
 
         <Section title="New posts from people" hint="Turn this on from someone's profile: Notify me.">
           {alerts.isPending ? (
-            <p className="px-1 text-sm text-[var(--text-muted)]">Loading…</p>
+            <RowsSkeleton rows={2} className="px-1" />
           ) : alerts.isError ? (
             <LoadError what="Couldn't load these." onRetry={() => void alerts.refetch()} />
           ) : alerts.data.length === 0 ? (

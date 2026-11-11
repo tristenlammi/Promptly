@@ -39,7 +39,23 @@ interface WidgetBackend {
 
     /** Your notes for the One note widget's settings (most recent first; [q] narrows). */
     fun pick(q: String): List<NoteCard> = emptyList()
+
+    /** Your photo albums (and ones shared with you) for the Photo widget's settings. */
+    fun albums(): List<PhotoAlbum> = emptyList()
+
+    /**
+     * A few photos of an album at random, ones the phone doesn't hold
+     * ([have]) first: `{album: {title, count}, photos: [{id, url}], gone: [ids]}`.
+     * [Refused] 404 when the album isn't there for you any more.
+     */
+    fun albumPhotos(albumId: String, n: Int, have: List<String>): JSONObject = throw Refused(404, "That album isn't there any more.")
+
+    /** A picture's bytes from one of the server's own short-lived links; nothing over [max] bytes. */
+    fun download(url: String, max: Long): ByteArray = throw IOException("This phone can't get pictures.")
 }
+
+/** An album to choose from. */
+data class PhotoAlbum(val id: String, val title: String, val count: Int, val shared: Boolean)
 
 /**
  * `/api/widgets` with this phone's own app password (scope `widgets`), the way
@@ -118,6 +134,39 @@ class WidgetApi(private val account: Store.Account) : WidgetBackend {
         val arr = call(Request.Builder().url(url).auth().get().build()).optJSONArray("notes") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map { j ->
             Snapshot.note(j).copy(left = j.optInt("left", 0))
+        }
+    }
+
+    override fun albums(): List<PhotoAlbum> {
+        val arr = call(Request.Builder().url("${account.server}/api/widgets/photos/albums").auth().get().build()).optJSONArray("albums") ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map { j ->
+            PhotoAlbum(j.optString("id"), j.optString("title").ifBlank { "Album" }, j.optInt("count"), j.optBoolean("shared"))
+        }
+    }
+
+    override fun albumPhotos(albumId: String, n: Int, have: List<String>): JSONObject {
+        val url = "${account.server}/api/widgets/photos/albums/${seg(albumId)}".toHttpUrl().newBuilder()
+            .addQueryParameter("n", n.toString())
+            .apply { have.take(60).forEach { addQueryParameter("have", it) } }
+            .build()
+        return call(Request.Builder().url(url).auth().get().build())
+    }
+
+    /** The link signs itself (it carries no password), and only ever goes to our own server. */
+    override fun download(url: String, max: Long): ByteArray {
+        val base = "${account.server}/".toHttpUrl()
+        val full = base.resolve(url)
+        if (full == null || full.scheme != base.scheme || full.host != base.host || full.port != base.port) throw Refused(400, "That picture isn't on your server.")
+        http.newCall(Request.Builder().url(full).get().build()).execute().use { r ->
+            if (r.code in 400..499) throw Refused(r.code, "That picture isn't there any more.")
+            if (!r.isSuccessful) throw IOException("The server had a problem (${r.code}).")
+            if (r.body.contentLength() > max) throw Refused(413, "That picture is too big.")
+            val src = r.body.source()
+            val buf = okio.Buffer()
+            while (buf.size <= max) {
+                if (src.read(buf, 64 * 1024) == -1L) return buf.readByteArray()
+            }
+            throw Refused(413, "That picture is too big.")
         }
     }
 

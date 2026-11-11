@@ -26,19 +26,14 @@ On the wire we additionally enforce:
 * A capped response body (default 10 MiB) — we read in chunks and
   drop the connection the moment we cross the limit.
 
-There's an inherent TOCTOU window between our DNS lookup and the
-socket the HTTP client opens (it re-resolves). Closing it would
-require pinning an explicit IP into the request, which breaks HTTPS
-SNI / certificate validation. We accept the residual risk because:
-
-* Our threat model treats outbound URLs as *admin-controlled* (search
-  provider endpoints), not arbitrary user input — the check primarily
-  prevents misconfig and "what if Brave starts redirecting somewhere
-  weird".
-* Every redirect target is re-validated, which closes the obvious
-  amplification (302 me to ``http://10.0.0.1``).
-* We still enforce small body cap + short timeout, so even a
-  successful TOCTOU doesn't yield interesting data exfil.
+DNS rebinding (security review M2): the socket connects to the very
+address that was checked, never to a second lookup. A hostname that
+answered with a public address for the check and ``127.0.0.1`` a moment
+later used to get through, because the HTTP client resolved it again.
+Now the request goes to the checked IP, with the real hostname kept in the
+``Host`` header and as the TLS SNI / certificate name
+(:class:`_PinnedTransport`), so HTTPS still verifies the site's own
+certificate. Every redirect hop is checked and pinned the same way.
 """
 from __future__ import annotations
 
@@ -205,7 +200,17 @@ def _deny_check(hostname: str, addresses, deny_hosts: frozenset[str]) -> None:
 def assert_url_is_safe(
     url: str, *, allow_private: bool = False, deny_hosts: frozenset[str] = frozenset()
 ) -> str:
-    """Return the validated URL, raise ``UnsafeURLError`` if not safe.
+    """Return the validated URL, raise ``UnsafeURLError`` if not safe (see
+    :func:`_check_url`). ``safe_fetch`` also connects to the checked address."""
+    _check_url(url, allow_private=allow_private, deny_hosts=deny_hosts)
+    return url
+
+
+def _check_url(
+    url: str, *, allow_private: bool = False, deny_hosts: frozenset[str] = frozenset()
+) -> ipaddress._BaseAddress | None:
+    """Check ``url``; return the address to connect to (``None`` for an IP
+    literal, which is itself checked), or raise ``UnsafeURLError``.
 
     Public API for callers that want to do the validation up front
     without actually fetching (e.g. webhook configuration).
@@ -277,9 +282,9 @@ def assert_url_is_safe(
     if literal is not None:
         _deny_check(hostname, [literal], deny_hosts)
         if explicit_allow and not _ip_is_metadata(literal):
-            return url
+            return None
         _check_ip(literal)
-        return url
+        return None  # already an address: nothing to pin
 
     # A denied name is refused before any lookup — whether or not it
     # resolves from here.
@@ -303,11 +308,48 @@ def assert_url_is_safe(
                     "blocked_metadata",
                     f"Refusing to fetch {hostname!r} — metadata-service address",
                 )
-        return url
+        return _pick(addresses)
 
     for ip in addresses:
         _check_ip(ip)
-    return url
+    return _pick(addresses)
+
+
+def _pick(addresses: list[ipaddress._BaseAddress]) -> ipaddress._BaseAddress:
+    """The checked address to connect to: IPv4 first (containers often have
+    no IPv6 route), otherwise the resolver's order."""
+    v4 = [a for a in addresses if isinstance(a, ipaddress.IPv4Address)]
+    return (v4 or addresses)[0]
+
+
+class _PinnedTransport(httpx.AsyncHTTPTransport):
+    """Connect to the address that was checked, not a fresh DNS answer.
+
+    ``pins`` maps a hostname to its checked IP. The request keeps its URL
+    for everything the caller sees (``response.url``); only the copy sent
+    on the wire points at the IP, with the hostname kept in ``Host`` and,
+    for HTTPS, as the SNI and certificate name (``sni_hostname``)."""
+
+    def __init__(self, pins: dict[str, str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._pins = pins
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        ip = self._pins.get(host)
+        if ip is None:
+            return await super().handle_async_request(request)
+        extensions = dict(request.extensions)
+        if request.url.scheme == "https":
+            extensions["sni_hostname"] = host
+        pinned = httpx.Request(
+            request.method,
+            request.url.copy_with(host=ip),
+            headers=request.headers,  # carries Host: <hostname>
+            stream=request.stream,
+            extensions=extensions,
+        )
+        return await super().handle_async_request(pinned)
 
 
 # --------------------------------------------------------------------
@@ -464,9 +506,16 @@ async def safe_fetch(
     # entire event loop — every user's SSE stream included — so the
     # validation (here and on every redirect hop) runs in a worker
     # thread. ``assert_provider_url_safe`` documents the same hazard.
-    await asyncio.to_thread(
-        assert_url_is_safe, current_url, allow_private=allow_private, deny_hosts=deny_hosts
-    )
+    pins: dict[str, str] = {}
+
+    async def _check_and_pin(target: str) -> None:
+        ip = await asyncio.to_thread(
+            _check_url, target, allow_private=allow_private, deny_hosts=deny_hosts
+        )
+        if ip is not None:
+            pins[httpx.URL(target).host] = str(ip)
+
+    await _check_and_pin(current_url)
 
     own_client = client is None
     if own_client:
@@ -475,6 +524,8 @@ async def safe_fetch(
             # We drive the redirect loop ourselves so we can re-run
             # the SSRF guard on every hop.
             follow_redirects=False,
+            # Connects to the checked address only (DNS rebinding, M2).
+            transport=_PinnedTransport(pins),
         )
 
     assert client is not None  # appeases mypy after the conditional create
@@ -512,9 +563,7 @@ async def safe_fetch(
             next_url = str(httpx.URL(current_url).join(location))
             await response.aclose()
             response = None
-            await asyncio.to_thread(
-                assert_url_is_safe, next_url, allow_private=allow_private, deny_hosts=deny_hosts
-            )
+            await _check_and_pin(next_url)
             # Never carry the caller's headers to another origin — they're
             # where credentials live (Authorization, X-API-Key…), and a
             # redirect would otherwise hand them to whoever it points at.

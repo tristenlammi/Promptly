@@ -105,7 +105,7 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
         )}
         <div className="min-w-0 flex-1">
           {question ? (
-            <div className="text-sm text-[var(--text)]">{question}</div>
+            <div className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">{question}</div>
           ) : (
             <div className="text-sm text-[var(--text)]">
               <span className="font-medium">{connector}</span> · {title}

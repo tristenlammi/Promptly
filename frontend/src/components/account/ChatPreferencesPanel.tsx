@@ -220,8 +220,7 @@ export function ChatPreferencesPanel() {
           description={
             <>
               Lets the assistant do things mid-reply instead of only
-              writing: search the web and read pages, run Python in a
-              sandbox to analyse a file or draw a chart, generate PDFs and
+              writing: search the web and read pages, generate PDFs and
               images, and fan out to parallel research agents. In a
               workspace it can also read your notes and boards and draft
               changes for you to approve. Turn this off and it can only

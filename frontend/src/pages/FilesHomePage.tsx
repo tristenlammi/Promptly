@@ -8,6 +8,7 @@ import type { FileItem } from "@/api/files";
 import { officeApi, type NewOfficeKind } from "@/api/office";
 import { askAboutFiles, ASK_MAX_FILES } from "@/components/files/askAbout";
 import { DriveItemIcon } from "@/components/files/DriveItemIcon";
+import { DriveListSkeleton } from "@/components/files/DriveListSkeleton";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
@@ -159,11 +160,7 @@ export function FilesHomePage() {
                 See all
               </Link>
             </div>
-            {isLoading && (
-              <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-              </div>
-            )}
+            {isLoading && <DriveListSkeleton rows={5} card />}
             {!isLoading && recent.length === 0 && (
               <p className="text-sm text-[var(--text-muted)]">Nothing yet — files you open or edit show up here.</p>
             )}
