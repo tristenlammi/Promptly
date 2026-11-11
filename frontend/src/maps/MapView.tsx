@@ -44,6 +44,8 @@ interface Props {
   trail?: [number, number][][];
   /** Tapped a warning on the route, or one on the traffic layer. */
   onPickIncident?: (incident: Pick<RouteIncident, "label" | "text" | "lat" | "lon" | "delay_seconds">) => void;
+  /** Light or dark for the map itself, when it isn't the app's own theme. */
+  colours?: "light" | "dark";
   /** Colour the roads by how busy they are. */
   showTraffic?: boolean;
   /** 1-degree squares ("<west>_<south>") shaded on the map: an offline area's. */
@@ -110,7 +112,8 @@ function dot(html: string, className: string): HTMLDivElement {
 
 export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, ref) {
   const { basemap, routes, selected, pin, stops, chargers, parked, you, saved, friends, marks, trail, fitTo, showTraffic, squares } = props;
-  const theme = useThemeStore((s) => s.resolved());
+  const appTheme = useThemeStore((s) => s.resolved());
+  const theme = props.colours ?? appTheme;
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const libRef = useRef<typeof import("maplibre-gl") | null>(null);

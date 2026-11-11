@@ -4,7 +4,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, ArrowUp, ArrowUpDown, BatteryCharging, Bike, Bookmark, Briefcase, Car, ChevronDown, ChevronUp, Clock, CloudDownload, Copy, SlidersHorizontal, Crosshair, Footprints, GripVertical,
-  Home, Layers, List, Loader2, LocateFixed, LocateOff, MapPin, Minus, Navigation, ParkingCircle, Plus, Route as RouteIcon, Search, Share2, Smartphone, TrafficCone, Trash2, User, Users, X,
+  Home, Layers, List, Loader2, LocateFixed, LocateOff, MapPin, Minus, Navigation, ParkingCircle, Plus, Route as RouteIcon, Search, Share2, Smartphone, SunMoon, TrafficCone, Trash2, User, Users, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -19,6 +19,7 @@ import { toast } from "@/store/toastStore";
 
 import { useKeyboardInset } from "@/components/files/documents/useKeyboardInset";
 import { NEARBY, mapsApi, decodeShape, formatDuration, formatKm, routeSeconds, trafficLine, type Charger, type Mode, type PlaceMore, type PreferredRoute, type Route, type SavedPlace, type SearchResult, type Spot } from "./api";
+import { MAP_THEMES, saveMapTheme, savedMapTheme, useMapColours, type MapTheme } from "./daylight";
 import { mapsPinLink, mapsRouteLink } from "./links";
 import { MapView, placeLook, type MapViewHandle } from "./MapView";
 import { OFFLINE_KEY, OfflinePanel, saveRouteForOffline, useOffline } from "./Offline";
@@ -103,6 +104,9 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
 
   // Where you are, while the map is open.
   const [you, setYou] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
+  // The map is dark from sunset to sunrise where you are, unless you'd rather it wasn't.
+  const [mapTheme, setMapTheme] = useState<MapTheme>(savedMapTheme);
+  const colours = useMapColours(mapTheme, you);
   const centredOnYou = useRef(false);
   const [locationBlocked, setLocationBlocked] = useState(false);
   // Why the phone hasn't given a location, once it has said. The watch carries on.
@@ -388,6 +392,14 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     }
   };
 
+  // No destination: the phone's driving map, following you, with your speed.
+  const justDrive = () => {
+    window.location.href = "promptlymaps://navigate";
+    window.setTimeout(() => {
+      if (document.visibilityState === "visible") toast.info("Didn't open? The driving map needs the latest Promptly app, from Apps → Install apps.");
+    }, 2500);
+  };
+
   // Turn-by-turn runs on the phone. Anywhere else, hand the trip over to it.
   const [sendToPhone, setSendToPhone] = useState<{ link: string; fromHere: boolean } | null>(null);
   const startDriving = async () => {
@@ -644,6 +656,12 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
           nearby={<NearbyPanel centre={() => you ?? map.current?.center() ?? null} onShow={(r) => showPlace(r)} onMarks={setNearMarks} />}
           home={saved.home}
           work={saved.work}
+          mapTheme={mapTheme}
+          onMapTheme={(t) => {
+            setMapTheme(t);
+            saveMapTheme(t);
+          }}
+          onDrive={isAndroidDevice() ? justDrive : undefined}
           places={saved.rest}
           recents={recents}
           parked={parked}
@@ -814,6 +832,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
         <MapView
           ref={map}
           basemap={config?.basemap ?? null}
+          colours={colours}
           routes={routes}
           selected={selected}
           pin={panel === "place" ? place : panel === "charger" && charger ? { lat: charger.lat, lon: charger.lon, name: charger.name } : null}
@@ -1097,6 +1116,10 @@ function HomePanel(p: {
   nearby: React.ReactNode;
   home?: SavedPlace;
   work?: SavedPlace;
+  mapTheme: MapTheme;
+  onMapTheme: (theme: MapTheme) => void;
+  /** On a phone with the app: open the driving map with nowhere to go. */
+  onDrive?: () => void;
   places: SavedPlace[];
   recents: Spot[];
   parked: { lat: number; lon: number; note: string | null; at: string } | null;
@@ -1131,6 +1154,7 @@ function HomePanel(p: {
         <Shortcut icon={Home} label="Home" detail={p.home?.address ?? p.home?.name ?? "Search, then save as Home"} onClick={p.home ? () => p.onGo({ ...p.home!, name: "Home" }) : undefined} />
         <Shortcut icon={Briefcase} label="Work" detail={p.work?.address ?? p.work?.name ?? "Search, then save as Work"} onClick={p.work ? () => p.onGo({ ...p.work!, name: "Work" }) : undefined} />
       </div>
+      {p.onDrive && <Row icon={Navigation} title="Just drive" detail="Follow the map with your speed, no destination" onClick={p.onDrive} />}
       {p.parked ? (
         <Row
           icon={ParkingCircle}
@@ -1151,6 +1175,14 @@ function HomePanel(p: {
         detail={p.offlineAreas ? `${p.offlineAreas} ${p.offlineAreas === 1 ? "area" : "areas"} kept on your phone for no signal` : "Keep the map on your phone for no signal"}
         onClick={p.onOffline}
       />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
+        <SunMoon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-[var(--text)]">Map colours</span>
+          <span className="block truncate text-xs text-[var(--text-muted)]">{p.mapTheme === "auto" ? "Dark from sunset to sunrise where you are" : "Stays this way day and night"}</span>
+        </span>
+        <Choice label="Map colours" value={p.mapTheme} onChange={p.onMapTheme} options={MAP_THEMES} className="pl-7" />
+      </div>
       {p.usual.length > 0 && (
         <div>
           <Heading>Your usual routes</Heading>

@@ -26,6 +26,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: the map goes dark at sunset and light at sunrise where you are, worked out on the phone from your position and the date, and it changes mid-drive without disturbing the trip. Pick Automatic, Always light or Always dark under the map's menu (Map colours). The phone's own dark mode no longer decides it.
 - P Maps: just drive. Open the driving map with no destination and, once you're moving, it follows you heading-up with an arrow, shows your speed, the road you're on and its speed limit (when the server knows them), and keeps the screen on. Pan away and a Re-centre button brings it back; "Where to?" stays at the top to start a trip. GPS stops when the screen is off or the app is in the background with no trip.
 - P Maps: a sound button on the driving screen cycles Sound on, Alerts only and Muted.
+- P Maps on the web: the same Map colours choice (Automatic by the sun where you are, Always light, Always dark) on the map's home panel; it changes the map only, not the rest of the app. On an Android phone the home panel also has Just drive, which opens the driving map with no destination.
+- P Maps on Android Auto: with no trip set, the map now keeps you in the middle, heading up, while you drive (it used to centre once and stay put). Move the map yourself and it's left alone for 20 seconds.
 
 ### Changed
 

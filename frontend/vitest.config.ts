@@ -8,7 +8,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   test: {
-    include: ["src/passwords/**/*.test.ts", "src/lib/**/*.test.ts", "src/rtc/**/*.test.ts", "src/components/layout/**/*.test.tsx"],
+    include: ["src/passwords/**/*.test.ts", "src/lib/**/*.test.ts", "src/maps/**/*.test.ts", "src/rtc/**/*.test.ts", "src/components/layout/**/*.test.tsx"],
     environment: "node",
     testTimeout: 60_000,
   },
