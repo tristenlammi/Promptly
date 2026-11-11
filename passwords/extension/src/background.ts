@@ -23,6 +23,7 @@ import { canCheckClipboard, CLIP_ALARM, clearClipboardIfOurs, clipboardTest, wat
 import { BrowserBookmarks, VaultBookmarks } from "./bookmarks";
 import { addSyncMenus, browserSyncTick, handleBrowserSync, initBrowserSync, type SyncRequest } from "./browsersync";
 import { type Base, bookmarkHash, bookmarksHtml, reconcile, syncableUrl, validItem } from "../../../frontend/src/passwords/core/bookmarks";
+import { LiveChannel } from "../../../frontend/src/passwords/core/live";
 import { handlePasskey, offerRows, useOffer } from "./passkeys";
 import { packPublicKey } from "./rules-key";
 import { type Candidate, type ContentRequest, ext, type FillOutcome, type LockChoice, type LockWhen, type MenuRequest, type PageReport, type PageRequest, type SaveRequest, type StateOut, type ToContent } from "./rpc";
@@ -132,6 +133,9 @@ async function proveAgain(c: VaultClient): Promise<boolean> {
   try {
     await c.reprove();
     await session.set({ vaultSession: c.api.session });
+    // A socket signed in with the old session would be closed at its next check: use the new one now.
+    live.stop();
+    live.start(true);
     return true;
   } catch (e) {
     if (e instanceof ApiError && (e.status === 401 || e.status === 403 || e.status === 404)) await lockIfNever();
@@ -143,11 +147,41 @@ async function lockIfNever(): Promise<void> {
   if ((await lockChoice()).when === "never") await lock();
 }
 
-function startKeepAlive() {
+/** `fresh` is an unlock: the live channel connects at once, whatever it last failed at. */
+function startKeepAlive(fresh = false) {
   // An alarm every 30 s keeps Chrome from dropping the decrypted index between uses
   // while unlocked. If it's dropped anyway, boot() brings it back.
-  ext.alarms.create(KEEPALIVE, { periodInMinutes: 0.5 });
-  ext.alarms.create(SYNC_ALARM, { periodInMinutes: 1 });
+  void keepAlarm(KEEPALIVE, 0.5);
+  void keepAlarm(SYNC_ALARM, 1);
+  live.start(fresh);
+}
+
+/** Creating an alarm that's already there replaces it and starts its wait again. boot() runs on
+ *  every wake of the worker, so recreating them there kept pushing the minute's sync back, and
+ *  a worker woken every 30 s could go minutes without one (2026-11-11, bookmarks 1-2 min late). */
+async function keepAlarm(name: string, periodInMinutes: number): Promise<void> {
+  const had = await ext.alarms.get(name).catch(() => undefined);
+  if (had?.periodInMinutes === periodInMinutes) return;
+  await ext.alarms.create(name, { periodInMinutes });
+}
+
+// ---- The live channel (core/live.ts, BOOKMARKS.md "When") ---------------------------------
+// The server says "vault X is at revision N" as soon as another device writes to it, so a
+// bookmark or a login made elsewhere is pulled in seconds. Only a number comes down it; the
+// minute's alarm still runs, and covers any time the socket isn't there.
+const live = new LiveChannel({
+  baseUrl: () => serverUrl,
+  credentials: async () => (client?.unlocked && token && client.api.session ? { token, session: client.api.session } : null),
+  behind: async (revisions) => !!client?.unlocked && (await client.behind(revisions)),
+  pull: livePull,
+  refusedMs: 60_000,
+});
+
+async function livePull(): Promise<void> {
+  await boot();
+  if (!client?.unlocked) return;
+  await safeSync();
+  await runBookmarks();
 }
 
 type ExtSettings = { onClickOnly: boolean; neverHosts: string[]; mailCodes: boolean };
@@ -201,6 +235,7 @@ async function lock() {
   await ext.alarms.clear(KEEPALIVE);
   await ext.alarms.clear(LOCK_ALARM);
   await ext.alarms.clear(SYNC_ALARM);
+  live.stop();
   booted = null;
   client = makeClient();
   // Nothing we copied should outlast the lock.
@@ -232,6 +267,8 @@ ext.alarms.onAlarm.addListener(async (a) => {
   await boot();
   if (a.name === LOCK_ALARM && typeof (await lockChoice()).when === "number") await lock();
   if (a.name === KEEPALIVE) await noticeSleep();
+  // A worker that was stopped lost its socket. Waking it is the time to open another.
+  if ((a.name === KEEPALIVE || a.name === SYNC_ALARM) && client?.unlocked) live.start();
   if (a.name === CLIP_ALARM) await clearClipboardIfOurs();
   if (a.name === PIN_ALARM) await unlockPin.expireIfStale();
   if (a.name === SYNC_ALARM && client?.unlocked) {
@@ -369,13 +406,16 @@ async function bookmarkPass(allowUpTo: number | undefined) {
 }
 
 let bookmarkTimer: ReturnType<typeof setTimeout> | undefined;
+/** Long enough for a folder move or an import to finish, short enough to feel immediate. The
+ *  other browsers hear of it over the live channel as soon as it's pushed. */
+const BOOKMARK_SETTLE_MS = 1000;
 /** A folder move or an import is many events. The worker may die first, and then the next
  *  alarm does the same job, because a run compares states and doesn't need the events. */
 function bookmarksChanged() {
   clearTimeout(bookmarkTimer);
   bookmarkTimer = setTimeout(() => {
     void boot().then(() => runBookmarks());
-  }, 3000);
+  }, BOOKMARK_SETTLE_MS);
 }
 
 function listenToBookmarks() {
@@ -1116,7 +1156,7 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       const locksBefore = locks;
       const r = await c.unlock(m.password, undefined, { keepSecret: true });
       await saveSecret(r.secret!, c.api.session, locksBefore);
-      startKeepAlive();
+      startKeepAlive(true);
       await touchLockTimer();
       updateBadgeAll();
       return { offline: r.offline };
@@ -1224,7 +1264,7 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       const locksBefore = locks;
       const r = await c.unlockWithSecret(secret);
       await saveSecret(secret, c.api.session, locksBefore);
-      startKeepAlive();
+      startKeepAlive(true);
       await touchLockTimer();
       updateBadgeAll();
       return { offline: r.offline };
@@ -1312,7 +1352,7 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       const locksBefore = locks;
       await c.unlockWithSecret(secret);
       await saveSecret(secret, c.api.session, locksBefore);
-      startKeepAlive();
+      startKeepAlive(true);
       await touchLockTimer();
       updateBadgeAll();
       return { ok: true };

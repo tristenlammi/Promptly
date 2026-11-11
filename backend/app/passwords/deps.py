@@ -69,6 +69,15 @@ async def get_vault_identity(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
 ) -> VaultIdentity:
+    identity = await identity_for(credentials, db)
+    if identity.device is not None:
+        request.state.pw_device_id = identity.device.id
+    return identity
+
+
+async def identity_for(credentials: HTTPAuthorizationCredentials | None, db: AsyncSession) -> VaultIdentity:
+    """Who a bearer token is, for :func:`get_vault_identity` and the live channel
+    (``live.py``), which gets its token in a message rather than a header."""
     settings = get_settings()
     token = credentials.credentials if credentials else None
 
@@ -84,7 +93,6 @@ async def get_vault_identity(
             await db.execute(update(PwDevice).where(PwDevice.id == device.id).values(last_seen_at=now()))
             await db.commit()
         bind_user(user.id)
-        request.state.pw_device_id = device.id
         return VaultIdentity(user=user, device=device)
 
     if settings.SINGLE_USER_MODE:
@@ -116,6 +124,13 @@ async def require_session(
     x_vault_session: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> VaultSession:
+    return await session_for(identity, x_vault_session, db)
+
+
+async def session_for(identity: VaultIdentity, x_vault_session: str | None, db: AsyncSession, *, touch: bool = True) -> VaultSession:
+    """The vault session ``x_vault_session`` names, if it's live and this identity's.
+    ``touch`` moves its idle expiry on; the live channel's re-checks don't, so an open
+    socket alone never keeps a session going."""
     if not x_vault_session or not x_vault_session.startswith(SESSION_PREFIX):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "vault_locked")
     row = await db.scalar(select(PwSession).where(PwSession.token_hash == hash_token(x_vault_session)))
@@ -131,7 +146,7 @@ async def require_session(
         or (row.device_id is not None and (identity.device is None or identity.device.id != row.device_id))
     ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "vault_locked")
-    if row.expires_at - current < SESSION_IDLE - timedelta(minutes=1):
+    if touch and row.expires_at - current < SESSION_IDLE - timedelta(minutes=1):
         row.expires_at = min(current + SESSION_IDLE, row.hard_expires_at)
         await db.commit()
     return VaultSession(user=identity.user, device=identity.device, session=row)

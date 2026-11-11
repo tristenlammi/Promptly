@@ -1239,6 +1239,22 @@ export class VaultClient {
 
   private syncKeys = new WeakMap<object, SyncKey>();
 
+  /** Whether the live channel's revisions (core/live.ts) say a sync would bring something: a vault
+   *  this device opens that has moved past what it pulled, or one it's never seen. A vault it
+   *  doesn't open (an invitation not yet taken, travel mode) is behind for ever, and isn't a reason. */
+  async behind(revisions: Record<string, number>): Promise<boolean> {
+    if (!this.unlocked) return false;
+    const local = new Map((await this.store.getVaults()).map((v) => [v.id, v]));
+    for (const [id, revision] of Object.entries(revisions)) {
+      if (typeof revision !== "number") continue;
+      const v = local.get(id);
+      if (!v) return true;
+      if (v.hidden || !this.mayOpen({ id: v.id, kind: v.kind, grantedBy: v.grantedBy })) continue;
+      if (v.revision < revision) return true;
+    }
+    return false;
+  }
+
   /** Where new things are saved. Their own vault, as this device knows it (refreshOwnPins). A new
    *  device whose other devices haven't signed theirs yet goes on the one vault the server calls
    *  personal, as before, but reads no trust book from it and seals nothing from it. */
