@@ -27,10 +27,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: just drive. Open the driving map with no destination and, once you're moving, it follows you heading-up with an arrow, shows your speed, the road you're on and its speed limit (when the server knows them), and keeps the screen on. Pan away and a Re-centre button brings it back; "Where to?" stays at the top to start a trip. GPS stops when the screen is off or the app is in the background with no trip.
 - P Maps: a sound button on the driving screen cycles Sound on, Alerts only and Muted.
 - P Maps on the web: the same Map colours choice (Automatic by the sun where you are, Always light, Always dark) on the map's home panel; it changes the map only, not the rest of the app. On an Android phone the home panel also has Just drive, which opens the driving map with no destination.
+- P Maps: a speeding beep, off until you turn it on. Under the map's menu (or mid-trip, by tapping the arrival time) choose At the limit, 5 km/h over or 10 km/h over. One short beep when you go over, and not again until you've dropped back under (or two minutes have passed). It works on a trip and when just driving, wherever the map knows the limit, and follows the Sound button: Muted is silent, Alerts only still beeps.
+- P Maps: share this trip. The share button on the arrival bar lets you pick people on your Promptly; they get a notification and can watch where you are and when you'll arrive under People on their Maps page. It stops by itself when you arrive or end the trip, or when you press Stop sharing. No public links, and nobody else (admins included) can see it. Notifications has a P Maps switch for these.
+- P Maps: tap the arrival time during a trip to change Map colours or the speeding beep without ending the trip.
 - P Maps on Android Auto: with no trip set, the map now keeps you in the middle, heading up, while you drive (it used to centre once and stay put). Move the map yourself and it's left alone for 20 seconds.
 
 ### Changed
 
+- P Maps on Android: the P Maps icon now always opens the map showing where you are, following you as you drive. Saved places, Timeline and People are one tap away under the search bar (they open on top, and Back returns to the map). A phone that hasn't been signed in to the map yet opens the Maps page once; pressing Just drive there signs it in.
+- P Maps: the route line and your arrow are now in Promptly's terracotta, with day and night shades, and traffic colours on the route have a dark edge so they stand apart from it. A leftover shadow from a hidden button on the driving screen is gone.
 - P Maps: the driving screen has a new look. A bigger next-turn banner with the turn after it, a bottom bar with the arrival time, minutes and distance left and a large End button, a speed badge that turns red over the limit, a road-name pill, larger round buttons (assistant, add a stop, sound, whole route / Re-centre), and matching day and night colours.
 
 ### Fixed

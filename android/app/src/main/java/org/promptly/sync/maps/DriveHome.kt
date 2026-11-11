@@ -252,6 +252,10 @@ fun DriveHome(
             delay(4_000)
         }
     }
+    // Over the limit with no trip on: the same beep as on one, when you've turned it on.
+    LaunchedEffect(here, road, driving) {
+        Nav.speedNow(here?.takeIf { driving && it.hasSpeed() }?.let { it.speed * 3.6 }, road?.limit)
+    }
     val voice by Voice.state.collectAsState()
     val said by Voice.reply.collectAsState()
     val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -412,10 +416,10 @@ fun DriveHome(
             options = MapOptions(ornamentOptions = OrnamentOptions.OnlyLogo),
         ) {
             RoutesOnMap(routes.orEmpty(), selected, DriveColours.route(dark))
-            Spot("promptly-picked", picked?.let { it.lat to it.lon }, accent, 9)
+            Spot("promptly-picked", picked?.let { it.lat to it.lon }, DriveColours.picked(dark), 9)
             // An arrow facing the way you're going while you drive, a dot when you aren't.
             val at = here?.let { it.latitude to it.longitude }
-            if (driving && picked == null) Puck(at, heading) else Spot("promptly-here", at, Color(0xFF1A73E8), 7)
+            if (driving && picked == null) Puck(at, heading) else Spot("promptly-here", at, DriveColours.you(dark), 8)
         }
 
         // While searching, the results fill the space above the keyboard.
@@ -444,6 +448,7 @@ fun DriveHome(
                 // On the move, just the map and Where to?: nothing to read.
                 if (!driving) {
                     Shortcuts(mine, usual, onPick = ::pick)
+                    if (online) MoreOfMaps()
                     Status(online, areas)
                 }
                 problem?.let { Note(it) }
@@ -521,6 +526,7 @@ private fun SearchBar(
     val focusRequester = remember { FocusRequester() }
     var menu by remember { mutableStateOf(false) }
     val theme by Nav.themeNow.collectAsState()
+    val speeding by Nav.speedWarningNow.collectAsState()
     LaunchedEffect(start) { if (start) runCatching { focusRequester.requestFocus() } }
     Surface(shape = RoundedCornerShape(28.dp), shadowElevation = 4.dp, tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -554,7 +560,7 @@ private fun SearchBar(
                         context.startActivity(Intent(context, OfflineAreasActivity::class.java))
                     })
                     if (online) {
-                        DropdownMenuItem(text = { Text("Open P Maps on the web") }, onClick = {
+                        DropdownMenuItem(text = { Text("Places, lists and more") }, onClick = {
                             menu = false
                             openWebMaps(context)
                         })
@@ -576,6 +582,25 @@ private fun SearchBar(
                                 Nav.setTheme(choice)
                             },
                             modifier = Modifier.semantics { selected = theme == choice },
+                        )
+                    }
+                    HorizontalDivider()
+                    // A beep when you go over the limit, where the map knows it. Off unless you ask.
+                    Text(
+                        "Speeding beep",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 2.dp).semantics { heading() },
+                    )
+                    SpeedWarning.entries.forEach { choice ->
+                        DropdownMenuItem(
+                            text = { Text(choice.label) },
+                            leadingIcon = { RadioButton(selected = speeding == choice, onClick = null) },
+                            onClick = {
+                                menu = false
+                                Nav.setSpeedWarning(choice)
+                            },
+                            modifier = Modifier.semantics { selected = speeding == choice },
                         )
                     }
                     HorizontalDivider()
@@ -645,6 +670,28 @@ private fun PlaceRow(stop: Stop, here: Location?, onPick: (Stop) -> Unit) {
             if (line.isNotEmpty()) {
                 Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
+        }
+    }
+}
+
+/** The rest of P Maps, a tap away: these are pages on your server, and Back from one
+ *  comes back to this map. */
+@Composable
+private fun MoreOfMaps() {
+    val context = LocalContext.current
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            Triple("Saved places", "/maps", R.drawable.ic_map_star),
+            Triple("Timeline", "/maps?panel=timeline", R.drawable.ic_map_recent),
+            Triple("People", "/maps?panel=people", R.drawable.ic_map_share),
+        ).forEach { (label, path, icon) ->
+            AssistChip(
+                onClick = { openWebMaps(context, path) },
+                label = { Text(label, maxLines = 1) },
+                leadingIcon = { Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
+                colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = AssistChipDefaults.assistChipElevation(elevation = 2.dp),
+            )
         }
     }
 }

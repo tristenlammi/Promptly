@@ -75,7 +75,7 @@ import com.stadiamaps.ferrostar.core.boundingBox
 import com.stadiamaps.ferrostar.maplibreui.routeline.BorderedPolyline
 import com.stadiamaps.ferrostar.maplibreui.routeline.RouteOverlayBuilder
 import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
-import com.stadiamaps.ferrostar.maplibreui.views.DynamicallyOrientingNavigationView
+import com.stadiamaps.ferrostar.maplibreui.NavigationMapPuckStyle
 import kotlinx.coroutines.launch
 import org.maplibre.compose.style.BaseStyle
 import org.promptly.sync.R
@@ -91,6 +91,18 @@ import uniffi.ferrostar.DrivingSide
 class NavigationActivity : ComponentActivity() {
     private val request = mutableStateOf<Trip?>(null)
     private val driveAsk = mutableStateOf<DriveAsk?>(null)
+
+    /** Sign-in handed over with no trip (the web's "Just drive"): server and code. */
+    private val pair = mutableStateOf<Pair<String, String>?>(null)
+
+    /** Opened by a tap on the P Maps icon, not by a link or from inside the app. */
+    private var fromIcon = false
+
+    private fun pairOf(uri: Uri?): Pair<String, String>? {
+        val server = uri?.getQueryParameter("server") ?: return null
+        val code = uri.getQueryParameter("code") ?: return null
+        return server to code
+    }
 
     private data class Trip(val server: String?, val code: String?, val stops: List<Stop>, val options: TripOptions, val through: List<ThroughPoint>)
 
@@ -135,6 +147,8 @@ class NavigationActivity : ComponentActivity() {
         // hadn't started yet is picked up again.
         if (savedInstanceState == null || savedInstanceState.getBoolean(PENDING)) {
             request.value = parse(intent?.data)
+            pair.value = pairOf(intent?.data)
+            fromIcon = intent?.getBooleanExtra(EXTRA_FROM_ICON, false) == true
             driveAsk.value = DriveAsk.fromWebPath(intent?.getStringExtra(MapLinkActivity.EXTRA_PATH))
         }
         // Ended anywhere (here, the car's End, the assistant, arriving): back to the map
@@ -156,7 +170,8 @@ class NavigationActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize()) {
                     val trip by request
                     val ask by driveAsk
-                    Driving(trip, ask) { finish() }
+                    val signIn by pair
+                    Driving(trip, ask, signIn) { finish() }
                 }
             }
         }
@@ -169,11 +184,15 @@ class NavigationActivity : ComponentActivity() {
 
     private companion object {
         const val PENDING = "trip_pending"
+
+        /** Set by the P Maps launcher (SuiteLauncher) when its icon was tapped. */
+        const val EXTRA_FROM_ICON = "org.promptly.app.FROM_ICON"
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val trip = parse(intent.data)
+        pairOf(intent.data)?.let { pair.value = it }
         if (trip != null) {
             // The trip a recreated screen picks up again if it hadn't started.
             setIntent(intent)
@@ -183,7 +202,7 @@ class NavigationActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Driving(trip: Trip?, driveAsk: DriveAsk?, onDone: () -> Unit) {
+    private fun Driving(trip: Trip?, driveAsk: DriveAsk?, pair: Pair<String, String>?, onDone: () -> Unit) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var signedIn by remember { mutableStateOf(false) }
@@ -202,13 +221,23 @@ class NavigationActivity : ComponentActivity() {
                 ask.launch(wanted.toTypedArray())
             }
         }
-        LaunchedEffect(trip) {
-            runCatching { Maps.signIn(context, trip?.server, trip?.code) }
+        LaunchedEffect(trip, pair) {
+            runCatching { Maps.signIn(context, trip?.server ?: pair?.first, trip?.code ?: pair?.second) }
                 .onSuccess {
+                    problem = null
                     signedIn = true
                     Nav.loadStyle(this)
                 }
                 .onFailure {
+                    if (signedIn) return@onFailure
+                    // The icon, on a phone the map hasn't been signed in on yet: P Maps on
+                    // your server instead of a dead end. "Just drive" there signs this in.
+                    if (trip == null && fromIcon) {
+                        fromIcon = false
+                        openWebMaps(context)
+                        onDone()
+                        return@onFailure
+                    }
                     problem = if (trip == null && Maps.server(context) == null) {
                         "Sign in to P Maps on this phone first: start a trip from P Maps on the web once, or pair this phone in Promptly."
                     } else it.message ?: "Couldn't sign in."
@@ -268,6 +297,7 @@ class NavigationActivity : ComponentActivity() {
         val source by Nav.routeSource.collectAsState()
         val offRoute by Nav.offRoute.collectAsState()
         var addingStop by remember { mutableStateOf(false) }
+        val sharedWith by Nav.sharedWith.collectAsState()
         val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
             if (ok) Voice.press(applicationContext)
         }
@@ -294,10 +324,29 @@ class NavigationActivity : ComponentActivity() {
         val under = if (navigating) with(density) { DriveLayout.banner.toDp() } else 0.dp
         val above = if (navigating) with(density) { DriveLayout.eta.toDp() } else 0.dp
         val routeLine = remember(dark) {
-            RouteOverlayBuilder(navigationPath = { ui -> ui.routeGeometry?.let { BorderedPolyline(points = it, color = DriveColours.route(dark)) } })
+            RouteOverlayBuilder(navigationPath = { ui ->
+                ui.routeGeometry?.let { BorderedPolyline(points = it, color = DriveColours.route(dark), borderColor = DriveColours.routeEdge(dark)) }
+            })
+        }
+        val you = DriveColours.you(dark)
+        val puck = remember(you) {
+            NavigationMapPuckStyle(
+                dotFillColorCurrentLocation = you,
+                dotFillColorOldLocation = you,
+                accuracyStrokeColor = you,
+                accuracyFillColor = you.copy(alpha = 0.16f),
+                bearingColor = you,
+            )
+        }
+        // The sheets are for a trip that's running.
+        LaunchedEffect(navigating) {
+            if (!navigating) {
+                DriveLayout.sharing = false
+                DriveLayout.options = false
+            }
         }
         Box(Modifier.fillMaxSize()) {
-            DynamicallyOrientingNavigationView(
+            DriveNavigationView(
                 modifier = Modifier.fillMaxSize(),
                 baseStyle = BaseStyle.Uri(styleUri),
                 navigationMapState = mapState,
@@ -307,6 +356,7 @@ class NavigationActivity : ComponentActivity() {
                 views = driveViews,
                 theme = NoLibraryButtons,
                 routeOverlayBuilder = routeLine,
+                locationPuckStyle = puck,
                 // Ending the trip goes back to Drive (Nav.ended).
                 onTapExit = { Nav.stop() },
                 mapContent = { TrafficOnRoute() },
@@ -404,6 +454,12 @@ class NavigationActivity : ComponentActivity() {
             if (addingStop) {
                 AddStopSheet { addingStop = false }
             }
+            if (DriveLayout.sharing && navigating) {
+                ShareTripSheet(sharedWith) { DriveLayout.sharing = false }
+            }
+            if (DriveLayout.options && navigating) {
+                TripOptionsSheet { DriveLayout.options = false }
+            }
             faster?.let { offer ->
                 LaunchedEffect(offer.savesMinutes) {
                     kotlinx.coroutines.delay(30_000)
@@ -447,6 +503,10 @@ class NavigationActivity : ComponentActivity() {
 private object DriveLayout {
     var banner by mutableIntStateOf(0)
     var eta by mutableIntStateOf(0)
+
+    /** Asked for from the arrival bar: who can watch this trip, and the trip's options. */
+    var sharing by mutableStateOf(false)
+    var options by mutableStateOf(false)
 }
 
 /** The turn card and the arrival bar: ours, in kilometres whatever the phone's language says. */
@@ -476,6 +536,7 @@ private val driveViews = NavigationViewComponentBuilder.Default()
         uiState.progress?.let { progress ->
             // With traffic, this bar shows the same arrival time as everything else.
             val traffic by Nav.traffic.collectAsState()
+            val watching by Nav.sharedWith.collectAsState()
             val context = LocalContext.current
             val now = java.time.Instant.now()
             val arriveAt = traffic?.arriveAt?.takeIf { it.isAfter(now) } ?: now.plusSeconds(progress.durationRemaining.toLong())
@@ -486,6 +547,9 @@ private val driveViews = NavigationViewComponentBuilder.Default()
                 trafficAddsMinutes = traffic?.addsMinutes,
                 onEnd = { onTapExit?.invoke() },
                 modifier = modifier.onSizeChanged { DriveLayout.eta = it.height },
+                sharing = watching.isNotEmpty(),
+                onShare = { DriveLayout.sharing = true },
+                onOptions = { DriveLayout.options = true },
             )
         }
     }

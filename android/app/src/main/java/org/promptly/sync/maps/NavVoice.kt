@@ -168,6 +168,23 @@ class NavVoice(context: Context) : SpokenInstructionObserver {
         }
     }
 
+    private val beepAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+
+    /** Two short pips (you're over the limit). The music dips for the half second
+     *  they take and comes straight back, the same way it does for a sentence. */
+    fun beep(id: String) {
+        ducking.begin(id)
+        val track = runCatching { Beep.track(beepAttributes) }.getOrNull()
+        main.postAtTime({
+            runCatching { track?.release() }
+            finished(id)
+        }, id, SystemClock.uptimeMillis() + (if (track == null) 0L else Beep.MILLIS + BEEP_TAIL_MS))
+        runCatching { track?.play() }
+    }
+
     private fun finished(id: String?) {
         id ?: return
         main.removeCallbacksAndMessages(id)
@@ -192,5 +209,6 @@ class NavVoice(context: Context) : SpokenInstructionObserver {
     private companion object {
         const val TAG = "PromptlyNavVoice"
         const val GIVE_UP_MS = 60_000L
+        const val BEEP_TAIL_MS = 200L
     }
 }

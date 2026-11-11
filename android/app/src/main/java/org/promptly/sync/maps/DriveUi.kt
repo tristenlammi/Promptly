@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -71,7 +72,17 @@ object DriveColours {
     val BannerNight = Color(0xFF2E2825)
     val BannerStrip = Color(0x1FFFFFFF)
 
-    fun route(dark: Boolean) = if (dark) Color(0xFF5B9DF0) else Color(0xFF2F78D6)
+    /** Your route, in Promptly's terracotta: deep on the day map, light on the night one. */
+    fun route(dark: Boolean) = if (dark) Color(0xFFEC9C7E) else Color(0xFFC2562F)
+
+    /** The route line's edge: what keeps it apart from the roads under it. */
+    fun routeEdge(dark: Boolean) = if (dark) Color(0xFF3A1A0E) else Color.White
+
+    /** You on the map. */
+    fun you(dark: Boolean) = if (dark) Color(0xFFE08B6D) else Color(0xFFC2562F)
+
+    /** The place you picked: not the colour of you, or of the way there. */
+    fun picked(dark: Boolean) = if (dark) Color(0xFFF3ECE6) else Color(0xFF26211E)
 
     fun scheme(dark: Boolean): ColorScheme = if (dark) {
         darkColorScheme(
@@ -298,17 +309,32 @@ fun TurnBanner(
 
 /** The bottom of a trip: when you'll get there, how long and how far that is, and End. */
 @Composable
-fun EtaBar(arrive: String, left: String, distance: String, trafficAddsMinutes: Int?, onEnd: () -> Unit, modifier: Modifier = Modifier) {
+fun EtaBar(
+    arrive: String,
+    left: String,
+    distance: String,
+    trafficAddsMinutes: Int?,
+    onEnd: () -> Unit,
+    modifier: Modifier = Modifier,
+    sharing: Boolean = false,
+    onShare: (() -> Unit)? = null,
+    onOptions: (() -> Unit)? = null,
+) {
     val scheme = MaterialTheme.colorScheme
     Surface(shape = RoundedCornerShape(24.dp), color = scheme.surface, contentColor = scheme.onSurface, shadowElevation = 8.dp, modifier = modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 22.dp, end = 12.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).clearAndSetSemantics { contentDescription = "Arriving $arrive, $left, $distance" }) {
+        Row(Modifier.padding(start = 10.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // The times are a button too: the map's colours and the speeding beep, mid-trip.
+            val options = if (onOptions == null) Modifier else Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClickLabel = "Trip options", onClick = onOptions)
+            Column(
+                Modifier.weight(1f).then(options).padding(start = 12.dp, top = 4.dp, bottom = 4.dp)
+                    .clearAndSetSemantics { contentDescription = "Arriving $arrive, $left, $distance" + if (onOptions != null) ". Trip options" else "" },
+            ) {
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(arrive, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold)
-                    Text("arrival", fontSize = 15.sp, lineHeight = 26.sp, color = scheme.onSurfaceVariant)
+                    Text(arrive, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                    Text(if (onOptions != null) "arrival ▾" else "arrival", fontSize = 15.sp, lineHeight = 26.sp, color = scheme.onSurfaceVariant, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("$left · $distance", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = scheme.onSurfaceVariant)
+                    Text("$left · $distance", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = scheme.onSurfaceVariant, maxLines = 1, softWrap = false)
                     if (trafficAddsMinutes != null && trafficAddsMinutes >= 1) {
                         Text(
                             "· +$trafficAddsMinutes min traffic",
@@ -321,12 +347,29 @@ fun EtaBar(arrive: String, left: String, distance: String, trafficAddsMinutes: I
                     }
                 }
             }
+            if (onShare != null) {
+                // Filled while someone's watching this trip.
+                Surface(
+                    onClick = onShare,
+                    shape = CircleShape,
+                    color = if (sharing) scheme.primary else scheme.surfaceVariant,
+                    contentColor = if (sharing) scheme.onPrimary else scheme.onSurface,
+                    modifier = Modifier.size(52.dp).semantics {
+                        contentDescription = if (sharing) "Sharing this trip. Change who can see it" else "Share this trip"
+                        role = Role.Button
+                    },
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(painterResource(org.promptly.sync.R.drawable.ic_map_share), contentDescription = null, modifier = Modifier.size(24.dp))
+                    }
+                }
+            }
             Surface(
                 onClick = onEnd,
                 shape = RoundedCornerShape(50),
                 color = DriveColours.Danger,
                 contentColor = Color.White,
-                modifier = Modifier.defaultMinSize(minWidth = 84.dp, minHeight = 56.dp).semantics { contentDescription = "End trip" },
+                modifier = Modifier.defaultMinSize(minWidth = 76.dp, minHeight = 56.dp).semantics { contentDescription = "End trip" },
             ) {
                 Box(contentAlignment = Alignment.Center) { Text("End", fontSize = 19.sp, fontWeight = FontWeight.Bold) }
             }

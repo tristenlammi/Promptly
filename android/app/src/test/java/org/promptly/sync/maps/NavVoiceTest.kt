@@ -141,4 +141,15 @@ class NavVoiceTest {
         assertFalse(voice.ducking.ducked)
         assertNull(audio.lastAudioFocusRequest)
     }
+
+    @Test
+    fun `a beep dips the music for as long as it sounds and no longer`() {
+        val voice = ready()
+        voice.beep("beep-1")
+        assertTrue(voice.ducking.ducked)
+        assertNotNull(audio.lastAudioFocusRequest)
+        ShadowLooper.idleMainLooper(1, java.util.concurrent.TimeUnit.SECONDS)
+        assertFalse(voice.ducking.ducked)
+        assertNotNull(audio.lastAbandonedAudioFocusRequest)
+    }
 }

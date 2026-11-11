@@ -17,6 +17,7 @@ import com.stadiamaps.ferrostar.core.location.NavigationLocationProvider
 import com.stadiamaps.ferrostar.core.location.NavigationLocationProviding
 import com.stadiamaps.ferrostar.core.location.SimulatedLocationProvider
 import com.stadiamaps.ferrostar.core.location.toUserLocation
+import com.stadiamaps.ferrostar.core.measurement.MeasurementSpeedUnit
 import com.stadiamaps.ferrostar.core.service.FerrostarForegroundServiceManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -319,6 +320,10 @@ object Nav {
             if (navigating) {
                 state.routeGeometry?.let(::routeIs)
                 state.location?.let { onLocation(it.coordinates.lat, it.coordinates.lng) }
+                speedNow(
+                    state.location?.speed?.value?.times(3.6),
+                    state.currentAnnotation?.speedLimit?.value(MeasurementSpeedUnit.KilometersPerHour)?.let { Math.round(it).toInt() },
+                )
             }
         }.launchIn(watching)
     }
@@ -493,6 +498,100 @@ object Nav {
         if (sound != Sound.ALL) voice?.stopAndClearQueue()
     }
 
+    private val _speedWarning by lazy {
+        val saved = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).getString("speed_alert", null)
+        MutableStateFlow(SpeedWarning.entries.firstOrNull { it.name == saved } ?: SpeedWarning.OFF)
+    }
+
+    /** Beep when you go over the limit: off, or how far over. */
+    val speedWarningNow: kotlinx.coroutines.flow.StateFlow<SpeedWarning> get() = _speedWarning
+
+    fun setSpeedWarning(choice: SpeedWarning) {
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit().putString("speed_alert", choice.name).apply()
+        _speedWarning.value = choice
+        speeding.reset()
+    }
+
+    private val speeding = SpeedAlert()
+
+    /** Your speed and the road's limit just now, on a trip or just driving: a beep when
+     *  you go over by more than you allowed. Muted means no beep; "Alerts only" beeps. */
+    fun speedNow(kmh: Double?, limit: Int?) {
+        val over = _speedWarning.value.over
+        if (over == null) return
+        if (!speeding.check(kmh, limit, over, android.os.SystemClock.elapsedRealtime())) return
+        if (sound() == Sound.MUTE) return
+        voice().beep("promptly-beep-${utterances.incrementAndGet()}")
+    }
+
+    // ---- Share this trip ------------------------------------------------------------
+
+    /** Someone on your Promptly a trip can be shared with. */
+    data class Person(val id: String, val name: String)
+
+    private val _sharedWith = MutableStateFlow<List<Person>>(emptyList())
+
+    /** Who's watching the trip you're on. Empty when it isn't shared. */
+    val sharedWith = _sharedWith.asStateFlow()
+
+    /** People to pick from: suggestions, or whoever matches what you typed. */
+    suspend fun peopleToShareWith(query: String): List<Person> = withContext(Dispatchers.IO) {
+        val found = Maps.get(app, "/api/maps/trip/people?q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8"), timeoutSeconds = 15)
+        val rows = found.optJSONArray("people") ?: return@withContext emptyList()
+        (0 until rows.length()).map { rows.getJSONObject(it) }.map { Person(it.getString("user_id"), it.optString("name", "Someone")) }
+    }
+
+    /** Let these people see where you are and when you'll arrive, until this trip ends.
+     *  They're sent a notification. Throws when it couldn't be done (no signal, say). */
+    suspend fun shareTrip(people: List<Person>) {
+        val vm = model
+        val state = vm?.navigationUiState?.value
+        val at = state?.location
+        val body = JSONObject().put("user_ids", org.json.JSONArray(people.map { it.id }))
+        (state?.destination ?: destination?.name)?.takeIf { it.isNotBlank() && it != "Destination" }?.let { body.put("destination", it) }
+        state?.progress?.let { body.put("eta", Instant.now().plusSeconds(it.durationRemaining.toLong()).toString()) }
+        at?.let { body.put("lat", it.coordinates.lat).put("lon", it.coordinates.lng) }
+        val answer = withContext(Dispatchers.IO) {
+            // Remembered first: if the answer is lost, ending the trip still ends the sharing.
+            tripPrefs().edit().putBoolean("trip_shared", true).apply()
+            Maps.send(app, "PUT", "/api/maps/trip/share", body, timeoutSeconds = 15)
+        }
+        val rows = answer.optJSONArray("sharing_with")
+        _sharedWith.value = if (rows == null) people else (0 until rows.length()).map { rows.getJSONObject(it) }.map { Person(it.getString("user_id"), it.optString("name", "Someone")) }
+        tripPrefs().edit().putString("trip_last", org.json.JSONArray(people.map { JSONObject().put("id", it.id).put("name", it.name) }).toString()).apply()
+        // Positions go every half minute from now, not whenever the slow check comes round.
+        if (vm != null && vm.navigationUiState.value.isNavigating()) liveLoop(vm)
+    }
+
+    /** Who you shared your last trip with: ticked for you next time. */
+    fun lastSharedWith(): List<Person> = runCatching {
+        val rows = org.json.JSONArray(tripPrefs().getString("trip_last", "[]"))
+        (0 until rows.length()).map { rows.getJSONObject(it) }.map { Person(it.getString("id"), it.getString("name")) }
+    }.getOrDefault(emptyList())
+
+    private fun tripPrefs() = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE)
+
+    /** The trip's over, or you stopped sharing it: nobody it was shared with sees you any
+     *  more. Tried until it works (the server also ends it by itself a while after you
+     *  were due, if the phone never gets through). */
+    fun endTripShare() {
+        _sharedWith.value = emptyList()
+        if (!tripPrefs().getBoolean("trip_shared", false)) return
+        endShareJob?.cancel()
+        endShareJob = watching.launch(Dispatchers.IO) {
+            repeat(20) { attempt ->
+                val ended = runCatching { Maps.send(app, "DELETE", "/api/maps/trip/share", JSONObject(), timeoutSeconds = 15) }.isSuccess
+                if (ended) {
+                    tripPrefs().edit().putBoolean("trip_shared", false).apply()
+                    return@launch
+                }
+                delay(if (attempt < 5) 10_000L else 60_000L)
+            }
+        }
+    }
+
+    private var endShareJob: Job? = null
+
     /** The car's mute button: directions on or everything off. */
     fun setMuted(muted: Boolean) = setSound(if (muted) Sound.MUTE else Sound.ALL)
 
@@ -554,6 +653,8 @@ object Nav {
     /** You're there: both screens say so, whichever started the trip. */
     fun arrivedNow() {
         if (_arrived.value) return
+        // You're there: the people watching this trip have seen what they needed.
+        endTripShare()
         arrivedAt = destination?.name?.takeIf { it.isNotBlank() && it != "Destination" }
         _arrived.value = true
         cameras = emptyList()
@@ -879,6 +980,8 @@ object Nav {
         // The offline engine's memory back, until the next trip needs it.
         runCatching { Offline.router(app).release() }
         liveJob?.cancel()
+        endTripShare()
+        speeding.reset()
         trafficJob?.cancel()
         _traffic.value = null
         _faster.value = null

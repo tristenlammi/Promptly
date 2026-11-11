@@ -92,6 +92,8 @@ Category = Literal[
     # Porch (0272): posts, comments, mentions, tags, invites, reactions,
     # birthdays — one switch here; per kind in Porch → Settings.
     "porch",
+    # P Maps: someone is sharing the trip they're driving with you.
+    "maps",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -119,6 +121,7 @@ CATEGORIES: tuple[str, ...] = (
     "call",
     "notes",
     "porch",
+    "maps",
     "test",
 )
 
@@ -210,6 +213,9 @@ RULES: dict[str, Rule] = {
         ),
     ),
 }
+# P Maps: "Sam is sharing a trip with you". It's about right now (it would be
+# over by morning), so quiet hours don't hold it; the switch turns it off.
+RULES["maps"] = Rule(False, app="P Maps", one="shared trip", many="shared trips", url="/maps?panel=people")
 _missing = set(CATEGORIES) - set(RULES)
 assert not _missing, f"notification categories without a quiet-hours rule: {_missing}"
 

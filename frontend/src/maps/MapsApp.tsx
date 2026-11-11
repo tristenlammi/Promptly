@@ -393,8 +393,16 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
   };
 
   // No destination: the phone's driving map, following you, with your speed.
-  const justDrive = () => {
-    window.location.href = "promptlymaps://navigate";
+  const justDrive = async () => {
+    // With a sign-in code, so it works on a phone that hasn't driven a trip yet.
+    let link = "promptlymaps://navigate";
+    try {
+      const code = await mapsApi.pairCode();
+      link += `?${new URLSearchParams({ server: window.location.origin, code }).toString()}`;
+    } catch {
+      // The phone may be signed in already.
+    }
+    window.location.href = link;
     window.setTimeout(() => {
       if (document.visibilityState === "visible") toast.info("Didn't open? The driving map needs the latest Promptly app, from Apps → Install apps.");
     }, 2500);
@@ -451,6 +459,18 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     setStops(rows);
     setPanel("route");
     window.setTimeout(() => void runRouteLatest.current(rows), 900);
+    // Only the link you arrived with.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A part of P Maps asked for by name: /maps?panel=people (a shared trip's
+  // notification, with &person=), or the phone's driving map opening Timeline.
+  const [showPerson, setShowPerson] = useState<string | null>(null);
+  useEffect(() => {
+    const wanted = params.get("panel");
+    if (wanted !== "people" && wanted !== "timeline" && wanted !== "offline") return;
+    setShowPerson(params.get("person"));
+    setParams({}, { replace: true });
+    setPanel(wanted);
     // Only the link you arrived with.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -743,7 +763,11 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
       )}
       {panel === "people" && (
         <PeoplePanel
-          onClose={() => setPanel("home")}
+          show={showPerson}
+          onClose={() => {
+            setShowPerson(null);
+            setPanel("home");
+          }}
           onShow={(p) => p.live && showPlace({ kind: "contact", name: p.name, address: p.live.destination ? `Going to ${p.live.destination}` : null, lat: p.live.lat, lon: p.live.lon })}
         />
       )}

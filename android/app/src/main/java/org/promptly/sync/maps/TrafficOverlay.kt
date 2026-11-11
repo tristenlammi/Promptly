@@ -9,6 +9,8 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
 import org.maplibre.compose.expressions.dsl.const
+import org.maplibre.compose.expressions.value.LineCap
+import org.maplibre.compose.expressions.value.LineJoin
 import org.maplibre.compose.layers.LineLayer
 import org.maplibre.compose.sources.GeoJsonData
 import org.maplibre.compose.sources.rememberGeoJsonSource
@@ -21,7 +23,7 @@ import org.maplibre.compose.util.MaplibreComposable
 fun TrafficOnRoute() {
     val traffic by Nav.traffic.collectAsState()
     val jams = traffic?.jams.orEmpty()
-    TrafficLayer("promptly-slow", jams.filter { it.kind == "slow" }, Color(0xFFEF9A1A))
+    TrafficLayer("promptly-slow", jams.filter { it.kind == "slow" }, Color(0xFFF7B500))
     TrafficLayer("promptly-jam", jams.filter { it.kind == "jam" }, Color(0xFFC62828))
 }
 
@@ -43,5 +45,8 @@ private fun TrafficLayer(id: String, jams: List<Nav.Jam>, colour: Color) {
         JSONObject().put("type", "FeatureCollection").put("features", features).toString()
     }
     val source = rememberGeoJsonSource(GeoJsonData.JsonString(json))
-    LineLayer(id = id, source = source, color = const(colour), width = const(7.dp))
+    // A dark edge under each stretch: amber and red read as traffic, not as more of the
+    // (terracotta) route, on the day map and the night one.
+    LineLayer(id = "$id-edge", source = source, color = const(Color(0xFF26211E)), width = const(11.dp), cap = const(LineCap.Round), join = const(LineJoin.Round))
+    LineLayer(id = id, source = source, color = const(colour), width = const(7.dp), cap = const(LineCap.Round), join = const(LineJoin.Round))
 }

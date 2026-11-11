@@ -31,6 +31,8 @@ export interface NotificationPreferences {
   notes: boolean;
   /** Porch: which kinds, and how, are chosen in Porch → Settings. */
   porch?: boolean;
+  /** P Maps: someone is sharing the trip they're driving with you. */
+  maps?: boolean;
   /** Quiet hours, "HH:MM" in your own time zone (one setting for all of Promptly). */
   quiet_enabled: boolean;
   quiet_start: string;
@@ -70,7 +72,8 @@ export type NotificationSwitch =
   | "call"
   | "call_quiet_hold"
   | "notes"
-  | "porch";
+  | "porch"
+  | "maps";
 
 export interface NotificationRow {
   id: string;

@@ -3,7 +3,11 @@
 The phone sends positions; a day's stays and journeys are worked out from them
 when you look, so deleting points really does delete the history. A timeline
 is only ever its owner's. Live location goes only to the people you chose, for
-as long as you chose, and its row is removed when nobody's left to see it."""
+as long as you chose, and its row is removed when nobody's left to see it.
+
+"Share this trip" is the same thing for one drive: the people you pick are
+told, see where you are and when you'll arrive, and stop seeing it when the
+trip ends (or a while after its arrival time, if the phone never says so)."""
 from __future__ import annotations
 
 import math
@@ -14,12 +18,14 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.database import get_db
+from app.notifications import notify_user
+from app.people import blocks
 
 from . import data, engine
 from .models import MapLiveLocation, MapPlace, MapShare, MapTrackPoint
@@ -336,13 +342,14 @@ async def shares(db: AsyncSession = Depends(get_db), user: User = Depends(maps_u
     ).all()
     return {
         "sharing_with": [
-            {"user_id": str(u.id), "name": u.username, "expires_at": s.expires_at.isoformat() if s.expires_at else None}
+            {"user_id": str(u.id), "name": u.username, "expires_at": s.expires_at.isoformat() if s.expires_at else None, "trip": s.trip}
             for s, u in mine
         ],
         "shared_with_me": [
             {
                 "user_id": str(u.id),
                 "name": u.username,
+                "trip": s.trip,
                 "live": {
                     "lat": live.lat, "lon": live.lon, "heading": live.heading, "speed": live.speed, "destination": live.destination,
                     "eta": live.eta.isoformat() if live.eta else None, "at": live.at.isoformat(),
@@ -369,8 +376,9 @@ async def start_share(body: ShareBody, db: AsyncSession = Depends(get_db), user:
     expires = datetime.now(timezone.utc) + timedelta(hours=body.hours) if body.hours else None
     await db.execute(
         insert(MapShare)
-        .values(id=uuid.uuid4(), owner_id=user.id, viewer_id=viewer.id, expires_at=expires)
-        .on_conflict_do_update(constraint="uq_map_share_pair", set_={"expires_at": expires})
+        .values(id=uuid.uuid4(), owner_id=user.id, viewer_id=viewer.id, expires_at=expires, trip=False)
+        # Chosen on purpose, so it outlives a trip you were sharing with them.
+        .on_conflict_do_update(constraint="uq_map_share_pair", set_={"expires_at": expires, "trip": False})
     )
     await db.commit()
     return {"user_id": str(viewer.id), "name": viewer.username, "expires_at": expires.isoformat() if expires else None}
@@ -393,6 +401,119 @@ async def stop_share(viewer_id: uuid.UUID, db: AsyncSession = Depends(get_db), u
     await db.commit()
 
 
+# ---- Share this trip ---------------------------------------------------------
+
+TRIP_GRACE = timedelta(hours=2)
+TRIP_LONGEST = timedelta(hours=24)
+
+
+def _trip_until(eta: datetime | None, now: datetime) -> datetime:
+    """When a shared trip lapses if the phone never says it's over: a while
+    after you were due, and never more than a day from now."""
+    due = eta if eta is not None and eta.tzinfo is not None else now + TRIP_GRACE
+    return min(max(due, now) + TRIP_GRACE, now + TRIP_LONGEST)
+
+
+class TripShareBody(BaseModel):
+    user_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+    destination: str | None = Field(default=None, max_length=200)
+    eta: datetime | None = None
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+
+
+async def _trip_viewers(db: AsyncSession, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    rows = (
+        await db.execute(
+            select(User).join(MapShare, MapShare.viewer_id == User.id)
+            .where(MapShare.owner_id == user_id, MapShare.trip.is_(True), _active(now)).order_by(func.lower(User.username))
+        )
+    ).scalars().all()
+    return [{"user_id": str(u.id), "name": u.username} for u in rows]
+
+
+@router.get("/trip/people")
+async def trip_people(q: str = Query(default="", max_length=80), db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)) -> dict[str, Any]:
+    """Who a trip can be shared with: the people picker's accounts on this
+    Promptly (suggestions when blank), for the phone, which signs in with a
+    maps-only password. Names only."""
+    from app.people.router import search
+
+    found = await search(q=q, details=False, db=db, viewer=user)
+    hidden = await blocks.hidden_ids(db, user.id)
+    people = [
+        {"user_id": row["user"]["id"], "name": row["name"] or row["user"]["username"]}
+        for row in found["people"]
+        if row.get("user") and uuid.UUID(str(row["user"]["id"])) not in hidden
+    ]
+    return {"people": people}
+
+
+@router.get("/trip/share")
+async def trip_shared_with(db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)) -> dict[str, Any]:
+    """Who's watching the trip you're on."""
+    return {"sharing_with": await _trip_viewers(db, user.id)}
+
+
+@router.put("/trip/share")
+async def share_trip(body: TripShareBody, db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)) -> dict[str, Any]:
+    """Share the trip you're driving with people on this Promptly. They're told,
+    and see where you are and when you'll arrive until the trip ends. Someone
+    you already share your location with keeps that as it is."""
+    now = datetime.now(timezone.utc)
+    hidden = await blocks.hidden_ids(db, user.id)
+    wanted = [i for i in dict.fromkeys(body.user_ids) if i != user.id and i not in hidden]
+    people = (await db.execute(select(User).where(User.id.in_(wanted), User.disabled.is_(False)))).scalars().all() if wanted else []
+    if not people:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="There's nobody by that name on this Promptly.")
+    until = _trip_until(body.eta, now)
+    already = {
+        row.viewer_id: row
+        for row in (await db.execute(select(MapShare).where(MapShare.owner_id == user.id, MapShare.viewer_id.in_([p.id for p in people])))).scalars()
+    }
+    told: list[User] = []
+    for person in people:
+        had = already.get(person.id)
+        ongoing = had is not None and not had.trip and (had.expires_at is None or had.expires_at > now)
+        if not ongoing:
+            await db.execute(
+                insert(MapShare)
+                .values(id=uuid.uuid4(), owner_id=user.id, viewer_id=person.id, expires_at=until, trip=True)
+                .on_conflict_do_update(constraint="uq_map_share_pair", set_={"expires_at": until, "trip": True})
+            )
+        # Told once a trip, not each time the list is sent again.
+        if had is None or not had.trip or (had.expires_at is not None and had.expires_at <= now):
+            told.append(person)
+    if body.lat is not None and body.lon is not None:
+        # Where you are now, so there's something to see before the phone's next report.
+        values = {"lat": body.lat, "lon": body.lon, "heading": None, "speed": None, "destination": body.destination, "eta": body.eta, "at": now}
+        await db.execute(insert(MapLiveLocation).values(user_id=user.id, **values).on_conflict_do_update(index_elements=["user_id"], set_=values))
+    await db.commit()
+    where = f" to {body.destination}" if body.destination else ""
+    for person in told:
+        await notify_user(
+            user_id=person.id,
+            category="maps",
+            title=f"{user.username} is sharing a trip with you",
+            body=f"See where they are on the way{where}, until they arrive.",
+            url=f"/maps?panel=people&person={user.id}",
+            tag=f"maps-trip-{user.id}",
+            actor_user_id=user.id,
+            ttl=3600,
+        )
+    return {"sharing_with": await _trip_viewers(db, user.id)}
+
+
+@router.delete("/trip/share", status_code=status.HTTP_204_NO_CONTENT)
+async def end_trip_share(db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)) -> None:
+    """The trip's over (arrived, ended, or you stopped sharing it): nobody it
+    was shared with sees you any more. Other sharing is left alone."""
+    await db.execute(delete(MapShare).where(MapShare.owner_id == user.id, MapShare.trip.is_(True)))
+    await _forget_if_unshared(db, user.id)
+    await db.commit()
+
+
 class LiveBody(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
@@ -407,8 +528,15 @@ async def live(body: LiveBody, db: AsyncSession = Depends(get_db), user: User = 
     """Your position, for the people you're sharing with. With nobody to see
     it, it isn't kept, and the phone is told it can stop sending."""
     sharing = await _forget_if_unshared(db, user.id)
+    trip = False
     if sharing:
-        values = {**body.model_dump(), "at": datetime.now(timezone.utc)}
+        now = datetime.now(timezone.utc)
+        values = {**body.model_dump(), "at": now}
         await db.execute(insert(MapLiveLocation).values(user_id=user.id, **values).on_conflict_do_update(index_elements=["user_id"], set_=values))
+        # A trip running late stays shared until it's over; one that's still going keeps going.
+        moved = await db.execute(
+            update(MapShare).where(MapShare.owner_id == user.id, MapShare.trip.is_(True)).values(expires_at=_trip_until(body.eta, now))
+        )
+        trip = bool(moved.rowcount)
     await db.commit()
-    return {"sharing": sharing}
+    return {"sharing": sharing, "trip": trip}
