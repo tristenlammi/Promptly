@@ -85,6 +85,9 @@ export interface UserSettings {
    *  or ``"manual"`` (inject saved facts, user adds them — no auto
    *  capture). Absent = derive from ``memory_enabled`` (on → auto). */
   memory_mode?: "off" | "auto" | "manual";
+  /** Health, money and other sensitive facts: saved like any other
+   *  (``"save"``, the default) or held for you to approve (``"ask"``). */
+  memory_sensitive?: "save" | "ask";
   /** Conversation ids the user has hidden from their own sidebar. */
   hidden_conversations?: string[];
   /** Account-wide custom system prompt injected into every new chat's
@@ -165,6 +168,8 @@ export interface UserPreferencesUpdate {
   memory_enabled?: boolean;
   /** Memory behaviour: off / auto / manual. */
   memory_mode?: "off" | "auto" | "manual";
+  /** Sensitive facts: save like any other, or ask first. */
+  memory_sensitive?: "save" | "ask";
   /** Replace the full set of conversation ids hidden from the sidebar. */
   hidden_conversations?: string[];
   /** Account-wide custom system prompt. Pass an empty string to clear. */

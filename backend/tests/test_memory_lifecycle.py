@@ -260,7 +260,30 @@ async def test_a_branch_isnt_read_for_what_it_copied(client, db, user, provider,
     assert branch.id not in await conversations_due(db)
 
 
-async def test_health_details_wait_for_you_unless_you_asked(db, user, provider, monkeypatch):
+async def test_health_details_are_saved_like_any_other_fact(db, user, provider, monkeypatch):
+    """The default: nothing is held back for being about health or money."""
+    fact = '[{"op": "add", "text": "User has type 1 diabetes", "category": "context", "confidence": "high", "sensitive": true}]'
+    _says(monkeypatch, fact)
+    saved = await capture_conversation(db, await _chat(db, user, provider, turns=(("I have type 1 diabetes, what's a good snack?", "Nuts."),)), user)
+    assert saved[0]["content"] == "User has type 1 diabetes" and not saved[0].get("suggested")
+    assert [r.status for r in await _rows(db, user)] == [ACTIVE]
+    block, used = await build_memory_system_prompt(db, user.id, query="diabetes snack", k=10)
+    assert block is not None and "diabetes" in block and len(used) == 1
+
+    # The chat's own "remember" tool too.
+    other = await mk_user(db, "tool")
+    chat = await _chat(db, other)
+    said = Message(conversation_id=chat.id, role="user", content="I have asthma")
+    db.add(said)
+    await db.commit()
+    result = await RememberTool().run(ToolContext(db=db, user=other, conversation_id=chat.id, user_message_id=said.id), {"content": "User has asthma", "sensitive": True})
+    assert not result.meta.get("memory_proposals") and result.meta["memory_writes"][0]["content"] == "User has asthma"
+    assert [(r.content, r.status) for r in await _rows(db, other)] == [("User has asthma", ACTIVE)]
+
+
+async def test_health_details_wait_for_you_if_you_chose_that(db, user, provider, monkeypatch):
+    user.settings = {**(user.settings or {}), "memory_sensitive": "ask"}
+    await db.commit()
     fact = '[{"op": "add", "text": "User has type 1 diabetes", "category": "context", "confidence": "high", "sensitive": true}]'
     _says(monkeypatch, fact)
     saved = await capture_conversation(db, await _chat(db, user, provider, turns=(("I have type 1 diabetes, what's a good snack?", "Nuts."),)), user)
@@ -272,6 +295,8 @@ async def test_health_details_wait_for_you_unless_you_asked(db, user, provider, 
     # "I can't remember" somewhere in the chat isn't asking to save it. An outright ask is
     # handled by the message that said it, not here.
     other = await mk_user(db, "asked")
+    other.settings = {**(other.settings or {}), "memory_sensitive": "ask"}
+    await db.commit()
     await capture_conversation(db, await _chat(db, other, provider, turns=(("I can't remember the dose. I have type 1 diabetes.", "Ok."),)), other)
     assert (await _rows(db, other))[0].status == SUGGESTED
 
@@ -329,6 +354,8 @@ async def test_only_remember_this_and_corrections_happen_straight_away():
 
 
 async def test_you_hear_what_was_learned_once(db, user, provider, monkeypatch):
+    user.settings = {**(user.settings or {}), "memory_sensitive": "ask"}
+    await db.commit()
     _says(monkeypatch, '[{"op": "add", "text": "User owns a Tesla", "confidence": "high"}, {"op": "add", "text": "User has asthma", "confidence": "high", "sensitive": true}]')
     await capture_conversation(db, await _chat(db, user, provider), user)
     assert await take_unannounced(db, user.id) == {"facts": ["User owns a Tesla"], "count": 1, "suggested": 1}
@@ -359,6 +386,8 @@ async def test_undoing_a_change_has_what_it_said_before(db, user):
 
 
 async def test_sensitive_from_the_model_is_offered_unless_asked(db, user):
+    user.settings = {**(user.settings or {}), "memory_sensitive": "ask"}
+    await db.commit()
     chat = await _chat(db, user)
     said = Message(conversation_id=chat.id, role="user", content="I have asthma")
     db.add(said)

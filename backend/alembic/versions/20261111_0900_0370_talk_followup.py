@@ -8,14 +8,14 @@
   default (owner decision 3, 2026-11-09).
 
 Revision ID: 0370_talk_followup
-Revises: 0420_drop_code_exec
+Revises: 0380_forms_quiz
 """
 import sqlalchemy as sa
 
 from alembic import op
 
 revision = "0370_talk_followup"
-down_revision = "0420_drop_code_exec"
+down_revision = "0380_forms_quiz"
 branch_labels = None
 depends_on = None
 

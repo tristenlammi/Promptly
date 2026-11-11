@@ -314,6 +314,9 @@ class UserPreferencesUpdate(BaseModel):
     #     the post-turn auto-capture pass is skipped. Lets a user curate
     #     their own persona without the AI volunteering facts.
     memory_mode: Literal["off", "auto", "manual"] | None = None
+    # Health, money and other sensitive facts: ``"save"`` (the default) keeps
+    # them like any other fact; ``"ask"`` holds them as suggestions to approve.
+    memory_sensitive: Literal["save", "ask"] | None = None
     # Conversations the user has hidden from *their own* sidebar. Used as
     # a "remove from my history" that never touches another user's copy
     # (e.g. a chat that reached them before per-chat sharing was retired,

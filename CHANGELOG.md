@@ -76,6 +76,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps on Android Auto: with no trip set, the map now keeps you in the middle, heading up, while you drive (it used to centre once and stay put). Move the map yourself and it's left alone for 20 seconds.
 
 ### Changed
+- Memory: health, money and other sensitive details are now saved like any other fact instead of waiting as suggestions for you to approve. If you'd rather be asked first, tick "Ask me before saving health, money and other sensitive details" in Account, Memory. Passwords, card numbers and the like are still never saved.
 
 <!-- Admin privacy, AP6 -->
 - Admin → Audit no longer shows other people's workspace, note or item titles, file names, device names or credential names: rows keep ids, kinds and counts. Older rows were cleaned up the same way.
@@ -96,6 +97,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: the driving screen has a new look. A bigger next-turn banner with the turn after it, a bottom bar with the arrival time, minutes and distance left and a large End button, a speed badge that turns red over the limit, a road-name pill, larger round buttons (assistant, add a stop, sound, whole route / Re-centre), and matching day and night colours.
 
 ### Fixed
+- The first request after start-up no longer waits about four seconds on installs without the Office converter: the check that refuses requests from the converter container now looks its address up in the background, never during a request (it still refuses anything it can't yet vouch for).
 
 - Calls: the calls service's config uses LiveKit's current name for the metrics port setting, so its log no longer warns that `prometheus_port` is deprecated.
 - Mail: a reply you send now shows in its conversation straight away ("Sending…", then sent), instead of only after Sent was next checked, and a reply that couldn't go says so there with Try again. Replies sent from another mail app show within seconds, and an answer that arrives before your reply (such as an out-of-office) no longer ends up in a conversation of its own. Replies and forwards always go from the mailbox the email is in.

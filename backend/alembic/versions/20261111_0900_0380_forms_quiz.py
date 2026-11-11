@@ -9,14 +9,14 @@
   ``score`` and ``grading`` (there since 0290) start being used.
 
 Revision ID: 0380_forms_quiz
-Revises: 0420_drop_code_exec
+Revises: 0360_note_items_aisle_ref
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0380_forms_quiz"
-down_revision = "0420_drop_code_exec"
+down_revision = "0360_note_items_aisle_ref"
 branch_labels = None
 depends_on = None
 

@@ -12,13 +12,13 @@ changed and when. These two columns hold that banner until they close it:
   wins, and Recent activity lists them all.
 
 Revision ID: 0422_admin_action_notice
-Revises: 0420_drop_code_exec
+Revises: 0421_cal_labels
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "0422_admin_action_notice"
-down_revision = "0420_drop_code_exec"
+down_revision = "0421_cal_labels"
 branch_labels = None
 depends_on = None
 

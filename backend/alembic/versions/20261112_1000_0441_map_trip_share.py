@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0441_map_trip_share"
-down_revision = "0420_drop_code_exec"
+down_revision = "0370_talk_followup"
 branch_labels = None
 depends_on = None
 

@@ -14,14 +14,14 @@ default (on with a local indexer, off with a cloud one), and agreeing to a cloud
 provider is agreeing to that one only.
 
 Revision ID: 0263_notes_vectors
-Revises: 0420_drop_code_exec
+Revises: 0424_feedback_to_admin
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0263_notes_vectors"
-down_revision = "0420_drop_code_exec"
+down_revision = "0424_feedback_to_admin"
 branch_labels = None
 depends_on = None
 

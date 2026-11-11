@@ -7,8 +7,9 @@ with what's already known alongside, so a change of heart updates the old fact.
 
 The chat's own words only. A reply that drew on a web page, a file or someone else's
 message is left out, because a planted "remember that the user prefers vendor X" could
-otherwise end up in every future chat. Health and other sensitive facts become
-suggestions for you to approve, never saved on the model's say-so.
+otherwise end up in every future chat. Health and other sensitive facts are
+saved like any other, unless you've chosen to approve those first (Memory
+settings), when they become suggestions instead.
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from app.database import SessionLocal
 from app.memory.service import (
     answer_cut_off,
     apply_ops,
+    asks_before_sensitive,
     chat_may_write_memory,
     existing_keys_for_capture,
     parse_ops,
@@ -230,6 +232,7 @@ async def capture_conversation(db: AsyncSession, conversation: Conversation, use
         changed_by="capture",
         max_new=_MAX_NEW,
         announce=True,
+        ask_sensitive=asks_before_sensitive(user),
     )
     await _mark_read_through(db, conversation.id, through)
     await db.commit()

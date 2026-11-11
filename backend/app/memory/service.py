@@ -22,6 +22,7 @@ from typing import Final
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.models import User
 from app.app_settings.defaults import load_effective_defaults
 from app.chat.titler import _strip_think_blocks
 from app.custom_models.embedding import (
@@ -111,6 +112,15 @@ def resolve_memory_mode(user) -> str:
     if mode in ("off", "auto", "manual"):
         return mode
     return "off" if settings.get("memory_enabled", True) is False else "auto"
+
+
+def asks_before_sensitive(user) -> bool:
+    """Has this person chosen to approve health, money and the like before
+    they're kept? Left alone, they're saved like any other fact (the owner's
+    call, 2026-11-11); ``memory_sensitive: "ask"`` in their settings turns
+    them back into suggestions."""
+    settings = getattr(user, "settings", None) or {}
+    return settings.get("memory_sensitive") == "ask"
 
 
 # An explicit ask to save or drop something, as opposed to merely saying
@@ -720,8 +730,8 @@ OPERATION_RULES: Final[str] = (
     "date with no year is the next time that date comes round. "
     "Plans like these are worth keeping, with their date.\n"
     'On an add, set "sensitive": true for health, medical or mental health details, '
-    "allergies, sexuality, religion, politics, or money troubles; it will be offered "
-    "to the user to approve rather than saved.\n\n"
+    "allergies, sexuality, religion, politics, or money troubles; a user who has asked "
+    "to approve those first is offered it rather than having it saved.\n\n"
     f"Categories (use exactly one per add/update): {_CATEGORY_LIST}\n"
     "  identity = name, role, occupation, location, pronouns, family\n"
     "  preferences = tools, languages, formats, style, units, food\n"
@@ -1083,6 +1093,7 @@ async def capture_memories(
         corrects=is_explicit_memory_request(user_text) or bool(CORRECTION_RE.search(user_text or "")),
         explicit=is_explicit_memory_request(user_text),
         changed_by="chat",
+        ask_sensitive=asks_before_sensitive(await db.get(User, user_id)),
     )
     if results:
         await db.commit()
@@ -1131,6 +1142,7 @@ async def apply_ops(
     changed_by: str,
     max_new: int = MAX_NEW_PER_TURN,
     announce: bool = False,
+    ask_sensitive: bool = False,
 ) -> list[dict]:
     """Make a capture pass's changes. Flushes and leaves the commit to the caller.
 
@@ -1205,7 +1217,8 @@ async def apply_ops(
             >= SEMANTIC_DUP_THRESHOLD
         ):
             continue
-        waits_for_you = bool(op.get("sensitive")) and not explicit
+        # Only for someone who chose to approve these first (asks_before_sensitive).
+        waits_for_you = ask_sensitive and bool(op.get("sensitive")) and not explicit
         # At the backstop, the least useful inferred fact is retired to make room.
         if not waits_for_you and total + len(new_rows) >= MAX_MEMORIES:
             if new_rows:

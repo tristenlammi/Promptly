@@ -65,6 +65,7 @@ from app.memory.service import (
     is_explicit_memory_request,
     keep_version,
     load_memories,
+    asks_before_sensitive,
     looks_sensitive,
     resolve_memory_mode,
     retrieve_relevant_memories,
@@ -344,8 +345,8 @@ class RememberTool(Tool):
                 "type": "boolean",
                 "description": (
                     "True for health, medical or mental health details, allergies, "
-                    "sexuality, religion, politics or money troubles. Unless they "
-                    "asked you to remember it, it's offered to them rather than saved."
+                    "sexuality, religion, politics or money troubles. If they've chosen "
+                    "to approve those first, it's offered to them rather than saved."
                 ),
             },
             "replaces": {
@@ -382,14 +383,15 @@ class RememberTool(Tool):
         # The person just said yes to saving exactly this (chat/approvals.py).
         approved = bool(ctx.turn and ctx.turn.get("user_approved"))
 
-        # Health and the like are yours to volunteer: offered, not saved, unless asked.
-        if args.get("sensitive") is True and not approved:
+        # Health and the like are saved like anything else, unless this person chose
+        # to approve them first: then offered, not saved, unless asked.
+        if args.get("sensitive") is True and not approved and asks_before_sensitive(ctx.user):
             trigger = await ctx.db.get(Message, ctx.user_message_id)
             if trigger is None or not is_explicit_memory_request(trigger.content or ""):
                 return ToolResult(
                     content=(
-                        "Not saved: that's sensitive, so it's only kept when the user "
-                        f"asks. They've been offered \"{content}\" to save with one click."
+                        "Not saved: that's sensitive, and this user approves those first. "
+                        f" They've been offered \"{content}\" to save with one click."
                     ),
                     meta={"memory_writes": [], "memory_proposals": [{"content": content, "category": category}]},
                 )

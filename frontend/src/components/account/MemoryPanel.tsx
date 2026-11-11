@@ -364,6 +364,19 @@ export function MemoryPanel() {
     }
   };
 
+  const askSensitive = user?.settings?.memory_sensitive === "ask";
+  const setAskSensitive = async (ask: boolean) => {
+    setToggleError(null);
+    const next = ask ? ("ask" as const) : ("save" as const);
+    patchSettings({ memory_sensitive: next });
+    try {
+      setUser(await authApi.updatePreferences({ memory_sensitive: next }));
+    } catch (err) {
+      patchSettings({ memory_sensitive: askSensitive ? "ask" : "save" });
+      setToggleError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const startEdit = (m: Memory) => {
     setEditingId(m.id);
     setEditText(m.content);
@@ -417,6 +430,21 @@ export function MemoryPanel() {
               ? "Self-managed: Promptly uses the facts you add below across all your chats, but never captures anything on its own. You have full control over what it remembers about you."
               : "Automatic: Promptly remembers durable facts you share (your name, role, tools, how you like answers) and applies them across all your chats. Say “remember that…” to save one on purpose, or add your own below."}
         </p>
+
+        {mode === "auto" && (
+          <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed text-[var(--text-muted)]">
+            <input
+              type="checkbox"
+              checked={askSensitive}
+              onChange={(e) => void setAskSensitive(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
+            />
+            <span>
+              Ask me before saving health, money and other sensitive details.
+              Left off, they're saved like anything else.
+            </span>
+          </label>
+        )}
 
         {toggleError && (
           <ErrorBox
