@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Clock, User, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { apiClient } from "@/api/client";
 import { PersonInput } from "@/items/ui/PersonInput";
@@ -12,11 +12,13 @@ import { Choice } from "./ui";
 export interface LivePerson {
   user_id: string;
   name: string;
+  /** Sharing the trip they're driving, not their location in general: it ends when they arrive. */
+  trip?: boolean;
   live: { lat: number; lon: number; destination: string | null; eta: string | null; at: string } | null;
 }
 
 interface Shares {
-  sharing_with: { user_id: string; name: string; expires_at: string | null }[];
+  sharing_with: { user_id: string; name: string; expires_at: string | null; trip?: boolean }[];
   shared_with_me: LivePerson[];
 }
 
@@ -36,9 +38,17 @@ function ago(iso: string): string {
 }
 
 /** Who can see where you are, and who you can see. */
-export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: (p: LivePerson) => void }) {
+export function PeoplePanel({ onClose, onShow, show }: { onClose: () => void; onShow: (p: LivePerson) => void; show?: string | null }) {
   const qc = useQueryClient();
   const { data } = useShares();
+  // Opened from "… is sharing a trip with you": straight to them on the map, once they've a position.
+  const shown = useRef(false);
+  const wanted = show ? data?.shared_with_me.find((p) => p.user_id === show && p.live) : undefined;
+  useEffect(() => {
+    if (!wanted || shown.current) return;
+    shown.current = true;
+    onShow(wanted);
+  }, [wanted, onShow]);
   const [name, setName] = useState("");
   // Who was picked from the suggestions; typing again clears it.
   const [picked, setPicked] = useState("");
@@ -97,6 +107,7 @@ export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: 
           <span className="min-w-0">
             <span className="block truncate text-sm text-[var(--text)]">{p.name}</span>
             <span className="block truncate text-xs text-[var(--text-muted)]">
+              {p.trip ? "Sharing this trip · " : ""}
               {p.live ? `${ago(p.live.at)}${p.live.destination ? ` · going to ${p.live.destination}` : ""}${p.live.eta ? `, arriving ${new Date(p.live.eta).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}` : "No location yet"}
             </span>
           </span>
@@ -110,7 +121,7 @@ export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: 
           <Clock className="h-4 w-4 text-[var(--text-muted)]" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm text-[var(--text)]">{p.name}</span>
-            <span className="block text-xs text-[var(--text-muted)]">{p.expires_at ? `Until ${new Date(p.expires_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}` : "Until you stop"}</span>
+            <span className="block text-xs text-[var(--text-muted)]">{p.trip ? "This trip, until you arrive or end it" : p.expires_at ? `Until ${new Date(p.expires_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}` : "Until you stop"}</span>
           </span>
           <button type="button" onClick={() => void stop(p)} aria-label={`Stop sharing with ${p.name}`} title="Stop sharing" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] md:h-8 md:w-8"><X className="h-4 w-4" /></button>
         </div>

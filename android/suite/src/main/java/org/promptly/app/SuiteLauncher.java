@@ -26,6 +26,10 @@ import java.lang.reflect.Field;
  * offline map) opens that instead when the phone has no working connection and
  * something to show offline, rather than a web page that can't load.
  *
+ * <p>A launcher whose app starts on a native screen ({@link #nativeFirst()}, P Maps'
+ * Drive map) opens that when its icon is tapped. Anything that asks for a page
+ * (a place another app sent, a widget, "more" on the native screen) still gets the page.
+ *
  * <p>A widget opens a page of the app instead ({@link #EXTRA_URL_PATH}: an
  * event, a task), in the app's own task. Only a path on the saved server is
  * taken ({@link #safePath}), never another site.
@@ -41,13 +45,19 @@ public class SuiteLauncher extends LauncherActivity {
     static final String ACTION_LAUNCHED = "org.promptly.app.action.LAUNCHED";
     private static final String WIDGET_EVENTS = "org.promptly.sync.widgets.WidgetEvents";
 
+    /** Told to the native screen: it was opened by a tap on the icon. */
+    static final String EXTRA_FROM_ICON = "org.promptly.app.FROM_ICON";
+
     private boolean offlineInstead;
+    private boolean nativeInstead;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         offlineInstead = Server.get(this) != null && offlineActivity() != null
                 && (getIntent() == null || !getIntent().getBooleanExtra(EXTRA_ONLINE, false))
                 && !online() && hasOfflineData();
+        nativeInstead = !offlineInstead && Server.get(this) != null && nativeFirst()
+                && offlineActivity() != null && iconTap(getIntent());
         super.onCreate(savedInstanceState);
         if (Server.get(this) == null) {
             startActivity(new Intent(this, SetupActivity.class)
@@ -59,6 +69,10 @@ public class SuiteLauncher extends LauncherActivity {
             String asked = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_PATH);
             if (asked != null) offline.putExtra(EXTRA_PATH, asked);
             startActivity(offline);
+            finish();
+        } else if (nativeInstead) {
+            startActivity(new Intent(Intent.ACTION_VIEW).setClassName(getPackageName(), offlineActivity())
+                    .putExtra(EXTRA_FROM_ICON, true));
             finish();
         }
         // The widgets refresh a couple of minutes after an app is opened (by then
@@ -73,7 +87,20 @@ public class SuiteLauncher extends LauncherActivity {
 
     @Override
     protected boolean shouldLaunchImmediately() {
-        return Server.get(this) != null && !offlineInstead;
+        return Server.get(this) != null && !offlineInstead && !nativeInstead;
+    }
+
+    /** Whether a tap on this launcher's icon opens its native screen
+     *  ({@link #offlineActivity()}) rather than the web page. */
+    protected boolean nativeFirst() {
+        return false;
+    }
+
+    /** A plain tap on the icon: nobody asked for a page, a place or a share. */
+    private static boolean iconTap(Intent intent) {
+        return intent != null && Intent.ACTION_MAIN.equals(intent.getAction()) && intent.getData() == null
+                && !intent.hasExtra(EXTRA_PATH) && !intent.hasExtra(EXTRA_URL_PATH)
+                && !intent.getBooleanExtra(EXTRA_ONLINE, false);
     }
 
     /** The native screen (a class in the app module, named as a string: this module can't

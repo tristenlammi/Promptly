@@ -380,6 +380,14 @@ export function NotificationsPanel() {
                 dimmed={!prefs.enabled}
                 extra={(prefs.mail ?? true) && summaryMode("mail")}
               />
+              <CategoryRow
+                title="P Maps"
+                subtitle="Someone sharing the trip they're driving with you, so you can see where they are until they arrive."
+                checked={prefs.maps ?? true}
+                busy={prefsBusy === "maps"}
+                onChange={(v) => toggle("maps", v)}
+                dimmed={!prefs.enabled}
+              />
               {porchOn && (
               <CategoryRow
                 title="Porch"

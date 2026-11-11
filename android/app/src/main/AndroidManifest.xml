@@ -95,7 +95,7 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:taskAffinity="org.promptly.app.maps"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:theme="@android:style/Theme.Material.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

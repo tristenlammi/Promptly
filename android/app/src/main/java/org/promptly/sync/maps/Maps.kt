@@ -68,6 +68,12 @@ object Maps {
         return JSONObject(text)
     }
 
+    /** The road at this spot and its limit, for driving with no trip on. Blocking. */
+    fun road(context: Context, lat: Double, lon: Double, heading: Float?): Road {
+        val facing = heading?.let { "&heading=${it.toInt().coerceIn(0, 360)}" }.orEmpty()
+        return Road.from(get(context, "/api/maps/road?lat=$lat&lon=$lon$facing", timeoutSeconds = 6))
+    }
+
     fun send(context: Context, method: String, path: String, body: JSONObject, timeoutSeconds: Long = 40): JSONObject {
         val server = server(context) ?: throw IOException("Not signed in")
         val (code, text) = call(context, timeoutSeconds) { url("$server$path").method(method, body.toString().toRequestBody(JSON)) }
@@ -281,3 +287,13 @@ object Maps {
 }
 
 data class Camera(val lat: Double, val lon: Double, val maxSpeed: Double?)
+
+/** The road you're on with no trip: its name and its limit in km/h, where the map has them. */
+data class Road(val name: String?, val limit: Int?) {
+    companion object {
+        fun from(json: JSONObject): Road = Road(
+            name = json.optString("name").takeIf { it.isNotBlank() && !json.isNull("name") },
+            limit = json.optInt("limit", 0).takeIf { it in 5..150 },
+        )
+    }
+}

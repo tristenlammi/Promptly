@@ -211,6 +211,28 @@ async def reverse(
     return {**engine.label(hits[0]), "lat": lat, "lon": lon}
 
 
+@router.get("/road")
+async def road(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    heading: float | None = Query(default=None, ge=0, le=360),
+    user: User = Depends(maps_user),
+) -> dict[str, Any]:
+    """The road you're driving along, and its speed limit where the map has one:
+    for driving with no trip on. Nothing is kept."""
+    spot: dict[str, Any] = {"lat": lat, "lon": lon}
+    if heading is not None:
+        # The carriageway going your way, not the one beside it.
+        spot.update(heading=round(heading), heading_tolerance=60)
+    try:
+        found = await engine.valhalla("/locate", {"locations": [spot], "costing": "auto", "verbose": True})
+    except HTTPException as e:
+        if e.status_code != status.HTTP_422_UNPROCESSABLE_ENTITY:
+            raise
+        found = []
+    return engine.road_at(found)
+
+
 # ---- Routes -----------------------------------------------------------------
 
 

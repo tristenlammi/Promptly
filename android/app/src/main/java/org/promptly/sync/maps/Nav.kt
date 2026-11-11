@@ -3,13 +3,10 @@ package org.promptly.sync.maps
 import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.lifecycle.viewModelScope
 import com.stadiamaps.ferrostar.composeui.notification.DefaultForegroundNotificationBuilder
 import com.stadiamaps.ferrostar.core.AlternativeRouteProcessor
-import com.stadiamaps.ferrostar.core.AndroidTtsObserver
-import com.stadiamaps.ferrostar.core.AndroidTtsStatusListener
 import com.stadiamaps.ferrostar.core.DefaultNavigationViewModel
 import com.stadiamaps.ferrostar.core.CorrectiveAction
 import com.stadiamaps.ferrostar.core.FerrostarCore
@@ -20,6 +17,7 @@ import com.stadiamaps.ferrostar.core.location.NavigationLocationProvider
 import com.stadiamaps.ferrostar.core.location.NavigationLocationProviding
 import com.stadiamaps.ferrostar.core.location.SimulatedLocationProvider
 import com.stadiamaps.ferrostar.core.location.toUserLocation
+import com.stadiamaps.ferrostar.core.measurement.MeasurementSpeedUnit
 import com.stadiamaps.ferrostar.core.service.FerrostarForegroundServiceManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -88,7 +86,7 @@ object Nav {
     private var routes: HybridRouteProvider? = null
     // Lives as long as the app: watches the one trip for both screens.
     private val watching = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var tts: AndroidTtsObserver? = null
+    private var voice: NavVoice? = null
     private var liveJob: Job? = null
     private var lastOptions: TripOptions? = null
     private val _style = MutableStateFlow<String?>(null)
@@ -196,12 +194,52 @@ object Nav {
         if (!::app.isInitialized) app = context.applicationContext
     }
 
+    private val _theme by lazy {
+        val saved = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).getString("theme", null)
+        MutableStateFlow(MapTheme.entries.firstOrNull { it.name == saved } ?: MapTheme.AUTO)
+    }
+
+    /** Map colours: by the sun, or always light, or always dark. */
+    val themeNow: kotlinx.coroutines.flow.StateFlow<MapTheme> get() = _theme
+
+    /** Whether the phone's map is dark right now. Null until it has been worked out. */
+    private val _dark = MutableStateFlow<Boolean?>(null)
+    val dark = _dark.asStateFlow()
+
+    fun setTheme(theme: MapTheme) {
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit().putString("theme", theme.name).apply()
+        _theme.value = theme
+        watching.launch { applyTheme() }
+    }
+
+    /** The phone's map, kept in step with the sun for as long as [scope] lives: it
+     *  turns dark at sunset and light at sunrise in the middle of a drive. Only the
+     *  colours change; the trip, the route and the camera stay as they are. */
     fun loadStyle(scope: kotlinx.coroutines.CoroutineScope) {
         scope.launch {
-            runCatching { Maps.styleFile(app) }
-                .onSuccess { _style.value = it }
-                .onFailure { _error.value = it.message ?: "Couldn't load the map." }
+            while (isActive) {
+                applyTheme()
+                delay(if (_style.value == null) 5_000 else 60_000)
+            }
         }
+    }
+
+    private val theming = Mutex()
+
+    private suspend fun applyTheme() = theming.withLock {
+        val fix = lastFix?.let { it.coordinates.lat to it.coordinates.lng }
+            ?: runCatching { locationProvider.lastLocation() }.getOrNull()?.let { it.latitude to it.longitude }
+        val dark = Daylight.mapDark(_theme.value, fix)
+        if (dark == _dark.value && _style.value != null) return@withLock
+        runCatching { Maps.styleFile(app, dark) }
+            .onSuccess {
+                _style.value = it
+                _dark.value = dark
+            }
+            .onFailure {
+                // Still showing the other colours: better than no map.
+                if (_style.value == null) _error.value = it.message ?: "Couldn't load the map."
+            }
     }
 
     /** The car's map: light or dark by the car's own setting, not the phone's. */
@@ -241,24 +279,11 @@ object Nav {
             config,
             FerrostarForegroundServiceManager(app, DefaultForegroundNotificationBuilder(app)),
         )
-        val observer = tts ?: AndroidTtsObserver(app).also { t ->
-            t.statusObserver = object : AndroidTtsStatusListener {
-                override fun onTtsInitialized(tts: TextToSpeech?, status: Int) {
-                    tts?.language = Locale.forLanguageTag("en-AU")
-                }
-
-                override fun onTtsSpeakError(utteranceId: String, status: Int) {
-                    Log.w(TAG, "Couldn't speak an instruction: $status")
-                }
-
-                override fun onTtsShutdownAndRelease() = Unit
-            }
-            t.start()
-            tts = t
-        }
-        observer.setMuted(savedMuted())
-        // Watched, so the car's Talk answer waits until a direction has been said.
-        built.spokenInstructionObserver = PromptWatch(observer)
+        val observer = voice()
+        observer.setMuted(sound() != Sound.ALL)
+        // The car's Talk answer waits until a direction has been said: [promptPlaying]
+        // asks this voice, which knows exactly when it is speaking.
+        built.spokenInstructionObserver = observer
         // A new route within a few seconds of leaving the old one, and again soon
         // after if you keep going your own way (the library waits 5 s and 50 m).
         built.minimumTimeBeforeRecalculation = 3.seconds
@@ -297,6 +322,10 @@ object Nav {
             if (navigating) {
                 state.routeGeometry?.let(::routeIs)
                 state.location?.let { onLocation(it.coordinates.lat, it.coordinates.lng) }
+                speedNow(
+                    state.location?.speed?.value?.times(3.6),
+                    state.currentAnnotation?.speedLimit?.value(MeasurementSpeedUnit.KilometersPerHour)?.let { Math.round(it).toInt() },
+                )
             }
         }.launchIn(watching)
     }
@@ -447,19 +476,131 @@ object Nav {
         }
     }
 
-    private fun savedMuted(): Boolean =
-        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).getBoolean("muted", false)
+    private fun voice(): NavVoice = voice ?: NavVoice(app).also { voice = it }
 
-    /** You turned the voice off, so it stays off, this trip and the next, until you turn it on. */
-    fun setMuted(muted: Boolean) {
-        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit().putBoolean("muted", muted).apply()
-        tts?.setMuted(muted)
+    private val _sound by lazy {
+        val prefs = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE)
+        val saved = prefs.getString("sound", null)?.let { name -> Sound.entries.firstOrNull { it.name == name } }
+        // Before there were three choices there was a mute switch.
+        MutableStateFlow(saved ?: if (prefs.getBoolean("muted", false)) Sound.MUTE else Sound.ALL)
     }
+
+    /** What's said on a trip: everything, warnings only, or nothing. */
+    val soundNow: kotlinx.coroutines.flow.StateFlow<Sound> get() = _sound
+
+    fun sound(): Sound = _sound.value
+
+    /** You chose it, so it stays, this trip and the next, until you change it. */
+    fun setSound(sound: Sound) {
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit()
+            .putString("sound", sound.name).putBoolean("muted", sound == Sound.MUTE).apply()
+        _sound.value = sound
+        voice?.setMuted(sound != Sound.ALL)
+        // Whatever was mid-sentence is no longer wanted.
+        if (sound != Sound.ALL) voice?.stopAndClearQueue()
+    }
+
+    private val _speedWarning by lazy {
+        val saved = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).getString("speed_alert", null)
+        MutableStateFlow(SpeedWarning.entries.firstOrNull { it.name == saved } ?: SpeedWarning.OFF)
+    }
+
+    /** Beep when you go over the limit: off, or how far over. */
+    val speedWarningNow: kotlinx.coroutines.flow.StateFlow<SpeedWarning> get() = _speedWarning
+
+    fun setSpeedWarning(choice: SpeedWarning) {
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit().putString("speed_alert", choice.name).apply()
+        _speedWarning.value = choice
+        speeding.reset()
+    }
+
+    private val speeding = SpeedAlert()
+
+    /** Your speed and the road's limit just now, on a trip or just driving: a beep when
+     *  you go over by more than you allowed. Muted means no beep; "Alerts only" beeps. */
+    fun speedNow(kmh: Double?, limit: Int?) {
+        val over = _speedWarning.value.over
+        if (over == null) return
+        if (!speeding.check(kmh, limit, over, android.os.SystemClock.elapsedRealtime())) return
+        if (sound() == Sound.MUTE) return
+        voice().beep("promptly-beep-${utterances.incrementAndGet()}")
+    }
+
+    // ---- Share this trip ------------------------------------------------------------
+
+    /** Someone on your Promptly a trip can be shared with. */
+    data class Person(val id: String, val name: String)
+
+    private val _sharedWith = MutableStateFlow<List<Person>>(emptyList())
+
+    /** Who's watching the trip you're on. Empty when it isn't shared. */
+    val sharedWith = _sharedWith.asStateFlow()
+
+    /** People to pick from: suggestions, or whoever matches what you typed. */
+    suspend fun peopleToShareWith(query: String): List<Person> = withContext(Dispatchers.IO) {
+        val found = Maps.get(app, "/api/maps/trip/people?q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8"), timeoutSeconds = 15)
+        val rows = found.optJSONArray("people") ?: return@withContext emptyList()
+        (0 until rows.length()).map { rows.getJSONObject(it) }.map { Person(it.getString("user_id"), it.optString("name", "Someone")) }
+    }
+
+    /** Let these people see where you are and when you'll arrive, until this trip ends.
+     *  They're sent a notification. Throws when it couldn't be done (no signal, say). */
+    suspend fun shareTrip(people: List<Person>) {
+        val vm = model
+        val state = vm?.navigationUiState?.value
+        val at = state?.location
+        val body = JSONObject().put("user_ids", org.json.JSONArray(people.map { it.id }))
+        (state?.destination ?: destination?.name)?.takeIf { it.isNotBlank() && it != "Destination" }?.let { body.put("destination", it) }
+        state?.progress?.let { body.put("eta", Instant.now().plusSeconds(it.durationRemaining.toLong()).toString()) }
+        at?.let { body.put("lat", it.coordinates.lat).put("lon", it.coordinates.lng) }
+        val answer = withContext(Dispatchers.IO) {
+            // Remembered first: if the answer is lost, ending the trip still ends the sharing.
+            tripPrefs().edit().putBoolean("trip_shared", true).apply()
+            Maps.send(app, "PUT", "/api/maps/trip/share", body, timeoutSeconds = 15)
+        }
+        val rows = answer.optJSONArray("sharing_with")
+        _sharedWith.value = if (rows == null) people else (0 until rows.length()).map { rows.getJSONObject(it) }.map { Person(it.getString("user_id"), it.optString("name", "Someone")) }
+        tripPrefs().edit().putString("trip_last", org.json.JSONArray(people.map { JSONObject().put("id", it.id).put("name", it.name) }).toString()).apply()
+        // Positions go every half minute from now, not whenever the slow check comes round.
+        if (vm != null && vm.navigationUiState.value.isNavigating()) liveLoop(vm)
+    }
+
+    /** Who you shared your last trip with: ticked for you next time. */
+    fun lastSharedWith(): List<Person> = runCatching {
+        val rows = org.json.JSONArray(tripPrefs().getString("trip_last", "[]"))
+        (0 until rows.length()).map { rows.getJSONObject(it) }.map { Person(it.getString("id"), it.getString("name")) }
+    }.getOrDefault(emptyList())
+
+    private fun tripPrefs() = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE)
+
+    /** The trip's over, or you stopped sharing it: nobody it was shared with sees you any
+     *  more. Tried until it works (the server also ends it by itself a while after you
+     *  were due, if the phone never gets through). */
+    fun endTripShare() {
+        _sharedWith.value = emptyList()
+        if (!tripPrefs().getBoolean("trip_shared", false)) return
+        endShareJob?.cancel()
+        endShareJob = watching.launch(Dispatchers.IO) {
+            repeat(20) { attempt ->
+                val ended = runCatching { Maps.send(app, "DELETE", "/api/maps/trip/share", JSONObject(), timeoutSeconds = 15) }.isSuccess
+                if (ended) {
+                    tripPrefs().edit().putBoolean("trip_shared", false).apply()
+                    return@launch
+                }
+                delay(if (attempt < 5) 10_000L else 60_000L)
+            }
+        }
+    }
+
+    private var endShareJob: Job? = null
+
+    /** The car's mute button: directions on or everything off. */
+    fun setMuted(muted: Boolean) = setSound(if (muted) Sound.MUTE else Sound.ALL)
 
     /** Warn once for each camera ahead. */
     fun onLocation(lat: Double, lon: Double) {
         // Anything else that switched it back on doesn't get to decide.
-        tts?.let { if (it.isMuted != savedMuted()) it.setMuted(savedMuted()) }
+        voice?.let { if (it.isMuted != (sound() != Sound.ALL)) it.setMuted(sound() != Sound.ALL) }
         checkHazards()
         val point = FloatArray(1)
         var nearest: Pair<Camera, Float>? = null
@@ -485,10 +626,6 @@ object Nav {
         }
     }
 
-    private var speaker: TextToSpeech? = null
-
-    // Called when the sentence with this id has finished, or couldn't be said.
-    private val afterSpeech = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
     private val utterances = java.util.concurrent.atomic.AtomicInteger()
 
     /** An answer you asked for, so it's spoken even with directions muted. */
@@ -499,25 +636,22 @@ object Nav {
     /** You've moved on: stop saying it. */
     fun hush() {
         SpokenAnswer.stop()
-        speaker?.stop()
+        voice?.stopAndClearQueue()
     }
 
     /** Are you being given directions right now? */
     fun onTrip(): Boolean = model?.navigationUiState?.value?.isNavigating() == true
 
+    // A warning (camera, hazard, faster route): said unless you've muted everything.
     private fun speak(text: String) {
-        if (tts?.isMuted == true) return
+        if (sound() == Sound.MUTE) return
         talk(text)
     }
 
-    /** Nav's own sentences still to be said (warnings, answers with no signal). */
-    private val saying = java.util.concurrent.atomic.AtomicInteger()
-
     /** A direction or warning is being said, or is about to be: the car's Talk answer
-     *  waits for it (WP-T8). Ferrostar's prompts are timed from their words. */
-    fun promptPlaying(): Boolean = saying.get() > 0 || System.currentTimeMillis() < promptUntil
-
-    @Volatile internal var promptUntil = 0L
+     *  waits for it (WP-T8). The trip's one voice ([NavVoice]) says both, and knows
+     *  when it has finished; muted directions aren't said, so nothing waits for them. */
+    fun promptPlaying(): Boolean = voice?.speaking == true
 
     /** Metres to the next turn on a trip, else null. */
     fun metresToTurn(): Double? {
@@ -550,39 +684,14 @@ object Nav {
     }
 
     private fun talk(text: String, done: (() -> Unit)? = null) {
-        val id = "promptly-${utterances.incrementAndGet()}"
-        saying.incrementAndGet()
-        if (done != null) afterSpeech[id] = done
-        val s = speaker
-        if (s != null) {
-            if (s.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) spoke(id)
-        } else {
-            speaker = TextToSpeech(app) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    speaker?.language = Locale.forLanguageTag("en-AU")
-                    speaker?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                        override fun onStart(utteranceId: String?) = Unit
-                        override fun onDone(utteranceId: String?) = spoke(utteranceId)
-                        @Deprecated("Deprecated in Java")
-                        override fun onError(utteranceId: String?) = spoke(utteranceId)
-                        override fun onStop(utteranceId: String?, interrupted: Boolean) = spoke(utteranceId)
-                    })
-                    speaker?.speak(text, TextToSpeech.QUEUE_ADD, null, id)
-                } else {
-                    spoke(id)
-                }
-            }
-        }
-    }
-
-    private fun spoke(id: String?) {
-        if (id?.startsWith("promptly-") == true) saying.updateAndGet { maxOf(0, it - 1) }
-        id?.let { afterSpeech.remove(it)?.invoke() }
+        voice().say(text, "promptly-${utterances.incrementAndGet()}", done)
     }
 
     /** You're there: both screens say so, whichever started the trip. */
     fun arrivedNow() {
         if (_arrived.value) return
+        // You're there: the people watching this trip have seen what they needed.
+        endTripShare()
         arrivedAt = destination?.name?.takeIf { it.isNotBlank() && it != "Destination" }
         _arrived.value = true
         cameras = emptyList()
@@ -908,6 +1017,8 @@ object Nav {
         // The offline engine's memory back, until the next trip needs it.
         runCatching { Offline.router(app).release() }
         liveJob?.cancel()
+        endTripShare()
+        speeding.reset()
         trafficJob?.cancel()
         _traffic.value = null
         _faster.value = null
@@ -918,29 +1029,10 @@ object Nav {
         cameraJob?.cancel()
         _camera.value = CameraAlert.None
         model?.stopNavigation()
+        // Nothing left to say about a trip that's over, and the music comes back up.
+        voice?.stopAndClearQueue()
         _ended.tryEmit(Unit)
     }
-}
-
-/** Ferrostar's spoken directions, passed through, noting how long each one takes to
- *  say (about 2.6 words a second, plus a breath), so Talk in the car can wait for it. */
-class PromptWatch(private val inner: com.stadiamaps.ferrostar.core.SpokenInstructionObserver) : com.stadiamaps.ferrostar.core.SpokenInstructionObserver {
-    override fun onSpokenInstructionTrigger(spokenInstruction: uniffi.ferrostar.SpokenInstruction) {
-        if (!inner.isMuted) {
-            val words = spokenInstruction.text.split(' ', '\n', '\t').count { it.isNotBlank() }
-            Nav.promptUntil = System.currentTimeMillis() + 600L + words * 380L
-        }
-        inner.onSpokenInstructionTrigger(spokenInstruction)
-    }
-
-    override fun stopAndClearQueue() {
-        Nav.promptUntil = 0L
-        inner.stopAndClearQueue()
-    }
-
-    override fun setMuted(isMuted: Boolean) = inner.setMuted(isMuted)
-
-    override val muteState: kotlinx.coroutines.flow.StateFlow<Boolean> get() = inner.muteState
 }
 
 /** The trip's state, with your own location shown before it starts. */

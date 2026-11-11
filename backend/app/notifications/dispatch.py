@@ -95,6 +95,8 @@ Category = Literal[
     # Talk (0370): "send that to my phone", and car answers cut short.
     # You asked a moment ago, so quiet hours don't hold it.
     "talk_followup",
+    # P Maps: someone is sharing the trip they're driving with you.
+    "maps",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -124,6 +126,7 @@ CATEGORIES: tuple[str, ...] = (
     "porch",
     # Talk
     "talk_followup",
+    "maps",
     "test",
 )
 
@@ -217,6 +220,9 @@ RULES: dict[str, Rule] = {
     # Talk (phase 2): asked for a moment ago; never held, never summarised.
     "talk_followup": Rule(False),
 }
+# P Maps: "Sam is sharing a trip with you". It's about right now (it would be
+# over by morning), so quiet hours don't hold it; the switch turns it off.
+RULES["maps"] = Rule(False, app="P Maps", one="shared trip", many="shared trips", url="/maps?panel=people")
 _missing = set(CATEGORIES) - set(RULES)
 assert not _missing, f"notification categories without a quiet-hours rule: {_missing}"
 

@@ -45,6 +45,23 @@ async def valhalla(path: str, body: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def road_at(found: Any) -> dict[str, Any]:
+    """The nearest road's name and limit, from Valhalla's "locate" answer."""
+    none: dict[str, Any] = {"name": None, "limit": None}
+    if not isinstance(found, list) or not found or not isinstance(found[0], dict):
+        return none
+    for edge in found[0].get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        info = edge.get("edge_info") or {}
+        names = [n for n in info.get("names") or [] if isinstance(n, str) and n.strip()]
+        limit = info.get("speed_limit") or (edge.get("edge") or {}).get("speed_limit")
+        # 0 is "not known" and 255 is "no limit" in Valhalla's tiles.
+        known = isinstance(limit, (int, float)) and 5 <= limit <= 150
+        return {"name": names[0].strip()[:120] if names else None, "limit": round(limit) if known else None}
+    return none
+
+
 def _why(data: dict[str, Any]) -> str:
     code = data.get("error_code")
     # Valhalla's codes for "nowhere near a road" and "no way there".

@@ -166,6 +166,10 @@ class PushPreferences(Base):
     talk_followup: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # P Maps (0441): someone is sharing the trip they're driving with you.
+    maps: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     # Quiet hours (0320), in the person's own time zone. One setting for all
     # of Promptly; ``dispatch.RULES`` says which categories they may hold.
     # The weekend pair, when set, is used for quiet periods that end on a

@@ -269,13 +269,41 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         val options = navigationCameraOptions().copy(browsingPadding = padding, navigationPadding = tracking)
         val mapState = rememberNavigationMapState(navigationCameraOptions = options)
         // With no trip yet, nothing moves the camera, and it would stay on the whole
-        // world, most of which this server has no map for. Start where you are.
+        // world, most of which this server has no map for. Start where you are, and
+        // while you're driving with nowhere set, keep you in the middle, heading up.
+        // Move the map yourself and it's left alone for a while.
         LaunchedEffect(Unit) {
-            val here = runCatching {
-                withTimeoutOrNull(20_000) { Nav.locationProvider.locationUpdates(1000L).first() }
-            }.getOrNull() ?: return@LaunchedEffect
-            if (uiState?.isNavigating() != true) {
-                mapState.cameraState.position = CameraPosition(target = Position(here.longitude, here.latitude), zoom = 14.0)
+            var set: Position? = null
+            var leftAloneUntil = 0L
+            runCatching {
+                Nav.locationProvider.locationUpdates(1000L).collect { here ->
+                    if (uiState?.isNavigating() == true || CarPreview.plan.value != null) {
+                        set = null
+                        return@collect
+                    }
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val target = Position(here.longitude, here.latitude)
+                    val last = set
+                    if (last == null) {
+                        mapState.cameraState.position = CameraPosition(target = target, zoom = 14.0)
+                        set = target
+                        return@collect
+                    }
+                    val at = mapState.cameraState.position
+                    val moved = Math.abs(at.target.latitude - last.latitude) > 0.0005 || Math.abs(at.target.longitude - last.longitude) > 0.0005
+                    if (moved && now >= leftAloneUntil) leftAloneUntil = now + 20_000L
+                    if (now < leftAloneUntil) return@collect
+                    if (here.hasSpeed() && here.speed >= 2.5f) {
+                        val bearing = if (here.hasBearing()) here.bearing.toDouble() else at.bearing
+                        runCatching {
+                            mapState.cameraState.animateTo(
+                                CameraPosition(target = target, zoom = maxOf(at.zoom, 15.0), bearing = bearing, tilt = at.tilt, padding = tracking),
+                                kotlin.time.Duration.parse("900ms"),
+                            )
+                        }
+                        set = target
+                    }
+                }
             }
         }
         // The whole route in view, beside the card that describes it.

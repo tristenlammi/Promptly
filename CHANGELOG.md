@@ -66,6 +66,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Headsets and Bluetooth on Android: Talk uses your earbuds' microphone when they're connected, moves to the phone if they disconnect without ending the conversation, works with older Android 10 and 11 Bluetooth headsets, says so when your earbuds have no microphone, and never uses the car's Bluetooth while Android Auto is connected. A headset's or car's voice button opens Talk; Account → Voice can let it start on a locked phone (off by default; email, files, photos and your timeline still need an unlock).
 - Photo widget: a "Whole photo" choice in its settings, beside the shape. The entire picture is shown inside the shape with a soft, dimmed copy of itself behind, instead of being cropped to fill it. Needs the next Android build.
 - Photo widget: when it picks the next photo it prefers ones that suit the widget's shape (a wide view is left out of a tall widget while enough others fit), still giving every photo a turn. Needs the next Android build.
+- P Maps: the map goes dark at sunset and light at sunrise where you are, worked out on the phone from your position and the date, and it changes mid-drive without disturbing the trip. Pick Automatic, Always light or Always dark under the map's menu (Map colours). The phone's own dark mode no longer decides it.
+- P Maps: just drive. Open the driving map with no destination and, once you're moving, it follows you heading-up with an arrow, shows your speed, the road you're on and its speed limit (when the server knows them), and keeps the screen on. Pan away and a Re-centre button brings it back; "Where to?" stays at the top to start a trip. GPS stops when the screen is off or the app is in the background with no trip.
+- P Maps: a sound button on the driving screen cycles Sound on, Alerts only and Muted.
+- P Maps on the web: the same Map colours choice (Automatic by the sun where you are, Always light, Always dark) on the map's home panel; it changes the map only, not the rest of the app. On an Android phone the home panel also has Just drive, which opens the driving map with no destination.
+- P Maps: a speeding beep, off until you turn it on. Under the map's menu (or mid-trip, by tapping the arrival time) choose At the limit, 5 km/h over or 10 km/h over. One short beep when you go over, and not again until you've dropped back under (or two minutes have passed). It works on a trip and when just driving, wherever the map knows the limit, and follows the Sound button: Muted is silent, Alerts only still beeps.
+- P Maps: share this trip. The share button on the arrival bar lets you pick people on your Promptly; they get a notification and can watch where you are and when you'll arrive under People on their Maps page. It stops by itself when you arrive or end the trip, or when you press Stop sharing. No public links, and nobody else (admins included) can see it. Notifications has a P Maps switch for these.
+- P Maps: tap the arrival time during a trip to change Map colours or the speeding beep without ending the trip.
+- P Maps on Android Auto: with no trip set, the map now keeps you in the middle, heading up, while you drive (it used to centre once and stay put). Move the map yourself and it's left alone for 20 seconds.
 
 ### Changed
 
@@ -83,6 +91,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - A new admin screen can't ship without a privacy check: the tests list every admin route with what it shows, and fail on one nobody has looked at. They also check that file ids an admin could see open nothing.
 <!-- Talk phase 2 (WP-T14) -->
 - The Android assistant is always a Talk conversation now. The "Hands-free conversations" switch in Phone assistant settings becomes "Tap to talk", and the one-question-at-a-time mode is only used when your server doesn't have Talk.
+- P Maps on Android: the P Maps icon now always opens the map showing where you are, following you as you drive. Saved places, Timeline and People are one tap away under the search bar (they open on top, and Back returns to the map). A phone that hasn't been signed in to the map yet opens the Maps page once; pressing Just drive there signs it in.
+- P Maps: the route line and your arrow are now in Promptly's terracotta, with day and night shades, and traffic colours on the route have a dark edge so they stand apart from it. A leftover shadow from a hidden button on the driving screen is gone.
+- P Maps: the driving screen has a new look. A bigger next-turn banner with the turn after it, a bottom bar with the arrival time, minutes and distance left and a large End button, a speed badge that turns red over the limit, a road-name pill, larger round buttons (assistant, add a stop, sound, whole route / Re-centre), and matching day and night colours.
 
 ### Fixed
 
@@ -91,6 +102,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: a bookmark added, changed or deleted in one browser now shows in your other browsers in a second or two instead of up to a minute or more. The extension sends a change about a second after it's made, the server tells your other unlocked browsers to fetch it over a new live connection (`/api/passwords/live`, which carries only "this vault changed", never your data), and the minute's background sync no longer keeps getting pushed back. Passwords and other vault changes made elsewhere arrive just as fast. Needs the new server and a new extension version.
 - Photo widget: photos are cropped round the people and pets in them, not round the middle, so a subject at the side of a photo is no longer cut off. The server sends where they are (from faces and animals Photos has already found; nothing new is scanned) and the phone keeps it with the saved photo. Photos with no one found are cropped as before. Needs the next Android build.
 - Photo widget: the size sent for an edited photo is now the edited picture's, not the original's.
+- P Maps: your music no longer stays quiet for the whole trip. It was turned down for every direction even with the voice muted, and never turned back up when a direction was cut off; now it dips only while something is actually being said and comes straight back, including when you mute, end the trip or the phone's voice fails. Camera and hazard warnings dip the music too (they used to talk over it).
 
 ### Removed
 

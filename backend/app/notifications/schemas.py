@@ -63,6 +63,7 @@ class PreferencesSchema(BaseModel):
     porch: bool = True
     # Talk (0370): "Sent to your phone".
     talk_followup: bool = True
+    maps: bool = True
     # Quiet hours (0320) — "HH:MM" in the person's own time zone.
     quiet_enabled: bool = False
     quiet_start: str = "22:00"
@@ -105,6 +106,7 @@ class PreferencesUpdate(BaseModel):
     notes: bool | None = None
     porch: bool | None = None
     talk_followup: bool | None = None
+    maps: bool | None = None
     quiet_enabled: bool | None = None
     quiet_start: str | None = Field(default=None, pattern=_CLOCK)
     quiet_end: str | None = Field(default=None, pattern=_CLOCK)

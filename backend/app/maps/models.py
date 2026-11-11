@@ -105,7 +105,9 @@ class MapTrackPoint(Base):
 
 class MapShare(UUIDPKMixin, CreatedAtMixin, Base):
     """``owner`` lets ``viewer`` see their live location, until ``expires_at``
-    (or until they stop it, when that's empty)."""
+    (or until they stop it, when that's empty). ``trip``: for one drive only;
+    it ends when the phone says the trip has (arrived, or ended), and lapses
+    by itself a while after the arrival time if the phone never says."""
 
     __tablename__ = "map_shares"
     __table_args__ = (UniqueConstraint("owner_id", "viewer_id", name="uq_map_share_pair"),)
@@ -113,6 +115,7 @@ class MapShare(UUIDPKMixin, CreatedAtMixin, Base):
     owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     viewer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trip: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
 
 class MapLiveLocation(Base):
