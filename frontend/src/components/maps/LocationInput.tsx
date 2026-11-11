@@ -5,7 +5,18 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { peopleHubApi } from "@/api/peopleHub";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { TextInput } from "@/items/ui";
-import { fromContacts, fromSavedPlaces, fromSearch, keyAction, locationText, mergeSuggestions, nearFrom, type LocationSuggestion, type SuggestionKind } from "@/lib/locationSuggest";
+import {
+  fromContacts,
+  fromSavedPlaces,
+  fromSearch,
+  keyAction,
+  locationText,
+  nearFrom,
+  suggestionsFrom,
+  type LocationSuggestion,
+  type SearchRowLike,
+  type SuggestionKind,
+} from "@/lib/locationSuggest";
 import { mapsApi } from "@/maps/api";
 import { useKnownPosition, useMapsReady } from "@/maps/useMapsReady";
 import { cn } from "@/utils/cn";
@@ -54,6 +65,19 @@ interface Props {
   unstyled?: boolean;
   /** Suggestions push what's below them down (a panel that would clip a popup). */
   inlineList?: boolean;
+  /** Who to ask for map suggestions. Defaults to P Maps search
+   *  (``/api/maps/search``, Calendar). Forms passes the form's own place
+   *  search (``/api/f/<token>/places``), the only one its answer page uses;
+   *  ``key`` keeps their cached results apart. */
+  search?: { key: string; run: (q: string, near: { lat: number; lon: number } | null, signal?: AbortSignal) => Promise<SearchRowLike[]> };
+  /** Which of your own things to suggest: saved P Maps places, contacts with
+   *  an address, and whether your device's location (only when you've
+   *  already allowed it) may rank results. Defaults to all (Calendar); a
+   *  form's Location question turns contacts off. */
+  sources?: { saved: boolean; contacts: boolean; here?: boolean };
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+  "aria-required"?: boolean;
 }
 
 /**
@@ -63,7 +87,20 @@ interface Props {
  * Any typed text still goes as it is. When Maps isn't available it suggests
  * saved places and contacts only, or nothing — never an error.
  */
-export function LocationInput({ value, onChange, onPick, placeholder = "Add a place", maxLength = 300, id, className, unstyled, inlineList, ...aria }: Props) {
+export function LocationInput({
+  value,
+  onChange,
+  onPick,
+  placeholder = "Add a place",
+  maxLength = 300,
+  id,
+  className,
+  unstyled,
+  inlineList,
+  search: custom,
+  sources = { saved: true, contacts: true, here: true },
+  ...aria
+}: Props) {
   const [armed, setArmed] = useState(false);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -81,24 +118,26 @@ export function LocationInput({ value, onChange, onPick, placeholder = "Add a pl
   const q = debounced.length >= MIN_CHARS ? debounced : "";
   const asking = armed && open && !!q;
 
-  // Nothing is fetched until the field is first used.
-  const mapsReady = useMapsReady(armed);
-  const here = useKnownPosition(armed);
-  const mine = useQuery({ queryKey: ["maps-mine"], queryFn: () => mapsApi.mine(), enabled: armed, staleTime: 60_000, retry: false });
+  // Nothing is fetched until the field is first used. A custom search
+  // says itself when there's no map (it just finds nothing).
+  const appMaps = useMapsReady(armed && !custom);
+  const mapsReady = custom ? true : appMaps;
+  const here = useKnownPosition(armed && sources.here !== false);
+  const mine = useQuery({ queryKey: ["maps-mine"], queryFn: () => mapsApi.mine(), enabled: armed && sources.saved, staleTime: 60_000, retry: false });
   const near = nearFrom(here, mine.data?.places);
   const nearKey = near ? `${near.lat.toFixed(2)},${near.lon.toFixed(2)}` : null;
 
   const people = useQuery({
     queryKey: ["location-input", "contacts", q],
     queryFn: ({ signal }) => peopleHubApi.search(q, { details: true, signal }),
-    enabled: asking,
+    enabled: asking && sources.contacts,
     staleTime: 60_000,
     retry: false,
     placeholderData: keepPreviousData,
   });
   const search = useQuery({
-    queryKey: ["location-input", "maps", q, nearKey],
-    queryFn: ({ signal }) => mapsApi.search(q, near, signal),
+    queryKey: ["location-input", custom ? custom.key : "maps", q, nearKey],
+    queryFn: ({ signal }) => (custom ? custom.run(q, near, signal) : mapsApi.search(q, near, signal)),
     enabled: asking && mapsReady,
     staleTime: 60_000,
     retry: false,
@@ -108,18 +147,19 @@ export function LocationInput({ value, onChange, onPick, placeholder = "Add a pl
   const suggestions = useMemo(
     () =>
       q
-        ? mergeSuggestions(
+        ? suggestionsFrom(
+            sources,
             fromSavedPlaces(mine.data?.places ?? [], q),
             fromContacts(people.data ?? []),
             fromSearch(mapsReady ? search.data ?? [] : []),
           )
         : [],
-    [q, mine.data, people.data, search.data, mapsReady],
+    [q, mine.data, people.data, search.data, mapsReady, sources.saved, sources.contacts],
   );
   // The last list stays up while you keep typing (no flicker), but goes as
   // soon as the text is too short to suggest anything.
   const shown = open && value.trim().length >= MIN_CHARS && suggestions.length > 0;
-  const busy = asking && (people.isFetching || (mapsReady && search.isFetching));
+  const busy = asking && ((sources.contacts && people.isFetching) || (mapsReady && search.isFetching));
 
   useEffect(() => setActive(-1), [q]);
 
@@ -225,6 +265,9 @@ export function LocationInput({ value, onChange, onPick, placeholder = "Add a pl
     placeholder,
     maxLength,
     "aria-label": aria["aria-label"],
+    "aria-describedby": aria["aria-describedby"],
+    "aria-invalid": aria["aria-invalid"],
+    "aria-required": aria["aria-required"],
     onChange: (e: ChangeEvent<HTMLInputElement>) => {
       onChange(e.target.value);
       setOpen(true);

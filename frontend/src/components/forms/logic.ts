@@ -19,6 +19,10 @@ import { BRANCHING_KINDS, isQuestion, sectionsOf, type SectionInfo } from "./mod
  *   ``MM-DDTHH:MM`` without the year
  * - time: ``HH:MM``, or a duration ``H:MM:SS``
  * - file_upload: upload ids
+ * - choice_grid: ``{rows: {rowId: columnId}}``; checkbox_grid ``{rows: {rowId:
+ *   columnId[]}}`` (only answered rows; ``required`` = any row, ``each_row``
+ *   = every row)
+ * - location: ``{text, lat?, lon?, picked}`` (a spot only for a picked suggestion)
  *
  * Branching: when a section ends, the last question in it with branching on
  * whose chosen option has a ``go_to`` decides; otherwise the section's own
@@ -29,7 +33,9 @@ import { BRANCHING_KINDS, isQuestion, sectionsOf, type SectionInfo } from "./mod
 
 export type ChoiceAnswer = { option: string } | { other: string };
 export type CheckboxAnswer = { options: string[]; other?: string };
-export type AnswerValue = string | number | ChoiceAnswer | CheckboxAnswer | string[];
+export type GridAnswer = { rows: Record<string, string | string[]> };
+export type LocationAnswer = { text: string; lat?: number; lon?: number; picked: boolean };
+export type AnswerValue = string | number | ChoiceAnswer | CheckboxAnswer | GridAnswer | LocationAnswer | string[];
 export type Answers = Record<string, AnswerValue | undefined>;
 
 export function isEmpty(item: FormItem, v: AnswerValue | undefined): boolean {
@@ -37,6 +43,12 @@ export function isEmpty(item: FormItem, v: AnswerValue | undefined): boolean {
   if (typeof v === "string") return v.trim() === "";
   if (typeof v === "number") return Number.isNaN(v);
   if (Array.isArray(v)) return v.length === 0;
+  if (item.kind === "choice_grid" || item.kind === "checkbox_grid") {
+    const rows = (v as Partial<GridAnswer>).rows;
+    if (!rows || typeof rows !== "object") return true;
+    return !Object.values(rows).some((x) => x !== undefined && x !== null && x !== "" && !(Array.isArray(x) && x.length === 0));
+  }
+  if (item.kind === "location") return !(v as Partial<LocationAnswer>).text?.trim();
   if (item.kind === "checkboxes") {
     const c = v as CheckboxAnswer;
     return (c.options?.length ?? 0) === 0 && c.other === undefined;
@@ -155,6 +167,25 @@ export function problemWith(item: FormItem, v: AnswerValue | undefined): string 
       if (y < 1 || m < 1 || m > 12 || d < 1 || d > new Date(y, m, 0).getDate()) return "Pick a full date.";
       if (timePart && !clockOk(timePart)) return "Pick a time.";
       return null;
+    }
+    case "choice_grid":
+    case "checkbox_grid": {
+      const cfg = item.config as import("@/api/forms").ChoiceGridConfig;
+      const rows = (v as GridAnswer).rows;
+      const answered = cfg.rows.filter((r) => {
+        const x = rows[r.id];
+        return x !== undefined && x !== null && x !== "" && !(Array.isArray(x) && x.length === 0);
+      });
+      if (cfg.each_row && answered.length < cfg.rows.length) return "Answer every row.";
+      if (item.kind === "choice_grid" && cfg.one_per_column) {
+        const picked = answered.map((r) => rows[r.id] as string);
+        if (new Set(picked).size !== picked.length) return "Pick each column in one row only.";
+      }
+      return null;
+    }
+    case "location": {
+      const t = (v as LocationAnswer).text.trim().replace(/\s+/g, " ");
+      return t.length > 300 ? "Keep the place to 300 characters or fewer." : null;
     }
     case "time": {
       const cfg = item.config as import("@/api/forms").TimeConfig;

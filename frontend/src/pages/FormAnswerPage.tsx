@@ -7,10 +7,12 @@ import {
   refusalOf,
   type AnswerPage,
   type AnswerPageOpen,
+  type QuizResultView,
   type SubmitBody,
 } from "@/api/formAnswer";
 import { FileAnswer, type FileMeta } from "@/components/forms/FileAnswer";
 import { FormDone, FormRenderer } from "@/components/forms/FormRenderer";
+import { QuizResult, ResultLink } from "@/components/forms/QuizResult";
 import { answersOnPath, walkPath, type Answers } from "@/components/forms/logic";
 import { themeVars } from "@/components/forms/theme";
 import { rememberReturnTo } from "@/lib/returnTo";
@@ -93,6 +95,9 @@ interface Pending {
 interface Done {
   changed: boolean;
   editToken: string | null;
+  /** A quiz: your own result, and (an answer by link) the results link's key. */
+  result?: QuizResultView;
+  resultToken?: string | null;
 }
 
 type View =
@@ -116,12 +121,17 @@ export function FormAnswerPage() {
       edit: stored<string>(`promptly.form-edit.${token}`),
       // This page's key for the files it picked (they're the server's until sent).
       fileKey: stored<string>(`promptly.form-files.${token}.${uid}`),
+      // A quiz answered by link: the key to its results, kept on this device.
+      result: stored<string>(`promptly.form-result.${token}`),
     }),
     [token, uid]
   );
 
   const [view, setView] = useState<View>({ kind: "loading" });
-  const [mode, setMode] = useState<"form" | "already" | "done">("form");
+  const [mode, setMode] = useState<"form" | "already" | "done" | "result">("form");
+  // "See your score": your own quiz result (WP-F2.3).
+  const [shown, setShown] = useState<QuizResultView | null>(null);
+  const [resultError, setResultError] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [editing, setEditing] = useState<{ answers: Answers; email: string; edit: string | null; when: string | null } | null>(null);
   const [run, setRun] = useState(0);
@@ -148,16 +158,34 @@ export function FormAnswerPage() {
   const cameToEdit = useRef(!!params.get("edit"));
 
   // A saved edit link (?edit=…): kept on this device, then out of the address bar.
+  // A results link (?result=…) the same way, and the page opens at your score.
+  const cameForResult = useRef(!!params.get("result"));
   useEffect(() => {
     const e = params.get("edit");
-    if (e) {
-      keys.edit.set(e);
+    const r = params.get("result");
+    if (e || r) {
+      if (e) keys.edit.set(e);
+      if (r && r !== "1") keys.result.set(r);
       const next = new URLSearchParams(params);
       next.delete("edit");
+      next.delete("result");
       setParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const seeResult = useCallback(async () => {
+    setResultError(null);
+    try {
+      const r = await formAnswerApi.result(token, keys.result.get());
+      setShown(r);
+      setMode("result");
+      document.getElementById("form-answer-scroll")?.scrollTo({ top: 0 });
+    } catch (err) {
+      const { status } = refusalOf(err);
+      setResultError(status === 404 ? "There's no score for you on this device." : "Your score couldn't be loaded. Try again.");
+    }
+  }, [token, keys]);
 
   const load = useCallback(async (): Promise<AnswerPage | null> => {
     try {
@@ -182,6 +210,11 @@ export function FormAnswerPage() {
   useEffect(() => {
     void (async () => {
       const page = await load();
+      if (page && cameForResult.current && (page.state === "open" || page.state === "closed")) {
+        cameForResult.current = false;
+        void seeResult();
+        return;
+      }
       if (!page || page.state !== "open") return;
       const pending = keys.pending.get();
       if (pending) {
@@ -242,12 +275,14 @@ export function FormAnswerPage() {
     try {
       const body = { ...pending.body, start_token: startToken.current || pending.body.start_token };
       if (pending.kind === "change") {
-        await formAnswerApi.change(token, body);
-        finish({ changed: true, editToken: body.edit ?? null }, page);
+        const res = await formAnswerApi.change(token, body);
+        if (res.result_token) keys.result.set(res.result_token);
+        finish({ changed: true, editToken: body.edit ?? null, result: res.result, resultToken: res.result_token ?? keys.result.get() }, page);
       } else {
         const res = await formAnswerApi.submit(token, body);
         if (res.edit_token) keys.edit.set(res.edit_token);
-        finish({ changed: false, editToken: res.edit_token }, page);
+        if (res.result_token) keys.result.set(res.result_token);
+        finish({ changed: false, editToken: res.edit_token, result: res.result, resultToken: res.result_token ?? null }, page);
       }
     } catch (err) {
       const { status, refusal } = refusalOf(err);
@@ -368,6 +403,26 @@ export function FormAnswerPage() {
     }
   };
 
+  // Location questions: the form's own place search (Photon on this
+  // server, never anyone's saved places); your own saved places too when
+  // you're signed in.
+  const signedInHere = view.kind === "page" && view.page.state === "open" && !!view.page.respondent;
+  const places = useMemo(
+    () => ({
+      key: `form:${token}`,
+      saved: signedInHere,
+      search: async (q: string, questionId: string, near: { lat: number; lon: number } | null, signal?: AbortSignal) => {
+        try {
+          return (await formAnswerApi.places(token, q, { question: questionId, near, signal })).results;
+        } catch {
+          // Busy, offline, or Maps not there: typing still works.
+          return [];
+        }
+      },
+    }),
+    [token, signedInHere]
+  );
+
   const onFileBusy = useCallback((questionId: string, busy: boolean) => {
     if (busy) busyFiles.current.add(questionId);
     else busyFiles.current.delete(questionId);
@@ -416,6 +471,23 @@ export function FormAnswerPage() {
     );
   }
   const accent = page.definition.theme?.accent;
+  if (mode === "result" && shown && (page.state === "open" || page.state === "closed"))
+    return (
+      <Shell accent={accent}>
+        <FormDone definition={page.definition} assetUrls={page.asset_urls} scheme="device" message="Here's how you did.">
+          <QuizResult result={shown} />
+          {page.state === "open" && (
+            <button type="button" className="pf-btn pf-btn-ghost self-start border" style={{ borderColor: "var(--pf-border)" }} onClick={() => setMode("form")}>
+              Back to the form
+            </button>
+          )}
+        </FormDone>
+        <Footer token={token} link={page.audience === "link"} />
+      </Shell>
+    );
+  const canSeeResult = (p: AnswerPage) =>
+    (p.state === "closed" && !!p.quiz && (!!user || !!keys.result.get())) ||
+    (p.state === "open" && !!p.quiz && (!!p.my_result || !!keys.result.get()));
   if (page.state === "closed")
     return (
       <Shell accent={accent}>
@@ -424,7 +496,9 @@ export function FormAnswerPage() {
           assetUrls={page.asset_urls}
           scheme="device"
           message={page.closed_message || "This form isn't taking answers any more."}
-        />
+        >
+          {canSeeResult(page) && <SeeScore onClick={() => void seeResult()} error={resultError} />}
+        </FormDone>
         <Footer token={token} link={page.audience === "link"} />
       </Shell>
     );
@@ -443,6 +517,10 @@ export function FormAnswerPage() {
           scheme="device"
           message={done.changed ? "Your changes are saved." : s.confirmation || "Your answer has been sent."}
         >
+          {page.quiz && done.result && <QuizResult result={done.result} />}
+          {page.quiz && !signedIn && done.resultToken && (
+            <ResultLink url={`${window.location.origin}/f/${token}?result=${encodeURIComponent(done.resultToken)}`} />
+          )}
           {editUrl && <EditLink url={editUrl} />}
           <div className="flex flex-wrap gap-2">
             {s.allow_edit && (signedIn || done.editToken) && (
@@ -482,6 +560,7 @@ export function FormAnswerPage() {
               Change your answer
             </button>
           )}
+          {canSeeResult(page) && <SeeScore onClick={() => void seeResult()} error={resultError} />}
         </FormDone>
         <Footer token={token} link={page.audience === "link"} />
       </Shell>
@@ -521,6 +600,19 @@ export function FormAnswerPage() {
           <button type="button" className="pf-link underline" onClick={() => void startEditing(page)}>
             Change that answer
           </button>
+        </span>
+      )}
+      {!editing && page.quiz && canSeeResult(page) && (
+        <span>
+          You&apos;ve sent this quiz before.{" "}
+          <button type="button" className="pf-link underline" onClick={() => void seeResult()}>
+            See your score
+          </button>
+        </span>
+      )}
+      {resultError && (
+        <span role="alert" style={{ color: "var(--pf-error)" }}>
+          {resultError}
         </span>
       )}
       {!editing && signedIn && page.answered && !s.one_per_person && s.allow_edit && (
@@ -603,6 +695,7 @@ export function FormAnswerPage() {
             onBusy={onFileBusy}
           />
         )}
+        places={places}
         footer={<FooterLinks token={token} link={page.audience === "link"} />}
         className="flex-1"
       />
@@ -641,6 +734,22 @@ function Message({ title, text, children }: { title: string; text: string; child
         </p>
       </div>
     </Shell>
+  );
+}
+
+/** "See your score" (a quiz): your own result only. */
+function SeeScore({ onClick, error }: { onClick: () => void; error: string | null }) {
+  return (
+    <>
+      <button type="button" className="pf-btn pf-btn-ghost self-start border" style={{ borderColor: "var(--pf-border)" }} onClick={onClick}>
+        See your score
+      </button>
+      {error && (
+        <p role="alert" className="text-sm" style={{ color: "var(--pf-error)" }}>
+          {error}
+        </p>
+      )}
+    </>
   );
 }
 

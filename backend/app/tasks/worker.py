@@ -305,6 +305,15 @@ async def forms_sheet_sync_job(ctx, form_id: str) -> int:
     return (await sync_form(_uuid.UUID(form_id))).written
 
 
+# Forms phase 2 (WP-F2.3): a quiz's key changed, so its answers are marked again.
+async def forms_regrade_job(ctx, form_id: str) -> int:
+    import uuid as _uuid
+
+    from app.forms.regrade import regrade_form
+
+    return await regrade_form(_uuid.UUID(form_id))
+
+
 async def forms_sheet_reconcile_job(ctx, form_id: str) -> bool:
     """A while after a live write: if the sheet's editor closed before its
     autosave, bring the workbook JSON up to the room."""
@@ -452,6 +461,8 @@ class WorkerSettings:
         func(call_alone_check, timeout=60, max_tries=2, keep_result=0),
         # Calls WP-D5: a dropped connection's grace.
         func(call_left_check, timeout=60, max_tries=2, keep_result=0),
+        # Forms phase 2 (WP-F2.3): quiz answers marked again after a key change.
+        func(forms_regrade_job, timeout=1800, max_tries=2, keep_result=0),
     ]
     cron_jobs = [
         # Learn from chats that have gone quiet, then look after memory overnight.

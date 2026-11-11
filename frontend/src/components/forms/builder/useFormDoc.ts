@@ -124,6 +124,8 @@ export function useFormDoc(
       base.current = sent;
       setAssetUrls((u) => ({ ...u, ...res.asset_urls }));
       optsRef.current.onFile?.(res.file);
+      // A quiz's key changed: the answers already in are marked again.
+      if (res.remarking) toast.success(res.remarking === 1 ? "Marks updated for 1 answer" : `Marks updated for ${res.remarking} answers`);
       inflight.current = false;
       persist();
       if (!same(local.current, sent) || again.current) {

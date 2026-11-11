@@ -42,7 +42,10 @@ export type QuestionKind =
   | "rating"
   | "date"
   | "time"
-  | "file_upload";
+  | "file_upload"
+  | "choice_grid"
+  | "checkbox_grid"
+  | "location";
 export type BlockKind = "text" | "image" | "section";
 export type ItemKind = QuestionKind | BlockKind;
 
@@ -105,6 +108,30 @@ export interface FileUploadConfig {
   max_files: number;
   max_size_mb: number;
 }
+/** A grid's row or column (stable ids, like options: a renamed row keeps its answers). */
+export interface GridLine {
+  id: string;
+  label: string;
+}
+export interface ChoiceGridConfig {
+  rows: GridLine[];
+  columns: GridLine[];
+  /** Every row needs an answer (``required`` alone means at least one). */
+  each_row: boolean;
+  shuffle_rows: boolean;
+  /** Each column can be picked in one row only ("rank these"). */
+  one_per_column: boolean;
+}
+export interface CheckboxGridConfig {
+  rows: GridLine[];
+  columns: GridLine[];
+  each_row: boolean;
+  shuffle_rows: boolean;
+}
+/** A Location question: what to ask for (suggestions follow it). */
+export interface LocationConfig {
+  ask: "address" | "town" | "any";
+}
 export interface ImageConfig {
   alt: string;
 }
@@ -124,9 +151,31 @@ export interface ConfigByKind {
   date: DateConfig;
   time: TimeConfig;
   file_upload: FileUploadConfig;
+  choice_grid: ChoiceGridConfig;
+  checkbox_grid: CheckboxGridConfig;
+  location: LocationConfig;
   text: Record<string, never>;
   image: ImageConfig;
   section: SectionConfig;
+}
+
+/** A quiz question's answer key (WP-F2.3), by kind: choices ``options``
+ *  (any of them right; checkboxes: exactly that set), short answers
+ *  ``accept``, grids ``rows`` (a column, or columns, per row). Paragraphs
+ *  have none: they're marked by hand. */
+export interface QuizKey {
+  options?: string[];
+  accept?: string[];
+  rows?: Record<string, string | string[]>;
+}
+export interface ItemQuiz {
+  /** 0–100; a grid's are per row right. */
+  points: number;
+  key: QuizKey | null;
+  feedback_right: string;
+  feedback_wrong: string;
+  /** Made by AI: shown as "check it" until the owner touches it. */
+  suggested?: boolean;
 }
 
 export interface FormItem<K extends ItemKind = ItemKind> {
@@ -139,6 +188,8 @@ export interface FormItem<K extends ItemKind = ItemKind> {
   config: ConfigByKind[K];
   /** A question with answers that was deleted: kept for its answers. */
   deleted: boolean;
+  /** Points and the answer key in a quiz (never sent to the answer page). */
+  quiz?: ItemQuiz | null;
 }
 
 export interface FormDefinition {
@@ -149,6 +200,19 @@ export interface FormDefinition {
   /** Where section 1 goes when it ends. */
   after: string;
   items: FormItem[];
+}
+
+/** A quiz's settings (null: not a quiz). */
+export interface QuizSettings {
+  /** Straight after sending, or later when you press Release scores. */
+  release: "now" | "later";
+  show_score: boolean;
+  show_right_wrong: boolean;
+  /** Turns "Let people change their answer" off while it's on. */
+  show_answers: boolean;
+  show_points: boolean;
+  /** What "change their answer" was before (put back when this goes off). */
+  edit_before?: boolean;
 }
 
 export interface FormSettings {
@@ -164,6 +228,7 @@ export interface FormSettings {
   confirmation: string;
   closed_message: string;
   allow_another: boolean;
+  quiz: QuizSettings | null;
 }
 
 export interface FormRecord {
@@ -194,6 +259,8 @@ export interface FormView {
 }
 
 export interface SaveResult {
+  /** A quiz's key changed: this many answers are being marked again. */
+  remarking?: number;
   data_version: number;
   definition: FormDefinition;
   asset_urls: Record<string, string>;
@@ -214,6 +281,8 @@ export interface FormTemplateInfo {
   description: string;
   accent: Accent;
   questions: number;
+  /** A quiz template (answer keys and points set). */
+  quiz?: boolean;
 }
 
 export interface FormCard {
@@ -235,6 +304,9 @@ export interface FormCard {
   starred: boolean;
   folder_id: string | null;
   owner: string | null;
+  /** A quiz, and how many answers wait for a hand mark. */
+  quiz?: boolean;
+  to_mark?: number;
 }
 
 /** Who sent an answer: an account, an email they typed (not checked),
@@ -272,6 +344,21 @@ export interface SummaryQuestion {
   latest?: { number: number; text: string; submitted_at: string | null }[];
   /** File questions: the newest files sent (WP-F1.6). */
   files?: (AnswerFile & { number: number })[];
+  /** Grids (WP-F2.1): how many picked each column, per row. */
+  rows?: { id: string; label: string; answered: number; counts: Record<string, number> }[];
+  columns?: GridLine[];
+  /** Location questions (WP-F2.2): the newest places, and how many have a spot. */
+  places?: AnswerPlace[];
+  with_spot?: number;
+}
+
+/** A Location answer: its words, and its spot when a suggestion was picked. */
+export interface AnswerPlace {
+  number: number;
+  text: string;
+  lat?: number;
+  lon?: number;
+  question_id?: string;
 }
 
 /** A file someone sent with an answer: signed links that work for a few
@@ -316,6 +403,41 @@ export interface LinkedSheet {
   can_open: boolean;
 }
 
+/** The Summary's Scores strip (a quiz): counts only, never names. */
+export interface QuizStats {
+  max: number;
+  marked: number;
+  average: number | null;
+  median: number | null;
+  top: number | null;
+  histogram: { label: string; from: number; to: number; count: number }[];
+  pending: number;
+  released: number;
+  unreleased: number;
+  release: "now" | "later";
+  questions: { id: string; title: string; right_pct: number; answered: number }[];
+  most_missed: { id: string; title: string; right_pct: number; answered: number }[];
+}
+
+/** One answer's marks. ``points`` null: a paragraph still to mark. */
+export interface AnswerMarks {
+  score: number;
+  max: number;
+  pending: number;
+  released: boolean;
+  items: Record<string, { points: number | null; max: number; right: boolean | null; by: "auto" | "owner"; rows?: Record<string, boolean> }>;
+}
+
+export interface ScoreRow {
+  number: number;
+  who: Respondent;
+  score: number;
+  max: number;
+  pending: number;
+  released: boolean;
+  submitted_at: string | null;
+}
+
 export interface ResponsesSummary {
   total: number;
   first_number: number | null;
@@ -328,6 +450,10 @@ export interface ResponsesSummary {
   /** ``null``: no sheet linked. */
   sheet: LinkedSheet | null;
   can_link_sheet: boolean;
+  /** A quiz (WP-F2.3/4): the Scores strip; null when it isn't one. */
+  quiz?: QuizStats | null;
+  /** You can mark answers and release scores (edit access). */
+  can_mark?: boolean;
 }
 
 export interface QuestionAnswers {
@@ -355,6 +481,8 @@ export interface OneResponse {
     text: string;
     files?: AnswerFile[];
   }[];
+  /** A quiz: this answer's marks. */
+  quiz?: AnswerMarks | null;
 }
 
 /** "Summarise" on a text question (AI): themes with counts and quotes. */
@@ -429,6 +557,26 @@ export const formsApi = {
     const { data } = await apiClient.get<QuestionAnswers>(`/forms/${fileId}/responses`, {
       params: { question, before: opts.before ?? undefined, q: opts.q || undefined },
     });
+    return data;
+  },
+  /** A quiz's Scores view: every marked answer, best first. */
+  async scores(fileId: string): Promise<ScoreRow[]> {
+    const { data } = await apiClient.get<{ scores: ScoreRow[] }>(`/forms/${fileId}/scores`);
+    return data.scores;
+  },
+  /** Mark a paragraph (or change an automatic mark); null: automatic again. */
+  async mark(fileId: string, number: number, marks: Record<string, number | null>): Promise<AnswerMarks> {
+    const { data } = await apiClient.put(`/forms/${fileId}/responses/${number}/marks`, { marks });
+    return data.marks as AnswerMarks;
+  },
+  /** "Release scores": every answer with nothing left to mark (or these). */
+  async release(fileId: string, numbers?: number[]): Promise<{ released: number; still_to_mark: number }> {
+    const { data } = await apiClient.post(`/forms/${fileId}/release`, numbers ? { numbers } : {});
+    return data;
+  },
+  /** Every picked place (with a spot), for "Show on a map". */
+  async places(fileId: string, question?: string): Promise<{ places: AnswerPlace[]; capped: boolean }> {
+    const { data } = await apiClient.get(`/forms/${fileId}/places`, { params: question ? { question } : undefined });
     return data;
   },
   async response(fileId: string, number: number): Promise<OneResponse> {

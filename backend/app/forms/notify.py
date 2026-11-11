@@ -523,7 +523,8 @@ async def today_section(db: AsyncSession, user: User, now: datetime, tz: Any) ->
             and not is_closed(form, now=now)
         ):
             closing.append({"title": _title(form), "closes_at": form.close_at.isoformat(), "url": responses_url(shell.id)})
-    if not new_items and not closing:
+    to_mark = await _to_mark_today(db, user)
+    if not new_items and not closing and not to_mark:
         return None
     new_items.sort(key=lambda i: -i["new"])
     return {
@@ -532,7 +533,31 @@ async def today_section(db: AsyncSession, user: User, now: datetime, tz: Any) ->
         "forms": new_items[:5],
         "more": max(0, len(new_items) - 5),
         "closing": closing[:3],
+        # Quizzes (WP-F2.4): "Family trivia: 4 answers to mark". Counts only.
+        "to_mark": to_mark,
     }
+
+
+async def _to_mark_today(db: AsyncSession, user: User) -> list[dict[str, Any]]:
+    """Your quizzes with answers waiting for a hand mark (counts only)."""
+    from app.forms.scores import to_mark
+
+    rows = (
+        await db.execute(
+            select(Form, UserFile)
+            .join(UserFile, UserFile.id == Form.file_id)
+            .where(UserFile.user_id == user.id, UserFile.trashed_at.is_(None), Form.quiz.is_not(None))
+            .limit(50)
+        )
+    ).all()
+    counts = await to_mark(db, [f.id for f, _s in rows])
+    out = [
+        {"title": _title(f), "count": counts[f.id], "url": f"/files/form/{s.id}?tab=responses"}
+        for f, s in rows
+        if counts.get(f.id)
+    ]
+    out.sort(key=lambda i: -i["count"])
+    return out[:3]
 
 
 __all__ = [

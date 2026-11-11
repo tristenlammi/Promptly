@@ -198,7 +198,10 @@ function closesLabel(iso: string | null): string | null {
 function answersLabel(f: FormCard): string {
   const n = f.response_count;
   const base = n === 0 ? "No answers yet" : `${n} answer${n === 1 ? "" : "s"}`;
-  return f.new_count > 0 && n > 0 ? `${base} · ${f.new_count} new` : base;
+  const withNew = f.new_count > 0 && n > 0 ? `${base} · ${f.new_count} new` : base;
+  // A quiz: "Quiz · 4 to mark · 12 answers".
+  if (f.quiz) return `Quiz · ${f.to_mark ? `${f.to_mark} to mark · ` : ""}${withNew}`;
+  return withNew;
 }
 
 function StateChip({ form }: { form: FormCard }) {

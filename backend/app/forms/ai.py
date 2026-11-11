@@ -32,20 +32,25 @@ ANSWER_CHARS = 1_500
 
 # What the model may ask for. Uploads aren't drafted: the owner decides
 # who may send files.
-DRAFT_KINDS = tuple(k for k in QUESTION_KINDS if k != "file_upload") + ("section", "text")
+DRAFT_KINDS = tuple(k for k in QUESTION_KINDS if k not in ("file_upload", "location")) + ("section", "text")
 
 DRAFT_SYSTEM = """You design forms (like Google Forms) for people to fill in.
 Reply with JSON only, no prose, in exactly this shape:
 {"title": "...", "description": "...", "items": [
   {"kind": "...", "title": "...", "description": "", "required": true,
    "options": ["..."], "other": false, "max": 5, "min_label": "", "max_label": "",
-   "validation": "any|number|email|url", "include_time": false, "mode": "time|duration"}
+   "validation": "any|number|email|url", "include_time": false, "mode": "time|duration",
+   "rows": ["..."], "columns": ["..."]}
 ]}
 kind is one of: short_text, paragraph, multiple_choice, checkboxes, dropdown, linear_scale,
-rating, date, time, section, text. Only give the fields that kind uses (options for the
-three choice kinds; max/min_label/max_label for linear_scale; max for rating;
-validation for short_text; include_time for date; mode for time). Use plain, friendly
-words. Keep it short: what's needed, nothing more. Never ask for passwords or bank details."""
+rating, date, time, choice_grid, checkbox_grid, section, text. Only give the fields that kind
+uses (options for the three choice kinds; max/min_label/max_label for linear_scale; max for
+rating; validation for short_text; include_time for date; mode for time; rows and columns
+for the two grids: at most 20 rows and 8 short columns, e.g. rows of days and columns of
+times). Use plain, friendly
+words. Keep it short: what's needed, nothing more. Never ask for passwords or bank details.
+For a quiz, also give each question its right answer and points: "answer": "the right option's
+text" (or "answers": [...] for checkboxes, or the accepted text for short_text) and "points": 1."""
 
 OPTIONS_SYSTEM = """You suggest the options for one multiple-choice question on a form.
 Reply with JSON only: {"options": ["...", "..."]}. Plain words, at most 20 options,
@@ -123,9 +128,57 @@ def _item(raw: dict[str, Any]) -> dict[str, Any] | None:
         cfg["include_time"] = bool(raw.get("include_time"))
     elif kind == "time":
         cfg["mode"] = "duration" if raw.get("mode") == "duration" else "time"
+    elif kind in ("choice_grid", "checkbox_grid"):
+        rows = _labels(raw.get("rows"), 20, 300)
+        cols = _labels(raw.get("columns"), 8, 40)
+        if not rows or not cols:
+            return None
+        cfg["rows"] = [{"id": _id("r"), "label": r} for r in rows]
+        cfg["columns"] = [{"id": _id("c"), "label": c} for c in cols]
     elif kind == "section":
         cfg["after"] = "continue"
     return item
+
+
+def _labels(raw: Any, most: int, chars: int) -> list[str]:
+    """Distinct non-empty labels from a model's list (grid rows/columns)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for v in raw if isinstance(raw, list) else []:
+        label = _s(v.get("label") if isinstance(v, dict) else v, chars)
+        if label and label.lower() not in seen:
+            seen.add(label.lower())
+            out.append(label)
+        if len(out) >= most:
+            break
+    return out
+
+
+def _key_from(raw: dict[str, Any], item: dict[str, Any]) -> dict[str, Any] | None:
+    """A model's suggested answer as a quiz key, marked "suggested" so the
+    builder shows "AI suggested this answer — check it" until the owner
+    looks. None when it gave no usable answer."""
+    kind = item["kind"]
+    try:
+        points = max(1, min(100, int(raw.get("points") or 1)))
+    except (TypeError, ValueError):
+        points = 1
+    given = raw.get("answers") if isinstance(raw.get("answers"), list) else raw.get("answer")
+    wanted = [str(x).strip().lower() for x in (given if isinstance(given, list) else [given]) if isinstance(x, (str, int, float))]
+    wanted = [w for w in wanted if w]
+    if not wanted:
+        return None
+    key: dict[str, Any]
+    if kind in ("multiple_choice", "dropdown", "checkboxes"):
+        ids = [o["id"] for o in item["config"]["options"] if o["label"].strip().lower() in wanted]
+        if not ids:
+            return None
+        key = {"options": ids}
+    elif kind == "short_text":
+        key = {"accept": [_s(w, 300) for w in (given if isinstance(given, list) else [given]) if str(w).strip()][:20]}
+    else:
+        return None
+    return {"points": points, "key": key, "feedback_right": "", "feedback_wrong": "", "suggested": True}
 
 
 def items_from(data: Any) -> dict[str, Any]:
@@ -141,6 +194,9 @@ def items_from(data: Any) -> dict[str, Any]:
         it = _item(raw)
         if it is None:
             continue
+        q = _key_from(raw, it)
+        if q is not None:
+            it["quiz"] = q
         try:
             validate_definition({"title": "x", "items": [it]})
         except DefinitionError:
@@ -155,6 +211,12 @@ def items_from(data: Any) -> dict[str, Any]:
     description = _s(data.get("description"), 2000)
     clean = validate_definition({"title": title, "description": description, "items": items})
     return {"title": title, "description": description, "items": clean["items"]}
+
+
+def is_quiz_draft(items: list[dict[str, Any]]) -> bool:
+    """A draft with suggested answer keys is a quiz (shown and released
+    straight away, as the owner can change)."""
+    return any(isinstance(i.get("quiz"), dict) for i in items)
 
 
 def options_from(data: Any) -> list[dict[str, Any]]:

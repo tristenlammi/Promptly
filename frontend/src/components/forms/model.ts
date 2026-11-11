@@ -5,8 +5,11 @@ import {
   ChevronDownSquare,
   CircleDot,
   Clock,
+  Grid3x3,
   Heading,
   Image as ImageIcon,
+  LayoutGrid,
+  MapPin,
   SeparatorHorizontal,
   SlidersHorizontal,
   Star,
@@ -20,6 +23,7 @@ import type {
   FormDefinition,
   FormItem,
   FormOption,
+  GridLine,
   ItemKind,
   QuestionKind,
 } from "@/api/forms";
@@ -42,7 +46,15 @@ export const QUESTION_KINDS: QuestionKind[] = [
   "date",
   "time",
   "file_upload",
+  "choice_grid",
+  "checkbox_grid",
+  "location",
 ];
+export const GRID_KINDS: ItemKind[] = ["choice_grid", "checkbox_grid"];
+/** Grids stay usable on a phone: at most this many rows and columns. */
+export const GRID_MAX_ROWS = 20;
+export const GRID_MAX_COLUMNS = 8;
+export const GRID_COLUMN_CHARS = 40;
 export const CHOICE_KINDS: ItemKind[] = ["multiple_choice", "checkboxes", "dropdown"];
 export const BRANCHING_KINDS: ItemKind[] = ["multiple_choice", "dropdown"];
 
@@ -57,6 +69,9 @@ export const KIND_META: Record<ItemKind, { label: string; icon: LucideIcon }> = 
   date: { label: "Date", icon: CalendarDays },
   time: { label: "Time", icon: Clock },
   file_upload: { label: "File upload", icon: Upload },
+  choice_grid: { label: "Multiple-choice grid", icon: Grid3x3 },
+  checkbox_grid: { label: "Checkbox grid", icon: LayoutGrid },
+  location: { label: "Location", icon: MapPin },
   text: { label: "Title & text", icon: Heading },
   image: { label: "Image", icon: ImageIcon },
   section: { label: "Section", icon: SeparatorHorizontal },
@@ -76,6 +91,10 @@ export function newOption(label = ""): FormOption {
   return { id: newId("o"), label, go_to: null, limit: null, image_asset_id: null };
 }
 
+export function newGridLine(prefix: "r" | "c", label = ""): GridLine {
+  return { id: newId(prefix), label };
+}
+
 export function defaultConfig<K extends ItemKind>(kind: K): ConfigByKind[K] {
   const c: { [P in ItemKind]: ConfigByKind[P] } = {
     short_text: { validation: { kind: "any", min: null, max: null, integer: false }, min_length: null, max_length: null },
@@ -88,6 +107,15 @@ export function defaultConfig<K extends ItemKind>(kind: K): ConfigByKind[K] {
     date: { include_time: false, include_year: true },
     time: { mode: "time" },
     file_upload: { kinds: ["images", "pdf"], max_files: 1, max_size_mb: 10 },
+    choice_grid: {
+      rows: [newGridLine("r", "Row 1")],
+      columns: [newGridLine("c", "Column 1")],
+      each_row: false,
+      shuffle_rows: false,
+      one_per_column: false,
+    },
+    checkbox_grid: { rows: [newGridLine("r", "Row 1")], columns: [newGridLine("c", "Column 1")], each_row: false, shuffle_rows: false },
+    location: { ask: "address" },
     text: {},
     image: { alt: "" },
     section: { after: "continue" },
@@ -109,11 +137,16 @@ export function newItem<K extends ItemKind>(kind: K, title = ""): FormItem<K> {
 }
 
 /** ``item`` as another kind: choices keep their options between choice
- *  kinds; anything else starts with the new kind's defaults. Answers
- *  already given stay on the server (shown as text). */
+ *  kinds, grids keep their rows and columns between the two grids;
+ *  anything else (a grid to a choice, say) starts with the new kind's
+ *  defaults. Answers already given stay on the server (shown as text). */
 export function changeKind(item: FormItem, kind: ItemKind): FormItem {
   if (item.kind === kind) return item;
   const config = defaultConfig(kind) as FormItem["config"];
+  if (GRID_KINDS.includes(kind) && GRID_KINDS.includes(item.kind)) {
+    const old = item.config as { rows: GridLine[]; columns: GridLine[]; each_row: boolean; shuffle_rows: boolean };
+    Object.assign(config as object, { rows: old.rows, columns: old.columns, each_row: old.each_row, shuffle_rows: old.shuffle_rows });
+  }
   const oldOpts = (item.config as { options?: FormOption[] }).options;
   if (CHOICE_KINDS.includes(kind) && oldOpts?.length) {
     const keepGoTo = BRANCHING_KINDS.includes(kind);
@@ -126,7 +159,34 @@ export function changeKind(item: FormItem, kind: ItemKind): FormItem {
     if (keepGoTo) (config as { branching: boolean }).branching = !!oldCfg.branching;
   }
   const block = kind === "text" || kind === "image" || kind === "section";
-  return { ...item, kind, config, required: block ? false : item.required };
+  return { ...item, kind, config, required: block ? false : item.required, quiz: quizForKind(item, kind, config) };
+}
+
+/** A quiz question changing kind keeps its points and feedback; its key
+ *  only when it still fits (choices to choices keep the right options, the
+ *  two grids keep their rows' answers when it's the same shape). A kind a
+ *  quiz can't mark loses the quiz part. */
+function quizForKind(item: FormItem, kind: ItemKind, config: FormItem["config"]): FormItem["quiz"] {
+  const q = item.quiz;
+  if (!q) return undefined;
+  const markable: ItemKind[] = ["multiple_choice", "dropdown", "checkboxes", "short_text", "paragraph", "choice_grid", "checkbox_grid"];
+  if (!markable.includes(kind)) return undefined;
+  let key: NonNullable<FormItem["quiz"]>["key"] = null;
+  if (CHOICE_KINDS.includes(kind)) {
+    const ids = new Set(((config as { options?: FormOption[] }).options ?? []).map((o) => o.id));
+    key = { options: CHOICE_KINDS.includes(item.kind) ? (q.key?.options ?? []).filter((o) => ids.has(o)) : [] };
+  } else if (kind === "short_text") key = { accept: item.kind === "short_text" ? q.key?.accept ?? [] : [] };
+  else if (GRID_KINDS.includes(kind)) {
+    const rows: Record<string, string | string[]> = {};
+    if (GRID_KINDS.includes(item.kind))
+      for (const [r, v] of Object.entries(q.key?.rows ?? {})) {
+        if (kind === "checkbox_grid") rows[r] = Array.isArray(v) ? v : [v];
+        else if (!Array.isArray(v)) rows[r] = v;
+        else if (v.length === 1) rows[r] = v[0];
+      }
+    key = { rows };
+  }
+  return { ...q, key };
 }
 
 /** A copy with new ids (the item's and its options'). */
@@ -134,7 +194,15 @@ export function duplicateItem(item: FormItem): FormItem {
   const copy: FormItem = JSON.parse(JSON.stringify(item));
   copy.id = newId(item.kind === "section" ? "s" : "q");
   const opts = (copy.config as { options?: FormOption[] }).options;
-  if (opts) for (const o of opts) o.id = newId("o");
+  const renamed = new Map<string, string>();
+  if (opts)
+    for (const o of opts) {
+      const id = newId("o");
+      renamed.set(o.id, id);
+      o.id = id;
+    }
+  // A quiz key follows its options to their new ids.
+  if (copy.quiz?.key?.options) copy.quiz.key.options = copy.quiz.key.options.map((o) => renamed.get(o) ?? o);
   copy.title = item.title ? `${item.title} (copy)`.slice(0, 1000) : "";
   return copy;
 }

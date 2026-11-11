@@ -39,14 +39,28 @@ function reId(items: FormItem[]): FormItem[] {
     const copy: FormItem = JSON.parse(JSON.stringify(it));
     copy.id = sections.get(it.id) ?? newId("q");
     const cfg = copy.config as { options?: { id: string; go_to?: string | null }[]; after?: string };
+    const renamed = new Map<string, string>();
     if (cfg.options) for (const o of cfg.options) {
-      o.id = newId("o");
+      const id = newId("o");
+      renamed.set(o.id, id);
+      o.id = id;
       if (o.go_to && sections.has(o.go_to)) o.go_to = sections.get(o.go_to)!;
       else if (o.go_to && o.go_to !== "submit") o.go_to = null;
     }
+    // A suggested quiz answer follows its option to the new id.
+    if (copy.quiz?.key?.options) copy.quiz.key.options = copy.quiz.key.options.map((o) => renamed.get(o) ?? o);
     if (cfg.after && sections.has(cfg.after)) cfg.after = sections.get(cfg.after)!;
     return copy;
   });
+}
+
+/** The right answer an AI draft suggested, in words. */
+function suggestedAnswer(it: FormItem): string {
+  const key = it.quiz?.key;
+  if (!key) return "";
+  if (key.accept?.length) return key.accept.join(" / ");
+  const opts = (it.config as { options?: { id: string; label: string }[] }).options ?? [];
+  return opts.filter((o) => key.options?.includes(o.id)).map((o) => o.label).join(", ");
 }
 
 export function MakeWithAi({
@@ -176,6 +190,11 @@ export function MakeWithAi({
                           ? ` · ${(it.config as { options: { label: string }[] }).options.map((o) => o.label).join(", ")}`
                           : ""}
                       </p>
+                      {it.quiz?.suggested && suggestedAnswer(it) && (
+                        <p className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                          Answer: {suggestedAnswer(it)} · AI suggested this answer — check it
+                        </p>
+                      )}
                     </div>
                     <span className="flex shrink-0 gap-1">
                       <Button size="sm" variant="secondary" onClick={() => take([it])} aria-label={`Add “${it.title || "this"}”`}>

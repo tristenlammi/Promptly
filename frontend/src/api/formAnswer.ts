@@ -1,3 +1,5 @@
+import type { SearchRowLike } from "@/lib/locationSuggest";
+
 import { apiClient } from "./client";
 import type { FormDefinition } from "./forms";
 
@@ -12,6 +14,25 @@ import type { FormDefinition } from "./forms";
  */
 
 export type AnswerPageState = "open" | "closed" | "sign_in";
+
+/** Your own quiz result (WP-F2.3), only what the owner chose to show. */
+export interface QuizResultView {
+  number?: number;
+  released: boolean;
+  pending?: number;
+  score?: number;
+  max?: number;
+  items?: {
+    id: string;
+    title: string;
+    waiting: boolean;
+    right?: boolean | null;
+    points?: number | null;
+    max?: number;
+    correct?: string;
+    feedback?: string;
+  }[];
+}
 
 export interface MyAnswer {
   number: number;
@@ -49,6 +70,10 @@ export interface AnswerPageOpen {
   uploads: { mode: "all" | "link" | "none"; accept: Record<string, string> };
   /** The event this form is for (an RSVP from Calendar): "Add to my calendar". */
   event: { title: string } | null;
+  /** A quiz: when scores come. */
+  quiz?: { release: "now" | "later" } | null;
+  /** Signed in and answered a quiz: your own result. */
+  my_result?: QuizResultView | null;
 }
 
 /** A file picked on the answer page, kept until the answer is sent. */
@@ -66,6 +91,8 @@ export interface AnswerPageClosed {
   definition: FormDefinition;
   asset_urls: Record<string, string>;
   closed_message: string;
+  /** A quiz: you can still look up your own score. */
+  quiz?: boolean;
 }
 
 export interface AnswerPageSignIn {
@@ -130,7 +157,10 @@ export const formAnswerApi = {
     const { data } = await apiClient.get<AnswerPage>(base(token));
     return data;
   },
-  async submit(token: string, body: SubmitBody): Promise<{ number: number; edit_token: string | null }> {
+  async submit(
+    token: string,
+    body: SubmitBody
+  ): Promise<{ number: number; edit_token: string | null; result?: QuizResultView; result_token?: string }> {
     const { data } = await apiClient.post(`${base(token)}/submit`, body, { timeout: 30_000 });
     return data;
   },
@@ -138,8 +168,16 @@ export const formAnswerApi = {
     const { data } = await apiClient.get(`${base(token)}/mine`, { params: edit ? { edit } : undefined });
     return data;
   },
-  async change(token: string, body: Omit<SubmitBody, "submit_id"> & { submit_id?: string }): Promise<{ number: number }> {
+  async change(
+    token: string,
+    body: Omit<SubmitBody, "submit_id"> & { submit_id?: string }
+  ): Promise<{ number: number; result?: QuizResultView; result_token?: string }> {
     const { data } = await apiClient.put(`${base(token)}/mine`, body, { timeout: 30_000 });
+    return data;
+  },
+  /** Your own quiz marks: by the results link kept on this device, or signed in. */
+  async result(token: string, r?: string | null): Promise<QuizResultView> {
+    const { data } = await apiClient.get(`${base(token)}/result`, { params: r ? { r } : undefined });
     return data;
   },
   async report(token: string, reason: string): Promise<void> {
@@ -166,6 +204,24 @@ export const formAnswerApi = {
         if (onProgress && e.total) onProgress(e.loaded / e.total);
       },
     });
+    return data;
+  },
+  /** Place suggestions for a Location question: this server's own map
+   *  search only (never anyone's saved places). ``maps: false`` when Maps
+   *  isn't set up — the question is then a plain text box. */
+  async places(
+    token: string,
+    q: string,
+    opts: { question?: string; near?: { lat: number; lon: number } | null; signal?: AbortSignal } = {}
+  ): Promise<{ results: SearchRowLike[]; maps: boolean }> {
+    const params: Record<string, string | number> = { q };
+    if (opts.question) params.question = opts.question;
+    // Roughly where (a kilometre or so) is enough to rank nearby places first.
+    if (opts.near) {
+      params.lat = Math.round(opts.near.lat * 100) / 100;
+      params.lon = Math.round(opts.near.lon * 100) / 100;
+    }
+    const { data } = await apiClient.get(`${base(token)}/places`, { params, signal: opts.signal });
     return data;
   },
   /** The linked event as a one-event .ics (title, time and place). */

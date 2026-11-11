@@ -208,6 +208,7 @@ async def save_definition(
     from app.files.activity import record_activity
 
     shell, form, _access = await load_form(db, file_id, user, need="edit", lock=True)
+    old_definition = form.definition or {}
     try:
         await service.save_definition(db, shell, form, payload.definition, data_version=payload.data_version)
     except service.StaleDefinition as exc:
@@ -235,9 +236,18 @@ async def save_definition(
     from app.forms.sheet import sync_soon
 
     sync_soon(form)
+    # A quiz whose points or answer keys changed: the answers already in are
+    # marked again (WP-F2.3), and the builder says so.
+    from app.forms.regrade import needs_regrade, regrade_soon
+
+    remarking = 0
+    if form.quiz is not None and (form.response_count or 0) > 0 and needs_regrade(old_definition, form.definition):
+        regrade_soon(form)
+        remarking = int(form.response_count or 0)
     from app.files.router import _file_to_response
 
     return {
+        "remarking": remarking,
         "data_version": form.data_version,
         "definition": form.definition,
         "asset_urls": service.asset_urls(shell, form.definition or {}),
@@ -261,10 +271,13 @@ class _Settings(BaseModel):
     confirmation: str | None = Field(default=None, max_length=2000)
     closed_message: str | None = Field(default=None, max_length=2000)
     allow_another: bool | None = None
+    # A quiz (WP-F2.3): ``{release, show_score, show_right_wrong,
+    # show_answers, show_points}``; null turns it off (marks are kept).
+    quiz: dict[str, Any] | None = None
 
 
 # Settings whose "off" is null — sending null clears them.
-_NULLABLE = ("close_at", "max_responses")
+_NULLABLE = ("close_at", "max_responses", "quiz")
 
 
 @router.patch("/{file_id:uuid}/settings")
@@ -287,6 +300,7 @@ async def update_settings(
     for k in ("confirmation", "closed_message"):
         if k in changes:
             changes[k] = changes[k].strip()
+    was_quiz = form.quiz is not None
     try:
         await service.apply_settings(db, form, changes)
     except service.SettingsError as exc:
@@ -295,6 +309,15 @@ async def update_settings(
     await db.commit()
     await db.refresh(form)
     await db.refresh(shell)
+    if form.quiz is not None and (not was_quiz or "quiz" in changes):
+        # Answers already in get marked (a quiz turned on late, or released
+        # straight away now) — and the sheet gets its Score column.
+        from app.forms.regrade import regrade_soon
+
+        regrade_soon(form)
+        from app.forms.sheet import sync_soon as _sync
+
+        _sync(form)
     if "collect_email" in changes or "audience" in changes:
         # An Email or Account column may be needed now (WP-F1.5).
         from app.forms.sheet import sync_soon
@@ -476,7 +499,91 @@ async def responses_summary(
 
     out["sheet"] = await sheet.status(db, form, user)
     out["can_link_sheet"] = access == "edit"
+    # A quiz (WP-F2.3/4): the Scores strip — counts, never names.
+    from app.forms import scores
+
+    out["quiz"] = await scores.stats(db, form) if form.quiz is not None else None
+    out["can_mark"] = access == "edit"
     return out
+
+
+@router.get("/{file_id:uuid}/scores")
+async def quiz_scores(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """The Scores view: every marked answer, best first (number, who,
+    score, still to mark). People who can see the answers only."""
+    from app.forms import scores
+
+    _shell, form, _access = await load_form(db, file_id, user)
+    if form.quiz is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This form isn't a quiz.")
+    return {"scores": await scores.ranked(db, form)}
+
+
+class _Marks(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    marks: dict[str, int | None] = Field(min_length=1, max_length=200)
+
+
+@router.put("/{file_id:uuid}/responses/{number:int}/marks")
+async def mark_answer(
+    file_id: uuid.UUID,
+    number: int,
+    payload: _Marks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Mark a paragraph by hand, or override an automatic mark: ``{marks:
+    {question_id: points}}`` (null hands it back to automatic marking)."""
+    from app.forms import scores
+
+    _shell, form, _access = await load_form(db, file_id, user, need="edit", lock=True)
+    try:
+        r = await scores.set_marks(db, form, number, payload.marks)
+    except scores.MarkError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    if r is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That answer isn't here any more.")
+    marks = scores.marks_view(r)
+    await db.commit()
+    from app.forms.sheet import sync_soon
+
+    sync_soon(form)
+    return {"number": number, "marks": marks}
+
+
+class _Release(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    numbers: list[int] | None = Field(default=None, max_length=10_000)
+
+
+@router.post("/{file_id:uuid}/release")
+async def release_scores(
+    file_id: uuid.UUID,
+    payload: _Release | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """"Release scores": every answer with nothing left to mark (or the
+    chosen ones). Answers still waiting for marks stay until they're
+    marked; the reply says how many."""
+    from app.forms import scores
+
+    shell, form, _access = await load_form(db, file_id, user, need="edit", lock=True)
+    try:
+        counts, people = await scores.release(db, form, payload.numbers if payload else None)
+    except scores.MarkError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    await db.commit()
+    await scores.tell_released(db, shell, form, people)
+    return counts
 
 
 @router.get("/{file_id:uuid}/responses")
@@ -574,6 +681,23 @@ async def export_responses(
             "Cache-Control": "no-store",
         },
     )
+
+
+@router.get("/{file_id:uuid}/places")
+async def answer_places(
+    file_id: uuid.UUID,
+    question: str | None = Query(None, min_length=1, max_length=40),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Every answer to a Location question that has a spot (a picked
+    place), for "Show on a map": ``{number, question_id, text, lat, lon}``,
+    newest first, at most 2,000. People who can see the answers only."""
+    from app.forms import results
+
+    _shell, form, _access = await load_form(db, file_id, user)
+    rows = await results.places(db, form, question)
+    return {"places": rows, "capped": len(rows) >= results.MAX_PLACES}
 
 
 class _Summarise(BaseModel):

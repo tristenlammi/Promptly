@@ -13,6 +13,8 @@ that shows or exports answers reads them through :func:`answer_text`:
   ``"MM-DDTHH:MM"`` (no year)
 * time: ``"HH:MM"`` (time of day) or ``"H:MM:SS"`` (a duration)
 * file upload: ``[{"id": "<upload id>", "name": "receipt.jpg"}, …]``
+* grids: ``{"rows": {"<row id>": "<column id>"}}`` (checkbox grid: a list)
+* location: ``{"text": "12 Smith St, Hobart", "lat"?, "lon"?, "picked"}``
 
 Older shapes (a bare option id, a list of ids) are read too. Anything that
 doesn't fit its question's shape (the question's type was changed after
@@ -29,7 +31,7 @@ import io
 import json
 import zipfile
 from datetime import datetime, timezone, tzinfo
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from app.forms.definition import questions
 
@@ -73,11 +75,69 @@ def _choice_part(names: dict[str, str], v: Any) -> str:
     return _plain(v)
 
 
+GRID_KINDS = ("choice_grid", "checkbox_grid")
+
+
+def grid_rows(question: dict[str, Any]) -> list[tuple[str, str]]:
+    """A grid's rows as ``(id, label)`` (a blank label reads "Row n")."""
+    return [
+        (str(r.get("id")), (r.get("label") or "").strip() or f"Row {n}")
+        for n, r in enumerate((question.get("config") or {}).get("rows") or [], start=1)
+    ]
+
+
+def grid_columns(question: dict[str, Any]) -> dict[str, str]:
+    return {
+        str(c.get("id")): (c.get("label") or "").strip() or f"Column {n}"
+        for n, c in enumerate((question.get("config") or {}).get("columns") or [], start=1)
+    }
+
+
+def grid_cell(question: dict[str, Any], value: Any, row_id: str) -> str:
+    """One row of a grid answer: the column picked, or the columns ticked
+    joined with ", " (a sheet or export cell)."""
+    if not isinstance(value, dict) or not isinstance(value.get("rows"), dict):
+        return ""
+    x = value["rows"].get(row_id)
+    cols = grid_columns(question)
+    if isinstance(x, list):
+        return ", ".join(cols.get(str(c), str(c)) for c in x)
+    if isinstance(x, str):
+        return cols.get(x, x)
+    return ""
+
+
+def _grid_text(question: dict[str, Any], value: Any) -> str:
+    if not isinstance(value, dict) or not isinstance(value.get("rows"), dict):
+        return _plain(value)
+    known = dict(grid_rows(question))
+    parts = []
+    order = [rid for rid, _ in grid_rows(question)] + [k for k in value["rows"] if k not in known]
+    for rid in order:
+        cell = grid_cell(question, value, rid)
+        if cell:
+            parts.append(f"{known.get(rid, '(removed row)')}: {cell}")
+    return "; ".join(parts)
+
+
+def location_spot(value: Any) -> str:
+    """A picked place's spot as ``lat, lon`` text (empty for a typed one)."""
+    if isinstance(value, dict) and value.get("picked") and isinstance(value.get("lat"), (int, float))             and isinstance(value.get("lon"), (int, float)):
+        return f"{value['lat']}, {value['lon']}"
+    return ""
+
+
 def answer_text(question: dict[str, Any], value: Any) -> str:
     """One answer as readable text (not yet neutralised)."""
     if value is None:
         return ""
     kind = question.get("kind")
+    if kind in GRID_KINDS:
+        return _grid_text(question, value)
+    if kind == "location":
+        if isinstance(value, dict) and isinstance(value.get("text"), str):
+            return value["text"]
+        return _plain(value)
     if kind in ("multiple_choice", "dropdown"):
         names = labels(question)
         if isinstance(value, dict) and isinstance(value.get("option"), str):
@@ -105,6 +165,29 @@ def answer_text(question: dict[str, Any], value: Any) -> str:
     return _plain(value)
 
 
+def question_columns(question: dict[str, Any]) -> list[tuple[str, str, Callable[[Any], str]]]:
+    """The columns one question takes in a download and the linked Sheet:
+    ``(key, title, text of an answer)``. One per question (key
+    ``q:<id>``), except a grid: one per row, titled "Question [Row]" like
+    Google, keyed ``q:<id>:<row id>``. Deleted questions say so."""
+    qid = question.get("id")
+    title = (question.get("title") or "").strip() or "Untitled question"
+    gone = " (deleted question)" if question.get("deleted") else ""
+    if question.get("kind") in GRID_KINDS:
+        return [
+            (f"q:{qid}:{rid}", f"{title} [{label}]{gone}", (lambda v, rid=rid: grid_cell(question, v, rid)))
+            for rid, label in grid_rows(question)
+        ]
+    if question.get("kind") == "location":
+        # The place as words, and its spot when one was picked (text: it
+        # opens nowhere by itself).
+        return [
+            (f"q:{qid}", f"{title}{gone}", lambda v: answer_text(question, v)),
+            (f"q:{qid}:map", f"{title} (map){gone}", location_spot),
+        ]
+    return [(f"q:{qid}", f"{title}{gone}", lambda v: answer_text(question, v))]
+
+
 def when(d: datetime | None, tz: tzinfo | None = None) -> str:
     if d is None:
         return ""
@@ -120,11 +203,13 @@ def table(
     who: dict[Any, str] | None = None,
     tz: tzinfo | None = None,
     typed: bool = False,
+    quiz: bool = False,
 ) -> list[list[Any]]:
     """Header row + one row per response: Response #, Submitted, Edited,
-    Email (typed, if any), Account (if any), then every question in order
-    — deleted ones last, marked "(deleted question)". Times are in ``tz``
-    (UTC when not given). Text is neutralised. ``typed``: Response # and
+    Score, Max and Still to mark (a quiz, WP-F2.3: numbers), Email (typed,
+    if any), Account (if any), then every question in order — deleted ones
+    last, marked "(deleted question)". Times are in ``tz`` (UTC when not
+    given). Text is neutralised. ``typed``: Response #, scores and
     scale/rating answers stay numbers (for xlsx)."""
     qs = questions(definition, include_deleted=True)
     qs = [q for q in qs if not q.get("deleted")] + [q for q in qs if q.get("deleted")]
@@ -132,37 +217,48 @@ def table(
     has_email = any(getattr(r, "email", None) for r in rows)
     has_account = any(getattr(r, "respondent_id", None) for r in rows)
     header = ["Response #", "Submitted", "Edited"]
+    if quiz:
+        header += ["Score", "Max", "Still to mark"]
     if has_email:
         header.append("Email (typed, not checked)")
     if has_account:
         header.append("Account")
-    for q in qs:
-        title = (q.get("title") or "").strip() or "Untitled question"
-        header.append(f"{title} (deleted question)" if q.get("deleted") else title)
+    cols = [(q, col) for q in qs for col in question_columns(q)]
+    for _q, (_key, title, _fn) in cols:
+        header.append(title)
     out: list[list[Any]] = [[neutralise(h) for h in header]]
     for r in rows:
         line: list[Any] = [r.number if typed else str(r.number), when(r.submitted_at, tz), when(r.edited_at, tz)]
+        if quiz:
+            g = getattr(r, "grading", None) or {}
+            nums = [int(g.get("auto") or 0) + int(g.get("manual") or 0), int(g.get("max") or 0), int(g.get("pending") or 0)] if g else None
+            line += [(n if typed else str(n)) for n in nums] if nums else ["", "", ""]
         if has_email:
             line.append(neutralise(r.email or ""))
         if has_account:
             line.append(neutralise((who or {}).get(r.respondent_id, "") if r.respondent_id else ""))
         answers = r.answers or {}
-        for q in qs:
+        for q, (_key, _title, fn) in cols:
             v = answers.get(q.get("id"))
             if typed and q.get("kind") in NUMBER_KINDS and isinstance(v, int) and not isinstance(v, bool):
                 line.append(v)
             else:
-                line.append(neutralise(answer_text(q, v)))
+                line.append(neutralise(fn(v)))
         out.append(line)
     return out
 
 
 def responses_csv(
-    definition: dict[str, Any], responses: Iterable[Any], *, who: dict[Any, str] | None = None, tz: tzinfo | None = None
+    definition: dict[str, Any],
+    responses: Iterable[Any],
+    *,
+    who: dict[Any, str] | None = None,
+    tz: tzinfo | None = None,
+    quiz: bool = False,
 ) -> bytes:
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\r\n")
-    writer.writerows(table(definition, responses, who=who, tz=tz))
+    writer.writerows(table(definition, responses, who=who, tz=tz, quiz=quiz))
     # A BOM so Excel opens it as UTF-8.
     return ("﻿" + buf.getvalue()).encode("utf-8")
 
@@ -174,6 +270,7 @@ def responses_xlsx(
     who: dict[Any, str] | None = None,
     tz: tzinfo | None = None,
     sheet_title: str = "Responses",
+    quiz: bool = False,
 ) -> bytes:
     """An Excel workbook: a bold, frozen header row and one row per answer.
     Every text cell is stored as text (``data_type="s"``), so even a value
@@ -183,7 +280,7 @@ def responses_xlsx(
     from openpyxl.styles import Alignment, Font
     from openpyxl.utils import get_column_letter
 
-    rows = table(definition, responses, who=who, tz=tz, typed=True)
+    rows = table(definition, responses, who=who, tz=tz, typed=True, quiz=quiz)
     wb = Workbook()
     ws = wb.active
     name = (sheet_title or "Responses")[:31]
@@ -226,8 +323,14 @@ def form_zip(
 
 
 __all__ = [
+    "GRID_KINDS",
     "NUMBER_KINDS",
     "answer_text",
+    "grid_cell",
+    "grid_columns",
+    "grid_rows",
+    "location_spot",
+    "question_columns",
     "form_zip",
     "labels",
     "neutralise",

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Award,
   Check,
   ChevronRight,
   CloudOff,
@@ -21,9 +22,10 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { filesApi, type FileItem } from "@/api/files";
-import { formsApi, type FormView } from "@/api/forms";
+import { formsApi, type FormDefinition, type FormView } from "@/api/forms";
 import { officeApi, officeEditorPath, type OfficeEditorInfo } from "@/api/office";
 import { FormRenderer } from "@/components/forms/FormRenderer";
+import { itemPoints, keySet } from "@/components/forms/builder/AnswerKey";
 import { LookPanel } from "@/components/forms/builder/LookPanel";
 import { PreviewPane } from "@/components/forms/builder/PreviewPane";
 import { QuestionsTab } from "@/components/forms/builder/QuestionsTab";
@@ -230,6 +232,7 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
           </p>
         )}
         <span className="flex-1" />
+        {view.form.settings.quiz && <QuizBadge def={doc.def} />}
         {canEdit && (
           <div className="flex items-center gap-2 py-1">
             {closedBy && <span className="hidden text-xs text-amber-700 dark:text-amber-400 sm:inline">{closedBy}</span>}
@@ -259,6 +262,7 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
               readOnly={!canEdit}
               onOpenLook={() => setLookOpen(true)}
               aside={!isPhone ? preview : undefined}
+              quiz={!!view.form.settings.quiz}
             />
           ) : (
             <div className="promptly-scroll min-h-0 flex-1 overflow-y-auto">
@@ -323,6 +327,16 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
 }
 
 type Tab = "questions" | "responses" | "settings";
+
+/** "Quiz · 10 points" beside the tabs. */
+function QuizBadge({ def }: { def: FormDefinition }) {
+  const total = def.items.filter((i) => !i.deleted && keySet(i)).reduce((n, i) => n + itemPoints(i), 0);
+  return (
+    <span className="hidden shrink-0 items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-text)] sm:inline-flex" data-testid="quiz-badge">
+      <Award className="h-3.5 w-3.5" aria-hidden="true" /> Quiz · {total} {total === 1 ? "point" : "points"}
+    </span>
+  );
+}
 
 function statusWords(s: SaveStatus): { text: string; tone: "ok" | "busy" | "bad" } {
   switch (s.kind) {

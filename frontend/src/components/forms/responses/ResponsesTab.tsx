@@ -9,12 +9,15 @@ import {
   FileText,
   Inbox,
   Loader2,
+  Map as MapIcon,
+  MapPin,
   MoreHorizontal,
   Search,
   Send,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import {
   formsApi,
@@ -33,11 +36,18 @@ import { confirm } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { mapsPinLink } from "@/maps/links";
+import type { MapCard } from "@/maps/MapChips";
+import { useMapsReady } from "@/maps/useMapsReady";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
+// The map library is big: loaded only when "Show on a map" is pressed.
+const MapCardModal = lazy(() => import("@/maps/MapCardModal").then((m) => ({ default: m.MapCardModal })));
+
 import { ChoiceBars, ScaleColumns, pct, type ChoiceRow } from "./charts";
 import { FileList, FileStrip } from "./Files";
+import { QuestionMark, ScoresStrip, ScoresView, nextToMark } from "./Scores";
 import { Summarise } from "./Summarise";
 import { SheetCard } from "./SheetCard";
 
@@ -52,7 +62,7 @@ import { SheetCard } from "./SheetCard";
  * (React escapes them; links aren't made clickable).
  */
 
-type ViewKind = "summary" | "question" | "individual";
+type ViewKind = "summary" | "question" | "individual" | "scores";
 
 const TEXTY = new Set(["short_text", "paragraph"]);
 
@@ -140,6 +150,19 @@ export function ResponsesTab({
     setNumber(n);
     setView("individual");
   };
+  // "Next to mark": the next answer with a paragraph waiting (a quiz).
+  const goNextToMark = async (from: number | null) => {
+    try {
+      const n = await nextToMark(fileId, from);
+      if (n === null) {
+        toast.success("Everything's marked.");
+        return;
+      }
+      showAnswer(n);
+    } catch (e) {
+      toast.error(extractError(e));
+    }
+  };
 
   return (
     <div className="promptly-scroll min-h-0 flex-1 overflow-y-auto bg-[var(--bg)]">
@@ -173,8 +196,18 @@ export function ResponsesTab({
           </div>
         ) : (
           <>
-            <ViewSwitch view={view} onView={setView} />
+            <ViewSwitch view={view} onView={setView} quiz={!!data.quiz} />
+            {view === "summary" && data.quiz && (
+              <ScoresStrip
+                fileId={fileId}
+                stats={data.quiz}
+                canMark={!!data.can_mark}
+                onScores={() => setView("scores")}
+                onNextToMark={() => void goNextToMark(null)}
+              />
+            )}
             {view === "summary" && <SummaryView fileId={fileId} summary={data} narrow={isPhone} onQuestion={openQuestion} onAnswer={showAnswer} />}
+            {view === "scores" && <ScoresView fileId={fileId} total={data.total} onAnswer={showAnswer} />}
             {view === "question" && (
               <QuestionView
                 fileId={fileId}
@@ -194,6 +227,8 @@ export function ResponsesTab({
                 isPhone={isPhone}
                 sheetLinked={!!data.sheet?.file_id}
                 highlight={openFile}
+                canMark={!!data.can_mark}
+                onNextToMark={(from) => void goNextToMark(from)}
               />
             )}
           </>
@@ -393,9 +428,10 @@ function NotifyButton({ fileId, settings: saved }: { fileId: string; settings: N
   );
 }
 
-function ViewSwitch({ view, onView }: { view: ViewKind; onView: (v: ViewKind) => void }) {
+function ViewSwitch({ view, onView, quiz }: { view: ViewKind; onView: (v: ViewKind) => void; quiz: boolean }) {
   const items: { key: ViewKind; label: string }[] = [
     { key: "summary", label: "Summary" },
+    ...(quiz ? [{ key: "scores" as const, label: "Scores" }] : []),
     { key: "question", label: "Question" },
     { key: "individual", label: "Individual" },
   ];
@@ -455,7 +491,7 @@ function SummaryView({
     <div className="mt-4 space-y-3" data-testid="responses-summary">
       {summary.questions.map((q) => (
         <Card key={q.id} q={q}>
-          {q.answered === 0 ? <p className="text-sm text-[var(--text-muted)]">No answers to this question yet.</p> : <QuestionSummary q={q} narrow={narrow} onQuestion={onQuestion} onAnswer={onAnswer} />}
+          {q.answered === 0 ? <p className="text-sm text-[var(--text-muted)]">No answers to this question yet.</p> : <QuestionSummary fileId={fileId} q={q} narrow={narrow} onQuestion={onQuestion} onAnswer={onAnswer} />}
           {TEXTY.has(q.kind) && <Summarise fileId={fileId} questionId={q.id} answered={q.answered} onAnswer={onAnswer} />}
         </Card>
       ))}
@@ -479,7 +515,134 @@ function SrTable({ caption, rows }: { caption: string; rows: [string, string][] 
   );
 }
 
-function QuestionSummary({ q, narrow, onQuestion, onAnswer }: { q: SummaryQuestion; narrow: boolean; onQuestion: (id: string) => void; onAnswer: (n: number) => void }) {
+/** A grid's summary: a small group of bars per row (one bar per column,
+ *  percentages of the people who answered that row), with the same numbers
+ *  in a real table for screen readers. */
+function GridSummary({ q, narrow }: { q: SummaryQuestion; narrow: boolean }) {
+  const rows = q.rows ?? [];
+  const cols = q.columns ?? [];
+  const multi = q.kind === "checkbox_grid";
+  return (
+    <>
+      <div className="space-y-3" aria-hidden="true">
+        {rows.map((r) => (
+          <div key={r.id}>
+            <p className="mb-0.5 break-words text-xs font-medium text-[var(--text)]">
+              {r.label} <span className="font-normal text-[var(--text-muted)]">· {answeredWords(r.answered)}</span>
+            </p>
+            <ChoiceBars rows={cols.map((c) => ({ key: c.id, label: c.label, count: r.counts[c.id] ?? 0 }))} of={r.answered} narrow={narrow} />
+          </div>
+        ))}
+      </div>
+      <table className="sr-only">
+        <caption>{`${q.title}: answers per row and column`}</caption>
+        <thead>
+          <tr>
+            <td />
+            {cols.map((c) => (
+              <th key={c.id} scope="col">
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <th scope="row">{`${r.label} (${answeredWords(r.answered)})`}</th>
+              {cols.map((c) => (
+                <td key={c.id}>{`${r.counts[c.id] ?? 0}, ${pct(r.counts[c.id] ?? 0, r.answered)}`}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {multi && <p className="mt-1 text-xs text-[var(--text-muted)]">People could tick more than one per row, so a row can add up to more than 100%.</p>}
+    </>
+  );
+}
+
+/** A Location question's summary: the newest places (a pin when one was
+ *  picked from the suggestions, with "Open in P Maps"), and "Show on a
+ *  map" for all of them when this server has Maps. */
+function PlacesSummary({ fileId, q, onQuestion, onAnswer }: { fileId: string; q: SummaryQuestion; onQuestion: (id: string) => void; onAnswer: (n: number) => void }) {
+  const maps = useMapsReady();
+  const [card, setCard] = useState<MapCard | null>(null);
+  const [loading, setLoading] = useState(false);
+  const showMap = async () => {
+    setLoading(true);
+    try {
+      const { places, capped } = await formsApi.places(fileId, q.id);
+      if (!places.length) {
+        toast.info("None of these answers has a spot on the map yet.");
+        return;
+      }
+      if (capped) toast.info("Showing the newest 2,000 places.");
+      setCard({
+        kind: "places",
+        title: q.title,
+        places: places.map((p) => ({ lat: p.lat!, lon: p.lon!, name: `#${p.number}: ${p.text}`.slice(0, 120) })),
+      });
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const list = q.places ?? [];
+  return (
+    <>
+      <ul className="divide-y divide-[var(--border)]">
+        {list.map((p) => (
+          <li key={p.number} className="flex items-center gap-2 py-1.5 text-sm">
+            {p.lat !== undefined ? (
+              <MapPin className="h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-label="On the map" />
+            ) : (
+              <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+            )}
+            <button type="button" onClick={() => onAnswer(p.number)} className="min-w-0 flex-1 truncate text-left text-[var(--text)] hover:underline" title={`Open answer #${p.number}`}>
+              {p.text}
+            </button>
+            {maps && p.lat !== undefined && p.lon !== undefined && (
+              <Link to={mapsPinLink(p.lat, p.lon, p.text.slice(0, 80))} className="shrink-0 text-xs font-medium text-[var(--accent-text)] hover:underline">
+                Open in P Maps
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {q.answered > list.length && (
+          <button type="button" onClick={() => onQuestion(q.id)} className="text-sm font-medium text-[var(--accent-text)] hover:underline">
+            Show all {q.answered.toLocaleString()}
+          </button>
+        )}
+        {maps && !!q.with_spot && (
+          <button
+            type="button"
+            onClick={() => void showMap()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent-text)] hover:underline disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <MapIcon className="h-4 w-4" aria-hidden="true" />} Show on a map
+          </button>
+        )}
+        <span className="text-xs text-[var(--text-muted)]">
+          {q.with_spot === 1 ? "1 place is on the map" : `${(q.with_spot ?? 0).toLocaleString()} places are on the map`}; typed ones have no spot.
+        </span>
+      </div>
+      {card && (
+        <Suspense fallback={null}>
+          <MapCardModal card={card} onClose={() => setCard(null)} />
+        </Suspense>
+      )}
+    </>
+  );
+}
+
+function QuestionSummary({ fileId, q, narrow, onQuestion, onAnswer }: { fileId: string; q: SummaryQuestion; narrow: boolean; onQuestion: (id: string) => void; onAnswer: (n: number) => void }) {
+  if (q.rows && q.columns) return <GridSummary q={q} narrow={narrow} />;
+  if (q.places) return <PlacesSummary fileId={fileId} q={q} onQuestion={onQuestion} onAnswer={onAnswer} />;
   if (q.options) {
     const rows: ChoiceRow[] = q.options.map((o) => ({
       key: o.id,
@@ -624,7 +787,7 @@ function QuestionView({
     setTyped("");
     setSearch("");
   }, [questionId]);
-  const searchable = !!q && (TEXTY.has(q.kind) || q.other !== undefined && q.other !== null);
+  const searchable = !!q && (TEXTY.has(q.kind) || q.kind === "location" || (q.other !== undefined && q.other !== null));
   const query = useInfiniteQuery({
     queryKey: ["form-question", fileId, q?.id, search, summary.total],
     queryFn: ({ pageParam }) => formsApi.questionAnswers(fileId, q!.id, { before: pageParam, q: search }),
@@ -650,7 +813,7 @@ function QuestionView({
         </label>
         {searchable && (
           <label className="relative flex flex-col gap-1 text-xs text-[var(--text-muted)] sm:w-64">
-            {TEXTY.has(q.kind) ? "Search these answers" : "Search “Other”"}
+            {TEXTY.has(q.kind) || q.kind === "location" ? "Search these answers" : "Search “Other”"}
             <Search className="pointer-events-none absolute bottom-2.5 left-2.5 h-4 w-4" aria-hidden="true" />
             <input type="search" className={cn(fieldCls, "pl-8")} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search" />
           </label>
@@ -711,6 +874,8 @@ function IndividualView({
   isPhone,
   sheetLinked,
   highlight = null,
+  canMark = false,
+  onNextToMark,
 }: {
   fileId: string;
   number: number | null;
@@ -723,6 +888,9 @@ function IndividualView({
   sheetLinked: boolean;
   /** A file to pick out (opened from the sheet). */
   highlight?: string | null;
+  /** A quiz: you can mark (edit access). */
+  canMark?: boolean;
+  onNextToMark?: (from: number) => void;
 }) {
   const qc = useQueryClient();
   // Opened at one file (from the sheet): bring it into view once it's there.
@@ -801,6 +969,13 @@ function IndividualView({
     );
   }
   const r = nav;
+  const marks = r.quiz ?? null;
+  const onMarked = (m: NonNullable<OneResponse["quiz"]>) => {
+    qc.setQueryData<OneResponse>(["form-response", fileId, number, total], (cur) => (cur ? { ...cur, quiz: m } : cur));
+    qc.invalidateQueries({ queryKey: ["form-summary", fileId] });
+    qc.invalidateQueries({ queryKey: ["form-scores", fileId] });
+    if (m.pending === 0) toast.success(`Marked: ${m.score} / ${m.max}`);
+  };
   const navBtn = "inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-40";
   return (
     <div
@@ -845,6 +1020,13 @@ function IndividualView({
               {r.edited_at ? ` · changed ${whenWords(r.edited_at)}` : ""}
             </p>
           </div>
+          {marks && (
+            <p className="w-full text-sm font-semibold tabular-nums text-[var(--text)] sm:w-auto" data-testid="answer-score">
+              {marks.score} / {marks.max}
+              {marks.pending > 0 && <span className="ml-1 font-normal text-amber-700 dark:text-amber-400">({marks.pending} to mark)</span>}
+              {!marks.released && <span className="ml-1 font-normal text-[var(--text-muted)]">· not released</span>}
+            </p>
+          )}
           {canDelete && (
             <button
               type="button"
@@ -866,10 +1048,24 @@ function IndividualView({
               <dd className={cn("mt-0.5 whitespace-pre-wrap break-words text-sm", a.answered ? "text-[var(--text)]" : "italic text-[var(--text-muted)]")}>
                 {a.answered && a.files ? <FileList fileId={fileId} files={a.files} highlight={highlight} /> : a.answered ? a.text : "No answer"}
               </dd>
+              {marks && marks.items[a.id] && (
+                <QuestionMark fileId={fileId} number={r.number} answer={a} marks={marks} canMark={canMark} onMarked={onMarked} />
+              )}
             </div>
           ))}
         </dl>
       </article>
+      {marks && canMark && onNextToMark && (
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={() => onNextToMark(r.number)}
+            className="inline-flex h-10 items-center gap-1 rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white hover:opacity-90"
+          >
+            Next to mark <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {isPhone && <p className="mt-2 text-center text-xs text-[var(--text-muted)]">Swipe left or right for the next answer.</p>}
     </div>
   );

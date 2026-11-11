@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.files.models import UserFile
 from app.forms import answering as ans
 from app.forms.definition import questions
-from app.forms.export import NUMBER_KINDS, answer_text, labels
+from app.forms.export import GRID_KINDS, NUMBER_KINDS, answer_text, grid_columns, grid_rows, labels
 from app.forms.models import Form, FormOptionCount, FormResponse
 
 if TYPE_CHECKING:
@@ -44,6 +44,10 @@ SUMMARY_TEXTS = 5
 PAGE = 50
 #: Days / times listed per question in the summary.
 MAX_GROUPS = 100
+#: Newest places listed per Location question in the summary.
+SUMMARY_PLACES = 10
+#: Places sent to the map at most.
+MAX_PLACES = 2000
 
 _LIVE = "r.form_id = :f AND r.deleted_at IS NULL"
 
@@ -163,6 +167,59 @@ async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dic
         ):
             strings.setdefault(k, {})[v] = int(n)
 
+    # Grids (WP-F2.1): how many picked each column, per row. A choice
+    # grid's row holds one column id, a checkbox grid's a list of them.
+    grid_ids = [q["id"] for q in qs if q.get("kind") in GRID_KINDS]
+    cells: dict[str, dict[str, dict[str, int]]] = {}
+    row_answers: dict[str, dict[str, int]] = {}
+    if grid_ids:
+        for k, row, col, n in await grouped(
+            f"SELECT e.key, g.key, c.value, count(*) FROM form_responses r "
+            f"CROSS JOIN LATERAL jsonb_each(r.answers) e "
+            f"CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(e.value) = 'object' "
+            f"AND jsonb_typeof(e.value->'rows') = 'object' THEN e.value->'rows' ELSE '{{}}'::jsonb END) g "
+            f"CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(g.value) = 'array' THEN g.value "
+            f"WHEN jsonb_typeof(g.value) = 'string' THEN jsonb_build_array(g.value) ELSE '[]'::jsonb END) c(value) "
+            f"WHERE {_LIVE} AND e.key = ANY(:keys) GROUP BY 1, 2, 3",
+            keys=grid_ids,
+        ):
+            cells.setdefault(k, {}).setdefault(row, {})[col] = int(n)
+        for k, row, n in await grouped(
+            f"SELECT e.key, g.key, count(*) FROM form_responses r "
+            f"CROSS JOIN LATERAL jsonb_each(r.answers) e "
+            f"CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(e.value) = 'object' "
+            f"AND jsonb_typeof(e.value->'rows') = 'object' THEN e.value->'rows' ELSE '{{}}'::jsonb END) g "
+            f"WHERE {_LIVE} AND e.key = ANY(:keys) GROUP BY 1, 2",
+            keys=grid_ids,
+        ):
+            row_answers.setdefault(k, {})[row] = int(n)
+
+    # Location questions (WP-F2.2): the newest places, and how many have a
+    # spot on the map.
+    place_ids = [q["id"] for q in qs if q.get("kind") == "location"]
+    places: dict[str, list[dict[str, Any]]] = {}
+    spots: dict[str, int] = {}
+    if place_ids:
+        for k, v, number in await grouped(
+            f"SELECT key, value, number FROM ("
+            f"SELECT e.key, e.value, r.number, "
+            f"row_number() OVER (PARTITION BY e.key ORDER BY r.number DESC) AS rn "
+            f"FROM form_responses r CROSS JOIN LATERAL jsonb_each(r.answers) e "
+            f"WHERE {_LIVE} AND e.key = ANY(:keys)) s WHERE rn <= :n ORDER BY key, number DESC",
+            keys=place_ids,
+            n=SUMMARY_PLACES,
+        ):
+            places.setdefault(k, []).append(_place(number, v))
+        spots = {
+            k: int(n)
+            for k, n in await grouped(
+                f"SELECT e.key, count(*) FROM form_responses r CROSS JOIN LATERAL jsonb_each(r.answers) e "
+                f"WHERE {_LIVE} AND e.key = ANY(:keys) AND jsonb_typeof(e.value) = 'object' "
+                f"AND e.value->'picked' = 'true'::jsonb GROUP BY 1",
+                keys=place_ids,
+            )
+        }
+
     latest_ids = [q["id"] for q in qs if q.get("kind") in TEXT_KINDS]
     latest: dict[str, list[dict[str, Any]]] = {}
     if latest_ids:
@@ -235,6 +292,22 @@ async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dic
             groups = sorted(strings.get(qid, {}).items())
             block["groups"] = [{"value": v, "count": c} for v, c in groups[:MAX_GROUPS]]
             block["more_groups"] = max(0, len(groups) - MAX_GROUPS)
+        elif kind in GRID_KINDS:
+            got = cells.get(qid, {})
+            columns = grid_columns(q)
+            block["columns"] = [{"id": cid, "label": label} for cid, label in columns.items()]
+            block["rows"] = [
+                {
+                    "id": rid,
+                    "label": label,
+                    "answered": row_answers.get(qid, {}).get(rid, 0),
+                    "counts": {cid: got.get(rid, {}).get(cid, 0) for cid in columns},
+                }
+                for rid, label in grid_rows(q)
+            ]
+        elif kind == "location":
+            block["places"] = places.get(qid, [])
+            block["with_spot"] = spots.get(qid, 0)
         elif kind in TEXT_KINDS:
             block["latest"] = latest.get(qid, [])
         elif kind == "file_upload":
@@ -251,6 +324,46 @@ async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dic
         "latest_number": first_last[1],
         "questions": live + gone,
     }
+
+
+def _place(number: int, value: Any) -> dict[str, Any]:
+    """One Location answer for the Responses page: its words, and its spot
+    when a suggestion was picked."""
+    out: dict[str, Any] = {"number": number, "text": ""}
+    if isinstance(value, dict):
+        out["text"] = str(value.get("text") or "")
+        if value.get("picked") and isinstance(value.get("lat"), (int, float)) and isinstance(value.get("lon"), (int, float)):
+            out["lat"], out["lon"] = float(value["lat"]), float(value["lon"])
+    elif isinstance(value, str):
+        out["text"] = value
+    return out
+
+
+async def places(db: AsyncSession, form: Form, question_id: str | None = None) -> list[dict[str, Any]]:
+    """Every located answer (a picked place) for the map: ``{number,
+    question_id, text, lat, lon}``, newest first, at most
+    :data:`MAX_PLACES`. Only for people who can see the answers."""
+    ids = [q["id"] for q in questions(form.definition or {}, include_deleted=True) if q.get("kind") == "location"]
+    if question_id is not None:
+        ids = [i for i in ids if i == question_id]
+    if not ids:
+        return []
+    rows = (
+        await db.execute(
+            text(
+                "SELECT r.number, e.key, e.value FROM form_responses r CROSS JOIN LATERAL jsonb_each(r.answers) e "
+                f"WHERE {_LIVE} AND e.key = ANY(:keys) AND jsonb_typeof(e.value) = 'object' "
+                "AND e.value->'picked' = 'true'::jsonb ORDER BY r.number DESC LIMIT :n"
+            ),
+            {"f": form.id, "keys": ids, "n": MAX_PLACES},
+        )
+    ).all()
+    out = []
+    for number, key, value in rows:
+        p = _place(number, value)
+        if "lat" in p:
+            out.append({**p, "question_id": key})
+    return out
 
 
 # --------------------------------------------------------------------
@@ -284,6 +397,8 @@ async def question_answers(
     if search:
         if q.get("kind") in TEXT_KINDS:
             cond.append("(r.answers ->> CAST(:q AS text)) ILIKE :pat ESCAPE '\\'")
+        elif q.get("kind") == "location":
+            cond.append("(r.answers -> CAST(:q AS text) ->> 'text') ILIKE :pat ESCAPE '\\'")
         else:
             # "Other" text on choice questions.
             cond.append("(r.answers -> CAST(:q AS text) ->> 'other') ILIKE :pat ESCAPE '\\'")
@@ -389,7 +504,11 @@ async def one(db: AsyncSession, form: Form, number: int, user: User | None = Non
             item["files"] = _files_of(answers.get(qid), cards, outside=r.source == "link")
         items.append(item)
     items = [i for i in items if not i["deleted"]] + [i for i in items if i["deleted"]]
+    from app.forms.scores import marks_view
+
     return {
+        # A quiz (WP-F2.3/4): this answer's marks.
+        "quiz": marks_view(r) if form.quiz is not None else None,
         "number": r.number,
         "position": position,
         "total": total,
@@ -494,10 +613,11 @@ async def export(db: AsyncSession, shell: UserFile, form: Form, user: User, fmt:
     safe = "".join(ch for ch in title if ch not in '\\/:*?"<>|\r\n\t').strip()[:120] or "Form"
     base = f"{safe} (Responses)"
     defn = form.definition or {}
+    is_quiz = form.quiz is not None
     if fmt == "xlsx":
-        data = await asyncio.to_thread(responses_xlsx, defn, rows, who=names, tz=tz)
+        data = await asyncio.to_thread(responses_xlsx, defn, rows, who=names, tz=tz, quiz=is_quiz)
         return data, f"{base}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    data = await asyncio.to_thread(responses_csv, defn, rows, who=names, tz=tz)
+    data = await asyncio.to_thread(responses_csv, defn, rows, who=names, tz=tz, quiz=is_quiz)
     return data, f"{base}.csv", "text/csv; charset=utf-8"
 
 
@@ -507,6 +627,7 @@ __all__ = [
     "export",
     "names_of",
     "one",
+    "places",
     "question_answers",
     "summary",
     "who",

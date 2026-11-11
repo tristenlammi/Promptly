@@ -7,6 +7,7 @@ import {
   GripVertical,
   Image as ImageIcon,
   ImagePlus,
+  KeyRound,
   Loader2,
   MoreVertical,
   Plus,
@@ -19,6 +20,7 @@ import { forwardRef, useEffect, useRef, useState, type CSSProperties, type React
 
 import { editorAiApi } from "@/api/editorAi";
 import { NO_MODEL_MESSAGE, useEditorModel } from "@/lib/editorModel";
+import { useMapsReady } from "@/maps/useMapsReady";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -32,6 +34,7 @@ import type {
   ImageConfig,
   ItemKind,
   LinearScaleConfig,
+  LocationConfig,
   MultipleChoiceConfig,
   ParagraphConfig,
   RatingConfig,
@@ -43,6 +46,8 @@ import { cn } from "@/utils/cn";
 
 import { fileHint } from "../FormRenderer";
 import { BRANCHING_KINDS, CHOICE_KINDS, KIND_META, changeKind, isQuestion, newOption, type SectionInfo } from "../model";
+import { AnswerKey, MARKABLE, emptyQuiz, keySet, keyWords } from "./AnswerKey";
+import { GridEditor } from "./GridEditor";
 import { PicturePicker } from "./PicturePicker";
 import { AutoTextarea, Menu, MenuItem, NumberBox, Switch, fieldCls, iconBtnCls } from "./ui";
 
@@ -72,6 +77,8 @@ export interface ItemCardProps {
   /** The save's complaint about this item, shown on it. */
   error?: string | null;
   readOnly?: boolean;
+  /** The form is a quiz: questions a quiz can mark get an Answer key. */
+  quiz?: boolean;
   // dnd-kit
   handle?: { attributes: DraggableAttributes; listeners: DraggableSyntheticListeners; setActivatorNodeRef: (el: HTMLElement | null) => void };
   style?: CSSProperties;
@@ -82,7 +89,9 @@ const KIND_GROUPS: { label: string; kinds: ItemKind[] }[] = [
   { label: "Text", kinds: ["short_text", "paragraph"] },
   { label: "Choices", kinds: ["multiple_choice", "checkboxes", "dropdown"] },
   { label: "Scales", kinds: ["linear_scale", "rating"] },
+  { label: "Grids", kinds: ["choice_grid", "checkbox_grid"] },
   { label: "Date and time", kinds: ["date", "time"] },
+  { label: "Places", kinds: ["location"] },
   { label: "Files", kinds: ["file_upload"] },
 ];
 
@@ -94,6 +103,8 @@ export const ItemCard = forwardRef<HTMLDivElement, ItemCardProps>(function ItemC
   const [showValidation, setShowValidation] = useState(false);
   const [limitsOn, setLimitsOn] = useState(false);
   const [picker, setPicker] = useState<null | { target: "item" } | { target: "option"; optionId: string }>(null);
+  const [keyOpen, setKeyOpen] = useState(false);
+  const markable = !!p.quiz && MARKABLE.includes(item.kind);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (item.description) setShowDesc(true);
@@ -166,6 +177,7 @@ export const ItemCard = forwardRef<HTMLDivElement, ItemCardProps>(function ItemC
             className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-default"
           >
             <Summary item={item} label={label} assetUrls={p.assetUrls} />
+            {markable && <KeyLine item={item} />}
           </button>
         </div>
       ) : (
@@ -233,9 +245,35 @@ export const ItemCard = forwardRef<HTMLDivElement, ItemCardProps>(function ItemC
                   {p.error}
                 </p>
               )}
+              {markable && keyOpen && (
+                <AnswerKey
+                  item={item}
+                  onChange={(fn, coalesce) => p.onChange((it) => ({ ...it, quiz: fn(it.quiz ?? emptyQuiz(it)) }), coalesce)}
+                  onDone={() => setKeyOpen(false)}
+                />
+              )}
             </div>
           </div>
           <Footer
+            keyButton={
+              markable ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!item.quiz) p.onChange((it) => ({ ...it, quiz: emptyQuiz(it) }));
+                    setKeyOpen((o) => !o);
+                  }}
+                  aria-expanded={keyOpen}
+                  className={cn(
+                    "mr-auto inline-flex min-h-[40px] items-center gap-1.5 rounded-md px-2 text-sm font-medium hover:bg-[var(--hover)]",
+                    item.quiz?.suggested ? "text-amber-700 dark:text-amber-400" : "text-[var(--accent-text)]"
+                  )}
+                >
+                  <KeyRound className="h-4 w-4" aria-hidden="true" /> Answer key
+                  <span className="font-normal text-[var(--text-muted)]">· {keyWords(item)}</span>
+                </button>
+              ) : undefined
+            }
             {...p}
             showDesc={showDesc}
             onToggleDesc={() => {
@@ -335,6 +373,10 @@ function Summary({ item, label, assetUrls }: { item: FormItem; label: string; as
       {item.description && <span className="line-clamp-2 whitespace-pre-line text-sm text-[var(--text-muted)]">{item.description}</span>}
       {img && <img src={img} alt="" className="max-h-40 w-full rounded-md object-cover" />}
       {item.kind === "image" && !img && <span className="text-sm text-[var(--text-muted)]">No picture yet</span>}
+      {(item.kind === "choice_grid" || item.kind === "checkbox_grid") && <GridSummary item={item} />}
+      {item.kind === "location" && (
+        <span className="text-sm text-[var(--text-muted)]">{ASK_WORDS[(item.config as LocationConfig).ask] ?? ASK_WORDS.any}</span>
+      )}
       {opts && opts.length > 0 && (
         <span className="flex flex-col gap-1 text-sm text-[var(--text)]">
           {opts.slice(0, 6).map((o) => (
@@ -353,6 +395,41 @@ function Summary({ item, label, assetUrls }: { item: FormItem; label: string; as
           {opts.length > 6 && <span className="text-xs text-[var(--text-muted)]">and {opts.length - 6} more</span>}
         </span>
       )}
+    </span>
+  );
+}
+
+/** "2 points · key set" / "No answer key yet" / "AI suggested — check it" on a collapsed quiz question. */
+function KeyLine({ item }: { item: FormItem }) {
+  const set = keySet(item);
+  return (
+    <span
+      className={cn(
+        "mt-1 inline-flex items-center gap-1 text-xs",
+        item.quiz?.suggested ? "font-medium text-amber-700 dark:text-amber-400" : set ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"
+      )}
+    >
+      {item.quiz?.suggested ? <Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> : <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+      {item.quiz?.suggested ? "AI suggested this answer — check it" : keyWords(item)}
+    </span>
+  );
+}
+
+function GridSummary({ item }: { item: FormItem }) {
+  const c = item.config as { rows: { id: string; label: string }[]; columns: { id: string; label: string }[] };
+  const rows = c.rows.map((r, i) => r.label || `Row ${i + 1}`);
+  const cols = c.columns.map((x, i) => x.label || `Column ${i + 1}`);
+  return (
+    <span className="flex flex-col gap-0.5 text-sm text-[var(--text)]">
+      <span className="truncate">
+        <span className="text-[var(--text-muted)]">Rows: </span>
+        {rows.slice(0, 6).join(", ")}
+        {rows.length > 6 ? ` and ${rows.length - 6} more` : ""}
+      </span>
+      <span className="truncate">
+        <span className="text-[var(--text-muted)]">Columns: </span>
+        {cols.join(", ")}
+      </span>
     </span>
   );
 }
@@ -383,6 +460,7 @@ function ItemPicture({ url, onRemove, onReplace }: { url?: string; onRemove: () 
 
 function Footer(
   p: ItemCardProps & {
+    keyButton?: ReactNode;
     showDesc: boolean;
     onToggleDesc: () => void;
     onAddImage: () => void;
@@ -407,6 +485,7 @@ function Footer(
     });
   return (
     <div className="flex flex-wrap items-center justify-end gap-1 border-t border-[var(--border)] pl-3 pt-2">
+      {p.keyButton}
       <button type="button" className={iconBtnCls} onClick={p.onDuplicate} title="Duplicate" aria-label="Duplicate">
         <Copy className="h-4 w-4" />
       </button>
@@ -591,6 +670,11 @@ function KindEditor(p: KindEditorProps) {
         </fieldset>
       );
     }
+    case "choice_grid":
+    case "checkbox_grid":
+      return <GridEditor item={item as FormItem<"choice_grid">} setConfig={setConfig} />;
+    case "location":
+      return <LocationEditor item={item as FormItem<"location">} setConfig={setConfig} />;
     case "file_upload":
       return <UploadEditor item={item as FormItem<"file_upload">} setConfig={setConfig} />;
     case "image":
@@ -635,6 +719,44 @@ function ShortTextRules({ item, setConfig }: { item: FormItem<"short_text">; set
         <NumberBox className="w-40" label="Shortest (characters)" value={c.min_length} min={1} max={1000} onChange={(n) => setConfig((x: ShortTextConfig) => ({ ...x, min_length: n ? Math.round(n) : null }), `${item.id}:minl`)} />
         <NumberBox className="w-40" label="Longest (characters)" value={c.max_length} min={1} max={1000} onChange={(n) => setConfig((x: ShortTextConfig) => ({ ...x, max_length: n ? Math.min(1000, Math.round(n)) : null }), `${item.id}:maxl`)} />
       </div>
+    </div>
+  );
+}
+
+const ASK_WORDS: Record<LocationConfig["ask"], string> = {
+  address: "Asks for an address",
+  town: "Asks for a suburb or town",
+  any: "Asks for any place",
+};
+
+function LocationEditor({ item, setConfig }: { item: FormItem<"location">; setConfig: KindEditorProps["setConfig"] }) {
+  const c = item.config;
+  const maps = useMapsReady();
+  const choices: { key: LocationConfig["ask"]; label: string }[] = [
+    { key: "address", label: "An address" },
+    { key: "town", label: "A suburb or town" },
+    { key: "any", label: "Any place" },
+  ];
+  return (
+    <div className="flex flex-col gap-2">
+      <fieldset className="flex flex-col gap-1">
+        <legend className="mb-1 text-xs text-[var(--text-muted)]">Ask for</legend>
+        <div className="flex w-fit flex-wrap overflow-hidden rounded-md border border-[var(--border)]">
+          {choices.map((o) => (
+            <label key={o.key} className={cn("flex h-10 cursor-pointer items-center px-3 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-[var(--accent)]", c.ask === o.key ? "bg-[var(--accent)] text-white" : "hover:bg-[var(--hover)]")}>
+              <input type="radio" className="sr-only" name={`${item.id}-ask`} checked={c.ask === o.key} onChange={() => setConfig((x: LocationConfig) => ({ ...x, ask: o.key }))} />
+              {o.label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <p className="text-xs text-[var(--text-muted)]">
+        {c.ask === "town" ? "People can answer without giving a street address. " : ""}
+        {maps
+          ? "People type a place or pick one of the suggestions. Picked places can be shown on a map in Responses."
+          : "Suggestions need P Maps; people can still type a place."}{" "}
+        Nobody is asked for their location.
+      </p>
     </div>
   );
 }

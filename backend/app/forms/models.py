@@ -72,6 +72,8 @@ class Form(Base):
     last_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # When the owner was told it closed (0296); cleared when it opens again.
     close_pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A quiz (0380, WP-F2.3): NULL = not a quiz; else ``app.forms.quiz.QuizSettings``.
+    quiz: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -122,6 +124,9 @@ class FormResponse(Base):
     edit_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     grading: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # When this person may see their marks (0380): at submit when the quiz
+    # releases straight away, else when the owner presses Release scores.
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     seq: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("nextval('form_response_seq')")
     )

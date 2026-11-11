@@ -1,7 +1,7 @@
-import { Globe, Users } from "lucide-react";
+import { ClipboardCheck, Globe, Users, Zap } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { formsApi, type FormSettings, type FormView } from "@/api/forms";
+import { formsApi, type FormSettings, type FormView, type QuizSettings } from "@/api/forms";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -90,9 +90,16 @@ export function SettingsTab({
           />
           <Switch
             checked={s.allow_edit}
+            disabled={!!s.quiz?.show_answers}
             onChange={(v) => void change({ allow_edit: v })}
             label="Let people change their answer after sending"
-            hint={link ? "They get a private link to come back to their answer." : undefined}
+            hint={
+              s.quiz?.show_answers
+                ? "Off while people see the correct answers after sending: changing an answer then would just copy them."
+                : link
+                  ? "They get a private link to come back to their answer."
+                  : undefined
+            }
           />
           {link && (
             <Switch
@@ -117,6 +124,8 @@ export function SettingsTab({
             />
           )}
         </Group>
+
+        <QuizGroup quiz={s.quiz} onChange={(quiz) => void change({ quiz })} />
 
         <Group title="Closing">
           <CloseAt value={s.close_at} onChange={(v) => void change({ close_at: v })} />
@@ -148,6 +157,75 @@ export function SettingsTab({
         </Group>
       </div>
     </div>
+  );
+}
+
+const QUIZ_DEFAULTS: QuizSettings = {
+  release: "now",
+  show_score: true,
+  show_right_wrong: true,
+  show_answers: false,
+  show_points: false,
+};
+
+/** Settings → Quiz (WP-F2.3): one switch, then when scores are released
+ *  and what people see of their own marks. Never anyone else's. */
+function QuizGroup({ quiz, onChange }: { quiz: QuizSettings | null; onChange: (q: QuizSettings | null) => void }) {
+  const q = quiz;
+  const set = (patch: Partial<QuizSettings>) => q && onChange({ ...q, ...patch });
+  return (
+    <Group title="Quiz">
+      <Switch
+        checked={!!q}
+        onChange={(v) => onChange(v ? QUIZ_DEFAULTS : null)}
+        label="Make this a quiz"
+        hint="Give questions points and an answer key; answers are marked as they arrive. Each person only ever sees their own score."
+      />
+      {q && (
+        <>
+          <div role="radiogroup" aria-label="Release scores" className="flex flex-col gap-2">
+            <p className="text-sm text-[var(--text)]">Release scores</p>
+            <Choice
+              name="quiz-release"
+              checked={q.release === "now"}
+              onChange={() => set({ release: "now" })}
+              icon={<Zap className="h-5 w-5" />}
+              title="Straight after sending"
+              text="People see their score on the screen after they send."
+            />
+            <Choice
+              name="quiz-release"
+              checked={q.release === "later"}
+              onChange={() => set({ release: "later" })}
+              icon={<ClipboardCheck className="h-5 w-5" />}
+              title="Later, after I've checked"
+              text="Mark the answers you need to, then press Release scores in Responses."
+            />
+          </div>
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-sm text-[var(--text)]">After sending, people see</legend>
+            {(
+              [
+                ["show_score", "Their score"],
+                ["show_right_wrong", "Which answers were right"],
+                ["show_answers", "The correct answers"],
+                ["show_points", "Points per question"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="flex min-h-[36px] cursor-pointer items-center gap-2 text-sm text-[var(--text)]">
+                <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={q[key]} onChange={(e) => set({ [key]: e.target.checked })} />
+                {label}
+              </label>
+            ))}
+            {q.show_answers && (
+              <p className="text-xs text-[var(--text-muted)]">
+                Showing the correct answers turns off “Let people change their answer”, so nobody can copy the answers into a new try.
+              </p>
+            )}
+          </fieldset>
+        </>
+      )}
+    </Group>
   );
 }
 

@@ -142,6 +142,8 @@ export interface TodayHub {
     forms: { title: string; new: number; total: number; url: string }[];
     more: number;
     closing: { title: string; closes_at: string; url: string }[];
+    /** Quizzes with answers waiting for a hand mark (WP-F2.4). */
+    to_mark?: { title: string; count: number; url: string }[];
   };
   /** Calls: voice channels of your spaces with people in them now. */
   voice?: {

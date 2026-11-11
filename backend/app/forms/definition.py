@@ -84,6 +84,11 @@ QUESTION_KINDS = (
     "date",
     "time",
     "file_upload",
+    # Phase 2 (WP-F2.1): a grid of rows × columns.
+    "choice_grid",
+    "checkbox_grid",
+    # WP-F2.2: a place someone picks or types (never a GPS fix).
+    "location",
 )
 BLOCK_KINDS = ("text", "image", "section")
 ItemKind = Literal[
@@ -97,11 +102,19 @@ ItemKind = Literal[
     "date",
     "time",
     "file_upload",
+    "choice_grid",
+    "checkbox_grid",
+    "location",
     "text",
     "image",
     "section",
 ]
 CHOICE_KINDS = ("multiple_choice", "checkboxes", "dropdown")
+GRID_KINDS = ("choice_grid", "checkbox_grid")
+# Grids stay usable on a phone (one small group of chips per row).
+GRID_MAX_ROWS = 20
+GRID_MAX_COLUMNS = 8
+GRID_COLUMN_CHARS = 40
 # Choice questions whose answer can send people to another section.
 BRANCHING_KINDS = ("multiple_choice", "dropdown")
 
@@ -249,6 +262,61 @@ class FileUploadConfig(_Strict):
         return self
 
 
+class GridRow(_Strict):
+    id: Id
+    label: Text300 = ""
+
+
+class GridColumn(_Strict):
+    id: Id
+    label: Annotated[str, StringConstraints(max_length=GRID_COLUMN_CHARS)] = ""
+
+
+class _GridBase(_Strict):
+    """Rows and columns keep stable ids (like options), so a renamed row
+    keeps its answers. ``each_row``: every row needs an answer (``required``
+    alone means at least one row)."""
+
+    rows: list[GridRow] = Field(default_factory=list, max_length=GRID_MAX_ROWS)
+    columns: list[GridColumn] = Field(default_factory=list, max_length=GRID_MAX_COLUMNS)
+    each_row: bool = False
+    # Rows only: a scale's columns must stay in order.
+    shuffle_rows: bool = False
+
+    @model_validator(mode="after")
+    def _unique(self) -> _GridBase:
+        rows = [r.id for r in self.rows]
+        cols = [c.id for c in self.columns]
+        if len(rows) != len(set(rows)):
+            raise ValueError("Two rows have the same id.")
+        if len(cols) != len(set(cols)):
+            raise ValueError("Two columns have the same id.")
+        return self
+
+
+class ChoiceGridConfig(_GridBase):
+    # "Rank these": each column can be picked in one row only.
+    one_per_column: bool = False
+
+    @model_validator(mode="after")
+    def _check(self) -> ChoiceGridConfig:
+        if self.one_per_column and self.each_row and len(self.rows) > len(self.columns):
+            raise ValueError(
+                "With one answer per column, every row can only be answered if there are at least as many columns as rows."
+            )
+        return self
+
+
+class CheckboxGridConfig(_GridBase):
+    pass
+
+
+class LocationConfig(_Strict):
+    # What to ask for: a street address, a suburb or town (no street
+    # needed), or any place at all. Suggestions follow it.
+    ask: Literal["address", "town", "any"] = "address"
+
+
 class TextConfig(_Strict):
     pass
 
@@ -282,6 +350,15 @@ def _config_message(exc: ValidationError) -> str:
         return re.sub(r"^Value error, ", "", str(err.get("msg") or ""))
     if etype == "too_long" and "options" in loc:
         return f"A question can have at most {MAX_OPTIONS} options."
+    if etype == "too_long" and "rows" in loc:
+        return f"A grid can have at most {GRID_MAX_ROWS} rows."
+    if etype == "too_long" and "columns" in loc:
+        return f"A grid can have at most {GRID_MAX_COLUMNS} columns."
+    if etype == "string_too_long" and "columns" in loc:
+        return f"A column's words are too long (at most {GRID_COLUMN_CHARS} characters). Keep columns short."
+    if etype == "string_too_long" and "rows" in loc:
+        limit = (err.get("ctx") or {}).get("max_length")
+        return f"A row's words are too long (at most {limit} characters)."
     if etype == "string_too_long":
         limit = (err.get("ctx") or {}).get("max_length")
         return f"{_FIELD_WORDS.get(loc[-1] if loc else '', 'This text')} is too long (at most {limit} characters)."
@@ -305,6 +382,9 @@ CONFIGS: dict[str, type[_Strict]] = {
     "date": DateConfig,
     "time": TimeConfig,
     "file_upload": FileUploadConfig,
+    "choice_grid": ChoiceGridConfig,
+    "checkbox_grid": CheckboxGridConfig,
+    "location": LocationConfig,
     "text": TextConfig,
     "image": ImageConfig,
     "section": SectionConfig,
@@ -323,6 +403,10 @@ class Item(_Strict):
     required: bool = False
     config: dict[str, Any] = Field(default_factory=dict)
     deleted: bool = False
+    # Quizzes (WP-F2.3): ``{points, key, feedback_right, feedback_wrong,
+    # suggested?}`` or null. Never sent to the answer page
+    # (``answering.respondent_definition`` drops it).
+    quiz: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _config(self) -> Item:
@@ -334,6 +418,10 @@ class Item(_Strict):
         if self.kind in BLOCK_KINDS:
             # Blocks aren't questions: nothing to answer, so nothing to require.
             self.required = False
+        if self.quiz is not None:
+            from app.forms.quiz import clean_item_quiz
+
+            self.quiz = clean_item_quiz(self.kind, self.config, self.quiz)
         return self
 
     @property
@@ -452,6 +540,10 @@ def validate_definition(raw: Any) -> dict[str, Any]:
     except ValueError as exc:  # pragma: no cover — validators raise inside ValidationError
         raise DefinitionError(str(exc)) from None
     out = model.model_dump(mode="json")
+    for it in out.get("items") or []:
+        # Only quiz questions carry a ``quiz`` (a plain form's JSON is as it was).
+        if it.get("quiz") is None:
+            it.pop("quiz", None)
     if json_size(out) > MAX_JSON_BYTES:
         raise DefinitionError("This form is too big to save (256 KB at most). Remove some questions or text.")
     return out
@@ -506,6 +598,10 @@ def search_text(defn: dict[str, Any]) -> str:
             if o.get("label"):
                 parts.append(o["label"])
         cfg = i.get("config") or {}
+        for part in ("rows", "columns"):
+            for r in cfg.get(part) or []:
+                if r.get("label"):
+                    parts.append(r["label"])
         for k in ("min_label", "max_label"):
             if cfg.get(k):
                 parts.append(cfg[k])
@@ -551,6 +647,7 @@ __all__ = [
     "ACCENTS",
     "BLOCK_KINDS",
     "CHOICE_KINDS",
+    "GRID_KINDS",
     "LINK_UPLOAD_GROUPS",
     "MAX_ITEMS",
     "MAX_JSON_BYTES",

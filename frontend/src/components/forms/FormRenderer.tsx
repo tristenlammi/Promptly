@@ -1,8 +1,9 @@
-import { Heart, MoreHorizontal, Star, ThumbsUp, Upload } from "lucide-react";
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Heart, MapPin, MoreHorizontal, Star, ThumbsUp, Upload } from "lucide-react";
+import { Fragment, Suspense, lazy, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import type {
   CheckboxesConfig,
+  ChoiceGridConfig,
   DateConfig,
   DropdownConfig,
   FileUploadConfig,
@@ -10,12 +11,14 @@ import type {
   FormItem,
   FormOption,
   LinearScaleConfig,
+  LocationConfig,
   MultipleChoiceConfig,
   ParagraphConfig,
   RatingConfig,
   ShortTextConfig,
   TimeConfig,
 } from "@/api/forms";
+import { locationText, type SearchRowLike } from "@/lib/locationSuggest";
 import { cn } from "@/utils/cn";
 
 import "./forms.css";
@@ -29,6 +32,8 @@ import {
   type Answers,
   type CheckboxAnswer,
   type ChoiceAnswer,
+  type GridAnswer,
+  type LocationAnswer,
 } from "./logic";
 import { isQuestion, sectionsOf } from "./model";
 import { themeVars } from "./theme";
@@ -73,6 +78,15 @@ export interface FormRendererProps {
   fieldErrors?: Record<string, string> | null;
   /** The file question's control (the answer page's uploader). */
   renderUpload?: (item: FormItem<"file_upload">, value: string[], onChange: (ids: string[]) => void) => ReactNode;
+  /** Location questions (WP-F2.2): where suggestions come from on the
+   *  answer page — the form's own place search (never anyone's saved
+   *  places), plus your own saved places when you're signed in. Without it
+   *  (the builder's preview) the question is a plain text box. */
+  places?: {
+    search: (q: string, questionId: string, near: { lat: number; lon: number } | null, signal?: AbortSignal) => Promise<SearchRowLike[]>;
+    key: string;
+    saved: boolean;
+  };
   footer?: ReactNode;
   className?: string;
 }
@@ -96,10 +110,15 @@ export function FormRenderer({
   onEmailChange,
   fieldErrors,
   renderUpload,
+  places,
   footer,
   className,
 }: FormRendererProps) {
   const sections = useMemo(() => sectionsOf(definition), [definition]);
+  const hasPlace = definition.items.some((i) => i.kind === "location" && !i.deleted);
+  useEffect(() => {
+    if (hasPlace) void loadLocationInput();
+  }, [hasPlace]);
   const [answers, setAnswers] = useState<Answers>(initialAnswers ?? {});
   const [path, setPath] = useState<number[]>([0]);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -304,6 +323,7 @@ export function FormRenderer({
                 remaining={remainingFor(item)}
                 showRemaining={!!showRemaining}
                 renderUpload={renderUpload}
+                places={places}
               />
             ) : (
               <BlockCard item={item} assetUrls={assetUrls} />
@@ -603,6 +623,7 @@ interface QuestionProps {
   remaining?: Record<string, number>;
   showRemaining: boolean;
   renderUpload?: FormRendererProps["renderUpload"];
+  places?: FormRendererProps["places"];
 }
 
 function QuestionCard(p: QuestionProps) {
@@ -612,7 +633,7 @@ function QuestionCard(p: QuestionProps) {
   const img = item.image_asset_id ? assetUrls[item.image_asset_id] : undefined;
   const described = [item.description ? descId : null, error ? errId : null].filter(Boolean).join(" ") || undefined;
   // Single-field kinds label their field; the rest are a fieldset.
-  const single = ["short_text", "paragraph", "dropdown", "date", "time"].includes(item.kind);
+  const single = ["short_text", "paragraph", "dropdown", "date", "time", "location"].includes(item.kind);
   const titleNode = (
     <>
       <span className="[overflow-wrap:anywhere]">{item.title || "Untitled question"}</span>
@@ -802,6 +823,11 @@ function Control(p: QuestionProps & { describedBy?: string; labelId: string }) {
       return <DateControl {...p} fieldProps={fieldProps} />;
     case "time":
       return <TimeControl {...p} fieldProps={fieldProps} />;
+    case "choice_grid":
+    case "checkbox_grid":
+      return <GridControl {...p} />;
+    case "location":
+      return <LocationControl {...p} fieldProps={fieldProps} />;
     case "file_upload": {
       const cfg = item.config as FileUploadConfig;
       if (p.renderUpload && p.mode === "answer")
@@ -938,6 +964,234 @@ function Choices(p: QuestionProps & { multi: boolean; describedBy?: string }) {
             />
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Loaded only by a form that has a Location question (the answer page stays
+// light): fetched as soon as such a form is shown, before anyone types.
+const loadLocationInput = () => import("@/components/maps/LocationInput").then((m) => ({ default: m.LocationInput }));
+const LocationInput = lazy(loadLocationInput);
+
+/** Puts the caret back in the place box when it replaces the plain one
+ *  someone was already typing in. */
+function RefocusOnLoad({ id, when }: { id: string; when: { current: boolean } }) {
+  useEffect(() => {
+    if (!when.current) return;
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    el?.focus();
+    const n = el?.value.length ?? 0;
+    el?.setSelectionRange(n, n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
+
+const ASK_PLACEHOLDER: Record<LocationConfig["ask"], string> = {
+  address: "Start typing an address",
+  town: "Start typing a suburb or town",
+  any: "Start typing a place",
+};
+
+/**
+ * A Location question: type a place, or pick one of the suggestions. A
+ * picked place keeps its spot on the map (shown under the box as a chip
+ * with a pin); a typed place is fine too and just has no spot. No "use my
+ * location" button: nobody's asked for a location permission here.
+ */
+function LocationControl(p: QuestionProps & { fieldProps: FieldProps }) {
+  const { item, value, onChange, places } = p;
+  const cfg = item.config as LocationConfig;
+  const v = value as LocationAnswer | undefined;
+  const search = useMemo(
+    () =>
+      places
+        ? { key: `${places.key}:${item.id}`, run: (q: string, near: { lat: number; lon: number } | null, signal?: AbortSignal) => places.search(q, item.id, near, signal) }
+        : { key: `none:${item.id}`, run: async () => [] as SearchRowLike[] },
+    [places, item.id]
+  );
+  const fp = p.fieldProps as { id: string; "aria-invalid"?: true; "aria-describedby"?: string; "aria-required"?: boolean };
+  const typing = useRef(false);
+  const plain = (
+    <input
+      onFocus={() => (typing.current = true)}
+      onBlur={() => (typing.current = false)}
+      id={fp.id}
+      className="pf-input"
+      value={v?.text ?? ""}
+      maxLength={300}
+      placeholder={ASK_PLACEHOLDER[cfg.ask] ?? ASK_PLACEHOLDER.any}
+      aria-invalid={fp["aria-invalid"]}
+      aria-describedby={fp["aria-describedby"]}
+      aria-required={fp["aria-required"]}
+      autoComplete="off"
+      onChange={(e) => onChange(e.target.value.trim() ? { text: e.target.value, picked: false } : undefined)}
+    />
+  );
+  return (
+    <div className="flex flex-col gap-2">
+      <Suspense fallback={plain}>
+      <LocationInput
+        id={fp.id}
+        unstyled
+        className="pf-input"
+        value={v?.text ?? ""}
+        maxLength={300}
+        placeholder={ASK_PLACEHOLDER[cfg.ask] ?? ASK_PLACEHOLDER.any}
+        aria-invalid={fp["aria-invalid"]}
+        aria-describedby={fp["aria-describedby"]}
+        aria-required={fp["aria-required"]}
+        search={search}
+        sources={{ saved: !!places?.saved, contacts: false, here: false }}
+        onChange={(text) => onChange(text.trim() ? { text, picked: false } : undefined)}
+        onPick={(s) => {
+          // Your own "Home" / "Work" is your label, not the form's: the
+          // answer is the address.
+          const text = (s.kind === "home" || s.kind === "work") && s.address ? s.address : locationText(s);
+          onChange(s.lat != null && s.lon != null ? { text, lat: s.lat, lon: s.lon, picked: true } : { text, picked: false });
+        }}
+      />
+      <RefocusOnLoad id={fp.id} when={typing} />
+      </Suspense>
+      {v?.picked && (
+        <span className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-sm" style={{ background: "var(--pf-selected)" }}>
+          <MapPin className="h-4 w-4 shrink-0" style={{ color: "var(--pf-accent)" }} aria-hidden="true" />
+          <span className="min-w-0 truncate">{v.text}</span>
+          <span className="sr-only">(a place on the map)</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The room a box has, kept up to date (grids pick table or phone rows by it). */
+function useWidth<T extends HTMLElement>(): [RefObject<T>, number] {
+  const ref = useRef<T>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setW(el.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
+
+/**
+ * A multiple-choice or checkbox grid. With room, a real table: column
+ * headers, a row header per row, a radio or checkbox in each cell. On a
+ * phone (or a narrow card), each row is its own group (its words as the
+ * legend) with the columns as big chips that wrap, so nothing scrolls
+ * sideways. "Only one per column": picking a column moves it from the row
+ * that had it.
+ */
+function GridControl(p: QuestionProps & { describedBy?: string }) {
+  const { item, value, onChange, domId } = p;
+  const cfg = item.config as ChoiceGridConfig;
+  const multi = item.kind === "checkbox_grid";
+  const [box, width] = useWidth<HTMLDivElement>();
+  const rows = useMemo(
+    () => (cfg.shuffle_rows ? shuffled(cfg.rows, p.seed + item.id.length) : cfg.rows),
+    [cfg.shuffle_rows, cfg.rows, p.seed, item.id]
+  );
+  const cur = ((value as GridAnswer | undefined)?.rows ?? {}) as Record<string, string | string[]>;
+  // A table only when every column gets a comfortable 76px beside the row words.
+  const table = width >= Math.max(420, 150 + cfg.columns.length * 76);
+
+  const put = (next: Record<string, string | string[]>) => {
+    const out: GridAnswer = { rows: next };
+    onChange(isEmpty(item, out) ? undefined : out);
+  };
+  const pick = (rowId: string, colId: string) => {
+    if (multi) {
+      const had = Array.isArray(cur[rowId]) ? (cur[rowId] as string[]) : [];
+      const list = had.includes(colId) ? had.filter((c) => c !== colId) : [...had, colId];
+      const next = { ...cur };
+      if (list.length) next[rowId] = list;
+      else delete next[rowId];
+      return put(next);
+    }
+    const next: Record<string, string | string[]> = {};
+    for (const [r, c] of Object.entries(cur)) if (!(cfg.one_per_column && c === colId)) next[r] = c;
+    next[rowId] = colId;
+    put(next);
+  };
+  const on = (rowId: string, colId: string) => (multi ? Array.isArray(cur[rowId]) && (cur[rowId] as string[]).includes(colId) : cur[rowId] === colId);
+  const rowWords = (label: string, i: number) => label || `Row ${i + 1}`;
+  const colWords = (label: string, i: number) => label || `Column ${i + 1}`;
+
+  return (
+    <div ref={box} className="min-w-0" data-grid={table ? "table" : "rows"}>
+      {table ? (
+        <table className="pf-grid">
+          <thead>
+            <tr>
+              <td />
+              {cfg.columns.map((c, ci) => (
+                <th key={c.id} scope="col">
+                  {colWords(c.label, ci)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const ri = cfg.rows.indexOf(r);
+              return (
+                <tr key={r.id}>
+                  <th scope="row">{rowWords(r.label, ri)}</th>
+                  {cfg.columns.map((c, ci) => (
+                    <td key={c.id}>
+                      <label className="pf-grid-cell">
+                        <input
+                          type={multi ? "checkbox" : "radio"}
+                          name={`${domId}-${r.id}`}
+                          checked={on(r.id, c.id)}
+                          onChange={() => pick(r.id, c.id)}
+                          aria-label={`${rowWords(r.label, ri)}: ${colWords(c.label, ci)}`}
+                          aria-describedby={p.describedBy}
+                        />
+                      </label>
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {rows.map((r) => {
+            const ri = cfg.rows.indexOf(r);
+            return (
+              <fieldset key={r.id} className="flex min-w-0 flex-col gap-2" aria-describedby={p.describedBy}>
+                <legend className="mb-2 text-[15px] font-medium [overflow-wrap:anywhere]">{rowWords(r.label, ri)}</legend>
+                <div className="flex flex-wrap gap-2">
+                  {cfg.columns.map((c, ci) => (
+                    <label key={c.id} className="pf-step pf-chip">
+                      <input
+                        type={multi ? "checkbox" : "radio"}
+                        name={`${domId}-${r.id}`}
+                        checked={on(r.id, c.id)}
+                        onChange={() => pick(r.id, c.id)}
+                      />
+                      <span>{colWords(c.label, ci)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            );
+          })}
+        </div>
+      )}
+      {multi || !cfg.one_per_column ? null : (
+        <p className="mt-2 text-sm" style={{ color: "var(--pf-muted)" }}>
+          Each column can be picked in one row only.
+        </p>
       )}
     </div>
   );

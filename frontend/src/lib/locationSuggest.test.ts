@@ -10,6 +10,7 @@ import {
   mergeSuggestions,
   moveActive,
   nearFrom,
+  suggestionsFrom,
   type SavedPlaceLike,
 } from "./locationSuggest";
 
@@ -137,5 +138,32 @@ describe("near", () => {
     expect(nearFrom(null, places)).toEqual({ lat: -26.8, lon: 153.12 });
     expect(nearFrom(null, [])).toBeNull();
     expect(nearFrom(null, undefined)).toBeNull();
+  });
+});
+
+describe("sources (a form's Location question)", () => {
+  const saved = fromSavedPlaces(places, "home");
+  const contacts = fromContacts([{ key: "u:1", name: "Grandma", contact: { address: "4 Rose Ave, Hobart" } }]);
+  const map = fromSearch([
+    { kind: "home", id: "h1", name: "Home", address: "12 Gum St", lat: -26.8, lon: 153.12 },
+    { kind: "contact", name: "Grandma", address: "4 Rose Ave, Hobart", lat: -42.9, lon: 147.3 },
+    { kind: "recent", name: "Bakery", address: null, lat: -26.75, lon: 153.11 },
+    { kind: "address", name: "12 Smith St", address: "Hobart TAS 7000", lat: -42.88, lon: 147.33 },
+  ]);
+
+  it("never offers contacts when they're off, even ones the map search handed back", () => {
+    const out = suggestionsFrom({ saved: true, contacts: false }, saved, contacts, map);
+    expect(out.map((s) => s.kind)).not.toContain("contact");
+    expect(out.map((s) => s.name)).toEqual(["Home", "Bakery", "12 Smith St"]);
+  });
+
+  it("someone with the link gets map search only: no saved places, recents or contacts", () => {
+    const out = suggestionsFrom({ saved: false, contacts: false }, saved, contacts, map);
+    expect(out.map((s) => s.name)).toEqual(["12 Smith St"]);
+  });
+
+  it("Calendar keeps everything", () => {
+    const out = suggestionsFrom({ saved: true, contacts: true }, saved, contacts, map);
+    expect(out.map((s) => s.name)).toEqual(["Home", "Grandma", "Bakery", "12 Smith St"]);
   });
 });

@@ -2150,6 +2150,736 @@
     "d"
    ],
    "error": null
+  },
+  {
+   "name": "grid: one row answered is enough when required",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "choice_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": true,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        },
+        {
+         "id": "r3",
+         "label": "Row 3"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": false,
+       "shuffle_rows": false,
+       "one_per_column": false
+      },
+      "deleted": false
+     },
+     {
+      "id": "n",
+      "kind": "short_text",
+      "title": "n",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "validation": {
+        "kind": "any",
+        "min": null,
+        "max": null,
+        "integer": false
+       },
+       "min_length": null,
+       "max_length": null
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {
+      "r1": "c2"
+     }
+    },
+    "n": "x"
+   },
+   "path": [
+    0
+   ],
+   "kept": [
+    "g",
+    "n"
+   ],
+   "error": null
+  },
+  {
+   "name": "grid: required with no rows answered",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "choice_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": true,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        },
+        {
+         "id": "r3",
+         "label": "Row 3"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": false,
+       "shuffle_rows": false,
+       "one_per_column": false
+      },
+      "deleted": false
+     },
+     {
+      "id": "n",
+      "kind": "short_text",
+      "title": "n",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "validation": {
+        "kind": "any",
+        "min": null,
+        "max": null,
+        "integer": false
+       },
+       "min_length": null,
+       "max_length": null
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {}
+    },
+    "n": "x"
+   },
+   "path": [
+    0
+   ],
+   "kept": null,
+   "error": "g"
+  },
+  {
+   "name": "grid: each row needs an answer",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "choice_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        },
+        {
+         "id": "r3",
+         "label": "Row 3"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": true,
+       "shuffle_rows": false,
+       "one_per_column": false
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {
+      "r1": "c1",
+      "r2": "c2"
+     }
+    }
+   },
+   "path": [
+    0
+   ],
+   "kept": null,
+   "error": "g"
+  },
+  {
+   "name": "grid: each row answered",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "choice_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        },
+        {
+         "id": "r3",
+         "label": "Row 3"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": true,
+       "shuffle_rows": false,
+       "one_per_column": false
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {
+      "r1": "c1",
+      "r2": "c2",
+      "r3": "c1"
+     }
+    }
+   },
+   "path": [
+    0
+   ],
+   "kept": [
+    "g"
+   ],
+   "error": null
+  },
+  {
+   "name": "grid: one per column refuses a repeat",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "choice_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        },
+        {
+         "id": "r3",
+         "label": "Row 3"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": false,
+       "shuffle_rows": false,
+       "one_per_column": true
+      },
+      "deleted": false
+     },
+     {
+      "id": "n",
+      "kind": "short_text",
+      "title": "n",
+      "description": "",
+      "image_asset_id": null,
+      "required": true,
+      "config": {
+       "validation": {
+        "kind": "any",
+        "min": null,
+        "max": null,
+        "integer": false
+       },
+       "min_length": null,
+       "max_length": null
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {
+      "r1": "c1",
+      "r2": "c1"
+     }
+    },
+    "n": "x"
+   },
+   "path": [
+    0
+   ],
+   "kept": null,
+   "error": "g"
+  },
+  {
+   "name": "grid: one per column, all different",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "choice_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        },
+        {
+         "id": "r3",
+         "label": "Row 3"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": true,
+       "shuffle_rows": false,
+       "one_per_column": true
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {
+      "r1": "c3",
+      "r2": "c1",
+      "r3": "c2"
+     }
+    }
+   },
+   "path": [
+    0
+   ],
+   "kept": [
+    "g"
+   ],
+   "error": null
+  },
+  {
+   "name": "checkbox grid: each row needs a tick",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "checkbox_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": true,
+       "shuffle_rows": false
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {
+      "r1": [
+       "c1",
+       "c2"
+      ],
+      "r2": []
+     }
+    }
+   },
+   "path": [
+    0
+   ],
+   "kept": null,
+   "error": "g"
+  },
+  {
+   "name": "checkbox grid: ticks in every row",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "checkbox_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": true,
+       "shuffle_rows": false
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {
+      "r1": [
+       "c1",
+       "c2"
+      ],
+      "r2": [
+       "c3"
+      ]
+     }
+    }
+   },
+   "path": [
+    0
+   ],
+   "kept": [
+    "g"
+   ],
+   "error": null
+  },
+  {
+   "name": "checkbox grid: empty rows only is no answer",
+   "definition": {
+    "version": 1,
+    "title": "Case",
+    "description": "",
+    "theme": {
+     "accent": "terracotta",
+     "header_asset_id": null,
+     "header_builtin": null,
+     "font": "default"
+    },
+    "after": "continue",
+    "items": [
+     {
+      "id": "g",
+      "kind": "checkbox_grid",
+      "title": "g",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "rows": [
+        {
+         "id": "r1",
+         "label": "Row 1"
+        },
+        {
+         "id": "r2",
+         "label": "Row 2"
+        }
+       ],
+       "columns": [
+        {
+         "id": "c1",
+         "label": "Col 1"
+        },
+        {
+         "id": "c2",
+         "label": "Col 2"
+        },
+        {
+         "id": "c3",
+         "label": "Col 3"
+        }
+       ],
+       "each_row": false,
+       "shuffle_rows": false
+      },
+      "deleted": false
+     },
+     {
+      "id": "n",
+      "kind": "short_text",
+      "title": "n",
+      "description": "",
+      "image_asset_id": null,
+      "required": false,
+      "config": {
+       "validation": {
+        "kind": "any",
+        "min": null,
+        "max": null,
+        "integer": false
+       },
+       "min_length": null,
+       "max_length": null
+      },
+      "deleted": false
+     }
+    ]
+   },
+   "answers": {
+    "g": {
+     "rows": {
+      "r1": [],
+      "r2": []
+     }
+    },
+    "n": "x"
+   },
+   "path": [
+    0
+   ],
+   "kept": [
+    "n"
+   ],
+   "error": null
   }
  ]
 }

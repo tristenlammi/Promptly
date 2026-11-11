@@ -54,6 +54,8 @@ SETTING_FIELDS = (
     "confirmation",
     "closed_message",
     "allow_another",
+    # A quiz's settings (WP-F2.3; null = not a quiz).
+    "quiz",
 )
 
 
@@ -211,6 +213,8 @@ async def apply_settings(db: AsyncSession, form: Form, changes: dict[str, Any]) 
         raise SettingsError(
             "Your server's admin has turned off answers from people without an account."
         )
+    if "quiz" in changes or "allow_edit" in changes:
+        changes = _quiz_rules(form, dict(changes))
     for k, v in changes.items():
         if k in SETTING_FIELDS:
             setattr(form, k, v)
@@ -226,6 +230,41 @@ async def apply_settings(db: AsyncSession, form: Form, changes: dict[str, Any]) 
         if link is not None:
             link.access_mode = _link_mode(form)
     return form
+
+
+def _quiz_rules(form: Form, changes: dict[str, Any]) -> dict[str, Any]:
+    """Quiz settings (WP-F2.3). Showing the correct answers turns "Let
+    people change their answer" off (changing an answer afterwards would
+    just copy the key); turning it off again, or the quiz off, puts that
+    switch back the way it was (kept as ``edit_before``)."""
+    from app.forms.quiz import QuizSettings
+
+    before = form.quiz if isinstance(form.quiz, dict) else None
+    showing_before = bool(before and before.get("show_answers"))
+    if "quiz" in changes:
+        raw = changes["quiz"]
+        if raw is None:
+            new = None
+        else:
+            try:
+                new = QuizSettings.model_validate({k: v for k, v in raw.items() if k != "edit_before"}).model_dump()
+            except Exception:  # noqa: BLE001 — pydantic's message isn't one to show
+                raise SettingsError("Those quiz settings can't be used.") from None
+        showing = bool(new and new.get("show_answers"))
+        if showing and not showing_before:
+            new["edit_before"] = bool(changes.get("allow_edit", form.allow_edit))
+            changes["allow_edit"] = False
+        elif showing and before:
+            new["edit_before"] = bool(before.get("edit_before", False))
+        elif showing_before and not showing:
+            changes["allow_edit"] = bool(before.get("edit_before", form.allow_edit))
+        changes["quiz"] = new
+    elif changes.get("allow_edit") and showing_before:
+        raise SettingsError(
+            "People see the correct answers after sending, so they can't change their answer. "
+            "Turn off “The correct answers” in Quiz first."
+        )
+    return changes
 
 
 # --------------------------------------------------------------------

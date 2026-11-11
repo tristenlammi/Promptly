@@ -218,3 +218,65 @@ html.dark .pf-theme[data-scheme="app"],
   text-decoration: underline;
   overflow-wrap: anywhere;
 }
+
+/* Grids (WP-F2.1). A wide screen gets a real table; a phone gets one small
+   group per row with the columns as big chips (FormRenderer picks by the
+   room the card has), so nothing ever scrolls sideways. */
+.pf-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 15px;
+}
+.pf-grid th,
+.pf-grid td {
+  padding: 4px;
+  text-align: center;
+  vertical-align: middle;
+}
+.pf-grid thead th {
+  font-weight: 500;
+  color: var(--pf-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.pf-grid tbody th {
+  text-align: left;
+  font-weight: 500;
+  padding-left: 8px;
+  overflow-wrap: anywhere;
+}
+.pf-grid tbody tr:nth-child(odd) > * {
+  background: var(--pf-hover);
+}
+.pf-grid tbody tr > :first-child {
+  border-radius: 10px 0 0 10px;
+}
+.pf-grid tbody tr > :last-child {
+  border-radius: 0 10px 10px 0;
+}
+.pf-grid-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.pf-grid-cell:has(input:focus-visible) {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: 1px;
+}
+.pf-grid-cell input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--pf-accent);
+  cursor: pointer;
+}
+.pf-chip {
+  padding: 8px 14px;
+  font-weight: 500;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
