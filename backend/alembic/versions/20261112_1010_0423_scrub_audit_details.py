@@ -45,6 +45,7 @@ _AUDITED_TOOLS = frozenset(
         "calendar_add_event", "calendar_change_event", "post_to_room", "dial", "message",
         "use_item", "remember", "forget", "create_note", "add_to_note", "tick_note_items",
         "draft_form", "mail_reply", "mail_draft_reply", "generate_pdf", "generate_image",
+        "set_alarm", "set_timer", "navigate", "open_app", "fetch_url",
         "code_interpreter",
     }
 )

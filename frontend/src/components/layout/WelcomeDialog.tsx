@@ -7,7 +7,6 @@ import { authApi } from "@/api/auth";
 import { apiClient } from "@/api/client";
 import { porchApi } from "@/api/porch";
 import { roomsApi, type RoomUser } from "@/api/rooms";
-import { PrivacyStatement } from "@/components/account/PrivacyStatementPanel";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { useInstallPrompt } from "@/lib/installPrompt";
@@ -185,16 +184,6 @@ export function WelcomeDialog() {
                 </li>
               ))}
             </ul>
-            {/* The app-wide promise, at first sign-in (admin privacy AP9). */}
-            <details className="mt-3 rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
-              <summary className="cursor-pointer font-medium text-[var(--text)]">
-                What your server admin can and can&apos;t see
-              </summary>
-              <PrivacyStatement className="mt-2 text-[13px] leading-relaxed text-[var(--text-muted)]" />
-              <p className="mt-2 text-xs text-[var(--text-muted)]">
-                It&apos;s also under Account → Privacy &amp; activity.
-              </p>
-            </details>
           </>
         )}
 

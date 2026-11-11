@@ -351,6 +351,54 @@ async def test_only_tools_that_change_something_are_audited(db, user):
     assert tools == ["mcp__github__open_issue", "remember"]
 
 
+async def test_device_and_fetch_tools_are_audited_by_name_only(db, user):
+    """set_alarm, set_timer, navigate, open_app and fetch_url get a row
+    (owner's decision), holding the tool name and outcome and nothing the
+    person asked for: no url, destination, label or app."""
+    from starlette.requests import Request
+
+    from app.auth.audit import AUDITED_TOOLS, tool_is_audited
+    from app.chat.router import _audit_tool_event
+
+    names = ("set_alarm", "set_timer", "navigate", "open_app", "fetch_url")
+    assert set(names) <= AUDITED_TOOLS and all(tool_is_audited(n) for n in names)
+    req = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("1.2.3.4", 1)})
+    for name in names:
+        await _audit_tool_event(db, request=req, user=user, event_type="tool_invoked", tool_name=name)
+        await _audit_tool_event(db, request=req, user=user, event_type="tool_failed", tool_name=name,
+                                detail={"error": "tool_error"})
+    ok = sorted(e.detail for e in await _events(db, user.id, "tool_invoked"))
+    assert ok == sorted(f"tool='{n}'" for n in names)
+    failed = sorted(e.detail for e in await _events(db, user.id, "tool_failed"))
+    assert failed == sorted(f"tool='{n}', error='tool_error'" for n in names)
+
+
+def test_tool_audit_rows_never_take_the_call_arguments():
+    """The dispatcher hands ``_audit_tool_event`` an outcome code or an
+    exception class name, never the arguments or the tool's own message
+    (a fetch_url error can quote the address)."""
+    import ast
+    import pathlib
+
+    import app.chat.router as router
+
+    tree = ast.parse(pathlib.Path(router.__file__).read_text(encoding="utf-8"))
+    calls = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_audit_tool_event"
+    ]
+    assert len(calls) >= 6
+    allowed_names = {"audit_code", "outcome", "out", "e", "type", "str"}
+    for call in calls:
+        detail = next((k.value for k in call.keywords if k.arg == "detail"), None)
+        if detail is None:
+            continue
+        assert isinstance(detail, ast.Dict)
+        assert {k.value for k in detail.keys} <= {"error", "mcp"}
+        used = {n.id for n in ast.walk(detail) if isinstance(n, ast.Name)}
+        assert used <= allowed_names, used
+
+
 def test_every_audited_tool_is_a_real_tool():
     """A renamed or removed tool would quietly stop being audited, and a
     stale name would hide that (code_interpreter went with 0420)."""
@@ -410,6 +458,7 @@ async def test_migration_scrubs_stored_audit_rows(db, user, caplog):
         ("tool_invoked", "tool='search_photos'", user.id, ""),
         ("tool_failed", "tool='mail_read', error='timeout'", user.id, ""),
         ("tool_invoked", "tool='remember'", user.id, ""),
+        ("tool_invoked", "tool='fetch_url'", user.id, ""),
         ("tool_invoked", "tool='mcp__gh__x', mcp=True", user.id, ""),
         ("tool_invoked", "tool='unlock', mcp=True, approved_by_user=True, connector='HA', spoken=False", user.id, ""),
         ("login_fail", "unknown_user", None, "my-Secret-pass!"),
@@ -440,7 +489,7 @@ async def test_migration_scrubs_stored_audit_rows(db, user, caplog):
     assert by["app_password_created"][0].detail == "device=[name]"
     assert by["secret_created"][0].detail == "credential [name]"
     tools = sorted(re.search(r"tool='([^']*)'", e.detail).group(1) for e in by["tool_invoked"] + by.get("tool_failed", []))
-    assert tools == ["mcp__gh__x", "remember", "unlock"]
+    assert tools == ["fetch_url", "mcp__gh__x", "remember", "unlock"]
     fails = {e.user_id: e.identifier for e in by["login_fail"]}
     assert fails[None] == "my… (15)" and fails[user.id] == user.email
     everything = " ".join((e.detail or "") + e.identifier for e in rows)

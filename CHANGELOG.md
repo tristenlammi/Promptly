@@ -23,16 +23,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 <!-- Admin privacy, AP5 -->
-- Account → Privacy & activity → Recent activity: your sign-ins, password and two-step changes, and every change an administrator made to your account, marked "By your administrator".
+- Account → Recent activity: your sign-ins, password and two-step changes, and every change an administrator made to your account, marked "By your administrator".
 - When an administrator resets your password, changes your email or role, or turns off your two-step verification, you're told: an email (an email change also goes to the old address), a notification, and a banner the next time you open Promptly on any device. Linking single sign-on to your account for the first time emails you too.
 - Admin → Users → Reset password can email the person a reset link instead of setting a temporary password, so the admin never knows their password. It's the default when email is set up.
 <!-- Admin privacy, AP9 -->
-- Account → Privacy & activity: one plain statement of what your server admin can and can't see, with your Recent activity under it. It's also shown at first sign-in (the choose-your-password screen and the Welcome dialog), linked from the account menu ("What your admin can see"), and in the README.
+- One plain statement of what a server admin can and can't see, in the README. The app has the same words at `/account/privacy#privacy-statement`, but nothing in the app links to it.
 
 ### Changed
 <!-- Admin privacy, AP6 -->
 - Admin → Audit no longer shows other people's workspace, note or item titles, file names, device names or credential names: rows keep ids, kinds and counts. Older rows were cleaned up the same way.
-- Admin → Audit no longer lists every AI tool call: only calls that change something or reach someone (adding an event, sending mail, saving to memory, making a file, connector tools, anything you approved). Your own chat still shows every call.
+- Admin → Audit no longer lists every AI tool call: only calls that change something, reach someone, act on your device or fetch a web page (adding an event, sending mail, saving to memory, making a file, setting an alarm or timer, opening an app or directions, fetching a page, connector tools, anything you approved). A row names the tool and how it ended, never the address, destination, label or app. Your own chat still shows every call.
 - A sign-in for an account that doesn't exist is logged as the first two characters and the length of what was typed, in case it was a password.
 <!-- Admin privacy, AP7 -->
 - Admin → Storage lists damaged or missing files by kind, size and owner, without their names. Each owner gets a notification naming their own files, and the admins' alert gives a count only.

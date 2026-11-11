@@ -185,8 +185,11 @@ def ext_of(filename: str | None) -> str:
     return "." + ext if 0 < len(ext) <= 11 and ext.isalnum() else ""
 
 
-#: Native chat tools that change something or reach someone (add an event,
-#: post, send mail, save to memory, make a file). Only these, and
+#: Native chat tools that change something, reach someone, act on the
+#: person's device or go out to the internet (add an event, post, send mail,
+#: save to memory, make a file, set an alarm, open an app, fetch a page).
+#: Their rows say which tool ran and how it ended, nothing else: no address,
+#: destination, label or app name. Only these, and
 #: every connector (``mcp__…``) tool, get an audit row per call: a row for
 #: each read-only call (search photos, read mail, look at the map) told the
 #: admin what someone was doing and when (admin privacy G10). The person's
@@ -210,6 +213,11 @@ AUDITED_TOOLS: frozenset[str] = frozenset(
         "mail_draft_reply",
         "generate_pdf",
         "generate_image",
+        "set_alarm",
+        "set_timer",
+        "navigate",
+        "open_app",
+        "fetch_url",
     }
 )
 

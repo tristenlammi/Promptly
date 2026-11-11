@@ -15,7 +15,7 @@ The first SSO link is told the same way but without a banner: the person
 just signed in themselves, and the email is what reaches the real owner.
 
 Every one of these is also an ``auth_events`` row, which the person sees
-under Account → Privacy & activity → Recent activity.
+under Account → Recent activity.
 
 Nothing here logs what changed beyond the kind, and the message never
 includes a password.

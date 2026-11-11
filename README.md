@@ -200,7 +200,7 @@ The full tour — live demos included — is at **[chatpromptly.com](https://cha
 
 ## What the server admin can and can't see
 
-Every account sees the same statement under Account → Privacy & activity:
+The app carries the same statement (it isn't linked from the menus; open `/account/privacy#privacy-statement`):
 
 > In Promptly, your admin manages accounts, storage and the server. The app
 > never shows them your chats, mail, files, photos, notes, tasks, calendar,

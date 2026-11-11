@@ -3,8 +3,9 @@ import { EyeOff } from "lucide-react";
 import { cn } from "@/utils/cn";
 
 /** The one app-wide statement of what a server admin can and can't see
- *  (admin privacy AP9). Shown in Account → Privacy & activity, at first
- *  sign-in and in the Welcome dialog. The same words are in README.md and OVERVIEW.md §5.7:
+ *  (admin privacy AP9). Not linked from anywhere in the app (owner's
+ *  call, so people aren't put off): it shows only at
+ *  /account/privacy#privacy-statement. The same words are in README.md:
  *  keep them in step. */
 export function PrivacyStatement({ className }: { className?: string }) {
   return (

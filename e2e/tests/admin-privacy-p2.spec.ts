@@ -3,8 +3,8 @@ import type { Page } from "@playwright/test";
 import { expect, ready, stamp, test } from "../fixtures";
 
 /** Admin privacy, part 2: an admin's change to someone's account is never
- *  silent (AP5), and the app says once what an admin can and can't see
- *  (AP9). */
+ *  silent (AP5). The statement of what an admin can and can't see (AP9)
+ *  isn't put in front of people: it shows only at its own address. */
 
 async function bearer(page: Page, path = "/"): Promise<string> {
   const seen = page.waitForRequest((r) => !!r.headers()["authorization"] && r.url().includes("/api/"));
@@ -13,7 +13,7 @@ async function bearer(page: Page, path = "/"): Promise<string> {
   return (await seen).headers()["authorization"];
 }
 
-test("a password reset by the admin is shown to the person, with the privacy statement", async ({
+test("a password reset by the admin is shown to the person; the privacy statement stays out of the way", async ({
   dana: admin,
   browser,
 }) => {
@@ -42,7 +42,7 @@ test("a password reset by the admin is shown to the person, with the privacy sta
   await dialog.getByRole("button", { name: "Reset password" }).click();
   await expect(dialog).toHaveCount(0);
 
-  // They sign in with it: told who did it, and what an admin can see.
+  // They sign in with it: told who did it.
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto("/login");
@@ -51,8 +51,7 @@ test("a password reset by the admin is shown to the person, with the privacy sta
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Choose your own password" })).toBeVisible();
   await expect(page.getByText(/Your administrator reset your password on/)).toBeVisible();
-  await page.getByText("What your server admin can and can't see").click();
-  await expect(page.getByText(/The app never shows them your chats, mail, files/)).toBeVisible();
+  await expect(page.getByText("What your server admin can and can't see")).toHaveCount(0);
 
   const fields = page.locator('input[type="password"]');
   await fields.nth(0).fill(temp);
@@ -61,9 +60,10 @@ test("a password reset by the admin is shown to the person, with the privacy sta
   await page.getByRole("button", { name: /change password|update password|save/i }).click();
   await ready(page);
 
-  // A new member's Welcome dialog carries the same statement.
+  // A new member's Welcome dialog doesn't carry the statement.
   const welcome = page.getByTestId("welcome-dialog");
-  await expect(welcome.getByText("What your server admin can and can't see")).toBeVisible();
+  await expect(welcome).toBeVisible();
+  await expect(welcome.getByText(/server admin can and can't see/)).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(welcome).toHaveCount(0);
 
@@ -75,11 +75,16 @@ test("a password reset by the admin is shown to the person, with the privacy sta
   const activity = page.locator("#recent-activity");
   await expect(activity.getByText("Password reset to a temporary one")).toBeVisible();
   await expect(activity.getByText(/By your administrator/).first()).toBeVisible();
-  await expect(page.locator("#privacy-statement")).toContainText("Only Passwords is.");
+  await expect(page.locator("#privacy-statement")).toHaveCount(0);
   await banner.getByRole("button", { name: "Close this notice" }).click();
   await expect(banner).toHaveCount(0);
   await page.reload();
   await ready(page);
   await expect(page.getByText(/Your administrator reset your password on/)).toHaveCount(0);
+
+  // The statement is still there for anyone given its address.
+  await page.goto("/account/privacy#privacy-statement");
+  await ready(page);
+  await expect(page.locator("#privacy-statement")).toContainText("Only Passwords is.");
   await context.close();
 });
