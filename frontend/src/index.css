@@ -87,6 +87,12 @@
   --success: #047857;
   --success-bg: rgba(16, 185, 129, 0.12);
   --success-border: rgba(16, 185, 129, 0.38);
+  /* Status WORDS on the raised --surface-2 fill (the voice panel's
+     "Voice connected"): --success and --warning are only 4.5:1 and 4.1:1
+     there, so small text uses these darker shades (5.3:1 and 5.8:1).
+     Icons and fills keep the plain tokens. */
+  --success-text: #046C4E;
+  --warning-text: #92400E;
   /* Elevation scale — one intentional set of shadows so depth reads
      consistently (row < card/hover < menu/overlay), instead of the ad-hoc
      mix of Tailwind's `shadow-sm` and `shadow-lg`. Theme-aware: dark needs
@@ -124,6 +130,8 @@ html.dark {
   --danger: #F87171;
   --warning: #FBBF24;
   --success: #34D399;
+  --success-text: var(--success);
+  --warning-text: var(--warning);
   /* Heavier elevation on dark so shadows register against the low-contrast
      warm-dark surfaces (see the :root scale for the rationale). */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);

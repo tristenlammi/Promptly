@@ -311,8 +311,8 @@ export function VoicePanel({ variant }: { variant: "rooms" | "sidebar" | "collap
                     : words.tone === "bad" || (words.tone === "ok" && level === "poor")
                       ? "text-[var(--danger)]"
                       : words.tone === "busy" || level === "fair"
-                        ? "text-[var(--warning)]"
-                        : "text-[var(--success)]",
+                        ? "text-[var(--warning-text)]"
+                        : "text-[var(--success-text)]",
                 )}
                 data-testid="voice-status-words"
               >
