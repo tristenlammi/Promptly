@@ -390,8 +390,7 @@ async def create_workspace_share(
             event_type=EVENT_WORKSPACE_SHARE_CREATED,
             request=request,
             user_id=user.id,
-            detail=f'"{ws.title}" (ws={ws.id}) → {invitee.username} '
-            f"as {payload.role} (re-invite)",
+            detail=f"ws={ws.id} → {invitee.username} as {payload.role} (re-invite)",
         )
         await db.commit()
         await db.refresh(existing)
@@ -410,8 +409,7 @@ async def create_workspace_share(
             event_type=EVENT_WORKSPACE_SHARE_CREATED,
             request=request,
             user_id=user.id,
-            detail=f'"{ws.title}" (ws={ws.id}) → {invitee.username} '
-            f"as {payload.role}",
+            detail=f"ws={ws.id} → {invitee.username} as {payload.role}",
         )
         await db.commit()
         await db.refresh(share)
@@ -488,8 +486,7 @@ async def update_workspace_share(
             event_type=EVENT_WORKSPACE_SHARE_CREATED,
             request=request,
             user_id=user.id,
-            detail=f'"{ws.title}" (ws={ws.id}) → {invitee.username} '
-            f"{before} → {payload.role}",
+            detail=f"ws={ws.id} → {invitee.username} {before} → {payload.role}",
         )
         await db.commit()
         await db.refresh(share)
@@ -606,7 +603,7 @@ async def revoke_workspace_share(
         event_type=EVENT_WORKSPACE_SHARE_REVOKED,
         request=request,
         user_id=user.id,
-        detail=f'"{ws.title}" (ws={workspace_id}) — member {departing_id} '
+        detail=f"ws={workspace_id} — member {departing_id} "
         + ("left" if is_invitee and not is_owner else "removed by owner"),
     )
     await db.commit()

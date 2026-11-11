@@ -61,8 +61,24 @@ async def user_from_basic(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from None
         await _note_failure(ip)
         try:
+            # The account it was for, if there is one; otherwise only a
+            # mask of what was typed (admin privacy G11).
+            from sqlalchemy import func, or_, select
+
+            from app.auth.audit import mask_identifier
+            from app.auth.models import User
+
+            typed = (creds[0] or "").strip()
+            who = (
+                await db.execute(
+                    select(User.id).where(
+                        or_(func.lower(User.username) == typed.lower(), func.lower(User.email) == typed.lower())
+                    )
+                )
+            ).scalars().first() if typed else None
             await record_event(db, request=None, ip=ip, user_agent="", event_type=EVENT_APP_PASSWORD_FAILED,
-                               user_id=None, identifier=(creds[0] or "")[:120], detail=safe_dict({"reason": str(e)}))
+                               user_id=who, identifier=typed[:120] if who else mask_identifier(typed),
+                               detail=safe_dict({"reason": str(e)}))
             await db.commit()
         except Exception:  # noqa: BLE001 — the audit row must never change the answer
             pass

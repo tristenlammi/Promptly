@@ -3,12 +3,10 @@ import type {
   AdminModelOption,
   AdminUser,
   AdminUserUsage,
-  AnalyticsFeedbackRow,
   AnalyticsModelRow,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
-  FeedbackNoteRow,
   AppSettings,
   AuthEvent,
   ErrorEventDetail,
@@ -316,7 +314,8 @@ export interface StorageCheckRun {
 
 export interface StorageProblem {
   id: string;
-  filename: string;
+  /** The file's extension (".pdf"), never its name: that's the owner's. */
+  kind: string;
   owner: string | null;
   state: "missing" | "damaged";
   size_bytes: number;
@@ -498,6 +497,14 @@ export const adminApi = {
     );
     return data;
   },
+  /** Email the person a single-use link to choose a new password (AP5):
+   *  the admin never learns a working password. Needs email set up. */
+  async sendResetLink(id: string): Promise<AdminUser> {
+    const { data } = await apiClient.post<AdminUser>(
+      `/admin/users/${id}/send-reset-link`
+    );
+    return data;
+  },
 
   // ---------------- Model pool ----------------
   async modelPool(): Promise<AdminModelOption[]> {
@@ -614,23 +621,6 @@ export const adminApi = {
     const { data } = await apiClient.get<AnalyticsModelRow[]>(
       "/admin/analytics/by-model",
       { params: { days } }
-    );
-    return data;
-  },
-  async analyticsFeedback(days = 30): Promise<AnalyticsFeedbackRow[]> {
-    const { data } = await apiClient.get<AnalyticsFeedbackRow[]>(
-      "/admin/analytics/feedback",
-      { params: { days } }
-    );
-    return data;
-  },
-  async analyticsFeedbackNotes(
-    days = 30,
-    limit = 50
-  ): Promise<FeedbackNoteRow[]> {
-    const { data } = await apiClient.get<FeedbackNoteRow[]>(
-      "/admin/analytics/feedback/notes",
-      { params: { days, limit } }
     );
     return data;
   },

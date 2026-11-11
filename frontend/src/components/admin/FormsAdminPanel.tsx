@@ -16,9 +16,11 @@ const KEY = ["admin", "forms"];
 
 /**
  * Admin → Forms (Forms WP-F1.3): whether people without an account can
- * answer forms at all, the forms anyone with the link can answer, their
- * reports, and closing one (its owner is told why); and how much each form
- * may take in files a day (WP-F1.6). Answers aren't shown here.
+ * answer forms at all, how many link forms there are, the forms someone
+ * reported with their reports, and closing one (its owner is told why);
+ * and how much each form may take in files a day (WP-F1.6). Other forms'
+ * titles and owners, and every form's answers, aren't shown here (admin
+ * privacy, owner decision 2026-11-09).
  */
 export function FormsAdminPanel() {
   const qc = useQueryClient();
@@ -75,16 +77,21 @@ export function FormsAdminPanel() {
 
       <section aria-labelledby="admin-forms-h" className="flex flex-col gap-2">
         <h2 id="admin-forms-h" className="text-sm font-semibold text-[var(--text)]">
-          Forms anyone with the link can answer
+          Reported forms
         </h2>
         <p className="text-xs text-[var(--text-muted)]">
-          And any form someone has reported. You can close a form here; you can&apos;t read its answers.
+          {data.link_form_count === 0
+            ? "No forms are open to anyone with the link right now."
+            : data.link_form_count === 1
+              ? "1 form can be answered by anyone with the link."
+              : `${data.link_form_count} forms can be answered by anyone with the link.`}{" "}
+          Only forms someone reported are listed. You can close one here; you can&apos;t read its answers.
         </p>
         {data.forms.length === 0 ? (
           <EmptyState
             icon={<ClipboardList className="h-5 w-5" />}
-            title="No link forms"
-            description="Nobody has a form open to people without an account right now."
+            title="No reports"
+            description="Nobody has reported a form. If someone does, it shows here."
           />
         ) : (
           <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">

@@ -131,12 +131,14 @@ async def create_secret(
         allowed_hosts=_hosts(payload.allowed_hosts),
     )
     db.add(row)
+    await db.flush()
+    # The id, never the name the person gave it (admin privacy G9).
     await record_event(
         db,
         event_type=EVENT_SECRET_CREATED,
         request=request,
         user_id=user.id,
-        detail=f"credential {name}",
+        detail=f"credential id={row.id}",
     )
     await db.commit()
     await db.refresh(row)
@@ -163,7 +165,7 @@ async def update_secret(
         event_type=EVENT_SECRET_UPDATED,
         request=request,
         user_id=user.id,
-        detail=f"credential {row.name}",
+        detail=f"credential id={row.id}",
     )
     await db.commit()
     await db.refresh(row)
@@ -184,14 +186,14 @@ async def delete_secret(
     row = await db.get(UserSecret, secret_id)
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    name = row.name
+    secret_ref = row.id
     await db.delete(row)
     await record_event(
         db,
         event_type=EVENT_SECRET_DELETED,
         request=request,
         user_id=user.id,
-        detail=f"credential {name}",
+        detail=f"credential id={secret_ref}",
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

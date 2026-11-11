@@ -35,8 +35,10 @@ from app.auth.audit import (
     EVENT_BUDGET_EXCEEDED,
     EVENT_TOOL_FAILED,
     EVENT_TOOL_INVOKED,
+    ext_of,
     record_event,
     safe_dict,
+    tool_is_audited,
 )
 from app.auth.deps import get_current_user
 from app.auth.models import User
@@ -76,7 +78,6 @@ from app.chat.schemas import (
     MentionConnectorCandidate,
     MentionFileCandidate,
     MessageResponse,
-    MessageFeedbackRequest,
     PatchAssistantMessageRequest,
     RegenerateMessageRequest,
     SendMessageRequest,
@@ -2314,54 +2315,6 @@ async def delete_message(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.put(
-    "/conversations/{conversation_id}/messages/{message_id}/feedback",
-    response_model=MessageResponse,
-)
-async def set_message_feedback(
-    conversation_id: uuid.UUID,
-    message_id: uuid.UUID,
-    payload: MessageFeedbackRequest,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> MessageResponse:
-    """Rate an assistant reply thumbs up / down (Phase 2.5).
-
-    Owner-only and assistant-rows-only. ``rating=None`` clears the
-    rating (toggling a thumb off) and also drops any stored reason.
-    The reason is a short optional note typically captured on a
-    thumbs-down; we keep it only alongside a ``"down"`` rating.
-    """
-    conv = await db.get(Conversation, conversation_id)
-    if conv is None or conv.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
-        )
-
-    target = await db.get(Message, message_id)
-    if target is None or target.conversation_id != conv.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
-        )
-    if target.role != "assistant":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only assistant replies can be rated.",
-        )
-
-    target.feedback = payload.rating
-    # Reason only makes sense attached to a rating; clear it when the
-    # rating is cleared or when none was supplied.
-    if payload.rating is None:
-        target.feedback_reason = None
-    else:
-        reason = (payload.reason or "").strip()
-        target.feedback_reason = reason or None
-    await db.commit()
-    await db.refresh(target)
-    return MessageResponse.model_validate(target)
-
-
 @router.post(
     "/conversations/{conversation_id}/messages/{message_id}/regenerate",
     response_model=SendMessageResponse,
@@ -3554,6 +3507,11 @@ async def _audit_tool_event(
     the assistant message lands — keeps the trail intact even if the
     surrounding turn errors out partway through.
     """
+    if not tool_is_audited(tool_name):
+        # A read-only native tool: no row. One per call told the admin
+        # what someone was doing and when (admin privacy G10); the
+        # person's own chat still shows every call.
+        return
     try:
         payload: dict[str, Any] = {"tool": tool_name}
         if detail:
@@ -7910,7 +7868,7 @@ async def import_conversations(
                     "failed": len(failed),
                     "total_messages": total_messages,
                     "workspace_id": str(workspace_db_id) if workspace_db_id else None,
-                    "filename": file.filename,
+                    "ext": ext_of(file.filename),
                 }
             ),
         )

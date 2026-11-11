@@ -193,9 +193,10 @@ async def _plain_user(db, name):
     return u
 
 
-async def test_an_owners_save_leaves_the_admins_attachments_alone(db, user, client):
+async def test_an_owners_save_keeps_what_they_send_and_can_turn_off_the_admins(db, user, client):
     """The owner flipping any toggle used to wipe every attachment and
-    re-add only what they could personally reach."""
+    re-add only what they could personally reach. What they send is kept;
+    one an admin attached is theirs to turn off (admin privacy G8)."""
     from app.chat.models import Workspace
     from app.mcp.models import ConnectorUser, McpConnector, WorkspaceMcpConnector
 
@@ -216,23 +217,30 @@ async def test_an_owners_save_leaves_the_admins_attachments_alone(db, user, clie
     db.add(ConnectorUser(connector_id=owners_own.id, user_id=owner.id))
     await db.commit()
 
+    async def listed():
+        return {
+            c["name"]: c
+            for c in (await client.get(f"/api/workspaces/{ws.id}/connectors", headers=_auth(owner))).json()
+        }
+
+    before = await listed()
+    assert before["Alarm"]["attached"] is True and before["Alarm"]["can_change"] is True
+
     r = await client.put(
         f"/api/workspaces/{ws.id}/connectors", headers=_auth(owner),
-        json={"connector_ids": [str(owners_own.id)]},
+        json={"connector_ids": [str(owners_own.id), str(admins_pick.id)]},
     )
     assert r.status_code == 204
+    after = await listed()
+    assert after["Alarm"]["attached"] is True and after["Lights"]["attached"] is True
+
     r = await client.put(
         f"/api/workspaces/{ws.id}/connectors", headers=_auth(owner), json={"connector_ids": []},
     )
     assert r.status_code == 204
-
-    listed = {
-        c["name"]: c
-        for c in (await client.get(f"/api/workspaces/{ws.id}/connectors", headers=_auth(owner))).json()
-    }
-    assert listed["Alarm"]["attached"] is True
-    assert listed["Alarm"]["can_change"] is False
-    assert listed["Lights"]["attached"] is False and listed["Lights"]["can_change"] is True
+    after = await listed()
+    assert "Alarm" not in after  # turned off, and the owner can't reach it to turn it back on
+    assert after["Lights"]["attached"] is False and after["Lights"]["can_change"] is True
 
 
 def test_admin_alerts_push_without_a_preference_of_their_own():

@@ -163,6 +163,69 @@ async def record_event(
     return event
 
 
+def mask_identifier(typed: str) -> str:
+    """What someone typed into the sign-in box, when it matches no account:
+    the first two characters and the length (``"jo… (12)"``). People
+    sometimes type their password there, and the admin reads this log
+    (admin privacy G11). Enough to spot a spray against one name."""
+    typed = (typed or "").strip()
+    if not typed:
+        return ""
+    return f"{typed[:2]}… ({len(typed)})"
+
+
+def ext_of(filename: str | None) -> str:
+    """A file's extension for the audit log, never its name (admin privacy
+    G9): ``"Biopsy results.pdf"`` → ``".pdf"``. Empty without one."""
+    name = (filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    stem, dot, ext = name.rpartition(".")
+    if not dot or not stem.strip():
+        return ""
+    ext = ext.lower()
+    return "." + ext if 0 < len(ext) <= 11 and ext.isalnum() else ""
+
+
+#: Native chat tools that change something, reach someone, act on the
+#: person's device or go out to the internet (add an event, post, send mail,
+#: save to memory, make a file, set an alarm, open an app, fetch a page).
+#: Their rows say which tool ran and how it ended, nothing else: no address,
+#: destination, label or app name. Only these, and
+#: every connector (``mcp__…``) tool, get an audit row per call: a row for
+#: each read-only call (search photos, read mail, look at the map) told the
+#: admin what someone was doing and when (admin privacy G10). The person's
+#: own chat still shows every call. A held call approved by the person is
+#: always audited (``chat/approvals.py``).
+AUDITED_TOOLS: frozenset[str] = frozenset(
+    {
+        "calendar_add_event",
+        "calendar_change_event",
+        "post_to_room",
+        "dial",
+        "message",
+        "use_item",
+        "remember",
+        "forget",
+        "create_note",
+        "add_to_note",
+        "tick_note_items",
+        "draft_form",
+        "mail_reply",
+        "mail_draft_reply",
+        "generate_pdf",
+        "generate_image",
+        "set_alarm",
+        "set_timer",
+        "navigate",
+        "open_app",
+        "fetch_url",
+    }
+)
+
+
+def tool_is_audited(name: str | None) -> bool:
+    return bool(name) and (name in AUDITED_TOOLS or name.startswith("mcp__"))
+
+
 def safe_dict(payload: dict[str, Any], *, redact: tuple[str, ...] = ()) -> str:
     """Serialise a small dict for the ``detail`` column with redaction.
 

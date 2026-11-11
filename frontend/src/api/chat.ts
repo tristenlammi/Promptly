@@ -619,22 +619,6 @@ export const chatApi = {
     );
   },
 
-  /** Rate an assistant reply thumbs up / down (Phase 2.5). Pass
-   *  ``rating: null`` to clear an existing rating. Returns the updated
-   *  message so the caller can reconcile its store. */
-  async setMessageFeedback(
-    conversationId: string,
-    messageId: string,
-    rating: "up" | "down" | null,
-    reason?: string
-  ): Promise<ChatMessage> {
-    const { data } = await apiClient.put<ChatMessage>(
-      `/chat/conversations/${conversationId}/messages/${messageId}/feedback`,
-      { rating, reason }
-    );
-    return data;
-  },
-
   // ---- Phase 2.6 — in-thread regeneration versioning ----
   /** Switch the visible thread to a sibling version. ``messageId`` is
    *  the sibling picked from the ``‹ 2/3 ›`` pager. Returns the full

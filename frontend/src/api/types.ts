@@ -191,6 +191,9 @@ export interface UserPreferencesUpdate {
   voice_local_mutes?: string[];
 }
 
+/** What an admin changed on someone's account (AP5). */
+export type AdminNoticeKind = "password_reset" | "email_changed" | "role_changed" | "mfa_reset" | "sso_linked";
+
 export interface User {
   id: string;
   email: string;
@@ -212,6 +215,10 @@ export interface User {
   must_change_password?: boolean;
   /** Last successful login. Surfaced in profile + admin user table. */
   last_login_at?: string | null;
+  /** An admin changed this account and the person hasn't closed the banner
+   *  yet (admin privacy AP5): when, and what (latest wins). */
+  admin_notice_at?: string | null;
+  admin_notice_kind?: AdminNoticeKind | null;
   /** Enrolled MFA method or null. Mirrored from the user_mfa_secrets row. */
   mfa_enrolled_method?: "totp" | "email" | null;
   mfa_enrolled_at?: string | null;
@@ -495,27 +502,6 @@ export interface AnalyticsModelRow {
   prompt_tokens_window: number;
   completion_tokens_window: number;
   cost_usd_window: number;
-}
-
-/** Thumbs up / down on one model's replies over the window.
- *  ``rated`` is the denominator — two downvotes out of four is a very
- *  different signal from ten out of a thousand. */
-export interface AnalyticsFeedbackRow {
-  model_id: string;
-  up: number;
-  down: number;
-  rated: number;
-  /** Share of rated replies thumbed down, 0-1. */
-  down_rate: number;
-}
-
-/** One thumbs-down with the note the user left. Carries no message
- *  content — the note was written to be read, the conversation wasn't. */
-export interface FeedbackNoteRow {
-  message_id: string;
-  model_id: string | null;
-  reason: string;
-  created_at: string;
 }
 
 // ---- End-user usage dashboard (Phase 8) ----
@@ -884,11 +870,6 @@ export interface ChatMessage {
    *  / system rows. The UI looks this up against the conversation's
    *  participants to render "from Jane" chips on shared chats. */
   author_user_id?: string | null;
-  /** Phase 2.5 — per-response quality signal on assistant replies.
-   *  ``null`` when unrated. ``feedback_reason`` is the optional short
-   *  note left on a thumbs-down. */
-  feedback?: "up" | "down" | null;
-  feedback_reason?: string | null;
   /** Phase 2.6 — in-thread regeneration versioning. ``parent_id`` is the
    *  lineage link. The pager fields are only present when a message has
    *  more than one sibling version: ``version_index`` is 1-based,

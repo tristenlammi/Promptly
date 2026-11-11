@@ -173,16 +173,18 @@ export function WelcomeDialog() {
     >
       <div data-testid="welcome-dialog" data-step={current}>
         {current === "what" && (
-          <ul className="flex flex-col gap-2.5">
-            {WHAT.map(({ icon: Icon, label }) => (
-              <li key={label} className="flex items-center gap-3 text-sm text-[var(--text)]">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-[var(--accent-text)]">
-                  <Icon className="h-4 w-4" aria-hidden />
-                </span>
-                {label}
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="flex flex-col gap-2.5">
+              {WHAT.map(({ icon: Icon, label }) => (
+                <li key={label} className="flex items-center gap-3 text-sm text-[var(--text)]">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-[var(--accent-text)]">
+                    <Icon className="h-4 w-4" aria-hidden />
+                  </span>
+                  {label}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
 
         {current === "install" && (

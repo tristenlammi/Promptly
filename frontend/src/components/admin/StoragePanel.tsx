@@ -156,7 +156,7 @@ export function StoragePanel() {
                     {p.state === "missing" ? "Missing" : "Damaged"}
                   </span>
                   <span className="min-w-0 flex-1 truncate" title={p.storage_path}>
-                    {p.filename}
+                    {p.kind ? `${p.kind.slice(1).toUpperCase()} file` : "File"}
                     <span className="text-[var(--text-muted)]">
                       {" "}
                       · {p.owner ?? "shared"} · {humanSize(p.size_bytes)}
@@ -177,6 +177,7 @@ export function StoragePanel() {
             </ul>
             <p className="mt-1 text-[11px] text-[var(--text-muted)]">
               Put each back at its path inside the uploads folder from a backup (shown on hover), then “Check again”.
+              File names aren&apos;t shown here: each owner has been told which of theirs it is.
             </p>
           </div>
         )}

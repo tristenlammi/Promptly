@@ -1,70 +1,30 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, MessageSquare, X } from "lucide-react";
 
 import { feedbackApi } from "@/api/feedback";
-import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 /**
- * Subtle feedback form. Submits through the instance's own SMTP (server-side)
- * so it works across isolated self-host networks with no external service. If
- * the instance has no SMTP configured — or the send fails — we fall back to a
- * ``mailto:`` compose in the user's own mail client, so feedback always has a
- * path out.
+ * A short message to this server's admins. It is kept on the server and
+ * shown to them under Admin → Feedback; it goes nowhere else.
  */
 export function FeedbackModal({ onClose }: { onClose: () => void }) {
-  const user = useAuthStore((s) => s.user);
   const [message, setMessage] = useState("");
-  const [includeEmail, setIncludeEmail] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const hasEmail = Boolean(user?.email);
-  // The destination address (from the server, so a self-hoster's override is
-  // respected), shown as a direct-email link for anyone who'd rather email.
-  const [address, setAddress] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void feedbackApi
-      .getConfig()
-      .then((c) => {
-        if (!cancelled) setAddress(c.email);
-      })
-      .catch(() => {
-        /* non-fatal — the form still works without the direct link */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const openMailto = (to: string) => {
-    const subject = encodeURIComponent("Promptly feedback");
-    const body = encodeURIComponent(message.trim());
-    window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
-  };
 
   const submit = async () => {
     const text = message.trim();
     if (!text || submitting) return;
     setSubmitting(true);
     try {
-      const res = await feedbackApi.submit(text, includeEmail && hasEmail);
-      if (res.delivered) {
-        toast.success("Thanks — your feedback was sent.");
-        onClose();
-      } else if (res.fallback_to) {
-        // No SMTP on this instance (or the send failed): hand off to the
-        // user's own mail client with the message pre-filled.
-        toast.info("Opening your email app to send this…");
-        openMailto(res.fallback_to);
-        onClose();
-      } else {
-        toast.error("Couldn't send feedback right now. Please try again.");
-      }
+      await feedbackApi.submit(text);
+      toast.success("Sent to your admin. Thank you.");
+      onClose();
     } catch (err) {
-      toast.error(apiErrorMessage(err, "Couldn't send feedback."));
+      toast.error(apiErrorMessage(err, "Couldn't send that. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -80,7 +40,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-2xl">
+      <div className="w-full max-w-sm overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <div className="flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-[var(--accent-text)]" />
@@ -98,42 +58,17 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-3 p-4">
           <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-            Found a bug or have an idea? Send it straight to the maintainer
-            {address ? (
-              <>
-                , or email{" "}
-                <a
-                  href={`mailto:${address}?subject=${encodeURIComponent(
-                    "Promptly feedback"
-                  )}`}
-                  className="text-[var(--accent-text)] underline"
-                >
-                  {address}
-                </a>{" "}
-                directly.
-              </>
-            ) : (
-              "."
-            )}
+            This goes to your server's admin.
           </p>
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value.slice(0, 5000))}
-            rows={5}
+            rows={4}
             autoFocus
+            aria-label="Your message"
             placeholder="What's on your mind?"
             className="w-full resize-y rounded-input border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/60"
           />
-          {hasEmail && (
-            <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-              <input
-                type="checkbox"
-                checked={includeEmail}
-                onChange={(e) => setIncludeEmail(e.target.checked)}
-              />
-              Include my email ({user?.email}) so I can reply
-            </label>
-          )}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3">

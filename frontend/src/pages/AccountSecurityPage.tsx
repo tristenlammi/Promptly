@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   BarChart3,
   Bell,
   Bookmark,
   Brain,
+  EyeOff,
   FolderInput,
   LayoutGrid,
   ShieldCheck,
@@ -26,6 +27,8 @@ import { PersonalContextPanel } from "@/components/account/PersonalContextPanel"
 import { BodyProfilePanel } from "@/components/account/BodyProfilePanel";
 import { UnitsPanel } from "@/components/account/UnitsPanel";
 import { ProfilePanel } from "@/components/account/ProfilePanel";
+import { PrivacyStatementPanel } from "@/components/account/PrivacyStatementPanel";
+import { RecentActivityPanel } from "@/components/account/RecentActivityPanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
 import { SignOutEverywherePanel } from "@/components/account/SignOutEverywherePanel";
 import { DevicesPanel } from "@/components/account/DevicesPanel";
@@ -64,6 +67,9 @@ export function AccountSecurityPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const { section } = useParams<{ section?: string }>();
   const navigate = useNavigate();
+  // The statement of what an admin can see isn't put in front of people
+  // (owner's call): it shows only at /account/privacy#privacy-statement.
+  const showStatement = useLocation().hash === "#privacy-statement";
   const [active, setActive] = useState<string>(section ?? "profile");
 
   const sections: Section[] = [
@@ -94,6 +100,19 @@ export function AccountSecurityPage() {
           <ChangePasswordPanel />
           <MfaSettingsPanel defaultEmail={user?.email} />
           <SignOutEverywherePanel />
+        </div>
+      ),
+    },
+    {
+      // This account's own history, admin changes included (admin privacy
+      // AP5). The id stays "privacy": banners and emails link here.
+      id: "privacy",
+      label: "Recent activity",
+      icon: EyeOff,
+      node: (
+        <div className="space-y-6">
+          {showStatement && <PrivacyStatementPanel />}
+          <RecentActivityPanel />
         </div>
       ),
     },

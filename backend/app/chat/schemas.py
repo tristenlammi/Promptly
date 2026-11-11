@@ -72,11 +72,6 @@ class MessageResponse(BaseModel):
     # ``ConversationDetail.collaborators`` to render "from Jane"
     # author chips on shared chats.
     author_user_id: uuid.UUID | None = None
-    # Phase 2.5 — per-response quality signal on assistant replies.
-    # ``None`` when unrated. ``feedback_reason`` carries the optional
-    # short note left on a thumbs-down.
-    feedback: Literal["up", "down"] | None = None
-    feedback_reason: str | None = None
     # Talk (0300): ``{spoken, interrupted, heard_chars, stt_ms}`` on a turn
     # that was spoken; drives the "Spoken" mark and "Interrupted" note.
     voice: dict[str, Any] | None = None
@@ -133,8 +128,6 @@ class MessageResponse(BaseModel):
                         "model_id",
                         "author_user_id",
                         "edited_at",
-                        "feedback",
-                        "feedback_reason",
                         "parent_id",
                     )
                 }
@@ -569,19 +562,6 @@ class PatchAssistantMessageRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     content: str = Field(min_length=1, max_length=200_000)
-
-
-class MessageFeedbackRequest(BaseModel):
-    """Body for ``PUT /conversations/{cid}/messages/{mid}/feedback``.
-
-    Phase 2.5 — thumbs up / down on an assistant reply. ``rating`` of
-    ``None`` clears any existing rating (toggling a thumb off).
-    ``reason`` is an optional short note, typically captured on a
-    thumbs-down; it's cleared whenever the rating is cleared.
-    """
-
-    rating: Literal["up", "down"] | None = None
-    reason: str | None = Field(default=None, max_length=2000)
 
 
 class RegenerateMessageRequest(BaseModel):

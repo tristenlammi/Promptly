@@ -24,10 +24,35 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 
 - **Calendar labels** — colour-code events with your own labels (Personal is green and Work is blue to start; rename, recolour, delete or add up to 30). Pick one when making or editing an event, change it from the event, and tick a label in the side panel to show or hide its events. Labels are yours alone: on a shared event or an invitation each person colours it their own way and nobody sees anyone else's. Chat can set one of your labels when it adds or changes an event.
+<!-- Admin privacy, AP5 -->
+- Account → Recent activity: your sign-ins, password and two-step changes, and every change an administrator made to your account, marked "By your administrator".
+- When an administrator resets your password, changes your email or role, or turns off your two-step verification, you're told: an email (an email change also goes to the old address), a notification, and a banner the next time you open Promptly on any device. Linking single sign-on to your account for the first time emails you too.
+- Admin → Users → Reset password can email the person a reset link instead of setting a temporary password, so the admin never knows their password. It's the default when email is set up.
+<!-- Admin privacy, AP9 -->
+- One plain statement of what a server admin can and can't see, in the README. The app has the same words at `/account/privacy#privacy-statement`, but nothing in the app links to it.
+
+### Changed
+
+<!-- Admin privacy, AP6 -->
+- Admin → Audit no longer shows other people's workspace, note or item titles, file names, device names or credential names: rows keep ids, kinds and counts. Older rows were cleaned up the same way.
+- Admin → Audit no longer lists every AI tool call: only calls that change something, reach someone, act on your device or fetch a web page (adding an event, sending mail, saving to memory, making a file, setting an alarm or timer, opening an app or directions, fetching a page, connector tools, anything you approved). A row names the tool and how it ended, never the address, destination, label or app. Your own chat still shows every call.
+- A sign-in for an account that doesn't exist is logged as the first two characters and the length of what was typed, in case it was a password.
+<!-- Admin privacy, AP7 -->
+- Admin → Storage lists damaged or missing files by kind, size and owner, without their names. Each owner gets a notification naming their own files, and the admins' alert gives a count only.
+- Admin → Connectors only lists and attaches to workspaces you're in. For someone else's workspace, give its owner the connector and they turn it on in the workspace's settings. A workspace's owner and admins can now turn off a connector an admin turned on there.
+- Admin → Forms lists reported forms and a count of link forms, not every link form's title and owner.
+<!-- Feedback to your admin (replaces AP8) -->
+- Send feedback (account menu) now goes to your server's admins and stays on the server: each admin gets a notification and, if email is set up, an email they can reply to. Admins read the messages under Admin → Feedback, where they can mark them read or delete them. Nothing is sent to an outside address any more, and the `FEEDBACK_EMAIL` setting is gone.
+<!-- Admin privacy, AP10 -->
+- A new admin screen can't ship without a privacy check: the tests list every admin route with what it shows, and fail on one nobody has looked at. They also check that file ids an admin could see open nothing.
 
 ### Fixed
 
 - Calls: the calls service's config uses LiveKit's current name for the metrics port setting, so its log no longer warns that `prometheus_port` is deprecated.
+
+### Removed
+
+- Thumbs up / thumbs down on AI replies, the note box that came with a thumbs-down, and Admin → Analytics → Response quality. To tell your admin something, use Send feedback.
 
 ## [0.36.2] - 2026-11-11
 

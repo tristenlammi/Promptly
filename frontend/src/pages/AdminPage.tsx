@@ -11,12 +11,13 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2, KeyRound, ClipboardList, PhoneCall, House } from "lucide-react";
+  Users2, MessageSquare, KeyRound, ClipboardList, PhoneCall, House } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { BackupsPanel } from "@/components/admin/BackupsPanel";
+import { FeedbackPanel } from "@/components/admin/FeedbackPanel";
 import { FormsAdminPanel } from "@/components/admin/FormsAdminPanel";
 import { CallsPanel } from "@/components/admin/CallsPanel";
 import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
@@ -38,6 +39,7 @@ type TabId =
   | "analytics"
   | "console"
   | "audit"
+  | "feedback"
   | "settings"
   | "backups"
   | "passwords"
@@ -102,6 +104,12 @@ const TABS: TabDef[] = [
     label: "Audit log",
     icon: <ScrollText className="h-3.5 w-3.5" />,
     subtitle: "Every authentication and admin event, with IP and timestamps.",
+  },
+  {
+    id: "feedback",
+    label: "Feedback",
+    icon: <MessageSquare className="h-3.5 w-3.5" />,
+    subtitle: "Messages people sent you with Send feedback.",
   },
   {
     id: "backups",
@@ -215,6 +223,7 @@ export function AdminPage() {
             {tab === "analytics" && <AnalyticsPanel />}
             {tab === "console" && <ConsolePanel />}
             {tab === "audit" && <AuditLogPanel />}
+            {tab === "feedback" && <FeedbackPanel />}
             {tab === "backups" && <BackupsPanel />}
             {tab === "passwords" && <PasswordsPanel />}
             {tab === "porch" && <PorchPanel />}

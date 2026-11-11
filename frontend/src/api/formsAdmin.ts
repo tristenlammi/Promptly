@@ -24,7 +24,10 @@ export interface AdminFormsOverview {
   /** Each form's files allowance for 24 hours, in MB (WP-F1.6). */
   upload_cap_mb: number;
   link_upload_cap_mb: number;
+  /** Reported forms only (admin privacy): other forms are just counted. */
   forms: AdminFormRow[];
+  /** How many forms anyone with the link can answer right now. */
+  link_form_count: number;
 }
 
 export interface FormReportRow {

@@ -1,5 +1,5 @@
 """Links Promptly sends never take their host from request headers (security
-review H1: password-reset host poisoning, OIDC redirect_uri, feedback)."""
+review H1: password-reset host poisoning, OIDC redirect_uri)."""
 from __future__ import annotations
 
 import re
@@ -106,26 +106,3 @@ async def test_the_oidc_redirect_uri_ignores_forged_hosts(db, client, monkeypatc
     r = await client.get("/api/auth/oidc/login", headers={"X-Forwarded-Host": "evil.example.net"})
     assert r.status_code == 302
     assert seen == ["https://promptly.example.com/api/auth/oidc/callback"]
-
-
-async def test_feedback_names_the_configured_instance(db, user, client, monkeypatch):
-    import app.feedback.router as fb
-
-    await _set_public(db, ["https://promptly.example.com"])
-    sent: list[str] = []
-
-    async def _send(db, *, to, subject, text_body, reply_to=None, **kw):
-        sent.append(text_body)
-
-    monkeypatch.setattr(fb, "send_message", _send)
-    from app.auth.utils import create_access_token
-
-    headers = {
-        "Authorization": f"Bearer {create_access_token(user.id, token_version=user.token_version)}",
-        "Origin": "https://evil.example.net",
-        "Host": "evil.example.net",
-    }
-    r = await client.post("/api/feedback", json={"message": "hello there"}, headers=headers)
-    assert r.status_code == 200, r.text
-    assert "Instance: https://promptly.example.com" in sent[0]
-    assert "evil" not in sent[0]

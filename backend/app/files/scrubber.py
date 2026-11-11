@@ -229,19 +229,43 @@ def empty_quarantine() -> int:
     return n
 
 
-async def _alert(names_list: list[str]) -> None:
-    if not names_list:
+async def _alert(bad: list[Any]) -> None:
+    """Tell the admins how many files went bad, and each owner which of
+    theirs. The admin's alert carries a count only: file names are the
+    owners' content (admin privacy G6)."""
+    if not bad:
         return
     from app.files.disk_guard import _notify_admins
 
-    n = len(names_list)
-    names = ", ".join(f"“{name}”" for name in names_list[:3])
-    more = f" and {n - 3} more" if n > 3 else ""
+    n = len(bad)
     await _notify_admins(
         f"{n} file{'s' if n != 1 else ''} failed the storage check",
-        f"{names}{more} {'is' if n == 1 else 'are'} missing or no longer match what was stored. "
-        "Restore them from a backup — Admin → Storage lists them.",
+        f"{n} file{' is' if n == 1 else 's are'} missing or no longer match what was stored. "
+        "Restore them from a backup — Admin → Storage lists them. Their owners have been told.",
     )
+    by_owner: dict[Any, list[str]] = {}
+    for row in bad:
+        if row.user_id is not None:
+            by_owner.setdefault(row.user_id, []).append(row.filename or "a file")
+    from app.notifications import dispatch
+
+    for owner, names in by_owner.items():
+        k = len(names)
+        shown = ", ".join(f"“{name}”" for name in names[:3]) + (f" and {k - 3} more" if k > 3 else "")
+        try:
+            await dispatch.notify_user(
+                user_id=owner,
+                category="system_alert",
+                title="A file of yours is damaged" if k == 1 else f"{k} of your files are damaged",
+                body=(
+                    f"{shown} couldn't be read back as it was saved. Your admin has been told "
+                    "and can restore it from a backup. You don't need to do anything."
+                ),
+                url="/files",
+                tag="promptly-storage-damaged",
+            )
+        except Exception:  # noqa: BLE001 — a failed notice must not fail the check
+            logger.exception("storage check: owner notice failed")
 
 
 async def run_check(*, trigger: str = "nightly", orphans: bool | None = None, budget_seconds: float | None = None) -> dict[str, Any]:
@@ -275,14 +299,14 @@ async def run_check(*, trigger: str = "nightly", orphans: bool | None = None, bu
         await db.commit()
         unique: dict = {}
         for r in bad:
-            unique.setdefault(r.id, r.filename)
-        names = list(unique.values())
+            unique.setdefault(r.id, r)
+        bad_rows = list(unique.values())
         out = {
             "id": str(check.id), "status": check.status, "checked": check.checked, "verified": check.verified,
             "missing": check.missing, "damaged": check.damaged, "recovered": check.recovered,
             "quarantined": check.quarantined,
         }
-    await _alert(names)
+    await _alert(bad_rows)
     return out
 
 

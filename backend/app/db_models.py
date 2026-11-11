@@ -166,3 +166,5 @@ from app.notes.models import (  # noqa: F401
     NoteUserState,
     NoteVersion,
 )
+# Feedback to this server's admins (0424).
+from app.feedback.models import FeedbackMessage  # noqa: F401

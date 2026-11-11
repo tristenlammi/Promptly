@@ -590,6 +590,19 @@ async def update_user(
                      old=before["email"], new=target.email)
     if "password" in fields and payload.password is not None:
         await _audit(db, request, actor, EVENT_PASSWORD_RESET_BY_ADMIN, target, via="edit")
+    # None of these may be silent (admin privacy AP5): the person is
+    # emailed (an email change: at the old address too), notified, and
+    # sees a banner next time they open Promptly.
+    from app.auth import admin_notice
+
+    if target.id != actor.id:
+        if target.email != before["email"]:
+            await admin_notice.tell(db, target, admin_notice.EMAIL_CHANGED, old_email=before["email"])
+        if target.role != before["role"]:
+            await admin_notice.tell(db, target, admin_notice.ROLE_CHANGED)
+        if "password" in fields and payload.password is not None:
+            await admin_notice.tell(db, target, admin_notice.PASSWORD_RESET)
+        await db.refresh(target)
     return await _user_response(db, target)
 
 
@@ -1006,6 +1019,63 @@ async def reset_password(
     )
     await db.commit()
     await db.refresh(target)
+    if target.id != actor.id:
+        from app.auth import admin_notice
+
+        await admin_notice.tell(db, target, admin_notice.PASSWORD_RESET)
+        await db.refresh(target)
+    return AdminUserResponse.model_validate(target)
+
+
+@router.post("/users/{user_id}/send-reset-link", response_model=AdminUserResponse)
+async def send_reset_link(
+    user_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> AdminUserResponse:
+    """Email the person a single-use link to choose a new password.
+
+    The kinder reset (admin privacy AP5, U1): the admin never learns a
+    working password, and nothing changes until the person uses the link.
+    Needs email set up on the server; without it, set a temporary password.
+    """
+    from app.auth.audit import EVENT_PASSWORD_RESET_REQUESTED
+    from app.auth.reset_link import NoPublicOriginError
+    from app.auth.reset_link import send_reset_link as _send
+    from app.mfa.smtp import SmtpNotConfiguredError
+
+    target = await _load_target(user_id, db)
+    if target.disabled:
+        raise HTTPException(status_code=409, detail="This account is turned off. Turn it back on first.")
+    try:
+        await _send(db, request, target, by_admin=True)
+    except NoPublicOriginError as e:
+        raise HTTPException(
+            status_code=409,
+            detail="No public address is set for this server, so a safe link can't be made. "
+            "Set it in Admin → General (Public address), or set a temporary password instead.",
+        ) from e
+    except SmtpNotConfiguredError as e:
+        raise HTTPException(
+            status_code=409,
+            detail="Email isn't set up on this server, so set a temporary password instead.",
+        ) from e
+    except Exception as e:  # noqa: BLE001 — SmtpSendError and the like
+        raise HTTPException(
+            status_code=502,
+            detail="The email couldn't be sent. Check the email settings, or set a temporary password.",
+        ) from e
+    await record_event(
+        db,
+        request=request,
+        event_type=EVENT_PASSWORD_RESET_REQUESTED,
+        user_id=target.id,
+        identifier=target.username,
+        detail=safe_dict({"by_admin": str(actor.id)}),
+    )
+    await db.commit()
+    await db.refresh(target)
     return AdminUserResponse.model_validate(target)
 
 
@@ -1035,21 +1105,11 @@ async def reset_mfa(
     )
     await db.commit()
     await db.refresh(target)
-    try:
-        from app.mfa.smtp import send_message
+    if target.id != actor.id:
+        from app.auth import admin_notice
 
-        await send_message(
-            db,
-            to=target.email,
-            subject="Promptly: two-step verification was reset",
-            text_body=(
-                f"Hi {target.username},\n\nAn administrator turned off two-step "
-                "verification on your account. Sign in and set it up again under "
-                "Account → Security. If you didn't ask for this, tell your administrator."
-            ),
-        )
-    except Exception:  # noqa: BLE001 — SMTP is optional
-        pass
+        await admin_notice.tell(db, target, admin_notice.MFA_RESET)
+        await db.refresh(target)
     return AdminUserResponse.model_validate(target)
 
 

@@ -2685,8 +2685,7 @@ async def _purge_item(
         event_type=EVENT_WORKSPACE_ITEM_DELETED,
         request=request,
         user_id=user.id,
-        detail=f'{item.kind} "{item.title}"{subtree} in "{ws.title}" '
-        f"(ws={ws.id})",
+        detail=f"{item.kind} item={item.id}{subtree} in ws={ws.id}",
     )
     # Deleting the top row cascades the descendant item rows via the
     # self-FK ON DELETE CASCADE.

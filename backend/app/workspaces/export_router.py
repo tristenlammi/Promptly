@@ -799,7 +799,7 @@ async def _export_response(
         event_type=EVENT_WORKSPACE_EXPORTED,
         request=request,
         user_id=user.id,
-        detail=f'"{ws.title}" (ws={ws.id}) — '
+        detail=f"ws={ws.id} — "
         + ", ".join(f"{v} {k}" for k, v in counts.items() if v),
     )
     await db.commit()
@@ -1063,7 +1063,7 @@ async def import_workspace(
         event_type=EVENT_WORKSPACE_IMPORTED,
         request=request,
         user_id=user.id,
-        detail=f'"{ws.title}" (ws={ws.id}) — {len(note_item_ids)} note(s), '
+        detail=f"ws={ws.id} — {len(note_item_ids)} note(s), "
         f"{len(notebooks)} notebook(s), {skipped_total} entr(ies) skipped",
     )
     await db.commit()

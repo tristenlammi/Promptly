@@ -81,7 +81,13 @@ async def test_one_corrupted_byte_is_caught_and_the_admins_are_told(client, db, 
     await db.refresh(row)
     assert row.blob_state == "damaged"
     assert (await db.get(UserFile, uuid.UUID(good))).blob_state == "ready"
-    assert any("failed the storage check" in a["title"] and "taxes.txt" in a["body"] for a in alerts)
+    # The admins get a count; the owner gets the name (admin privacy AP7).
+    admin_alert = next(a for a in alerts if "failed the storage check" in a["title"])
+    assert "taxes.txt" not in admin_alert["body"] and "1 file is" in admin_alert["body"]
+    assert any(
+        a["user_id"] == user.id and a["title"] == "A file of yours is damaged" and "taxes.txt" in a["body"]
+        for a in alerts
+    )
     # The file says so, wherever it's shown.
     meta = (await client.get(f"/api/files/{fid}", headers=_auth(user))).json()
     assert meta["blob_state"] == "damaged"

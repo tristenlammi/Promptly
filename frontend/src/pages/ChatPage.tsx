@@ -1105,32 +1105,6 @@ export function ChatPage({
     [id]
   );
 
-  /** Rate an assistant reply thumbs up/down (Phase 2.5). Persists via
-   *  the backend and splices the returned row into the store so the
-   *  thumb state (and any reason) reflects the server's truth. */
-  const handleMessageFeedback = useCallback(
-    async (
-      messageId: string,
-      rating: "up" | "down" | null,
-      reason?: string
-    ) => {
-      if (!id) return;
-      try {
-        const updated = await chatApi.setMessageFeedback(
-          id,
-          messageId,
-          rating,
-          reason
-        );
-        replaceMessage(messageId, updated);
-      } catch {
-        // Non-critical — leave the previous state in place. A failed
-        // rating isn't worth interrupting the user with an alert.
-      }
-    },
-    [id, replaceMessage]
-  );
-
   // Context-window compaction — destructive (middle of the chat
   // becomes a single system summary). Gate on ``window.confirm`` to
   // match the pattern used elsewhere (PDF editor discard, provider
@@ -1576,7 +1550,6 @@ export function ChatPage({
               onRetry={id && isOwner ? handleRetry : undefined}
               onPickAnotherModel={handlePickAnotherModel}
               onDelete={id && isOwner ? handleDeleteMessage : undefined}
-              onFeedback={id && isOwner ? handleMessageFeedback : undefined}
               onSelectVersion={id ? handleSelectVersion : undefined}
               // Workspaces are a self-contained zone — their chats shouldn't
               // push into the account-level personal memory. Hide the account

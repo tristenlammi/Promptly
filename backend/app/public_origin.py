@@ -4,7 +4,7 @@ A password-reset email used to build its link from ``X-Forwarded-Host`` /
 ``Host``. Anyone could ask for a reset for someone else with a forged host,
 and the real email would carry a link to the attacker's site with a live
 reset token in it (host-header poisoning). The OIDC ``redirect_uri`` and the
-feedback email had the same habit.
+old feedback email had the same habit.
 
 The rule now: a link's origin is always one the admin configured —
 ``app_settings.public_origins`` (the setup wizard / Admin → General) or the
