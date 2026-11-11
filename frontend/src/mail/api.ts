@@ -123,6 +123,8 @@ export interface Message {
   html_clipped?: boolean;
   reply_to: string;
   invite: MailInvite | null;
+  /** Your reply, sent from here and not gone yet (or it couldn't go). Null once sent. */
+  outgoing?: { id: string; status: "waiting" | "sending" | "failed"; error: string } | null;
 }
 
 export interface Conversation {

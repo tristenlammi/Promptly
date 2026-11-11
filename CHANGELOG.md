@@ -49,6 +49,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Fixed
 
 - Calls: the calls service's config uses LiveKit's current name for the metrics port setting, so its log no longer warns that `prometheus_port` is deprecated.
+- Mail: a reply you send now shows in its conversation straight away ("Sending…", then sent), instead of only after Sent was next checked, and a reply that couldn't go says so there with Try again. Replies sent from another mail app show within seconds, and an answer that arrives before your reply (such as an out-of-office) no longer ends up in a conversation of its own. Replies and forwards always go from the mailbox the email is in.
 
 ### Removed
 

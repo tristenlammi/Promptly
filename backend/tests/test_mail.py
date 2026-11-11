@@ -210,6 +210,10 @@ def _deliver(to: str, subject: str = "Lunch", body: str = "Are you free?", **hea
     m["Message-ID"] = headers.get("message_id", f"<{uuid.uuid4().hex}@mailtest.example>")
     if "in_reply_to" in headers:
         m["In-Reply-To"] = headers["in_reply_to"]
+    if "references" in headers:
+        m["References"] = headers["references"]
+    if "date" in headers:
+        m["Date"] = headers["date"]
     m.set_content(body)
     if "attachment" in headers:
         m.add_attachment(headers["attachment"].encode(), maintype="application", subtype="pdf", filename="report.pdf")

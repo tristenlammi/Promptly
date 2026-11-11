@@ -411,6 +411,34 @@ async def _related(db: AsyncSession, accounts: list[uuid.UUID], query: str, fold
     return out
 
 
+async def _replies_on_their_way(db: AsyncSession, account_id: uuid.UUID, here: set[str]) -> list[dict[str, Any]]:
+    """Your replies to this conversation that haven't gone yet, or couldn't go: in it
+    straight away, saying so. Once sent, the copy kept in Sent (worker._keep_sent_copy)
+    is what shows."""
+    waiting = (await db.execute(
+        select(MailOutbox).where(MailOutbox.account_id == account_id, MailOutbox.status.in_(("waiting", "sending", "failed"))).order_by(MailOutbox.created_at)
+    )).scalars().all()
+    out = []
+    for item in waiting:
+        raw = item.raw.encode("utf-8", "surrogateescape")
+        headers = BytesHeaderParser().parsebytes(raw)
+        answers = set(parse.message_ids(str(headers.get("In-Reply-To", "")), str(headers.get("References", ""))))
+        if not answers & here:
+            continue
+        found = await asyncio.to_thread(parse.parse, raw)
+        if found.message_id in here:
+            continue
+        out.append({
+            "id": f"outbox-{item.id}", "message_id": found.message_id, "subject": found.subject, "from": _person(found.from_name, found.from_addr),
+            "to": found.to, "cc": found.cc, "at": found.sent_at.isoformat(), "text": found.text, "html": found.html,
+            # Not in the mailbox yet, so nothing to open them from.
+            "attachments": [], "unsubscribe": "", "seen": True, "starred": False, "reply_to": "", "invite": None,
+            "remote_images": False, "html_clipped": found.html_clipped,
+            "outgoing": {"id": str(item.id), "status": item.status, "error": item.error},
+        })
+    return out
+
+
 @router.get("/threads/{account_id}/{key}")
 async def thread(account_id: uuid.UUID, key: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     await _mine(db, user, account_id)
@@ -431,12 +459,14 @@ async def thread(account_id: uuid.UUID, key: str, db: AsyncSession = Depends(get
             "to": m.to_addrs, "cc": m.cc_addrs, "at": m.sent_at.isoformat(), "text": m.body_text, "html": m.body_html,
             "attachments": m.attachments, "unsubscribe": m.unsubscribe, "seen": m.seen, "starred": m.flagged, "reply_to": m.reply_to,
             "invite": {**m.invite, **(await apps.invite_state(db, user, m.invite["uid"]))} if m.invite else None,
-            "remote_images": "data-remote-src" in m.body_html, "html_clipped": m.html_clipped,
+            "remote_images": "data-remote-src" in m.body_html, "html_clipped": m.html_clipped, "outgoing": None,
         })
+    subject = out[-1]["subject"]
+    out = sorted(out + await _replies_on_their_way(db, account_id, seen_ids), key=lambda m: datetime.fromisoformat(m["at"]))
     labels = (await db.execute(select(MailThreadLabel.label_id).where(MailThreadLabel.account_id == account_id, MailThreadLabel.thread_key == key))).scalars()
     snooze = await db.get(MailSnooze, (account_id, key))
     return {
-        "account_id": str(account_id), "key": key, "subject": out[-1]["subject"], "messages": out, "labels": [str(x) for x in labels],
+        "account_id": str(account_id), "key": key, "subject": subject, "messages": out, "labels": [str(x) for x in labels],
         "snoozed_until": snooze.until.isoformat() if snooze else None,
         "summary": (await _summaries(db, [account_id], [key])).get((account_id, key), ""),
     }

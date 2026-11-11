@@ -482,7 +482,7 @@ export function MailApp() {
         label: "Undo",
         onClick: () => {
           window.clearTimeout(timer);
-          void mailApi.undoSend(id).then(() => write(snapshot)).catch((e) => toast.error(apiErrorMessage(e, "Too late: that's already gone.")));
+          void mailApi.undoSend(id).then(() => { write(snapshot); refresh(); }).catch((e) => toast.error(apiErrorMessage(e, "Too late: that's already gone.")));
         },
       },
     });
@@ -1160,7 +1160,12 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   onWrite: (d: Draft) => void;
   markRead: () => void;
 }) {
-  const { data, isLoading, isError } = useQuery({ queryKey: ["mail-conversation", open.account_id, open.key], queryFn: () => mailApi.conversation(open.account_id, open.key) });
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["mail-conversation", open.account_id, open.key],
+    queryFn: () => mailApi.conversation(open.account_id, open.key),
+    // A reply on its way: look again soon, so it settles into the conversation as sent.
+    refetchInterval: (q) => (q.state.data?.messages.some((m) => m.outgoing && m.outgoing.status !== "failed") ? 3000 : false),
+  });
   const aliasInfo = useThreadAliases(open.account_id, open.key);
   const marked = useRef(false);
   useEffect(() => {
@@ -1174,7 +1179,7 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   // A reply Chat drafted: open it ready to check and send.
   useEffect(() => {
     if (!data || !prefill) return;
-    const newest = data.messages[data.messages.length - 1];
+    const newest = data.messages.findLast((m) => !m.outgoing) ?? data.messages[data.messages.length - 1];
     const own = mine.includes(newest.from.addr.toLowerCase());
     onWrite({
       account_id: open.account_id, to: own ? newest.to.map((p) => p.addr).join(", ") : newest.reply_to || newest.from.addr,
@@ -1204,7 +1209,8 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
 
   if (isLoading) return <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" /></div>;
   if (isError || !data) return <p className="p-6 text-sm text-[var(--text-muted)]">Couldn't open this conversation.</p>;
-  const last = data.messages[data.messages.length - 1];
+  // What a reply answers: the newest email that's really in the mailbox, not one still on its way.
+  const last = data.messages.findLast((m) => !m.outgoing) ?? data.messages[data.messages.length - 1];
   const starred = data.messages.some((m) => m.starred);
   const isMine = (addr: string) => mine.includes(addr.toLowerCase());
   const others = (people: { addr: string }[]) => people.map((p) => p.addr).filter((a) => a && !isMine(a));
@@ -1236,9 +1242,11 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
     u: () => { onAct("unread"); onBack(); },
   };
   // A long conversation you've already read: the first and the newest, the rest a tap away.
-  const middle = data.messages.slice(1, -1);
+  // A reply still on its way is never tucked away.
+  const settled = data.messages.filter((m) => !m.outgoing);
+  const middle = settled.slice(1, -1);
   const tucked = !showAll && middle.length >= 2 && middle.every((m) => m.seen);
-  const shown = tucked ? [data.messages[0], last] : data.messages;
+  const shown = tucked ? [settled[0], last, ...data.messages.filter((m) => m.outgoing)] : data.messages;
   const answer = "inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-[var(--border)] px-4 text-sm text-[var(--text)] transition-colors hover:border-[var(--accent)]";
   const action = "inline-flex h-10 shrink-0 items-center gap-1.5 md:h-8 whitespace-nowrap rounded-lg border border-[var(--border)] px-2.5 text-xs text-[var(--text)] transition-colors hover:border-[var(--accent)]";
   const iconButton = "flex h-10 w-10 shrink-0 items-center justify-center md:h-9 md:w-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
@@ -1279,10 +1287,10 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
             <MessageCard
               message={m}
               people={people}
-              startOpen={m === last || !m.seen}
+              startOpen={m === last || !m.seen || !!m.outgoing}
               // The newest one's answers are the row underneath it.
-              onReply={m === last ? undefined : (all) => reply(m, all)}
-              onForward={m === last ? undefined : () => forward(m)}
+              onReply={m === last || m.outgoing ? undefined : (all) => reply(m, all)}
+              onForward={m === last || m.outgoing ? undefined : () => forward(m)}
               replyAll={whoTo(m).rest.length > 0}
             />
             {tucked && i === 0 && (
@@ -1361,6 +1369,31 @@ function InviteCard({ message }: { message: Message }) {
   );
 }
 
+/** A reply that couldn't go: why, and a way to send it again or let it go. */
+function NotSent({ outboxId, error }: { outboxId: string; error: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const run = async (what: "retry" | "dismiss") => {
+    setBusy(true);
+    try {
+      await (what === "retry" ? mailApi.retrySend(outboxId) : mailApi.dismissSend(outboxId));
+      await qc.invalidateQueries({ queryKey: ["mail-conversation"] });
+      void qc.invalidateQueries({ queryKey: ["mail-overview"] });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, what === "retry" ? "Couldn't try that again." : "Couldn't remove that."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mx-3 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-[var(--danger)]/10 px-3 py-2 text-xs text-[var(--text)]">
+      <span className="min-w-0 flex-1">{error || "This reply couldn't be sent."}</span>
+      <button type="button" disabled={busy} onClick={() => void run("retry")} className="font-medium text-[var(--accent-text)] disabled:opacity-60">Try again</button>
+      <button type="button" disabled={busy} onClick={() => void run("dismiss")} className="text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-60">Remove</button>
+    </div>
+  );
+}
+
 function MessageCard({ message, people, startOpen, onReply, onForward, replyAll }: { message: Message; people: People; startOpen: boolean; onReply?: (all: boolean) => void; onForward?: () => void; replyAll?: boolean }) {
   const [open, setOpen] = useState(startOpen);
   const [dated, setDated] = useState(false);
@@ -1368,8 +1401,10 @@ function MessageCard({ message, people, startOpen, onReply, onForward, replyAll 
   const small = "inline-flex h-10 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] md:h-8";
   const [viewing, setViewing] = useState<number | null>(null);
   const files = useSavedAttachments(message.id);
+  const outgoing = message.outgoing;
+  const failed = outgoing?.status === "failed";
   return (
-    <article className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+    <article className={`rounded-2xl border bg-[var(--surface)] ${failed ? "border-[var(--danger)]/50" : "border-[var(--border)]"}`}>
       <div className="flex items-stretch">
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 rounded-l-2xl py-3 pl-3 text-left">
           <Avatar person={message.from} people={people} />
@@ -1379,8 +1414,15 @@ function MessageCard({ message, people, startOpen, onReply, onForward, replyAll 
           </span>
         </button>
         {/* The short time is enough at a glance. Tap it for the whole date. */}
-        <button type="button" onClick={() => setDated((v) => !v)} aria-expanded={dated} aria-label={`Sent ${fullDate}`} title={fullDate} className="flex min-w-10 shrink-0 items-center justify-end rounded-r-2xl pl-2 pr-3 text-xs text-[var(--text-muted)] hover:text-[var(--text)]">{shortWhen(message.at)}</button>
+        {outgoing ? (
+          <span role="status" className={`inline-flex shrink-0 items-center gap-1 pl-2 pr-3 text-xs ${failed ? "font-medium text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>
+            {!failed && <Loader2 className="h-3 w-3 animate-spin" />}{failed ? "Not sent" : "Sending…"}
+          </span>
+        ) : (
+          <button type="button" onClick={() => setDated((v) => !v)} aria-expanded={dated} aria-label={`Sent ${fullDate}`} title={fullDate} className="flex min-w-10 shrink-0 items-center justify-end rounded-r-2xl pl-2 pr-3 text-xs text-[var(--text-muted)] hover:text-[var(--text)]">{shortWhen(message.at)}</button>
+        )}
       </div>
+      {failed && outgoing && <NotSent outboxId={outgoing.id} error={outgoing.error} />}
       {dated && <p className="px-3 pb-2 text-xs text-[var(--text-muted)]">Sent {fullDate}</p>}
       {open && (
         <div className="px-3 pb-3">

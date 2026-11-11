@@ -181,7 +181,7 @@ export function Composer({ draft, accounts, minimised = false, slot = 0, onClose
   const isMobile = useIsMobile();
   // What you were writing here before, unless this was reopened by undo.
   const saved = useRef(draft.html ? {} : loadDraft(draft)).current;
-  const [account, setAccount] = useState(saved.account_id ?? draft.account_id);
+  const [account, setAccount] = useState(draft.reply_to || draft.forward_of ? draft.account_id : saved.account_id ?? draft.account_id);
   const [to, setTo] = useState(saved.to || draft.to);
   const [cc, setCc] = useState(saved.cc ?? draft.cc ?? "");
   const [bcc, setBcc] = useState(saved.bcc ?? draft.bcc ?? "");
@@ -359,7 +359,8 @@ export function Composer({ draft, accounts, minimised = false, slot = 0, onClose
             {fromAlias && draft.from_alias_note && <p className="pb-2 text-xs text-[var(--warning)]">{draft.from_alias_note}</p>}
           </div>
         )}
-        {accounts.length > 1 && !draft.from_alias && (
+        {/* A reply or forward goes from the mailbox the email is in, so it stays in that conversation. */}
+        {accounts.length > 1 && !draft.from_alias && !draft.reply_to && !draft.forward_of && (
           <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
             <span className="w-8 shrink-0">From</span>
             <select value={account} onChange={(e) => setAccount(e.target.value)} className="min-w-0 flex-1 bg-transparent py-2 text-sm text-[var(--text)] outline-none">
