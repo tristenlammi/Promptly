@@ -458,7 +458,7 @@ async def limits_on(monkeypatch):
     monkeypatch.setattr(rate_limit, "_limiter", FixedWindowRateLimiter(RedisStorage(rate_limit._settings.REDIS_URL)))
 
     async def clear():
-        for pattern in ("LIMITER*form_*", "form:*"):
+        for pattern in ("*LIMITER*form_*", "form:*"):
             async for k in redis.scan_iter(match=pattern):
                 await redis.delete(k)
 

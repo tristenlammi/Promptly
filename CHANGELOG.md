@@ -39,7 +39,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Notes phase 2, N2.3 -->
 - Meal Plan → Groceries: "Send to Tasks" is now "Send to list". It goes to your Shopping note by default (by aisle; everyone on the note sees the items arrive), or another list in Notes, or Tasks as before. With no Shopping note it makes a "Groceries" list. Sending again updates amounts, ticks what you ticked in Meal Plan and never touches things people typed themselves; the message has Open and Undo. Chat can do it too.
 <!-- Notes phase 2, N2.4 -->
-- Notes by voice: Talking to Promptly and the phone assistant can read your notes ("what's on the shopping list?"), add to one ("add eggs to the shopping list" asks "Add eggs to your Shopping note?" and adds only on yes) and make one ("make a note called gate code"). Nothing is ticked off or deleted by voice.
+- Notes by voice: Talking to Promptly and the phone assistant can read your notes ("what's on the shopping list?"), add to one and make one ("make a note called gate code"). The phone assistant asks first ("Add eggs to your Shopping note?") and adds only on yes; Talking to Promptly adds to a list straight away with "undo" (below) and ticks items off on a yes. Nothing is deleted by voice.
 <!-- Notes phase 2, N2.5 -->
 - A person's page has a Notes section: the notes you both have (shared between you, or shared with you both), in their colours, with See all, which opens Notes showing just those. Never a note only they can open.
 <!-- Notes phase 2, N2.6 -->

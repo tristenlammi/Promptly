@@ -175,7 +175,21 @@ async def test_blank_and_overlong_messages_are_refused(db, user, client, outbox,
     assert r.status_code == 401
 
 
-async def test_six_an_hour(db, user, client, outbox):
+async def test_six_an_hour(db, user, client, outbox, monkeypatch):
+    # A Redis connection of this test's own: a pooled one left by an earlier
+    # test's event loop would hang (the same reason as forms' ``limits_on``).
+    from limits.aio.storage import RedisStorage
+    from limits.aio.strategies import FixedWindowRateLimiter
+
+    from app import rate_limit
+    from app.redis_client import redis
+
+    monkeypatch.setattr(rate_limit, "_limiter", FixedWindowRateLimiter(RedisStorage(rate_limit._settings.REDIS_URL)))
+    monkeypatch.setattr(rate_limit._settings, "RATE_LIMIT_ENABLED", True)
+    # The count is per address and lasts the hour: start from none, so a second
+    # run inside the hour on the same Redis passes too.
+    async for k in redis.scan_iter(match="*LIMITER/feedback/*"):
+        await redis.delete(k)
     codes = []
     for i in range(7):
         r = await client.post("/api/feedback", json={"message": f"note {i}"}, headers=_auth(user))
