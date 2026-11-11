@@ -66,7 +66,7 @@ async def section(db: AsyncSession, viewer: User, target: User) -> dict[str, Any
             "owner": owner,
             "href": f"/notes/n/{n.id}",
         })
-    return {"kind": "grid", "items": items, "more_url": f"/notes?with={target.id}", "more_label": "See all in Notes"}
+    return {"kind": "grid", "items": items, "more_url": f"/notes?with={target.id}"}
 
 
 sections.register("notes", "Notes", section, order=50)
