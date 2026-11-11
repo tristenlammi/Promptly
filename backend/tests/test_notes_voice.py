@@ -1,10 +1,12 @@
 """Notes N2.4: notes by voice — Talking to Promptly and the phone assistant.
 
-* the four notes tools are in both allowlists: reads straight away, writes
-  only on a yes; ticking and deleting aren't there;
+* the notes tools are in both allowlists: reads straight away, writes only on
+  a yes. Talking to Promptly (Talk phase 2) adds to a checklist at once, with
+  "undo", and can tick items on a yes; the phone assistant asks before every
+  add and doesn't tick; nothing is deleted by voice;
 * the read-back comes from the real arguments and names the real note;
-* a write waits for the yes, and a shared note read on the same turn makes it
-  ask (the approval path), never refuse.
+* a shared note read on the same turn makes the add ask (the approval path),
+  never refuse.
 """
 from __future__ import annotations
 
@@ -21,11 +23,14 @@ from tests.test_notes_core import H, client, get, live, mk_user, new_list, new_n
 def test_the_notes_tools_are_in_both_allowlists():
     for reads in (voice.READS, phone.READ_TOOLS):
         assert {"find_notes", "read_note"} <= set(reads)
-    for writes in (voice.WRITES, phone.WRITE_TOOLS):
-        assert {"add_to_note", "create_note"} <= set(writes)
-    everything = {*voice.READS, *voice.WRITES, *phone.READ_TOOLS, *phone.WRITE_TOOLS}
-    assert "tick_note_items" not in everything  # nothing ticked or deleted by voice
-    assert all(voice.is_write(n) for n in ("add_to_note", "create_note"))
+    assert {"add_to_note", "create_note"} <= set(phone.WRITE_TOOLS)
+    # Talk: making a note and ticking wait for a yes; an add to a checklist is
+    # the quick kind (runs at once with "undo", asked about otherwise).
+    assert {"create_note", "tick_note_items"} <= set(voice.WRITES) and voice.QUICK == ("add_to_note",)
+    assert "add_to_note" not in voice.WRITES and "add_to_note" in voice.GUARDED
+    assert "tick_note_items" not in {*phone.READ_TOOLS, *phone.WRITE_TOOLS}  # the phone doesn't tick
+    assert all(voice.approvable(n) for n in ("add_to_note", "create_note", "tick_note_items"))
+    assert voice.is_write("create_note") and not voice.approvable("read_note")
     assert not voice.is_write("read_note") and "notes" in voice.CATEGORIES
     assert "shopping list" in voice.prompt(voice.voice_tool_names([]), device="web", driving=False)
 
@@ -54,7 +59,7 @@ async def test_the_read_back_names_the_real_note(client, db, live):  # noqa: F81
     assert readback.done_line("add_to_note", ok=True) == "Added." and readback.done_line("create_note", ok=True) == "Saved."
 
 
-async def test_talk_holds_the_write_for_a_yes_and_a_shared_note_asks_instead_of_refusing(client, db, live):  # noqa: F811
+async def test_talk_adds_to_a_list_at_once_and_a_shared_note_read_asks_instead_of_refusing(client, db, live):  # noqa: F811
     from app.chat.tools.notes import AddToNoteTool, ReadNoteTool
 
     ann, bob = await mk_user(db, "ann"), await mk_user(db, "bob")
@@ -62,10 +67,16 @@ async def test_talk_holds_the_write_for_a_yes_and_a_shared_note_asks_instead_of_
     await share(client, bob, shop["id"], ann)
     args = {"note": "shopping list", "items": ["eggs"]}
 
+    # A checklist add on a clean turn isn't held (Talk phase 2: it runs, with "undo")...
     gate = voice.VoiceGate(user=ann)
-    verdict = await gate.check("add_to_note", args, {})
-    assert verdict.kind == "hold" and verdict.say == "Add eggs to your Shopping note?"
-    assert [i["text"] for i in (await get(client, ann, shop["id"]))["items"]] == ["Bread"]  # not yet
+    assert await gate.check("add_to_note", args, {}) is None and "add_to_note" in gate.quick
+    # ...but making a note is, and so is an add to a text note.
+    verdict = await voice.VoiceGate(user=ann).check("create_note", {"title": "Gate code", "text": "4471"}, {})
+    assert verdict.kind == "hold" and verdict.say == "Make a note called Gate code?"
+    memo = await new_note(client, ann, title="Gate", text="code")
+    verdict = await voice.VoiceGate(user=ann).check("add_to_note", {"note": memo["id"], "text": "side door 1234"}, {})
+    assert verdict.kind == "hold" and verdict.say == "Add side door 1234 to your Gate note?"
+    assert [i["text"] for i in (await get(client, ann, shop["id"]))["items"]] == ["Bread"]  # nothing added yet
 
     # "What's on the shopping list?": Bob wrote it, so the turn is marked...
     c = ctx(db, ann)

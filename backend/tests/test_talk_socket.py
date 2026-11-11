@@ -244,6 +244,16 @@ async def test_no_words_or_audio_in_the_database_or_logs(db, user, conversation,
     secret_said = "Okay, the xylophone appointment is noted."
     use_model(monkeypatch, Model([secret_said]))
     tmp_before = set(os.listdir(tempfile.gettempdir()))
+
+    # The upload folder is one per test session, so earlier tests' files may be
+    # in it: what counts is that this conversation adds none.
+    def uploaded() -> set[str]:
+        root = os.environ.get("PROMPTLY_UPLOAD_ROOT")
+        if not root or not os.path.isdir(root):
+            return set()
+        return {os.path.join(d, f) for d, _dirs, files in os.walk(root) for f in files}
+
+    uploads_before = uploaded()
     caplog.set_level(logging.DEBUG)
     c = await open_talk(talk_app, user, conversation)
     live = await sidecars.live()
@@ -270,10 +280,7 @@ async def test_no_words_or_audio_in_the_database_or_logs(db, user, conversation,
     assert set(os.listdir(tempfile.gettempdir())) - tmp_before == set() or all(
         not n.endswith((".wav", ".pcm", ".opus", ".webm")) for n in set(os.listdir(tempfile.gettempdir())) - tmp_before
     )
-    upload_root = os.environ.get("PROMPTLY_UPLOAD_ROOT")
-    if upload_root and os.path.isdir(upload_root):
-        for dirpath, _dirs, files in os.walk(upload_root):
-            assert not files, dirpath
+    assert uploaded() - uploads_before == set()
 
 
 async def test_config_says_what_the_client_needs(db, user, http):
