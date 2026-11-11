@@ -333,7 +333,7 @@ export function MailApp() {
       run: () => {
         window.clearTimeout(timer);
         setUndo(null);
-        void mailApi.undoSend(id).then(() => setDraft(snapshot)).catch((e) => toast.error(apiErrorMessage(e, "Too late: that's already gone.")));
+        void mailApi.undoSend(id).then(() => { setDraft(snapshot); refresh(); }).catch((e) => toast.error(apiErrorMessage(e, "Too late: that's already gone.")));
       },
     });
   }, [refresh]);
@@ -924,7 +924,12 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   onWrite: (d: Draft) => void;
   markRead: () => void;
 }) {
-  const { data, isLoading, isError } = useQuery({ queryKey: ["mail-conversation", open.account_id, open.key], queryFn: () => mailApi.conversation(open.account_id, open.key) });
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["mail-conversation", open.account_id, open.key],
+    queryFn: () => mailApi.conversation(open.account_id, open.key),
+    // A reply on its way: look again soon, so it settles into the conversation as sent.
+    refetchInterval: (q) => (q.state.data?.messages.some((m) => m.outgoing && m.outgoing.status !== "failed") ? 3000 : false),
+  });
   const aliasInfo = useThreadAliases(open.account_id, open.key);
   const marked = useRef(false);
   useEffect(() => {
@@ -938,7 +943,7 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   // A reply Chat drafted: open it ready to check and send.
   useEffect(() => {
     if (!data || !prefill) return;
-    const newest = data.messages[data.messages.length - 1];
+    const newest = data.messages.findLast((m) => !m.outgoing) ?? data.messages[data.messages.length - 1];
     const own = mine.includes(newest.from.addr.toLowerCase());
     onWrite({
       account_id: open.account_id, to: own ? newest.to.map((p) => p.addr).join(", ") : newest.reply_to || newest.from.addr,
@@ -950,7 +955,8 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
 
   if (isLoading) return <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" /></div>;
   if (isError || !data) return <p className="p-6 text-sm text-[var(--text-muted)]">Couldn't open this conversation.</p>;
-  const last = data.messages[data.messages.length - 1];
+  // What a reply answers: the newest email that's really in the mailbox, not one still on its way.
+  const last = data.messages.findLast((m) => !m.outgoing) ?? data.messages[data.messages.length - 1];
   const starred = data.messages.some((m) => m.starred);
   const isMine = (addr: string) => mine.includes(addr.toLowerCase());
   const others = (people: { addr: string }[]) => people.map((p) => p.addr).filter((a) => a && !isMine(a));
@@ -1067,20 +1073,54 @@ function InviteCard({ message }: { message: Message }) {
   );
 }
 
+/** A reply that couldn't go: why, and a way to send it again or let it go. */
+function NotSent({ outboxId, error }: { outboxId: string; error: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const run = async (what: "retry" | "dismiss") => {
+    setBusy(true);
+    try {
+      await (what === "retry" ? mailApi.retrySend(outboxId) : mailApi.dismissSend(outboxId));
+      await qc.invalidateQueries({ queryKey: ["mail-conversation"] });
+      void qc.invalidateQueries({ queryKey: ["mail-overview"] });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, what === "retry" ? "Couldn't try that again." : "Couldn't remove that."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mx-3 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-[#C62828]/10 px-3 py-2 text-xs text-[var(--text)]">
+      <span className="min-w-0 flex-1">{error || "This reply couldn't be sent."}</span>
+      <button type="button" disabled={busy} onClick={() => void run("retry")} className="font-medium text-[#D97757] disabled:opacity-60">Try again</button>
+      <button type="button" disabled={busy} onClick={() => void run("dismiss")} className="text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-60">Remove</button>
+    </div>
+  );
+}
+
 function MessageCard({ message, people, startOpen }: { message: Message; people: People; startOpen: boolean }) {
   const [open, setOpen] = useState(startOpen);
   const [viewing, setViewing] = useState<number | null>(null);
   const files = useSavedAttachments(message.id);
+  const outgoing = message.outgoing;
+  const failed = outgoing?.status === "failed";
   return (
-    <article className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+    <article className={`rounded-2xl border bg-[var(--surface)] ${failed ? "border-[#C62828]/50" : "border-[var(--border)]"}`}>
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex w-full items-center gap-3 p-3 text-left">
         <Avatar person={message.from} people={people} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-[var(--text)]">{shownName(message.from, people)}</span>
           <span className="block truncate text-xs text-[var(--text-muted)]">{open ? `to ${message.to.map(personName).join(", ") || "you"}` : message.text.slice(0, 120)}</span>
         </span>
-        <span className="shrink-0 text-xs text-[var(--text-muted)]">{shortWhen(message.at)}</span>
+        {outgoing ? (
+          <span role="status" className={`inline-flex shrink-0 items-center gap-1 text-xs ${failed ? "font-medium text-[#C62828]" : "text-[var(--text-muted)]"}`}>
+            {!failed && <Loader2 className="h-3 w-3 animate-spin" />}{failed ? "Not sent" : "Sending…"}
+          </span>
+        ) : (
+          <span className="shrink-0 text-xs text-[var(--text-muted)]">{shortWhen(message.at)}</span>
+        )}
       </button>
+      {outgoing?.status === "failed" && <NotSent outboxId={outgoing.id} error={outgoing.error} />}
       {open && (
         <div className="px-3 pb-3">
           {message.invite && <InviteCard message={message} />}

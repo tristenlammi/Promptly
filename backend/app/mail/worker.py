@@ -27,7 +27,7 @@ from app.net.internal_hosts import may_reach_private_network
 from app.notifications.dispatch import notify_user
 
 from . import aliases, imap, parse, rules, search, triage
-from .models import MailAccount, MailFolder, MailMessage, MailOp, MailOutbox, MailSnooze
+from .models import MailAccount, MailFolder, MailMessage, MailOp, MailOutbox, MailSnooze, MailThreadLabel
 
 logger = logging.getLogger("promptly.mail.worker")
 
@@ -90,16 +90,84 @@ async def _set_status(account_id: uuid.UUID, status: str, detail: str = "", sync
 
 
 async def _thread_for(db, account_id: uuid.UUID, found: parse.Parsed) -> str:
-    """The conversation this belongs to: whichever an earlier message it mentions
-    is in, or a new one named after its first message."""
+    """The conversation this belongs to: the one the email it answers is in (or, failing
+    that, the nearest earlier one it mentions), or a new one named after its first message."""
     mentioned = parse.message_ids(found.references, found.in_reply_to)
     if mentioned:
-        known = await db.scalar(
-            select(MailMessage.thread_key).where(MailMessage.account_id == account_id, MailMessage.message_id.in_(mentioned)).limit(1)
-        )
-        if known:
-            return known
+        rows = (await db.execute(
+            select(MailMessage.message_id, MailMessage.thread_key).where(MailMessage.account_id == account_id, MailMessage.message_id.in_(mentioned))
+        )).all()
+        known = {r.message_id: r.thread_key for r in rows}
+        # References can reach back into an older conversation, so the closest one wins.
+        for message_id in [*parse.message_ids(found.in_reply_to), *reversed(parse.message_ids(found.references))]:
+            if message_id in known:
+                return known[message_id]
     return parse.thread_key(account_id, (mentioned[0] if mentioned else found.message_id) or secrets.token_hex(8))
+
+
+async def _gather_replies(db, account_id: uuid.UUID, message: MailMessage) -> None:
+    """Replies that got here before this email did started a conversation named after it.
+    Your reply comes in from Sent less often than the answer to it comes into the Inbox,
+    so this is common: they join this one now, with any label or snooze they were given."""
+    if not message.message_id:
+        return
+    early = parse.thread_key(account_id, message.message_id)
+    if early == message.thread_key:
+        return
+    moved = await db.execute(
+        update(MailMessage).where(MailMessage.account_id == account_id, MailMessage.thread_key == early).values(thread_key=message.thread_key)
+    )
+    if not moved.rowcount:
+        return
+    for model in (MailThreadLabel, MailSnooze):
+        mine = model.account_id == account_id
+        if not await db.scalar(select(model.account_id).where(mine, model.thread_key == early).limit(1)):
+            continue
+        # One label and one snooze per conversation: what it already had stays.
+        if await db.scalar(select(model.account_id).where(mine, model.thread_key == message.thread_key).limit(1)):
+            await db.execute(delete(model).where(mine, model.thread_key == early))
+        else:
+            await db.execute(update(model).where(mine, model.thread_key == early).values(thread_key=message.thread_key))
+
+
+async def _our_sent_copy(db, folder_id: uuid.UUID, found: parse.Parsed) -> MailMessage | None:
+    """The copy we kept when sending this, where the server filed it in Sent under a
+    Message-ID of its own: same subject, same email answered, sent within minutes."""
+    near = timedelta(minutes=10)
+    return await db.scalar(
+        select(MailMessage).where(
+            MailMessage.folder_id == folder_id, MailMessage.uid.is_(None), MailMessage.subject == found.subject,
+            MailMessage.in_reply_to == found.in_reply_to, func.lower(MailMessage.from_addr) == found.from_addr.lower(),
+            MailMessage.sent_at.between(found.sent_at - near, found.sent_at + near),
+        ).limit(1)
+    )
+
+
+async def _keep_sent_copy(account_id: uuid.UUID, raw: bytes) -> str:
+    """What you just sent, in Sent and in its conversation at once. The mailbox's own
+    copy takes its place when it's seen (see ``_store``), however long that takes.
+    Says what happened, for the log."""
+    found = await asyncio.to_thread(parse.parse, raw)
+    async with SessionLocal() as db:
+        sent = await db.scalar(select(MailFolder).where(MailFolder.account_id == account_id, MailFolder.role == "sent").limit(1))
+        if sent is None:
+            return "no Sent folder"
+        if found.message_id and await db.scalar(
+            select(MailMessage.id).where(MailMessage.account_id == account_id, MailMessage.message_id == found.message_id).limit(1)
+        ):
+            return "already here"
+        message = MailMessage(
+            account_id=account_id, folder_id=sent.id, uid=None, thread_key=await _thread_for(db, account_id, found),
+            message_id=found.message_id, in_reply_to=found.in_reply_to, references=found.references, subject=found.subject,
+            from_name=found.from_name, from_addr=found.from_addr, to_addrs=found.to, cc_addrs=found.cc, sent_at=found.sent_at,
+            snippet=found.snippet.replace("\x00", ""), body_text=found.text.replace("\x00", ""), body_html=found.html.replace("\x00", ""), html_clipped=found.html_clipped,
+            attachments=found.attachments, unsubscribe="", reply_to=found.reply_to, invite=found.invite, seen=True,
+        )
+        db.add(message)
+        await db.flush()
+        await _gather_replies(db, account_id, message)
+        await db.commit()
+    return "kept"
 
 
 async def _announce(account_id: uuid.UUID, messages: list[MailMessage]) -> None:
@@ -136,6 +204,8 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
                 moved = await db.scalar(
                     select(MailMessage).where(MailMessage.folder_id == folder_id, MailMessage.uid.is_(None), MailMessage.message_id == found.message_id).limit(1)
                 )
+            if moved is None and folder.role == "sent":
+                moved = await _our_sent_copy(db, folder_id, found)
             if moved is not None:
                 moved.uid = uid
                 continue
@@ -166,6 +236,7 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
                     )
                     db.add(message)
                     await db.flush()
+                    await _gather_replies(db, account_id, message)
             except Exception as e:  # noqa: BLE001 — logged without its contents
                 logger.warning("Skipped an email that couldn't be saved: %s", type(e).__name__)
                 continue
@@ -225,7 +296,9 @@ async def _copy(client, account_id: uuid.UUID, folder_id: uuid.UUID, uids: list[
         await _store(account_id, folder_id, items, announce=announce)
 
 
-async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> None:
+async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder, with_flags: bool = True) -> None:
+    """New mail in this folder, then (``with_flags``) what's been read, starred or
+    deleted elsewhere."""
     validity = await asyncio.to_thread(imap.select, client, folder.path)
     last_uid = folder.last_uid
     # Been through here before, even if it was empty then. Otherwise everything is
@@ -249,6 +322,10 @@ async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> Non
         if not known:
             values["oldest_uid"] = min(uids) if uids else 1
         await db.execute(update(MailFolder).where(MailFolder.id == folder.id).values(**values))
+        await db.commit()
+    if not with_flags:
+        return
+    async with SessionLocal() as db:
         rows = (await db.execute(
             select(MailMessage.id, MailMessage.uid, MailMessage.seen, MailMessage.flagged, MailMessage.answered, MailMessage.message_id)
             .where(MailMessage.folder_id == folder.id, MailMessage.uid.is_not(None))
@@ -336,10 +413,13 @@ async def _sync_folders(client, account_id: uuid.UUID, every: bool) -> None:
         folders = (await db.execute(select(MailFolder).where(MailFolder.account_id == account_id))).scalars().all()
     # All Mail last, so what's in the others doesn't get copied from it first.
     for folder in sorted(folders, key=lambda f: (f.role == "all", f.role != "inbox", f.role != "other")):
-        if not _copied(folder, folders) or not (every or folder.role == "inbox" or _never_copied(folder)):
+        # Sent keeps up with the Inbox, so your reply from another app is in its
+        # conversation by the time an answer to it is. Only new mail, between full passes.
+        quick = folder.role == "sent" and not every
+        if not _copied(folder, folders) or not (every or folder.role == "inbox" or quick or _never_copied(folder)):
             continue
         try:
-            await _sync_folder(client, account_id, folder)
+            await _sync_folder(client, account_id, folder, with_flags=not quick)
             if folder.role == "all":
                 await _learn_archive_numbers(client, account_id, folder)
         except asyncio.CancelledError:
@@ -452,8 +532,10 @@ async def _smtp_send(account: MailAccount, raw: bytes, recipients: list[str]) ->
         link.close()
 
 
-async def _send_due(client, account: MailAccount, allow_private: bool) -> None:
+async def _send_due(client, account: MailAccount, allow_private: bool) -> bool:
+    """Sends what's due. True if anything went, so Sent can be looked at straight away."""
     now = datetime.now(timezone.utc)
+    went = False
     async with SessionLocal() as db:
         due = (await db.execute(
             select(MailOutbox).where(MailOutbox.account_id == account.id, MailOutbox.status == "waiting", MailOutbox.send_at <= now).limit(10)
@@ -474,9 +556,16 @@ async def _send_due(client, account: MailAccount, allow_private: bool) -> None:
                 logger.warning("Sending failed: %s", type(e).__name__)
                 await db.commit()
                 continue
+            # Its copy goes in first, so the conversation never shows it as neither
+            # on its way nor sent (the outbox entry hides once the copy is there).
+            try:
+                kept = await _keep_sent_copy(account.id, raw)
+            except Exception as e:  # noqa: BLE001 — it did send; the mailbox's copy will still come
+                kept = f"failed ({type(e).__name__})"
             item.status = "sent"
             item.error = ""
             await db.commit()
+            went = True
             # Gmail files what it sends by itself.
             if account.provider != "gmail":
                 sent = await db.scalar(select(MailFolder.path).where(MailFolder.account_id == account.id, MailFolder.role == "sent").limit(1))
@@ -485,8 +574,11 @@ async def _send_due(client, account: MailAccount, allow_private: bool) -> None:
                         await asyncio.to_thread(imap.append_sent, client, sent, raw)
                     except Exception as e:  # noqa: BLE001 — it did send
                         logger.warning("Couldn't file a sent message: %s", type(e).__name__)
+            # No addresses, subject or words: only whether it's in its conversation here.
+            logger.info("Sent a message (%s mailbox, a reply: %s); its copy here: %s", account.provider, b"\nIn-Reply-To:" in raw, kept)
         await db.execute(delete(MailOutbox).where(MailOutbox.account_id == account.id, MailOutbox.status == "sent", MailOutbox.send_at < now - timedelta(days=1)))
         await db.commit()
+    return went
 
 
 async def _settle_interrupted_sends(account_id: uuid.UUID) -> None:
@@ -520,9 +612,10 @@ async def run_account(account_id: uuid.UUID) -> None:
             loop = asyncio.get_running_loop()
             while True:
                 await _apply_ops(client, account_id)
-                await _send_due(client, account, allow_private)
+                went = await _send_due(client, account, allow_private)
                 now = loop.time()
-                if now - last_inbox >= INBOX_EVERY_S:
+                # What you sent is in Sent on the server now: pick up its number soon.
+                if went or now - last_inbox >= INBOX_EVERY_S:
                     every = now - last_all >= FOLDERS_EVERY_S
                     if every:
                         await _refresh_folders(client, account_id)

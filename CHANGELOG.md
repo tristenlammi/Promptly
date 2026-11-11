@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+- Mail: a reply you send now shows in its conversation straight away ("Sending…", then sent), instead of only after Sent was next checked, and a reply that couldn't go says so there with Try again. Replies sent from another mail app show within seconds, and an answer that arrives before your reply (such as an out-of-office) no longer ends up in a conversation of its own. Replies and forwards always go from the mailbox the email is in.
+
 ## [0.34.0] - 2026-11-09
 
 ### Added
