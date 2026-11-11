@@ -48,6 +48,8 @@ ADMIN_ROUTES: dict[str, str] = {
     "POST /api/admin/users/{user_id}/reset-mfa": "account",  # tells the person (AP5)
     "POST /api/admin/users/{user_id}/reset-password": "account",  # tells the person (AP5)
     "POST /api/admin/users/{user_id}/send-reset-link": "account",
+    # Emails a new member their own sign-in details; reads nothing of theirs.
+    "POST /api/admin/users/{user_id}/welcome-email": "account",
     "POST /api/admin/users/{user_id}/unlock": "account",
     "GET /api/admin/users/{user_id}/usage": "counts",
     "GET /api/admin/auth-events": "account",  # ids, not titles (AP6)
