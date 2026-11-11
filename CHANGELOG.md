@@ -21,6 +21,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Photo widget: a "Whole photo" choice in its settings, beside the shape. The entire picture is shown inside the shape with a soft, dimmed copy of itself behind, instead of being cropped to fill it. Needs the next Android build.
+- Photo widget: when it picks the next photo it prefers ones that suit the widget's shape (a wide view is left out of a tall widget while enough others fit), still giving every photo a turn. Needs the next Android build.
+
+### Fixed
+- Photo widget: photos are cropped round the people and pets in them, not round the middle, so a subject at the side of a photo is no longer cut off. The server sends where they are (from faces and animals Photos has already found; nothing new is scanned) and the phone keeps it with the saved photo. Photos with no one found are cropped as before. Needs the next Android build.
+- Photo widget: the size sent for an edited photo is now the edited picture's, not the original's.
+
 ## [0.36.2] - 2026-11-11
 
 ### Added

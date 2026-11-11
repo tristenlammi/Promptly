@@ -129,6 +129,177 @@ class PhotoLogicTest {
         assertArrayEquals(intArrayOf(0, 0, 0, 0), PhotoShapes.cover(0, 0, 10, 10))
     }
 
+    private fun focus(l: Double, t: Double, r: Double, b: Double) = PhotoShapes.Focus.of(l, t, r - l, b - t)!!
+
+    @Test
+    fun with_no_focus_the_crop_is_the_one_it_always_was() {
+        val r = Random(11)
+        repeat(300) {
+            val sw = r.nextInt(1, 4000); val sh = r.nextInt(1, 4000); val dw = r.nextInt(1, 1200); val dh = r.nextInt(1, 1200)
+            assertArrayEquals(PhotoShapes.cover(sw, sh, dw, dh), PhotoShapes.cover(sw, sh, dw, dh, null))
+        }
+        // The middle across; a little above the middle up and down.
+        assertArrayEquals(intArrayOf(500, 0, 1500, 1000), PhotoShapes.cover(2000, 1000, 300, 300, null))
+        assertArrayEquals(intArrayOf(0, 400, 1000, 1400), PhotoShapes.cover(1000, 2000, 300, 300, null))
+    }
+
+    @Test
+    fun the_crop_goes_to_the_subject_at_any_edge() {
+        // A wide photo in a square: the window is 1000 of 2000 across.
+        // Subject hard on the right: the window goes right, as far as the photo does.
+        assertArrayEquals(intArrayOf(1000, 0, 2000, 1000), PhotoShapes.cover(2000, 1000, 300, 300, focus(0.7, 0.1, 1.0, 0.9)))
+        // Hard on the left.
+        assertArrayEquals(intArrayOf(0, 0, 1000, 1000), PhotoShapes.cover(2000, 1000, 300, 300, focus(0.0, 0.1, 0.3, 0.9)))
+        // Off-centre but not at the edge: it sits in the middle of the window.
+        assertArrayEquals(intArrayOf(700, 0, 1700, 1000), PhotoShapes.cover(2000, 1000, 300, 300, focus(0.5, 0.2, 0.7, 0.8)))
+        // A tall photo in a square: the window is 1000 of 2000 down.
+        assertArrayEquals(intArrayOf(0, 0, 1000, 1000), PhotoShapes.cover(1000, 2000, 300, 300, focus(0.2, 0.0, 0.8, 0.2)))
+        assertArrayEquals(intArrayOf(0, 1000, 1000, 2000), PhotoShapes.cover(1000, 2000, 300, 300, focus(0.2, 0.8, 0.8, 1.0)))
+        assertArrayEquals(intArrayOf(0, 800, 1000, 1800), PhotoShapes.cover(1000, 2000, 300, 300, focus(0.2, 0.6, 0.8, 0.7)))
+        // Up and down doesn't matter when only the sides are cut, nor across when only top and bottom are.
+        assertArrayEquals(
+            PhotoShapes.cover(2000, 1000, 300, 300, focus(0.7, 0.0, 1.0, 0.1)),
+            PhotoShapes.cover(2000, 1000, 300, 300, focus(0.7, 0.9, 1.0, 1.0)),
+        )
+    }
+
+    @Test
+    fun a_subject_that_fits_is_all_in_and_one_that_doesnt_is_centred() {
+        val r = Random(5)
+        repeat(500) {
+            val sw = r.nextInt(50, 4000); val sh = r.nextInt(50, 4000); val dw = r.nextInt(1, 1200); val dh = r.nextInt(1, 1200)
+            val l = r.nextDouble(0.0, 0.9); val t = r.nextDouble(0.0, 0.9)
+            val f = focus(l, t, r.nextDouble(l + 0.02, 1.0), r.nextDouble(t + 0.02, 1.0))
+            val k = PhotoShapes.cover(sw, sh, dw, dh, f)
+            val plain = PhotoShapes.cover(sw, sh, dw, dh)
+            // Same size as ever, and inside the photo: only where it sits changes.
+            assertEquals(plain[2] - plain[0], k[2] - k[0])
+            assertEquals(plain[3] - plain[1], k[3] - k[1])
+            assertTrue(k[0] >= 0 && k[1] >= 0 && k[2] <= sw && k[3] <= sh)
+            for ((lo, hi, from, to, full) in listOf(
+                listOf(k[0].toFloat(), k[2].toFloat(), f.left * sw, f.right * sw, sw.toFloat()),
+                listOf(k[1].toFloat(), k[3].toFloat(), f.top * sh, f.bottom * sh, sh.toFloat()),
+            )) {
+                if (to - from <= hi - lo - 2f) {
+                    assertTrue("a subject that fits is all in", from >= lo - 1f && to <= hi + 1f)
+                } else if (hi - lo < full) {
+                    // Bigger than the window: the window sits on its middle (or at the photo's edge).
+                    val mid = (from + to) / 2f
+                    assertTrue("centred on a subject too big to fit", abs((lo + hi) / 2f - mid) <= 1f || lo == 0f || hi == full)
+                    assertTrue(lo >= from - 1f && hi <= to + 1f || lo == 0f || hi == full)
+                }
+            }
+        }
+        // Bigger than the crop: centred on it.
+        assertArrayEquals(intArrayOf(600, 0, 1600, 1000), PhotoShapes.cover(2000, 1000, 300, 300, focus(0.2, 0.0, 0.9, 1.0)))
+    }
+
+    @Test
+    fun wide_in_tall_and_tall_in_wide() {
+        // A wide photo in a tall widget (2:3): 400 of 1600 across, on the person at the right.
+        assertArrayEquals(intArrayOf(1080, 0, 1480, 600), PhotoShapes.cover(1600, 600, 200, 300, focus(0.75, 0.2, 0.85, 0.9)))
+        // ... and against the right edge when they're at it.
+        assertArrayEquals(intArrayOf(1200, 0, 1600, 600), PhotoShapes.cover(1600, 600, 200, 300, focus(0.9, 0.2, 1.0, 0.9)))
+        // A tall photo in a wide widget (2:1): 300 of 1600 down, on the face near the top.
+        assertArrayEquals(intArrayOf(0, 170, 600, 470), PhotoShapes.cover(600, 1600, 400, 200, focus(0.3, 0.1, 0.7, 0.3)))
+        // ... and the dog at their feet.
+        assertArrayEquals(intArrayOf(0, 1300, 600, 1600), PhotoShapes.cover(600, 1600, 400, 200, focus(0.3, 0.85, 0.7, 1.0)))
+    }
+
+    @Test
+    fun a_focus_is_a_box_inside_the_photo_or_nothing() {
+        val f = PhotoShapes.Focus.of(0.55, 0.1, 0.45, 0.85)!!
+        assertEquals(0.55f, f.left, 1e-6f); assertEquals(0.1f, f.top, 1e-6f); assertEquals(1f, f.right, 1e-6f); assertEquals(0.95f, f.bottom, 1e-6f)
+        // Spilling over the edge: kept to the photo.
+        val g = PhotoShapes.Focus.of(-0.2, 0.9, 0.5, 0.5)!!
+        assertEquals(0f, g.left, 1e-6f); assertEquals(0.3f, g.right, 1e-6f); assertEquals(1f, g.bottom, 1e-6f)
+        assertNull(PhotoShapes.Focus.of(0.5, 0.5, 0.0, 0.2))
+        assertNull(PhotoShapes.Focus.of(0.5, 0.5, 0.2, -0.1))
+        assertNull(PhotoShapes.Focus.of(1.2, 0.5, 0.2, 0.2))
+        assertNull(PhotoShapes.Focus.of(Double.NaN, 0.5, 0.2, 0.2))
+        assertNull(PhotoShapes.Focus.of(0.1, 0.5, Double.POSITIVE_INFINITY, 0.2))
+    }
+
+    @Test
+    fun a_photo_suits_a_box_that_keeps_most_of_it_or_all_of_its_subject() {
+        assertEquals(1f, PhotoShapes.suits(800, 600, 400, 300), 1e-3f)
+        assertEquals(0.5f, PhotoShapes.suits(2000, 1000, 300, 300), 1e-3f)
+        // A wide view in a tall widget: most of it goes.
+        assertTrue(PhotoShapes.suits(3000, 1000, 300, 400) < PhotoPick.SUITS)
+        // The same with one person in it, who's all in the crop: fine.
+        assertTrue(PhotoShapes.suits(3000, 1000, 300, 400, focus(0.6, 0.1, 0.75, 0.9)) >= PhotoPick.SUITS)
+        // A row of people right across it: half of them would go.
+        assertTrue(PhotoShapes.suits(3000, 1000, 300, 400, focus(0.05, 0.2, 0.95, 0.9)) < PhotoPick.SUITS)
+        // Knowing the subject never makes a photo suit less.
+        val r = Random(3)
+        repeat(200) {
+            val sw = r.nextInt(50, 4000); val sh = r.nextInt(50, 4000); val dw = r.nextInt(1, 1200); val dh = r.nextInt(1, 1200)
+            val l = r.nextDouble(0.0, 0.9); val t = r.nextDouble(0.0, 0.9)
+            val s = PhotoShapes.suits(sw, sh, dw, dh, focus(l, t, r.nextDouble(l + 0.02, 1.0), r.nextDouble(t + 0.02, 1.0)))
+            assertTrue(s in 0f..1f && s >= PhotoShapes.suits(sw, sh, dw, dh) - 0.02f)
+        }
+        assertEquals(1f, PhotoShapes.suits(0, 0, 10, 10), 0f)
+    }
+
+    @Test
+    fun photos_that_suit_the_shape_are_chosen_from_while_there_are_enough() {
+        val score = mapOf("a" to 1f, "b" to 0.9f, "c" to 0.2f, "d" to 0.6f, "e" to 0.3f, "f" to 0.55f)
+        assertEquals(listOf("a", "b", "d", "f"), PhotoPick.suited(score.keys.toList()) { score.getValue(it) })
+        // Too few that suit: the best three, in their own order, so it still changes.
+        val few = mapOf("a" to 0.1f, "b" to 0.9f, "c" to 0.2f, "d" to 0.3f, "e" to 0.25f)
+        assertEquals(listOf("b", "d", "e"), PhotoPick.suited(few.keys.toList()) { few.getValue(it) })
+        // A handful of photos: all of them, whatever their shape.
+        assertEquals(listOf("a", "b", "c"), PhotoPick.suited(listOf("a", "b", "c")) { 0f })
+        assertEquals(emptyList<String>(), PhotoPick.suited(emptyList()) { 0f })
+        // All the same: all of them.
+        assertEquals(listOf("a", "b", "c", "d", "e"), PhotoPick.suited(listOf("a", "b", "c", "d", "e")) { 1f })
+        // The turn-taking still holds over the ones that suit.
+        val pool = PhotoPick.suited(score.keys.toList()) { score.getValue(it) }
+        var current: String? = null
+        var recent = emptyList<String>()
+        val seen = mutableListOf<String>()
+        repeat(pool.size) {
+            val next = PhotoPick.next(pool, current, recent, Random(it))!!
+            recent = PhotoPick.remember(recent, next, pool.size)
+            current = next
+            seen += next
+        }
+        assertEquals(pool.toSet(), seen.toSet())
+    }
+
+    @Test
+    fun a_whole_photo_fits_inside_every_shape() {
+        val sizes = listOf(300f to 300f, 400f to 220f, 220f to 400f)
+        val photos = listOf(1600 to 900, 900 to 1600, 1000 to 1000, 3000 to 1000)
+        for (shape in PhotoShape.entries) for ((w, h) in sizes) for ((pw, ph) in photos) {
+            val b = PhotoShapes.box(shape, w, h)
+            val at = PhotoShapes.inside(shape, w, h, pw, ph)
+            val what = "$shape $w×$h $pw×$ph"
+            // The photo's own proportions, inside the shape's box.
+            assertEquals(what, pw.toFloat() / ph, at.width / at.height, 0.02f)
+            assertTrue(what, at.left >= b.left - 0.5f && at.top >= b.top - 0.5f && at.right <= b.right + 0.5f && at.bottom <= b.bottom + 0.5f)
+            assertEquals("$what: in the middle across", (b.left + b.right) / 2f, (at.left + at.right) / 2f, 0.5f)
+            if (shape == PhotoShape.ROUNDED) {
+                // As big as the box lets it be.
+                assertTrue(what, abs(at.width - b.width) < 0.5f || abs(at.height - b.height) < 0.5f)
+                continue
+            }
+            // All of it inside the outline (a hair in from its own edge), and a fair size.
+            val pts = PhotoShapes.outline(shape, w, h)
+            val l = at.left + 1f; val t = at.top + 1f; val r = at.right - 1f; val bt = at.bottom - 1f
+            for (i in 0..20) {
+                val f = i / 20f
+                for ((x, y) in listOf(l + (r - l) * f to t, l + (r - l) * f to bt, l to t + (bt - t) * f, r to t + (bt - t) * f)) {
+                    assertTrue("$what: ($x, $y) is outside the shape", PhotoShapes.holds(pts, x, y))
+                }
+            }
+            assertTrue("$what: too small (${at.width}×${at.height})", at.width * at.height >= 0.12f * b.width * b.height)
+        }
+        // A picture sits whole in a box, in its middle.
+        val c = PhotoShapes.contain(200, 100, PhotoShapes.Box(0f, 0f, 100f, 100f))
+        assertEquals(0f, c.left, 1e-3f); assertEquals(25f, c.top, 1e-3f); assertEquals(100f, c.right, 1e-3f); assertEquals(75f, c.bottom, 1e-3f)
+    }
+
     @Test
     fun the_picture_handed_to_the_home_screen_stays_small() {
         assertEquals(300 to 200, PhotoShapes.fit(300, 200, PhotoRender.MAX_PIXELS))

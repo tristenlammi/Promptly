@@ -394,6 +394,7 @@ class PhotoConfigActivity : ComponentActivity() {
                 var savedTitle by remember { mutableStateOf("") }
                 var shape by remember { mutableStateOf(PhotoShape.ROUNDED) }
                 var tap by remember { mutableStateOf(PhotoWidget.TAP_NEXT) }
+                var fit by remember { mutableStateOf(PhotoWidget.FIT_FILL) }
                 val linked = remember { Widgets.link(this@PhotoConfigActivity) == Link.LINKED }
                 LaunchedEffect(Unit) {
                     prefsOf(this@PhotoConfigActivity, id)?.let { p ->
@@ -402,6 +403,7 @@ class PhotoConfigActivity : ComponentActivity() {
                         savedTitle = p[PhotoWidget.ALBUM_TITLE].orEmpty()
                         shape = PhotoShape.of(p[PhotoWidget.SHAPE])
                         tap = if (p[PhotoWidget.TAP] == PhotoWidget.TAP_OPEN) PhotoWidget.TAP_OPEN else PhotoWidget.TAP_NEXT
+                        fit = if (p[PhotoWidget.FIT] == PhotoWidget.FIT_WHOLE) PhotoWidget.FIT_WHOLE else PhotoWidget.FIT_FILL
                     }
                     val account = if (linked) Store(this@PhotoConfigActivity).account else null
                     val got = if (account == null) null else withContext(Dispatchers.IO) { runCatching { WidgetApi(account).albums() }.getOrNull() }
@@ -424,6 +426,7 @@ class PhotoConfigActivity : ComponentActivity() {
                             }
                             p[PhotoWidget.SHAPE] = shape.key
                             p[PhotoWidget.TAP] = tap
+                            p[PhotoWidget.FIT] = fit
                         }) { PhotoWidget().update(this@PhotoConfigActivity, it) }
                         if (picked != null) WidgetSync.now(this@PhotoConfigActivity)
                         finish()
@@ -458,6 +461,9 @@ class PhotoConfigActivity : ComponentActivity() {
                             for (s in row) ShapeTile(s, shape == s, { shape = s }, Modifier.weight(1f))
                         }
                     }
+                    Section("How the photo fits")
+                    Choice("Fill the shape — cropped round the people and pets in it", fit == PhotoWidget.FIT_FILL, { fit = PhotoWidget.FIT_FILL })
+                    Choice("Whole photo — all of it, with a soft blur behind", fit == PhotoWidget.FIT_WHOLE, { fit = PhotoWidget.FIT_WHOLE })
                     Section("When you tap the photo")
                     Choice("Show another photo", tap == PhotoWidget.TAP_NEXT, { tap = PhotoWidget.TAP_NEXT })
                     Choice("Open the album in P Photos", tap == PhotoWidget.TAP_OPEN, { tap = PhotoWidget.TAP_OPEN })
