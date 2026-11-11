@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, BellPlus, CalendarPlus, CheckSquare, CloudOff, Copy, FileText, Heading, ListTodo, ListX, Mic, MoreVertical, Palette, Pin, Send, Sparkles, Square, Tag, Trash2, Type, UserPlus, Users, WandSparkles } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, BellPlus, CalendarPlus, CheckSquare, CloudOff, Copy, FileText, Heading, LayoutDashboard, ListTodo, ListX, Mic, MoreVertical, Palette, Pin, Send, ShoppingBasket, Sparkles, Square, Store, Tag, Trash2, Type, UserPlus, Users, WandSparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -6,6 +6,7 @@ import type { PhotoItem } from "@/api/photos";
 import { tagColor } from "@/api/tags";
 import { SendToSheet } from "@/components/share/SendToSheet";
 import { UserAvatar } from "@/components/shared/UserAvatar";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { useEditorModel } from "@/lib/editorModel";
 import { toast } from "@/store/toastStore";
@@ -24,6 +25,7 @@ import { BodyEditor, type BodyEditorHandle } from "./BodyEditor";
 import { ListEditor } from "./ListEditor";
 import { AiSheet, EventSheet, TasksSheet } from "./NoteTools";
 import { ColorGrid, LabelChooser } from "./pickers";
+import { CopyToWorkspace } from "./CopyToWorkspace";
 import { MenuItem, Pop } from "./Pop";
 import { ReminderChip, ReminderPicker } from "./Reminder";
 import { ShareDialog } from "./ShareDialog";
@@ -77,7 +79,9 @@ export function NoteEditor({
   const [pop, setPop] = useState<null | "color" | "labels" | "more" | "remind">(null);
   const [sharing, setSharing] = useState(false);
   // Across Promptly (N1.5): an AI proposal, Turn into tasks, Make an event, Send to….
-  const [tool, setTool] = useState<null | "tidy" | "to_list" | "title" | "tasks" | "event" | "send">(null);
+  const [tool, setTool] = useState<null | "tidy" | "to_list" | "title" | "tasks" | "event" | "send" | "workspace">(null);
+  // Copy to a workspace (N2.6) is a desktop thing, like Workspaces.
+  const desktop = !useIsMobile();
   const [busyTool, setBusyTool] = useState<null | "copy" | "document">(null);
   const navigate = useNavigate();
   useAvailableModels();
@@ -581,6 +585,7 @@ export function NoteEditor({
       {sharing && <ShareDialog note={note} onClose={() => setSharing(false)} onLeft={onClose} />}
       {(tool === "tidy" || tool === "to_list" || tool === "title") && <AiSheet note={note} action={tool} onClose={() => setTool(null)} />}
       {tool === "tasks" && <TasksSheet note={note} onClose={() => setTool(null)} />}
+      {tool === "workspace" && <CopyToWorkspace note={note} onClose={() => setTool(null)} />}
       {tool === "event" && (
         <EventSheet
           note={note}
@@ -660,6 +665,29 @@ export function NoteEditor({
                   Sort A–Z
                 </MenuItem>
               )}
+              {note.items.length > 1 && !note.list_opts.aisles && (
+                <MenuItem
+                  icon={ShoppingBasket}
+                  onClick={() => {
+                    setPop(null);
+                    flush();
+                    notesActions.itemsBulk(id, "sort_aisle");
+                  }}
+                >
+                  Sort by aisle
+                </MenuItem>
+              )}
+              <MenuItem
+                icon={Store}
+                checked={!!note.list_opts.aisles}
+                onClick={() => {
+                  setPop(null);
+                  flush();
+                  notesActions.patch(id, { list_opts: { ...note.list_opts, aisles: !note.list_opts.aisles } });
+                }}
+              >
+                Keep sorted by aisle
+              </MenuItem>
             </>
           )}
           {editable && hasModel && !isDraft && note.kind === "text" && (
@@ -694,6 +722,11 @@ export function NoteEditor({
               {note.is_owner && !note.document && (
                 <MenuItem icon={FileText} onClick={() => void toDocument()}>
                   {busyTool === "document" ? "Making a document…" : "Open as document"}
+                </MenuItem>
+              )}
+              {note.is_owner && desktop && (
+                <MenuItem icon={LayoutDashboard} onClick={() => pick("workspace")}>
+                  Copy to a workspace…
                 </MenuItem>
               )}
             </>

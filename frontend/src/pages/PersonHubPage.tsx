@@ -7,6 +7,8 @@ import {
   CalendarPlus,
   ChevronRight,
   Contact as ContactIcon,
+  ListChecks,
+  StickyNote,
   ExternalLink,
   FileText,
   Folder,
@@ -47,6 +49,7 @@ import { calls } from "@/rtc/call/actions";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+import "@/notes/notes.css";
 
 /** Which person the URL names: /people/u/<user>, /people/c/<file>/<contact>, /people/p/<photos person>. */
 function usePersonRef(): PersonRef | null {
@@ -413,7 +416,7 @@ function PersonBody({ p }: { p: PersonPage }) {
             )}
           </Section>
 
-          {/* Other apps' sections ("On Porch"), as you're allowed to see them. */}
+          {/* Other apps' sections ("On Porch", "Notes"), as you're allowed to see them. */}
           {(p.sections ?? []).map((s) => (
             <AppSection key={s.key} s={s} />
           ))}
@@ -459,7 +462,7 @@ function Section({ title, icon, extra, children }: { title: string; icon: ReactN
   );
 }
 
-const SECTION_ICONS: Record<string, ReactNode> = { porch: <House className="h-4 w-4" /> };
+const SECTION_ICONS: Record<string, ReactNode> = { porch: <House className="h-4 w-4" />, notes: <StickyNote className="h-4 w-4" /> };
 
 /** One app's section: a grid of pictures (a line of words when there's no
  *  picture) or a list, a note, and "See all". */
@@ -481,6 +484,20 @@ function AppSection({ s }: { s: PersonSection }) {
           <ul className="grid grid-cols-3 gap-1.5">
             {s.items.map((it) => (
               <li key={it.id}>
+                {it.color !== undefined ? (
+                  // A note card in the note's own colour (Notes, N2.5).
+                  <Link
+                    to={it.href || s.more_url || "#"}
+                    data-color={it.color || "default"}
+                    className="note-c flex aspect-square flex-col gap-1 overflow-hidden rounded-lg border p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  >
+                    <span className="flex items-start gap-1">
+                      {it.kind === "list" && <ListChecks className="mt-0.5 h-3.5 w-3.5 shrink-0 note-muted" aria-hidden />}
+                      <span className="line-clamp-3 min-w-0 flex-1 text-xs font-medium leading-snug">{it.title}</span>
+                    </span>
+                    {it.subtitle && <span className="mt-auto truncate text-[11px] note-muted">{it.subtitle}</span>}
+                  </Link>
+                ) : (
                 <Link
                   to={it.href || s.more_url || "#"}
                   className="relative block aspect-square overflow-hidden rounded-lg bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
@@ -494,6 +511,7 @@ function AppSection({ s }: { s: PersonSection }) {
                     </span>
                   )}
                 </Link>
+                )}
               </li>
             ))}
           </ul>

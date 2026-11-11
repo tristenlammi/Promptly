@@ -1,6 +1,7 @@
 package org.promptly.app;
 
 import android.app.Notification;
+import android.content.Intent;
 import android.util.Log;
 
 import com.google.androidbrowserhelper.locationdelegation.LocationDelegationExtraCommandHandler;
@@ -12,6 +13,10 @@ import com.google.androidbrowserhelper.trusted.DelegationService;
  *  which shows it as a real incoming call. */
 public class Delegation extends DelegationService {
     private static final String TAG = "PromptlyDelegation";
+    /** Told to the widgets (org.promptly.sync.widgets.WidgetEvents, in :app): a
+     *  notification came, so refresh in a few seconds. Nothing happens without widgets. */
+    static final String ACTION_NOTIFIED = "org.promptly.app.action.NOTIFIED";
+    private static final String WIDGET_EVENTS = "org.promptly.sync.widgets.WidgetEvents";
 
     public Delegation() {
         registerExtraCommandHandler(new LocationDelegationExtraCommandHandler());
@@ -19,6 +24,7 @@ public class Delegation extends DelegationService {
 
     @Override
     public boolean onNotifyNotificationWithChannel(String platformTag, int platformId, Notification notification, String channelName) {
+        tellWidgets();
         CallRings.Handler calls = CallRings.get();
         if (calls != null && platformTag != null && platformTag.contains("call:")) {
             try {
@@ -29,6 +35,15 @@ public class Delegation extends DelegationService {
             }
         }
         return super.onNotifyNotificationWithChannel(platformTag, platformId, notification, channelName);
+    }
+
+    /** An explicit broadcast to our own receiver (this module can't see :app's classes). */
+    private void tellWidgets() {
+        try {
+            sendBroadcast(new Intent(ACTION_NOTIFIED).setClassName(getPackageName(), WIDGET_EVENTS));
+        } catch (RuntimeException e) {
+            // The widgets aren't in this build: nothing to tell.
+        }
     }
 
     @Override

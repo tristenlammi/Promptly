@@ -24,7 +24,8 @@ import { toast } from "@/store/toastStore";
 import { notesApi, type Members } from "./api";
 import { notesDb } from "./db";
 import { mergeFields } from "./merge";
-import { applyOp, coalesce, grouped, type Base, type ItemFields, type MeFields, type NoteFields, type Op, type QueuedOp } from "./ops";
+import { aisleOf, keptByAisle, orderOf, placeByAisle } from "./aisles";
+import { applyOp, coalesce, grouped, type Base, type BulkItemsAction, type ItemFields, type MeFields, type NoteFields, type Op, type QueuedOp } from "./ops";
 import { isEmptyNote, uuid, type DocNode, type Known, type Note, type NoteAttachment, type NoteItem, type NoteKind, type NoteLabel, type NoteUser, type ReminderIn } from "./types";
 
 export type SyncState = "idle" | "saving" | "offline" | "retrying" | "signed_out";
@@ -344,11 +345,14 @@ export async function fetchNote(id: string, retry = true): Promise<"ok" | "gone"
 
 /** Search on the server (words in long notes, every list item): the ids
  *  that match, in your notes and archive. */
-export async function searchServer(q: string): Promise<string[] | null> {
+/** The server's matches for words (``ids``), and notes close in meaning
+ * that don't use them (``related``, nearest first; empty when AI search is off). */
+export async function searchServer(q: string): Promise<{ ids: string[]; related: string[] } | null> {
   try {
     const [a, b] = await Promise.all([notesApi.list("home", { q, limit: 200 }), notesApi.list("archive", { q, limit: 200 })]);
-    learn([...a.notes, ...b.notes], true);
-    return [...a.notes, ...b.notes].map((n) => n.id);
+    const related = [...(a.related ?? []), ...(b.related ?? [])];
+    learn([...a.notes, ...b.notes, ...related], true);
+    return { ids: [...a.notes, ...b.notes].map((n) => n.id), related: related.map((n) => n.id) };
   } catch {
     return null;
   }
@@ -808,12 +812,23 @@ export const notesActions = {
   addItem(id: string, item: Partial<NoteItem> & { id?: string }, afterId: string | null): string {
     const iid = item.id ?? uuid();
     const n = current(id);
-    const position = n ? positionFor(n.items, afterId, item.parent_id ?? null) : undefined;
+    let position = n ? positionFor(n.items, afterId, item.parent_id ?? null) : undefined;
+    let aisle: string | null = null;
+    if (n && keptByAisle(n)) {
+      // Kept by aisle: shown where the server will put it (N2.2).
+      const after = afterId ? n.items.find((i) => i.id === afterId) : undefined;
+      const parent = item.parent_id ? n.items.find((i) => i.id === item.parent_id) : undefined;
+      if (parent || after) aisle = (parent ?? (after?.parent_id ? n.items.find((i) => i.id === after.parent_id) : after))?.aisle ?? null;
+      else {
+        aisle = aisleOf(item.text ?? "");
+        position = placeByAisle(n.items, aisle, orderOf(n));
+      }
+    }
     enqueue({
       k: "item_add",
       id,
       after_id: afterId,
-      item: { id: iid, parent_id: item.parent_id ?? null, text: item.text ?? "", checked: item.checked ?? false, position },
+      item: { id: iid, parent_id: item.parent_id ?? null, text: item.text ?? "", checked: item.checked ?? false, position, aisle },
     });
     return iid;
   },
@@ -823,7 +838,7 @@ export const notesActions = {
   deleteItem(id: string, iid: string) {
     enqueue({ k: "item_delete", id, iid });
   },
-  itemsBulk(id: string, action: "untick_all" | "delete_ticked" | "sort") {
+  itemsBulk(id: string, action: BulkItemsAction) {
     enqueue({ k: "items_bulk", id, action });
   },
   me(id: string, fields: MeFields) {

@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -93,11 +94,12 @@ export function Pop({
   );
 }
 
-export function MenuItem({ icon: Icon, children, onClick, danger }: { icon?: React.ComponentType<{ className?: string }>; children: ReactNode; onClick: () => void; danger?: boolean }) {
+export function MenuItem({ icon: Icon, children, onClick, danger, checked }: { icon?: React.ComponentType<{ className?: string }>; children: ReactNode; onClick: () => void; danger?: boolean; checked?: boolean }) {
   return (
     <button
       type="button"
-      role="menuitem"
+      role={checked === undefined ? "menuitem" : "menuitemcheckbox"}
+      aria-checked={checked}
       onClick={onClick}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none",
@@ -106,6 +108,7 @@ export function MenuItem({ icon: Icon, children, onClick, danger }: { icon?: Rea
     >
       {Icon && <Icon className="h-4 w-4 shrink-0 opacity-80" />}
       <span className="min-w-0 flex-1 truncate">{children}</span>
+      {checked && <Check className="h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-hidden />}
     </button>
   );
 }

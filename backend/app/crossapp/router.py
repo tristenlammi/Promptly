@@ -9,6 +9,8 @@
   POST /trip/{file_id}/{trip_id}/spending/tag tag your Budget's purchases in the trip's dates
   GET  /budget/trips                          trips a Budget transaction can be tagged with
   POST /mealplan/{file_id}/to-tasks           send the grocery list to Tasks
+  POST /mealplan/{file_id}/to-note            send the grocery list to a note {note_id?} (Notes N2.3)
+  GET  /mealplan/note-target                  the note "Send to list" uses without a pick
 """
 from __future__ import annotations
 
@@ -153,3 +155,26 @@ async def budget_trips(db: AsyncSession = Depends(get_db), user: User = Depends(
 @router.post("/mealplan/{file_id}/to-tasks")
 async def mealplan_to_tasks(file_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     return await groceries.send_to_tasks(db, user, file_id)
+
+
+# Notes phase 2 (N2.3): the grocery list → your Shopping note.
+
+
+class ToNoteIn(BaseModel):
+    note_id: uuid.UUID | None = None
+
+
+@router.get("/mealplan/note-target")
+async def mealplan_note_target(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    from . import groceries_note
+
+    return await groceries_note.target_preview(db, user)
+
+
+@router.post("/mealplan/{file_id}/to-note")
+async def mealplan_to_note(
+    file_id: uuid.UUID, body: ToNoteIn | None = None, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    from . import groceries_note
+
+    return await groceries_note.send_to_note(db, user, file_id, body.note_id if body else None)

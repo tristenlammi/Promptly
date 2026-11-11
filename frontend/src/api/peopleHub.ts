@@ -82,7 +82,7 @@ export interface PersonPage {
   blocked?: boolean;
   /** Calls: you can call them (calls on for both, no block either way). */
   can_call?: boolean;
-  /** Other apps' sections ("On Porch"), each as you're allowed to see it. */
+  /** Other apps' sections ("On Porch", "Notes"), each as you're allowed to see it. */
   sections?: PersonSection[];
 }
 
@@ -92,11 +92,23 @@ export interface PersonSection {
   title: string;
   /** ``grid``: pictures (or a line of words); ``list``: rows. */
   kind: "grid" | "list";
-  items: { id: string; title: string; subtitle?: string; image?: string | null; href?: string | null }[];
+  items: PersonSectionItem[];
   more_url: string | null;
   more_label: string | null;
   /** A line under the items ("Groups you're both in: Family"). */
   note: string | null;
+}
+
+export interface PersonSectionItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  image?: string | null;
+  href?: string | null;
+  /** Notes: a palette key ("mint"): the card is that note's colour. */
+  color?: string | null;
+  /** Notes: "list" shows a checklist mark. */
+  kind?: string;
 }
 
 /** Someone you've blocked (Account → Blocked people). */

@@ -4,7 +4,7 @@ Every route loads the note through :mod:`app.notes.access` — 404 for
 anything the caller can't open, never 403 — commits, then tells the
 people on the note through their live stream (ids only).
 
-    GET    /notes?view=home|archive|trash|reminders&label=&color=&type=&q=&cursor=
+    GET    /notes?view=home|archive|trash|reminders&label=&color=&type=&q=&cursor=&with=<user id (notes you both have)>
     GET    /notes/labels                    your labels on notes, with counts
     GET    /notes/events                    live updates (SSE)
     POST   /notes                           create {client_id, kind, …}
@@ -13,8 +13,8 @@ people on the note through their live stream (ids only).
     GET    /notes/{id}                      the whole note
     PATCH  /notes/{id}                      {base_revision, title?, body_doc?|text?, color?, kind?, list_opts?}
     POST   /notes/{id}/items                {id, text, after_id?, parent_id?, checked?}
-    POST   /notes/{id}/items/bulk           {action: untick_all|delete_ticked|sort}
-    PATCH  /notes/{id}/items/{iid}          {text?, checked?, parent_id?, position?}
+    POST   /notes/{id}/items/bulk           {action: untick_all|delete_ticked|sort|sort_aisle}
+    PATCH  /notes/{id}/items/{iid}          {text?, checked?, parent_id?, position?, aisle?}
     DELETE /notes/{id}/items/{iid}
     PUT    /notes/{id}/me                   {pinned?, archived?, position?, seen?}
     PUT    /notes/{id}/labels               {tag_ids}
@@ -27,6 +27,8 @@ people on the note through their live stream (ids only).
     DELETE /notes/{id}/attachments/{aid}    out of the note (the file stays in Drive)
     POST   /notes/{id}/attachments/{aid}/transcribe   try the words again
     GET|PUT /notes/admin/transcription      the admin's switch for transcribing voice notes
+    GET|PUT /notes/admin/ai-search          the admin's switch for finding notes by meaning (two totals, nothing else)
+    GET|PUT /notes/settings/search          your own "Find notes by meaning"
     PUT    /notes/{id}/reminder             {due, time?, repeat?} — your reminder (a task in your Tasks)
     DELETE /notes/{id}/reminder             take your reminder off (its open task goes too)
     POST   /notes/{id}/ai/{action}          tidy|to_list|title|to_tasks|to_event → a proposal (nothing saved)
@@ -34,6 +36,8 @@ people on the note through their live stream (ids only).
     POST   /notes/{id}/to-document          {folder_id?} — Open as document (owner); DELETE = undo
     GET    /notes/to-tasks/lists            the lists in your Tasks
     POST   /notes/{id}/to-tasks             {list?, tasks} — Turn into tasks; POST …/undo {file_id, task_ids}
+    GET    /notes/to-workspace/targets      workspaces you can add a page to (N2.6)
+    POST   /notes/{id}/to-workspace         {workspace_id, parent_id?} — Copy to a workspace (owner), as a Page
 """
 from __future__ import annotations
 
@@ -52,6 +56,7 @@ from app.database import get_db
 
 from . import access, events, push, reminders, service, transcription
 from . import ai as note_ai
+from . import search as note_search
 from . import attachments as attach
 from . import convert
 from .body import BodyError
@@ -105,7 +110,7 @@ class NotePatch(BaseModel):
     text: str | None = Field(default=None, max_length=40_000)
     color: str | None = Field(default=None, max_length=16)
     kind: Literal["text", "list"] | None = None
-    list_opts: dict[str, bool] | None = None
+    list_opts: dict[str, Any] | None = None  # on/off options, and aisle_order (a list)
     # "ai": an AI proposal being applied — the note as it was is kept as a
     # version first.
     checkpoint: Literal["ai"] | None = None
@@ -124,10 +129,12 @@ class ItemPatch(BaseModel):
     checked: bool | None = None
     parent_id: uuid.UUID | None = None  # send null to outdent
     position: float | None = None
+    # A list kept by aisle: dragged across an aisle line (a foods.AISLES key).
+    aisle: str | None = Field(default=None, max_length=16)
 
 
 class ItemsBulk(BaseModel):
-    action: Literal["untick_all", "delete_ticked", "sort"]
+    action: Literal["untick_all", "delete_ticked", "sort", "sort_aisle"]
 
 
 class MeIn(BaseModel):
@@ -166,6 +173,11 @@ class ToDocumentIn(BaseModel):
     folder_id: uuid.UUID | None = None
 
 
+class ToWorkspaceIn(BaseModel):
+    workspace_id: uuid.UUID
+    parent_id: uuid.UUID | None = None  # a notebook in it; else the top
+
+
 class BulkIn(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
     action: Literal["pin", "unpin", "archive", "unarchive", "color", "label", "unlabel", "trash"]
@@ -185,15 +197,26 @@ async def list_notes(
     q: str | None = Query(None, max_length=200),
     cursor: str | None = Query(None, max_length=400),
     limit: int = Query(60, ge=1, le=200),
+    with_: uuid.UUID | None = Query(None, alias="with"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    return await service.list_cards(db, user, view=view, label=label, color=color, type_=type, q=q, cursor=cursor, limit=limit)
+    return await service.list_cards(
+        db, user, view=view, label=label, color=color, type_=type, q=q, cursor=cursor, limit=limit, with_user=with_,
+    )
 
 
 @router.get("/labels")
 async def labels(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     return {"labels": await service.label_counts(db, user)}
+
+
+@router.get("/to-workspace/targets")
+async def workspace_targets(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Workspaces you can copy a note into (you can add pages there), with their notebooks."""
+    from . import to_workspace
+
+    return {"workspaces": await to_workspace.targets(db, user)}
 
 
 @router.get("/to-tasks/lists")
@@ -220,6 +243,54 @@ async def transcription_status(db: AsyncSession = Depends(get_db), user: User = 
 async def set_transcription(body: TranscriptionIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)) -> dict:
     _ = user
     return _transcription_out(await transcription.set_choice(db, body.on))
+
+
+# ------------------------------------------------------------------ AI search (N2.1)
+
+
+def _ai_search_out(cfg, indexed: int, total: int) -> dict:  # noqa: ANN001 — search.Config
+    """The switch, how the server's indexer runs, and two totals. Never a
+    note, a title or anyone's count."""
+    return {
+        "ready": cfg.ready, "on": cfg.on, "local": cfg.local, "provider": cfg.provider.name if cfg.provider else "",
+        "model": cfg.model, "indexed": indexed, "total": total,
+    }
+
+
+@router.get("/admin/ai-search")
+async def ai_search_status(db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)) -> dict:
+    _ = user
+    return _ai_search_out(await note_search.config(db), *await note_search.counts(db))
+
+
+@router.put("/admin/ai-search")
+async def set_ai_search(body: TranscriptionIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)) -> dict:
+    _ = user
+    cfg = await note_search.set_choice(db, body.on)
+    return _ai_search_out(cfg, *await note_search.counts(db))
+
+
+async def _my_search_out(db: AsyncSession, user: User) -> dict:
+    cfg = await note_search.config(db)
+    return {
+        # The server's switch: when it's off there's nothing to choose.
+        "available": cfg.on,
+        "on": note_search.person_on(user),
+        "local": cfg.local,
+        "provider": cfg.provider.name if cfg.provider and cfg.on else "",
+    }
+
+
+@router.get("/settings/search")
+async def my_search(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Your "Find notes by meaning"."""
+    return await _my_search_out(db, user)
+
+
+@router.put("/settings/search")
+async def set_my_search(body: TranscriptionIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await note_search.set_person(db, user, body.on)
+    return await _my_search_out(db, user)
 
 
 @router.get("/events")
@@ -402,7 +473,7 @@ async def patch_item(
 ) -> dict:
     note = await access.load(db, user, note_id, lock=True)
     fields = body.model_dump(exclude_unset=True)
-    for k in ("text", "checked", "position"):
+    for k in ("text", "checked", "position", "aisle"):
         if k in fields and fields[k] is None:
             fields.pop(k)
     try:
@@ -782,3 +853,21 @@ async def undo_to_tasks(
     n = await convert.undo_tasks(db, user, note, body)
     await db.commit()
     return {"removed": n}
+
+
+@router.post("/{note_id}/to-workspace", status_code=status.HTTP_201_CREATED)
+async def to_workspace(
+    note_id: uuid.UUID, body: ToWorkspaceIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Copy to a workspace (N2.6): a Page with the note's words and pictures.
+    The note itself is unchanged and stays private."""
+    from . import to_workspace as tw
+
+    note = await access.load(db, user, note_id)
+    try:
+        out = await tw.copy(db, user, note, body.workspace_id, body.parent_id)
+    except HTTPException:
+        await db.rollback()
+        raise
+    await db.commit()
+    return out

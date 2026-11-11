@@ -44,6 +44,7 @@ import { NoteEditor } from "./components/NoteEditor";
 import { CardSheet } from "./components/CardSheet";
 import { LabelsSheet } from "./components/LabelsSheet";
 import { NoteGrid, NoteGridSkeleton } from "./components/NoteGrid";
+import { NotesSettingsButton } from "./components/NotesSettings";
 import { ColorGrid, LabelChooser } from "./components/pickers";
 import { Pop } from "./components/Pop";
 import { ReminderPicker, reminderMoment, reminderWhen } from "./components/Reminder";
@@ -143,13 +144,15 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const q = params.get("q") ?? "";
   const typeFilter = params.get("type");
   const colorFilter = params.get("color");
-  const searching = !!(q.trim() || typeFilter || colorFilter);
+  // "See all" from a person page (N2.5): the notes you and they both have.
+  const withUser = params.get("with");
+  const searching = !!(q.trim() || typeFilter || colorFilter || withUser);
 
   const [drawer, setDrawer] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
   const [searchFocus, setSearchFocus] = useState(false);
-  const [serverHits, setServerHits] = useState<{ q: string; ids: Set<string> } | null>(null);
+  const [serverHits, setServerHits] = useState<{ q: string; ids: Set<string>; related: string[] } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const layout: "grid" | "list" = (settings?.notes_view as "grid" | "list" | undefined) ?? "grid";
   const [now, setNow] = useState(() => Date.now());
@@ -245,8 +248,8 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       return;
     }
     const t = setTimeout(async () => {
-      const ids = await searchServer(term);
-      if (ids) setServerHits({ q: term, ids: new Set(ids) });
+      const hits = await searchServer(term);
+      if (hits) setServerHits({ q: term, ids: new Set(hits.ids), related: hits.related });
     }, 300);
     return () => clearTimeout(t);
   }, [q]);
@@ -280,6 +283,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       list = live.filter((n) => {
         if (typeFilter && !matchesType(n, typeFilter)) return false;
         if (colorFilter && n.color !== colorFilter) return false;
+        if (withUser && n.owner_id !== withUser && !n.member_ids.includes(withUser)) return false;
         if (place.view === "label" && !hasLabel(n, place.label)) return false;
         if (!term) return true;
         return searchText(n).includes(term) || (serverHits?.q === q.trim() && serverHits.ids.has(n.id));
@@ -291,11 +295,30 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     else list = live.filter((n) => !n.archived);
     if (place.view === "trash" && !searching) return list.sort((a, b) => (b.trashed_at ?? "").localeCompare(a.trashed_at ?? ""));
     return list.sort(byOrder);
-  }, [all, live, searching, q, typeFilter, colorFilter, place.view, place.label, serverHits]);
+  }, [all, live, searching, q, typeFilter, colorFilter, withUser, place.view, place.label, serverHits]);
+
+  // Notes about what you typed that don't use the words (AI search, online
+  // only), under the exact matches, with the same filters.
+  const related = useMemo(() => {
+    const term = q.trim();
+    if (!term || serverHits?.q !== term || !serverHits.related.length) return [];
+    const shown = new Set(visible.map((n) => n.id));
+    return serverHits.related
+      .map((id) => notes[id])
+      .filter((n): n is Note => !!n && !n.trashed_at && !shown.has(n.id))
+      .filter((n) => (!typeFilter || matchesType(n, typeFilter)) && (!colorFilter || n.color === colorFilter) && (place.view !== "label" || hasLabel(n, place.label)))
+      .filter((n) => !withUser || n.owner_id === withUser || n.member_ids.includes(withUser))
+      .slice(0, 8);
+  }, [q, serverHits, visible, notes, typeFilter, colorFilter, withUser, place.view, place.label]);
 
   const sections = useMemo(() => {
     if (place.view === "trash" && !searching) return [{ key: "trash", notes: visible }];
-    if (searching) return [{ key: "results", notes: visible }];
+    if (searching) {
+      const out: { key: string; title?: string; notes: Note[] }[] = [];
+      if (visible.length) out.push({ key: "results", notes: visible });
+      if (related.length) out.push({ key: "related", title: "Related notes", notes: related });
+      return out;
+    }
     if (place.view === "reminders") {
       const at = new Date(now);
       const groups: { key: string; title: string; notes: Note[] }[] = [
@@ -315,7 +338,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     out.push({ key: "others", title: pinned.length ? "Others" : undefined, notes: place.view === "archive" ? [...others, ...archived] : others });
     if (place.view === "label" && archived.length) out.push({ key: "archived", title: "Archived", notes: archived });
     return out;
-  }, [visible, place.view, searching, now]);
+  }, [visible, related, place.view, searching, now]);
 
   const order = useMemo(() => sections.flatMap((s) => s.notes.map((n) => n.id)), [sections]);
 
@@ -410,7 +433,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   };
   const clearSearch = () => {
     const next = new URLSearchParams(params);
-    for (const k of ["q", "type", "color"]) next.delete(k);
+    for (const k of ["q", "type", "color", "with"]) next.delete(k);
     setParams(next, { replace: true });
   };
 
@@ -501,6 +524,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       <RailLink to={KEEP_IMPORT} icon={Import} active={false} onNavigate={() => setDrawer(false)}>
         Import from Google Keep
       </RailLink>
+      <NotesSettingsButton />
       {embedded && isPhone && (
         <button
           type="button"
@@ -516,7 +540,10 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     </nav>
   );
 
-  const title = searching
+  const withName = withUser ? users[withUser]?.username || "them" : null;
+  const title = withName && !q.trim() && !typeFilter && !colorFilter
+    ? `Notes with ${withName}`
+    : searching
     ? "Search"
     : place.view === "archive"
       ? "Archive"
@@ -559,9 +586,15 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
 
   const usedColors = NOTE_COLORS.filter((c) => c !== "default" && live.some((n) => n.color === c));
   const usedTypes = TYPE_CHIPS.filter((t) => live.some((n) => matchesType(n, t.key)));
-  const chips = (searching || searchFocus) && place.view !== "trash" && (usedTypes.length > 0 || usedColors.length > 0 || labels.length > 0) && (
+  const chips = (searching || searchFocus) && place.view !== "trash" && (usedTypes.length > 0 || usedColors.length > 0 || labels.length > 0 || !!withUser) && (
     <div className="flex flex-col gap-2 border-b border-[var(--border)] px-4 py-2.5" onMouseDown={(e) => e.preventDefault()}>
       <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by type">
+        {withUser && (
+          <Chip on onClick={() => setParam("with", null)}>
+            With {withName}
+            <X className="h-3.5 w-3.5" aria-label="Show all notes" />
+          </Chip>
+        )}
         {usedTypes.map((t) => (
           <Chip key={t.key} on={typeFilter === t.key} onClick={() => setParam("type", typeFilter === t.key ? null : t.key)}>
             {t.label}
@@ -669,7 +702,9 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       if (ready && typeof navigator !== "undefined" && navigator.onLine === false) return <Empty icon={CloudOff} title="You're offline" body="Your notes will show once you're connected. Notes you write now are kept on this device." />;
       return <NoteGridSkeleton layout={layout} />;
     }
-    if (visible.length) return null;
+    if (visible.length || related.length) return null;
+    if (withUser && !q.trim() && !typeFilter && !colorFilter)
+      return <Empty icon={Lightbulb} title={`You and ${withName} don't have any notes together`} body="Notes you share with each other, or that someone shares with you both, show here." />;
     if (searching) return <Empty icon={Search} title={q.trim() ? `Nothing matches “${q.trim()}”` : "No notes match"} body="Try other words, or clear the filters." />;
     if (place.view === "trash") {
       if (!loaded.trash) return <NoteGridSkeleton layout={layout} label="Loading the Trash…" />;

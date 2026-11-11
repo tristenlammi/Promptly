@@ -211,6 +211,9 @@ dependencies {
     testImplementation("androidx.test:core:1.7.0")
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("androidx.car.app:app-testing:1.7.0")
+    // Notes phase 2 (N2.7): the widgets' WorkManager schedules, in Robolectric. Apache-2.0,
+    // the same release as work-runtime.
+    testImplementation("androidx.work:work-testing:2.12.0")
 
     // Instrumented tests on the emulator, driving the real system services.
     androidTestImplementation("androidx.test:runner:1.7.0")

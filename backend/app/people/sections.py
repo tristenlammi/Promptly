@@ -80,6 +80,8 @@ def _load() -> None:
     _loaded = True
     # Porch (WP-P3.3): "On Porch".
     import app.porch.person  # noqa: F401
+    # Notes phase 2 (N2.5): "Notes" (the notes you both have).
+    import app.notes.people  # noqa: F401
 
 
 async def _run(s: Section, viewer: User, target: User) -> dict[str, Any] | None:

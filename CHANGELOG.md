@@ -30,6 +30,22 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Admin → Users → Reset password can email the person a reset link instead of setting a temporary password, so the admin never knows their password. It's the default when email is set up.
 <!-- Admin privacy, AP9 -->
 - One plain statement of what a server admin can and can't see, in the README. The app has the same words at `/account/privacy#privacy-statement`, but nothing in the app links to it.
+<!-- Notes phase 2, N2.1 -->
+- Notes search also shows "Related notes" under the exact matches: notes about what you typed that don't use the words (searching "wifi" finds the note with the router password). Chat's note search finds them too. Ctrl+K stays words only.
+- Admin → Defaults: the "AI search for mail" card is now "AI search", with its own switch for Notes beside Mail's (on for an indexer on your own network, off for a cloud one until you turn it on). It shows only how many notes are indexed, never anyone's notes.
+- Notes → Settings: "Find notes by meaning", so each person can keep their own notes out of AI search (a shared note follows its owner's choice). With a cloud indexer it names the service the notes would go to.
+<!-- Notes phase 2, N2.2 -->
+- Notes lists by aisle: ⋯ → Sort by aisle puts a shopping list in store order (Meal Plan's food list and your own store order from its Kitchen view; no AI), and Keep sorted by aisle makes everything added later, from chat, the widget, the phone or a family member, land in its aisle instead of at the bottom. Thin aisle lines show where each aisle starts; drag an item across one to move it there.
+<!-- Notes phase 2, N2.3 -->
+- Meal Plan → Groceries: "Send to Tasks" is now "Send to list". It goes to your Shopping note by default (by aisle; everyone on the note sees the items arrive), or another list in Notes, or Tasks as before. With no Shopping note it makes a "Groceries" list. Sending again updates amounts, ticks what you ticked in Meal Plan and never touches things people typed themselves; the message has Open and Undo. Chat can do it too.
+<!-- Notes phase 2, N2.4 -->
+- Notes by voice: Talking to Promptly and the phone assistant can read your notes ("what's on the shopping list?"), add to one ("add eggs to the shopping list" asks "Add eggs to your Shopping note?" and adds only on yes) and make one ("make a note called gate code"). Nothing is ticked off or deleted by voice.
+<!-- Notes phase 2, N2.5 -->
+- A person's page has a Notes section: the notes you both have (shared between you, or shared with you both), in their colours, with See all, which opens Notes showing just those. Never a note only they can open.
+<!-- Notes phase 2, N2.6 -->
+- Notes ⋯ → Copy to a workspace… (on a computer): makes a Page with the note's words and pictures in a workspace you can add pages to, at the top or in a notebook. The dialog says who will see the copy; the note itself stays as it is, private.
+<!-- Notes phase 2, N2.7 -->
+- Android: the home-screen widgets refresh a few seconds after any Promptly notification arrives (a reminder, an invite, a shared note), and every 15 minutes while the phone is charging. With no widgets, nothing extra runs.
 
 ### Changed
 
@@ -50,6 +66,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 - Calls: the calls service's config uses LiveKit's current name for the metrics port setting, so its log no longer warns that `prometheus_port` is deprecated.
 - Mail: a reply you send now shows in its conversation straight away ("Sending…", then sent), instead of only after Sent was next checked, and a reply that couldn't go says so there with Try again. Replies sent from another mail app show within seconds, and an answer that arrives before your reply (such as an out-of-office) no longer ends up in a conversation of its own. Replies and forwards always go from the mailbox the email is in.
+- Passwords: a bookmark added, changed or deleted in one browser now shows in your other browsers in a second or two instead of up to a minute or more. The extension sends a change about a second after it's made, the server tells your other unlocked browsers to fetch it over a new live connection (`/api/passwords/live`, which carries only "this vault changed", never your data), and the minute's background sync no longer keeps getting pushed back. Passwords and other vault changes made elsewhere arrive just as fast. Needs the new server and a new extension version.
 
 ### Removed
 
@@ -63,7 +80,6 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
-- Passwords: a bookmark added, changed or deleted in one browser now shows in your other browsers in a second or two instead of up to a minute or more. The extension sends a change about a second after it's made, the server tells your other unlocked browsers to fetch it over a new live connection (`/api/passwords/live`, which carries only "this vault changed", never your data), and the minute's background sync no longer keeps getting pushed back. Passwords and other vault changes made elsewhere arrive just as fast. Needs the new server and a new extension version.
 - Calls on Unraid: new optional `LIVEKIT_INTERFACES` in `.env` (e.g. `br0`) limits the calls service to your LAN interface. With "host access to custom networks" on, Unraid adds a second interface with the same address, and the calls service kept restarting with "address already in use".
 
 ### Changed

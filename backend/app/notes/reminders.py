@@ -336,6 +336,13 @@ async def after_tasks_save(db: AsyncSession, file_id: uuid.UUID, before: dict, a
         db.sync_session.info.setdefault(_EVENTS_KEY, []).extend(tell)
 
 
+def tell_after_commit(db: AsyncSession, user_ids: list[uuid.UUID], ev: dict) -> None:
+    """Tell these people's Notes about ``ev`` once the caller commits
+    (nothing if it rolls back). For writes that run inside someone else's
+    transaction (a Meal Plan send through ``use_item``)."""
+    db.sync_session.info.setdefault(_EVENTS_KEY, []).extend((str(u), ev) for u in dict.fromkeys(user_ids))
+
+
 @event.listens_for(Session, "after_commit")
 def _publish_after_commit(session: Session) -> None:
     pending = session.info.pop(_EVENTS_KEY, None)

@@ -6,11 +6,12 @@
  * and applying one twice to a note gives the same note — which is what lets
  * a sent change stay on screen until the refreshed note arrives.
  */
-import { attachmentCounts, displayTitle, docText, textDoc, type DocNode, type Note, type NoteAttachment, type NoteItem, type NoteKind, type NoteLabel, type NoteReminder, type ReminderIn } from "./types";
+import { keptByAisle, orderOf, sortByAisle } from "./aisles";
+import { attachmentCounts, displayTitle, docText, textDoc, type DocNode, type Note, type NoteAttachment, type ListOpts, type NoteItem, type NoteKind, type NoteLabel, type NoteReminder, type ReminderIn } from "./types";
 
-export type ItemFields = { text?: string; checked?: boolean; parent_id?: string | null; position?: number };
+export type ItemFields = { text?: string; checked?: boolean; parent_id?: string | null; position?: number; aisle?: string };
 export type MeFields = { pinned?: boolean; archived?: boolean; position?: number; seen?: boolean };
-export type NoteFields = { title?: string; body_doc?: DocNode | null; color?: string; kind?: NoteKind; list_opts?: Record<string, boolean>; checkpoint?: "ai" };
+export type NoteFields = { title?: string; body_doc?: DocNode | null; color?: string; kind?: NoteKind; list_opts?: ListOpts; checkpoint?: "ai" };
 export type Base = { title: string; body_doc: DocNode | null; color: string };
 
 export type Op =
@@ -19,7 +20,7 @@ export type Op =
   | { k: "item_add"; id: string; item: NoteItem; after_id: string | null }
   | { k: "item_patch"; id: string; iid: string; fields: ItemFields }
   | { k: "item_delete"; id: string; iid: string }
-  | { k: "items_bulk"; id: string; action: "untick_all" | "delete_ticked" | "sort" }
+  | { k: "items_bulk"; id: string; action: BulkItemsAction }
   | { k: "me"; id: string; fields: MeFields }
   | { k: "labels"; id: string; labels: NoteLabel[] }
   | { k: "trash"; id: string; owner: boolean }
@@ -32,6 +33,8 @@ export type Op =
   | { k: "transcribe"; id: string; aid: string }
   // Your reminder (a task in your Tasks); null takes it off.
   | { k: "reminder"; id: string; reminder: ReminderIn | null };
+
+export type BulkItemsAction = "untick_all" | "delete_ticked" | "sort" | "sort_aisle";
 
 export interface QueuedOp {
   seq: number;
@@ -89,7 +92,12 @@ export function applyOp(note: Note | null, op: Op): Note | null {
       if (f.kind && f.kind !== n.kind) n = convert(n, f.kind);
       if (f.title !== undefined) n.title = f.title;
       if (f.color !== undefined) n.color = f.color;
-      if (f.list_opts !== undefined) n.list_opts = { ...f.list_opts };
+      if (f.list_opts !== undefined) {
+        const turnedOn = !keptByAisle(n) && !!f.list_opts.aisles;
+        n.list_opts = { ...f.list_opts };
+        // Keeping it sorted by aisle sorts it now (the server does the same).
+        if (turnedOn && n.kind === "list") n.items = sortByAisle(n.items, orderOf(n));
+      }
       if (f.body_doc !== undefined && n.kind === "text") {
         n.body_doc = f.body_doc;
         n.body_text = docText(f.body_doc);
@@ -133,6 +141,7 @@ export function applyOp(note: Note | null, op: Op): Note | null {
         const items = note.items.filter((i) => !gone.has(i.id)).map((i) => (i.parent_id && gone.has(i.parent_id) ? { ...i, parent_id: null } : i));
         return { ...note, items, items_total: Math.max(0, note.items_total - note.items_checked), items_checked: 0 };
       }
+      if (op.action === "sort_aisle") return { ...note, items: sortByAisle(note.items, orderOf(note)) };
       const tops = note.items.filter((i) => !i.parent_id).sort((a, b) => a.text.localeCompare(b.text, undefined, { sensitivity: "base" }) || (a.position ?? 0) - (b.position ?? 0));
       const order = tops.flatMap((t) => [t, ...note.items.filter((i) => i.parent_id === t.id).sort((a, b) => (a.position ?? 0) - (b.position ?? 0))]);
       const seen = new Set(order.map((i) => i.id));

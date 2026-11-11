@@ -177,13 +177,27 @@ class FindNotesTool(Tool):
                     TagAssignment.entity_id == cast(Note.id, String),
                 )
             )
+        base = stmt
         if q:
             pat = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
             stmt = stmt.where(or_(literal_column("notes.tsv").op("@@")(drive_tsquery(q)), Note.search_text.ilike(pat, escape="\\")))
             stmt = stmt.order_by(Note.title.ilike(pat, escape="\\").desc(), Note.updated_at.desc())
         else:
             stmt = stmt.order_by(func.coalesce(st.pinned, False).desc(), Note.updated_at.desc())
-        rows = (await ctx.db.execute(stmt.limit(_MAX_FOUND))).all()
+        rows = list((await ctx.db.execute(stmt.limit(_MAX_FOUND))).all())
+        near: set[uuid.UUID] = set()
+        if q and len(rows) < _MAX_FOUND:
+            # Then notes close in meaning (AI search, N2.1): "wifi" finds the
+            # router password. Nothing when it's off.
+            from app.notes import search
+
+            shown = {r[0].id for r in rows}
+            ids = [i for i in await search.nearest(ctx.db, ctx.user, q, limit=_MAX_FOUND) if i not in shown][: _MAX_FOUND - len(rows)]
+            if ids:
+                found = {r[0].id: r for r in (await ctx.db.execute(base.where(Note.id.in_(ids)))).all()}
+                extra = [found[i] for i in ids if i in found]
+                rows += extra
+                near = {r[0].id for r in extra}
         if not rows:
             what = f" matching “{q}”" if q else ""
             what += f" labelled #{label}" if label else ""
@@ -215,6 +229,8 @@ class FindNotesTool(Tool):
                 bits.append("archived")
             if n.owner_id != ctx.user.id:
                 bits.append("shared with the user")
+            if n.id in near:
+                bits.append("close in meaning, not the exact words")
             first = re.sub(r"\s+", " ", n.body_text or "")[:120]
             lines.append(f"- “{display_title(n)}” ({', '.join(bits)}) id {n.id}" + (f" — {first}" if first and n.title.strip() else ""))
         body = "\n".join(lines)

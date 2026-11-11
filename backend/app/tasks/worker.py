@@ -406,6 +406,14 @@ async def prune_talk_metrics(ctx) -> int:
     return await prune()
 
 
+# Notes phase 2 (N2.1): AI search over notes — embed stale notes in batches
+# of 32 until none are left or 50 s pass (app/notes/search.py).
+async def index_note_vectors(ctx) -> int:
+    from app.notes.search import index_tick
+
+    return await index_tick()
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -492,6 +500,8 @@ class WorkerSettings:
         cron(calls_reaper, minute=set(range(1, 60, 2)), run_at_startup=False, unique=True, timeout=240),
         # Talking to Promptly (WP-T6): drop Talk timings older than 30 days.
         cron(prune_talk_metrics, hour=4, minute=35, run_at_startup=False, unique=True),
+        # Notes phase 2 (N2.1): AI search over notes, every minute.
+        cron(index_note_vectors, minute=set(range(60)), run_at_startup=False, unique=True, timeout=120),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

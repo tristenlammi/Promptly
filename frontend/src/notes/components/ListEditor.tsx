@@ -6,6 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 
 import { cn } from "@/utils/cn";
 
+import { aisleName, keptByAisle } from "../aisles";
 import { grouped } from "../ops";
 import { addFlusher, notesActions } from "../store";
 import { uuid, type Note, type NoteItem } from "../types";
@@ -35,6 +36,32 @@ export function ListEditor({ note, editable, autoFocusNew }: { note: Note; edita
   const [focus, setFocus] = useState<Focus>(null);
   const newRef = useRef<HTMLInputElement>(null);
   const tickedOpen = note.list_opts.ticked_open ?? true;
+  // Kept by aisle (N2.2): thin aisle lines between groups, and a new item
+  // goes in when it's typed (Enter), so its aisle comes from its words.
+  const byAisle = keptByAisle(note);
+  const [draft, setDraft] = useState("");
+  const commitDraft = () => {
+    const text = draft.trim();
+    if (!text) return;
+    notesActions.addItem(note.id, { id: uuid(), text }, null);
+    setDraft("");
+  };
+  /** An aisle line before ``i`` when its aisle differs from the item above. */
+  const aisleLine = (list: NoteItem[], at: number) => {
+    if (!byAisle) return null;
+    const a = list[at]?.aisle;
+    if (!a) return null;
+    const prev = list.slice(0, at).reverse().find((x) => x.aisle);
+    if (prev && prev.aisle === a) return null;
+    return (
+      <li key={`aisle-${a}-${list[at].id}`} className="list-none px-1 pb-0.5 pt-2 first:pt-0" data-aisle={a}>
+        <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider note-muted">
+          {aisleName(a)}
+          <span aria-hidden className="h-px flex-1 bg-[color-mix(in_srgb,var(--note-text)_14%,transparent)]" />
+        </span>
+      </li>
+    );
+  };
 
   useLayoutEffect(() => {
     if (!focus) return;
@@ -124,7 +151,9 @@ export function ListEditor({ note, editable, autoFocusNew }: { note: Note; edita
       const hi = after ? pos(after) : lo + 2;
       const kids = note.items.filter((i) => i.parent_id === a).sort((x, y) => pos(x) - pos(y));
       const step = (hi - lo) / (kids.length + 2);
-      notesActions.patchItem(note.id, a, { position: lo + step });
+      // Kept by aisle: dropped on an item, it joins that item's aisle.
+      const aisle = byAisle && target.aisle && target.aisle !== item.aisle ? target.aisle : undefined;
+      notesActions.patchItem(note.id, a, aisle ? { position: lo + step, aisle } : { position: lo + step });
       kids.forEach((k, n) => notesActions.patchItem(note.id, k.id, { position: lo + step * (n + 2) }));
     } else {
       const sibs = open.filter((i) => i.parent_id === item.parent_id && i.id !== a);
@@ -197,9 +226,11 @@ export function ListEditor({ note, editable, autoFocusNew }: { note: Note; edita
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={openTops.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           <ul aria-label="List items" className="flex flex-col">
-            {openTops.map((t) => {
+            {openTops.flatMap((t, at) => {
               const kids = kidsOf(t.id);
-              return (
+              const line = aisleLine(openTops, at);
+              return [
+                line,
                 <SortableGroup key={t.id} id={t.id} enabled={editable}>
                   {row(t, true)}
                   {kids.length > 0 && (
@@ -213,14 +244,39 @@ export function ListEditor({ note, editable, autoFocusNew }: { note: Note; edita
                       </ul>
                     </SortableContext>
                   )}
-                </SortableGroup>
-              );
+                </SortableGroup>,
+              ];
             })}
           </ul>
         </SortableContext>
       </DndContext>
 
-      {editable && (
+      {editable && byAisle && (
+        <div className="flex items-center gap-2 py-1 pl-7">
+          <Plus className="h-4 w-4 shrink-0 note-muted" aria-hidden />
+          <input
+            ref={newRef}
+            aria-label="New list item"
+            aria-description="Press Enter to add it to its aisle"
+            placeholder="List item"
+            value={draft}
+            enterKeyHint="done"
+            className="h-8 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-[var(--note-muted)]"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitDraft}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                commitDraft();
+              } else if (e.key === "ArrowUp" && open.length && !draft) {
+                e.preventDefault();
+                setFocus({ id: open[open.length - 1].id, caret: "end" });
+              }
+            }}
+          />
+        </div>
+      )}
+      {editable && !byAisle && (
         <div className="flex items-center gap-2 py-1 pl-7">
           <Plus className="h-4 w-4 shrink-0 note-muted" aria-hidden />
           <input
@@ -256,7 +312,11 @@ export function ListEditor({ note, editable, autoFocusNew }: { note: Note; edita
             <ChevronDown className={cn("h-4 w-4 transition", !tickedOpen && "-rotate-90")} />
             {ticked.length === 1 ? "1 ticked item" : `${ticked.length} ticked items`}
           </button>
-          {tickedOpen && <ul aria-label="Ticked items" className="flex flex-col">{ticked.map((i) => <li key={i.id}>{row(i, false)}</li>)}</ul>}
+          {tickedOpen && (
+            <ul aria-label="Ticked items" className="flex flex-col">
+              {ticked.flatMap((i, at) => [aisleLine(ticked, at), <li key={i.id}>{row(i, false)}</li>])}
+            </ul>
+          )}
         </div>
       )}
     </div>

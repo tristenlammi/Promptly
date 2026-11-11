@@ -113,6 +113,10 @@ def question(name: str, args: dict[str, Any], *, called: str | None = None) -> s
         return f"Save to your memory: {text(args.get('content'), 200)}?"
     if name == "set_alarm":
         return f"Set {clock_words({'type': 'set_alarm', **args})}?"
+    if name == "add_to_note":
+        return f"Add {listed(note_texts(args))} to {called or 'that note'}?"
+    if name == "create_note":
+        return _new_note(args)
     if name == "use_item":
         values = args.get("args") if isinstance(args.get("args"), dict) else {}
         action = text(args.get("action") or "do that").replace("_", " ")
@@ -121,6 +125,55 @@ def question(name: str, args: dict[str, Any], *, called: str | None = None) -> s
     values = args.get("args") if isinstance(args.get("args"), dict) else {}
     action = text(args.get("action") or "do that").replace("_", " ")
     return f"Should I {action}: {', '.join(words(values))[:160]}?"
+
+
+def listed(things: list[str], most: int = 6) -> str:
+    """"eggs and oat milk"; "eggs, milk, bread and 3 more"."""
+    things = [text(t, 60) for t in things if str(t).strip()]
+    if not things:
+        return "nothing"
+    if len(things) > most:
+        return ", ".join(things[: most - 1]) + f" and {len(things) - most + 1} more"
+    return things[0] if len(things) == 1 else ", ".join(things[:-1]) + " and " + things[-1]
+
+
+def note_texts(args: dict[str, Any]) -> list[str]:
+    """What ``add_to_note`` would add, as the tool reads its arguments."""
+    from app.chat.tools.notes import _texts
+
+    return _texts(args)
+
+
+def _new_note(args: dict[str, Any]) -> str:
+    title = text(args.get("title") or "", 80)
+    items = [str(x) for x in args.get("items") or [] if str(x).strip()] if isinstance(args.get("items"), list) else []
+    if items:
+        return f"Make a list called {title} with {listed(items)}?" if title else f"Make a list with {listed(items)}?"
+    if title:
+        return f"Make a note called {title}?"
+    return f"Make a note saying: {text(args.get('text') or '', 120)}?"
+
+
+async def note_called(db, user: User, args: dict[str, Any]) -> tuple[str | None, str | None]:  # noqa: ANN001
+    """Which note ``add_to_note`` would change, named the way the person
+    knows it ("your Shopping note"), or why it can't. Looks only at notes
+    they can open; "shopping list" with no such note is Tasks' list."""
+    from app.chat.tools.base import ToolContext, ToolError
+    from app.chat.tools.notes import _resolve
+    from app.notes import shopping
+    from app.notes.service import display_title
+
+    ref = str(args.get("note") or "").strip()
+    if not note_texts(args):
+        return None, "there's nothing to add"
+    if shopping.means_shopping(ref) and await shopping.find_note(db, user) is None:
+        return f"the {shopping.TASKS_LIST} list in Tasks", None
+    ctx = ToolContext(db=db, user=user, conversation_id=uuid.uuid4(), user_message_id=uuid.uuid4(), turn={})
+    try:
+        note = await _resolve(ctx, ref)
+    except ToolError as e:
+        return None, str(e)
+    return f"your {text(display_title(note), 60)} note", None
 
 
 async def cant_use(db, user: User, args: dict[str, Any]) -> tuple[str | None, str | None]:  # noqa: ANN001
@@ -186,6 +239,9 @@ async def read_back(db, user: User, name: str, args: dict[str, Any]) -> tuple[st
     if name == "calendar_change_event":
         called, problem = await _event_title(db, user, args)
         return question(name, args, called=called), problem
+    if name == "add_to_note":
+        called, problem = await note_called(db, user, args)
+        return question(name, args, called=called), problem
     return question(name, args), None
 
 
@@ -199,7 +255,7 @@ _DONE = {
     "use_item": "Done.",
     # Held on a chat turn that read outside content (chat/holds.py).
     "post_to_room": "Sent.",
-    "create_note": "Made the note.",
+    "create_note": "Saved.",
     "add_to_note": "Added.",
     "tick_note_items": "Done.",
     "draft_form": "Made the draft form. It's in Forms for you to check and send.",

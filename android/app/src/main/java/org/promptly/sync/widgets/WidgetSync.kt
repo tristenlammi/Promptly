@@ -29,6 +29,9 @@ import java.util.concurrent.TimeUnit
  *  - every 30 minutes while there are widgets (`widgets-refresh`, needs network);
  *  - right after a change on a widget (a tick, a Quick task);
  *  - 2 minutes after a Promptly app is opened (you're back on the home screen by then);
+ *  - 5 seconds after any Promptly notification arrives (a reminder, an invite, a shared note);
+ *  - every 15 minutes while the phone is charging (`widgets-charging`: a phone on the
+ *    kitchen bench showing the Agenda and the shopping list);
  *  - after a reboot, a clock or time-zone change.
  * The no-network redraws (an event starting, midnight) are [Boundaries].
  */
@@ -53,25 +56,47 @@ class WidgetSync(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
     companion object {
         private const val PERIODIC = "widgets-refresh"
+        const val CHARGING = "widgets-charging"
+        /** How long after a notification: long enough for its change to be saved everywhere. */
+        const val AFTER_NOTIFICATION_MS = 5_000L
         private const val NOW = "widgets-now"
         private const val SOON = "widgets-soon"
         private const val TAG = "widgets"
 
         private fun network() = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
 
-        /** While any widget is on the home screen. */
+        /** While any widget is on the home screen: every 30 minutes, and every 15
+         *  while charging (the shortest WorkManager allows; free on a charger). */
         fun periodic(ctx: Context) {
-            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(
+            val wm = WorkManager.getInstance(ctx)
+            wm.enqueueUniquePeriodicWork(
                 PERIODIC, ExistingPeriodicWorkPolicy.KEEP,
                 PeriodicWorkRequestBuilder<WidgetSync>(30, TimeUnit.MINUTES, 10, TimeUnit.MINUTES)
                     .setConstraints(network()).addTag(TAG).build(),
+            )
+            wm.enqueueUniquePeriodicWork(
+                CHARGING, ExistingPeriodicWorkPolicy.KEEP,
+                PeriodicWorkRequestBuilder<WidgetSync>(15, TimeUnit.MINUTES)
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresCharging(true).build())
+                    .addTag(TAG).build(),
             )
         }
 
         fun cancel(ctx: Context) {
             val wm = WorkManager.getInstance(ctx)
             wm.cancelUniqueWork(PERIODIC)
+            wm.cancelUniqueWork(CHARGING)
             wm.cancelUniqueWork(SOON)
+        }
+
+        /** A Promptly notification arrived (Delegation in :suite tells [WidgetEvents]):
+         *  whatever it's about — a reminder, an invite, a note shared with you — shows
+         *  on the widgets a few seconds later. Nothing without widgets, or with them
+         *  turned off for this phone. */
+        fun notified(ctx: Context): Boolean {
+            if (!Widgets.placed(ctx) || WidgetsOff.get(ctx)) return false
+            now(ctx, AFTER_NOTIFICATION_MS)
+            return true
         }
 
         /** After a change made on a widget. [delayMs]: a tick waits out its moment of

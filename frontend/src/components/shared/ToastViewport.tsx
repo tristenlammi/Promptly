@@ -245,19 +245,27 @@ function ToastItem({ toast, leaving }: { toast: Toast; leaving: boolean }) {
           {toast.message}
         </div>
         {toast.action && (
-          <button
-            type="button"
-            onClick={() => {
-              toast.action!.onClick();
-              dismiss(toast.id);
-            }}
-            className={cn(
-              "mt-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
-              "bg-[var(--accent)]/10 text-[var(--accent-text)] hover:bg-[var(--accent)]/20",
+          <div className="flex flex-wrap gap-1.5">
+            {[toast.action, toast.secondary].map(
+              (a) =>
+                a && (
+                  <button
+                    key={a.label}
+                    type="button"
+                    onClick={() => {
+                      a.onClick();
+                      dismiss(toast.id);
+                    }}
+                    className={cn(
+                      "mt-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
+                      "bg-[var(--accent)]/10 text-[var(--accent-text)] hover:bg-[var(--accent)]/20",
+                    )}
+                  >
+                    {a.label}
+                  </button>
+                ),
             )}
-          >
-            {toast.action.label}
-          </button>
+          </div>
         )}
       </div>
       <button

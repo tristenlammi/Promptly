@@ -1,12 +1,14 @@
 /** The Notes API (``/api/notes``, ``backend/app/notes/router.py``). */
 import { apiClient } from "@/api/client";
 
-import type { AiAction, AiProposal, DocNode, Note, NoteItem, NoteKind, NoteLabel, NoteUser, NoteView, ProposedTask, ReminderIn } from "./types";
+import type { AiAction, AiProposal, DocNode, ListOpts, Note, NoteItem, NoteKind, NoteLabel, NoteUser, NoteView, ProposedTask, ReminderIn } from "./types";
 
 export interface Page {
   notes: Note[];
   next_cursor: string | null;
   users: Record<string, NoteUser>;
+  /** With words, first page: notes close in meaning that don't use them (AI search). */
+  related?: Note[];
 }
 
 export interface NewNote {
@@ -28,7 +30,7 @@ export interface NotePatch {
   body_doc?: DocNode | null;
   color?: string;
   kind?: NoteKind;
-  list_opts?: Record<string, boolean>;
+  list_opts?: ListOpts;
   /** An AI proposal being applied: the note as it was is kept as a version. */
   checkpoint?: "ai";
 }
@@ -58,13 +60,13 @@ export const notesApi = {
     const { data } = await apiClient.post<{ item: NoteItem }>(`/notes/${id}/items`, body);
     return data.item;
   },
-  async patchItem(id: string, itemId: string, body: { text?: string; checked?: boolean; parent_id?: string | null; position?: number }): Promise<void> {
+  async patchItem(id: string, itemId: string, body: { text?: string; checked?: boolean; parent_id?: string | null; position?: number; aisle?: string }): Promise<void> {
     await apiClient.patch(`/notes/${id}/items/${itemId}`, body);
   },
   async deleteItem(id: string, itemId: string): Promise<void> {
     await apiClient.delete(`/notes/${id}/items/${itemId}`);
   },
-  async itemsBulk(id: string, action: "untick_all" | "delete_ticked" | "sort"): Promise<void> {
+  async itemsBulk(id: string, action: "untick_all" | "delete_ticked" | "sort" | "sort_aisle"): Promise<void> {
     await apiClient.post(`/notes/${id}/items/bulk`, { action });
   },
   async me(id: string, body: { pinned?: boolean; archived?: boolean; position?: number; seen?: boolean }): Promise<void> {
@@ -134,6 +136,24 @@ export const notesApi = {
     const { data } = await apiClient.put<TranscriptionStatus>("/notes/admin/transcription", { on });
     return data;
   },
+  /** AI search over notes: the admin's switch and two totals. */
+  async aiSearch(): Promise<AiSearchStatus> {
+    const { data } = await apiClient.get<AiSearchStatus>("/notes/admin/ai-search");
+    return data;
+  },
+  async setAiSearch(on: boolean): Promise<AiSearchStatus> {
+    const { data } = await apiClient.put<AiSearchStatus>("/notes/admin/ai-search", { on });
+    return data;
+  },
+  /** Your own "Find notes by meaning". */
+  async mySearch(): Promise<MySearch> {
+    const { data } = await apiClient.get<MySearch>("/notes/settings/search");
+    return data;
+  },
+  async setMySearch(on: boolean): Promise<MySearch> {
+    const { data } = await apiClient.put<MySearch>("/notes/settings/search", { on });
+    return data;
+  },
   async versions(id: string): Promise<NoteVersionRow[]> {
     const { data } = await apiClient.get<{ versions: NoteVersionRow[] }>(`/notes/${id}/versions`);
     return data.versions;
@@ -160,6 +180,15 @@ export const notesApi = {
     const { data } = await apiClient.delete<{ note: Note }>(`/notes/${id}/to-document`);
     return data.note;
   },
+  /** Copy to a workspace (N2.6): where you can add a page. */
+  async workspaceTargets(): Promise<WorkspaceTarget[]> {
+    const { data } = await apiClient.get<{ workspaces: WorkspaceTarget[] }>("/notes/to-workspace/targets");
+    return data.workspaces;
+  },
+  async toWorkspace(id: string, workspaceId: string, parentId: string | null): Promise<{ workspace: string; href: string; item_id: string; title: string }> {
+    const { data } = await apiClient.post(`/notes/${id}/to-workspace`, { workspace_id: workspaceId, parent_id: parentId });
+    return data;
+  },
   async taskLists(): Promise<{ available: boolean; lists: { id: string; name: string; color?: string | null }[] }> {
     const { data } = await apiClient.get("/notes/to-tasks/lists");
     return data;
@@ -178,7 +207,7 @@ export const notesApi = {
 export interface NoteVersionRow {
   id: string;
   revision: number;
-  reason: "edit" | "restore" | "ai";
+  reason: "edit" | "restore" | "ai" | "send";
   made_by: string | null;
   created_at: string;
   title: string;
@@ -207,4 +236,31 @@ export interface TranscriptionStatus {
   backend: "local" | "openai";
   choice: boolean | null;
   ready: boolean;
+}
+
+/** The admin's switch for finding notes by meaning (two totals, nobody's notes). */
+export interface AiSearchStatus {
+  ready: boolean;
+  on: boolean;
+  local: boolean;
+  provider: string;
+  model: string;
+  indexed: number;
+  total: number;
+}
+
+/** Your own "Find notes by meaning"; ``available`` is the server's switch. */
+export interface MySearch {
+  available: boolean;
+  on: boolean;
+  local: boolean;
+  provider: string;
+}
+
+/** A workspace a note can be copied into (you're its owner, an admin or an editor). */
+export interface WorkspaceTarget {
+  id: string;
+  title: string;
+  role: string;
+  notebooks: { id: string; title: string }[];
 }
