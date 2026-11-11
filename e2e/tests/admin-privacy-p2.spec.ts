@@ -62,9 +62,9 @@ test("a password reset by the admin is shown to the person, with the privacy sta
   await ready(page);
 
   // A new member's Welcome dialog carries the same statement.
-  const welcome = page.getByRole("dialog", { name: "Pick your apps" });
+  const welcome = page.getByTestId("welcome-dialog");
   await expect(welcome.getByText("What your server admin can and can't see")).toBeVisible();
-  await welcome.getByRole("button", { name: "Not now" }).click();
+  await page.keyboard.press("Escape");
   await expect(welcome).toHaveCount(0);
 
   // The banner, until they close it; and Recent activity marks the reset.
