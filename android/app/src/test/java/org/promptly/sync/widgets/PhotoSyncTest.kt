@@ -44,6 +44,12 @@ class PhotoSyncTest {
         var failDownload: (String) -> Exception? = { null }
         var failAlbum: Exception? = null
 
+        /** Where the subject is in each photo; an older server ([old]) doesn't say. */
+        var focus = mutableMapOf<String, JSONObject>()
+        var old = false
+
+        private fun about(id: String) = JSONObject().put("id", id).also { if (!old) it.put("focus", focus[id] ?: JSONObject.NULL) }
+
         override fun snapshot(want: List<String>, days: Int, someday: Boolean, etags: Map<String, String>, noteIds: List<String>) = JSONObject()
         override fun send(op: Op) = JSONObject()
 
@@ -55,7 +61,8 @@ class PhotoSyncTest {
             val picked = (inAlbum.filter { it !in have } + inAlbum.filter { it in have }).take(n)
             return JSONObject()
                 .put("album", JSONObject().put("id", albumId).put("title", title).put("count", inAlbum.size))
-                .put("photos", JSONArray(picked.map { JSONObject().put("id", it).put("url", "/m/$it").put("thumb", "/m/t-$it") }))
+                .put("photos", JSONArray(picked.map { about(it).put("url", "/m/$it").put("thumb", "/m/t-$it") }))
+                .also { if (!old) it.put("held", JSONArray(have.filter { h -> h in inAlbum }.map { h -> about(h) })) }
                 .put("gone", JSONArray(have.filter { it !in inAlbum }))
         }
 
@@ -155,6 +162,57 @@ class PhotoSyncTest {
         assertEquals(emptyList<String>(), ids())
         val meta = PhotoCache.meta(ctx, album)!!
         assertEquals(PhotoCache.GONE, meta.state); assertEquals("Biscuit", meta.title)
+    }
+
+    private fun box(x: Double, y: Double, w: Double, h: Double) = JSONObject().put("x", x).put("y", y).put("w", w).put("h", h)
+
+    @Test
+    fun where_the_subject_is_comes_with_the_photo_and_is_kept_beside_it() {
+        val api = Fake(listOf("a", "b"))
+        api.focus["a"] = box(0.55, 0.1, 0.45, 0.85)
+        sync(api, 1_000)
+        val f = PhotoCache.focus(ctx, album, "a")!!
+        assertEquals(0.55f, f.left, 1e-4f); assertEquals(0.1f, f.top, 1e-4f); assertEquals(1f, f.right, 1e-4f); assertEquals(0.95f, f.bottom, 1e-4f)
+        // No one in it: none, and the crop is the middle as before.
+        assertNull(PhotoCache.focus(ctx, album, "b"))
+        // Still only two photos saved: what's kept beside them isn't counted as one.
+        assertEquals(listOf("a", "b"), ids())
+
+        // Found later (or moved by an edit): it follows, with no picture downloaded again.
+        api.focus["b"] = box(0.1, 0.2, 0.3, 0.4)
+        api.focus["a"] = box(0.0, 0.0, 0.5, 0.5)
+        val before = api.downloads.size
+        sync(api, 2_000)
+        assertEquals(before, api.downloads.size)
+        assertEquals(0.4f, PhotoCache.focus(ctx, album, "b")!!.right, 1e-4f)
+        assertEquals(0.5f, PhotoCache.focus(ctx, album, "a")!!.right, 1e-4f)
+        // ... and goes when the server no longer knows of anyone there.
+        api.focus.remove("a")
+        sync(api, 3_000)
+        assertNull(PhotoCache.focus(ctx, album, "a"))
+
+        // It leaves with its photo.
+        api.inAlbum = listOf("a")
+        sync(api, 4_000)
+        assertEquals(listOf("a"), ids())
+        assertNull(PhotoCache.focus(ctx, album, "b"))
+        assertEquals(listOf("a.jpg", "album.json"), PhotoCache.file(ctx, album, "a").parentFile!!.list()!!.sorted())
+    }
+
+    @Test
+    fun an_older_server_says_nothing_and_nothing_changes() {
+        val api = Fake(listOf("a", "b")).apply { old = true }
+        sync(api, 1_000)
+        assertEquals(listOf("a", "b"), ids())
+        assertNull(PhotoCache.focus(ctx, album, "a"))
+        // What a newer server said before isn't thrown away by an older one's silence.
+        api.old = false
+        api.focus["a"] = box(0.2, 0.2, 0.2, 0.2)
+        sync(api, 2_000)
+        assertEquals(0.4f, PhotoCache.focus(ctx, album, "a")!!.right, 1e-4f)
+        api.old = true
+        sync(api, 3_000)
+        assertEquals(0.4f, PhotoCache.focus(ctx, album, "a")!!.right, 1e-4f)
     }
 
     @Test

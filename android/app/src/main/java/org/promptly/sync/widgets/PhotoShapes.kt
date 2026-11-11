@@ -168,20 +168,148 @@ object PhotoShapes {
         return abs(sum / 2).toFloat()
     }
 
-    /** The part of a [srcW]×[srcH] photo that fills [dstW]×[dstH] with nothing left over (centre crop): left, top, right, bottom. */
-    fun cover(srcW: Int, srcH: Int, dstW: Int, dstH: Int): IntArray {
+    /**
+     * Where the people and pets are in a photo, as shares (0–1) of its width
+     * and height — from the server, which already knows. The crop is made
+     * round it.
+     */
+    class Focus(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+        companion object {
+            /** From the server's x, y, width, height; null when it isn't a box inside the photo. */
+            fun of(x: Double, y: Double, w: Double, h: Double): Focus? {
+                if (listOf(x, y, w, h).any { it.isNaN() || it.isInfinite() } || w <= 0.0 || h <= 0.0) return null
+                val l = x.coerceIn(0.0, 1.0)
+                val t = y.coerceIn(0.0, 1.0)
+                val r = (x + w).coerceIn(0.0, 1.0)
+                val b = (y + h).coerceIn(0.0, 1.0)
+                return if (r <= l || b <= t) null else Focus(l.toFloat(), t.toFloat(), r.toFloat(), b.toFloat())
+            }
+        }
+    }
+
+    /**
+     * The part of a [srcW]×[srcH] photo that fills [dstW]×[dstH] with nothing
+     * left over: left, top, right, bottom. It keeps the box's proportions and
+     * uses one side of the photo whole. With a [focus] it sits with the
+     * subject in its middle (as near as the photo's edges allow), so the
+     * subject is all in when it fits; with none it's the middle of the photo.
+     */
+    fun cover(srcW: Int, srcH: Int, dstW: Int, dstH: Int, focus: Focus? = null): IntArray {
         if (srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return intArrayOf(0, 0, max(srcW, 0), max(srcH, 0))
         // Compare the two shapes without dividing: src wider than dst → trim the sides.
         return if (srcW.toLong() * dstH > dstW.toLong() * srcH) {
             val cw = (srcH.toLong() * dstW / dstH).toInt().coerceIn(1, srcW)
-            val l = (srcW - cw) / 2
+            val l = if (focus == null) (srcW - cw) / 2 else start(srcW, cw, focus.left, focus.right)
             intArrayOf(l, 0, l + cw, srcH)
         } else {
             val ch = (srcW.toLong() * dstH / dstW).toInt().coerceIn(1, srcH)
             // People's faces sit above the middle more often than below: keep a little more of the top.
-            val t = ((srcH - ch) * 0.4f).roundToInt()
+            val t = if (focus == null) ((srcH - ch) * 0.4f).roundToInt() else start(srcH, ch, focus.top, focus.bottom)
             intArrayOf(0, t, srcW, t + ch)
         }
+    }
+
+    /** Where a [part]-long window starts on a [full]-long side so the stretch [from]–[to] (0–1) is in its middle, kept on the side. */
+    private fun start(full: Int, part: Int, from: Float, to: Float): Int =
+        ((from + to) / 2f * full - part / 2f).roundToInt().coerceIn(0, full - part)
+
+    /**
+     * How well a photo suits a box, 0–1: the share of the photo the crop
+     * keeps — or, when the subject is known and nearly all of it is kept,
+     * that (a wide photo with one person in it is fine in a tall widget; a
+     * wide view with no one in it isn't).
+     */
+    fun suits(srcW: Int, srcH: Int, dstW: Int, dstH: Int, focus: Focus? = null): Float {
+        if (srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return 1f
+        val c = cover(srcW, srcH, dstW, dstH, focus)
+        val kept = (c[2] - c[0]).toFloat() * (c[3] - c[1]) / (srcW.toFloat() * srcH)
+        if (focus == null) return kept
+        val l = focus.left * srcW
+        val t = focus.top * srcH
+        val r = focus.right * srcW
+        val b = focus.bottom * srcH
+        val area = (r - l) * (b - t)
+        if (area <= 0f) return kept
+        val inside = (min(r, c[2].toFloat()) - max(l, c[0].toFloat())).coerceAtLeast(0f) * (min(b, c[3].toFloat()) - max(t, c[1].toFloat())).coerceAtLeast(0f)
+        return max(kept, inside / area - (1f - SUBJECT))
+    }
+
+    /** With this much of the subject in the crop, the photo suits the box however much else is lost. */
+    private const val SUBJECT = 0.75f
+
+    /** A [srcW]×[srcH] picture as big as it goes inside [box], whole, in the middle. */
+    fun contain(srcW: Int, srcH: Int, box: Box): Box {
+        if (srcW <= 0 || srcH <= 0 || box.width <= 0f || box.height <= 0f) return box
+        val k = min(box.width / srcW, box.height / srcH)
+        val w = srcW * k
+        val h = srcH * k
+        val l = box.left + (box.width - w) / 2f
+        val t = box.top + (box.height - h) / 2f
+        return Box(l, t, l + w, t + h)
+    }
+
+    /**
+     * Where a whole [srcW]×[srcH] photo goes in a [w]×[h] widget of this
+     * shape so none of it is cut off: the biggest rectangle of the photo's
+     * proportions that sits inside the outline (found by trying — every shape
+     * is even left to right, so it's in the middle across and anywhere up and
+     * down). Rounded is all but a rectangle already: the photo fills its box
+     * one way and only loses the tips of its corners, as any rounded picture.
+     */
+    fun inside(shape: PhotoShape, w: Float, h: Float, srcW: Int, srcH: Int): Box {
+        val b = box(shape, w, h)
+        if (shape == PhotoShape.ROUNDED || srcW <= 0 || srcH <= 0 || b.width <= 0f || b.height <= 0f) return contain(srcW, srcH, b)
+        val pts = outline(shape, w, h)
+        val cx = (b.left + b.right) / 2f
+        val tall = srcH.toFloat() / srcW
+        var best = 0f
+        var bestY = (b.top + b.bottom) / 2f
+        for (i in 1 until TRIES) {
+            val cy = b.top + b.height * i / TRIES
+            var lo = best
+            var hi = min(b.width / 2f, min(cy - b.top, b.bottom - cy) / tall)
+            if (hi <= best || !within(pts, cx, cy, best, best * tall)) continue
+            repeat(14) {
+                val mid = (lo + hi) / 2f
+                if (within(pts, cx, cy, mid, mid * tall)) lo = mid else hi = mid
+            }
+            if (lo > best) {
+                best = lo
+                bestY = cy
+            }
+        }
+        if (best < 1f) return contain(srcW, srcH, b)
+        return Box(cx - best, bestY - best * tall, cx + best, bestY + best * tall)
+    }
+
+    private const val TRIES = 40
+    private const val ALONG = 8
+
+    /** Is the rectangle of half-width [hw] and half-height [hh] round ([cx], [cy]) inside the outline? (Points along its edges are.) */
+    private fun within(pts: FloatArray, cx: Float, cy: Float, hw: Float, hh: Float): Boolean {
+        for (i in 0..ALONG) {
+            val f = i.toFloat() / ALONG
+            val x = cx - hw + 2 * hw * f
+            val y = cy - hh + 2 * hh * f
+            if (!holds(pts, x, cy - hh) || !holds(pts, x, cy + hh) || !holds(pts, cx - hw, y) || !holds(pts, cx + hw, y)) return false
+        }
+        return true
+    }
+
+    /** Is the point inside the outline? (Even–odd.) */
+    fun holds(pts: FloatArray, x: Float, y: Float): Boolean {
+        var inside = false
+        val n = pts.size / 2
+        var j = n - 1
+        for (i in 0 until n) {
+            val xi = pts[i * 2]
+            val yi = pts[i * 2 + 1]
+            val xj = pts[j * 2]
+            val yj = pts[j * 2 + 1]
+            if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside
+            j = i
+        }
+        return inside
     }
 
     /**
@@ -220,6 +348,25 @@ object PhotoPick {
         val fresh = others.filter { it !in recent }
         return (fresh.ifEmpty { others }).random(random)
     }
+
+    /**
+     * The photos to choose from for a box of some shape: the ones that suit
+     * it ([score], 0–1: how much the crop keeps), so a wide view doesn't go
+     * in a tall widget while others would fit. Never fewer than [MIN_POOL]
+     * (the best of what there is), so the widget still changes.
+     */
+    fun suited(ids: List<String>, score: (String) -> Float): List<String> {
+        if (ids.size <= MIN_POOL) return ids
+        val scored = ids.map { it to score(it) }
+        val good = scored.filter { it.second >= SUITS }
+        if (good.size >= MIN_POOL) return good.map { it.first }
+        val best = scored.sortedByDescending { it.second }.take(MIN_POOL).map { it.first }.toSet()
+        return ids.filter { it in best }
+    }
+
+    /** A photo suits a box when the crop keeps at least this share of it (or nearly all of its subject). */
+    const val SUITS = 0.5f
+    const val MIN_POOL = 3
 
     /** [recent] with [shown] added, kept shorter than the number of photos so there's always one to go to. */
     fun remember(recent: List<String>, shown: String, photos: Int): List<String> =

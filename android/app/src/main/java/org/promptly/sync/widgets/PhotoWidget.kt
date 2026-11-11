@@ -11,6 +11,7 @@ import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.net.Uri
@@ -56,6 +57,7 @@ import androidx.glance.state.GlanceStateDefinition
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.Text
 import androidx.glance.text.TextAlign
+import org.json.JSONArray
 import org.json.JSONObject
 import org.promptly.sync.R
 import org.promptly.sync.Refused
@@ -71,7 +73,9 @@ import kotlin.math.roundToInt
  *    (files/widgets/photos/<album>/), so it works with no signal and never
  *    holds a big picture. Wiped with the rest of the widgets' copy.
  *  - PhotoSync: tops the cache up from /api/widgets/photos (part of WidgetSync).
- *  - PhotoRender: cuts a saved photo to the shape at the widget's size.
+ *  - PhotoRender: cuts a saved photo to the shape at the widget's size —
+ *    cropped round the people and pets in it (the server says where; kept
+ *    beside the saved photo), or shown whole if that's what you chose.
  *  - PhotoWidget: draws it; which photo is showing is the widget's own state,
  *    so several widgets each keep their own album, shape and photo.
  */
@@ -118,7 +122,39 @@ object PhotoCache {
         }
     }
 
-    fun delete(ctx: Context, album: String, ids: Collection<String>) = ids.forEach { file(ctx, album, it).delete() }
+    fun delete(ctx: Context, album: String, ids: Collection<String>) = ids.forEach {
+        file(ctx, album, it).delete()
+        focusFile(ctx, album, it).delete()
+    }
+
+    /** Where a saved photo's subject is, kept beside it (so the crop is right with no signal). */
+    private fun focusFile(ctx: Context, album: String, id: String) = File(dir(ctx, album), WidgetApi.seg(id) + ".focus")
+
+    fun focus(ctx: Context, album: String, id: String): PhotoShapes.Focus? = runCatching {
+        val a = JSONArray(focusFile(ctx, album, id).readText())
+        PhotoShapes.Focus.of(a.getDouble(0), a.getDouble(1), a.getDouble(2), a.getDouble(3))
+    }.getOrNull()
+
+    /** [box]: the server's `{x, y, w, h}` for the photo, or null when it knows of no one in it. */
+    fun setFocus(ctx: Context, album: String, id: String, box: JSONObject?) {
+        val f = focusFile(ctx, album, id)
+        val ok = box != null && PhotoShapes.Focus.of(box.optDouble("x"), box.optDouble("y"), box.optDouble("w"), box.optDouble("h")) != null
+        if (!ok) {
+            f.delete()
+            return
+        }
+        runCatching {
+            f.parentFile?.mkdirs()
+            f.writeText(JSONArray().put(box!!.optDouble("x")).put(box.optDouble("y")).put(box.optDouble("w")).put(box.optDouble("h")).toString())
+        }
+    }
+
+    /** A saved photo's width and height, without reading the picture. */
+    fun size(ctx: Context, album: String, id: String): Pair<Int, Int>? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file(ctx, album, id).path, bounds)
+        return if (bounds.outWidth > 0 && bounds.outHeight > 0) bounds.outWidth to bounds.outHeight else null
+    }
 
     /** Forget the album's photos (it's empty now, or gone). */
     fun clear(ctx: Context, album: String) = delete(ctx, album, ids(ctx, album))
@@ -219,10 +255,19 @@ object PhotoSync {
                     val url = p.optString("url")
                     if (id.isBlank() || url.isBlank() || id in have) continue
                     try {
-                        save(api.download(url, MAX_BYTES), PhotoCache.file(ctx, album, id))
+                        if (save(api.download(url, MAX_BYTES), PhotoCache.file(ctx, album, id))) PhotoCache.setFocus(ctx, album, id, p.optJSONObject("focus"))
                     } catch (e: Refused) {
                         // This one picture can't be had (too big, its link ran out): the rest still can.
                     }
+                }
+            }
+            // Ones it holds already: where their subject is, as the server knows it now
+            // (found since they were saved, or moved by an edit). An older server says nothing.
+            answer.optJSONArray("held")?.let { held ->
+                for (i in 0 until held.length()) {
+                    val h = held.optJSONObject(i) ?: continue
+                    val id = h.optString("id")
+                    if (id in have && h.has("focus")) PhotoCache.setFocus(ctx, album, id, h.optJSONObject("focus"))
                 }
             }
             PhotoCache.delete(ctx, album, PhotoPick.trim(PhotoCache.saved(ctx, album), PhotoCache.KEEP, showing))
@@ -260,22 +305,111 @@ object PhotoRender {
         BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = PhotoShapes.sample(bounds.outWidth, bounds.outHeight, max(fw, fh)) })
     }.getOrNull()
 
-    /** [src] cropped to fill the shape and cut to it, see-through outside, for a widget of [w]×[h] pixels. */
-    fun cut(src: Bitmap, shape: PhotoShape, w: Int, h: Int): Bitmap {
+    /**
+     * [src] cut to the shape, see-through outside, for a widget of [w]×[h]
+     * pixels. It fills the shape, cropped round [focus] (the people and pets
+     * in it; the middle when there's none) — or, with [whole], all of it is
+     * shown inside the shape with a soft, dimmed copy of itself behind.
+     */
+    fun cut(src: Bitmap, shape: PhotoShape, w: Int, h: Int, focus: PhotoShapes.Focus? = null, whole: Boolean = false): Bitmap {
         val (fw, fh) = PhotoShapes.fit(w, h, MAX_PIXELS)
         val out = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
         val box = PhotoShapes.box(shape, fw.toFloat(), fh.toFloat())
-        val crop = PhotoShapes.cover(src.width, src.height, max(box.width.roundToInt(), 1), max(box.height.roundToInt(), 1))
-        val shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-        shader.setLocalMatrix(Matrix().apply {
-            setRectToRect(
-                RectF(crop[0].toFloat(), crop[1].toFloat(), crop[2].toFloat(), crop[3].toFloat()),
-                RectF(box.left, box.top, box.right, box.bottom), Matrix.ScaleToFit.FILL,
-            )
-        })
+        val to = RectF(box.left, box.top, box.right, box.bottom)
+        val bw = max(box.width.roundToInt(), 1)
+        val bh = max(box.height.roundToInt(), 1)
+        val fill = if (whole) wholeIn(src, shape, fw, fh, focus) else null
+        val from = fill ?: src
+        val shader = BitmapShader(from, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        if (fill == null) {
+            val crop = PhotoShapes.cover(src.width, src.height, bw, bh, focus)
+            shader.setLocalMatrix(Matrix().apply {
+                setRectToRect(RectF(crop[0].toFloat(), crop[1].toFloat(), crop[2].toFloat(), crop[3].toFloat()), to, Matrix.ScaleToFit.FILL)
+            })
+        }
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { this.shader = shader }
         Canvas(out).drawPath(path(shape, fw.toFloat(), fh.toFloat()), paint)
+        fill?.recycle()
         return out
+    }
+
+    /** A small, blurred copy of [src] (its own picture: [src] is left as it is). */
+    private fun soft(src: Bitmap): Bitmap {
+        val k = BLUR_EDGE.toFloat() / max(src.width, src.height)
+        val w = max((src.width * k).roundToInt(), 2)
+        val h = max((src.height * k).roundToInt(), 2)
+        // Down by halves: one big step skips most of the photo's pixels.
+        var step = src
+        while (step.width / 2 >= w * 2 && step.height / 2 >= h * 2) {
+            val half = Bitmap.createScaledBitmap(step, step.width / 2, step.height / 2, true)
+            if (step !== src) step.recycle()
+            step = half
+        }
+        val small = Bitmap.createScaledBitmap(step, w, h, true).copy(Bitmap.Config.ARGB_8888, true)
+        if (step !== src) step.recycle()
+        val px = IntArray(w * h)
+        small.getPixels(px, 0, w, 0, 0, w, h)
+        val tmp = IntArray(w * h)
+        repeat(3) {
+            smear(px, tmp, w, h, across = true)
+            smear(tmp, px, w, h, across = false)
+        }
+        small.setPixels(px, 0, w, 0, 0, w, h)
+        return small
+    }
+
+    /** One pass of the blur: each pixel becomes the average of its neighbours along a row (or down a column). */
+    private fun smear(from: IntArray, to: IntArray, w: Int, h: Int, across: Boolean) {
+        val lines = if (across) h else w
+        val len = if (across) w else h
+        for (line in 0 until lines) for (i in 0 until len) {
+            var r = 0
+            var g = 0
+            var b = 0
+            for (d in -BLUR_REACH..BLUR_REACH) {
+                val j = (i + d).coerceIn(0, len - 1)
+                val c = from[if (across) line * w + j else j * w + line]
+                r += (c shr 16) and 0xFF
+                g += (c shr 8) and 0xFF
+                b += c and 0xFF
+            }
+            val n = 2 * BLUR_REACH + 1
+            to[if (across) line * w + i else i * w + line] = (0xFF shl 24) or ((r / n) shl 16) or ((g / n) shl 8) or (b / n)
+        }
+    }
+
+    /** The blurred copy's long edge: it's blurred this small, then stretched. */
+    private const val BLUR_EDGE = 48
+
+    /** How far each of the three passes of the blur reaches, in the small copy's pixels. */
+    private const val BLUR_REACH = 2
+
+    /** How much darker the copy behind is (0–255 of black over it). */
+    private const val DIM = 0x66
+
+    /**
+     * The whole widget as a plain rectangle, before the shape is cut: the
+     * photo, all of it, where it fits inside the shape; behind it the same
+     * photo filling the shape's box, blurred and dimmed.
+     */
+    private fun wholeIn(src: Bitmap, shape: PhotoShape, fw: Int, fh: Int, focus: PhotoShapes.Focus?): Bitmap {
+        val layer = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
+        val c = Canvas(layer)
+        val smooth = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val box = PhotoShapes.box(shape, fw.toFloat(), fh.toFloat())
+        val to = RectF(box.left, box.top, box.right, box.bottom)
+        val at = PhotoShapes.inside(shape, fw.toFloat(), fh.toFloat(), src.width, src.height)
+        val photo = RectF(at.left, at.top, at.right, at.bottom)
+        // Nothing shows behind a photo that fills its box already.
+        if (photo.width() < to.width() - 1f || photo.height() < to.height() - 1f || shape != PhotoShape.ROUNDED) {
+            val soft = soft(src)
+            val crop = PhotoShapes.cover(soft.width, soft.height, max(to.width().roundToInt(), 1), max(to.height().roundToInt(), 1), focus)
+            c.drawBitmap(soft, Rect(crop[0], crop[1], crop[2], crop[3]), to, smooth)
+            c.drawColor(DIM shl 24)
+            soft.recycle()
+        }
+        c.drawBitmap(src, null, photo, smooth)
+        return layer
     }
 
     /** A made-up picture (a sunset over hills) for the widget picker — never anyone's photo. */
@@ -345,10 +479,15 @@ class PhotoWidget : GlanceAppWidget() {
         val ALBUM_ID = stringPreferencesKey("album_id")
         val ALBUM_TITLE = stringPreferencesKey("album_title")
         val SHAPE = stringPreferencesKey("shape")
+        val FIT = stringPreferencesKey("fit")
         val TAP = stringPreferencesKey("tap")
         val CURRENT = stringPreferencesKey("photo_id")
         val RECENT = stringPreferencesKey("recent")
         val SHOWN_AT = longPreferencesKey("shown_at")
+
+        /** Fill the shape (cropped round the subject), or show the whole photo inside it. */
+        const val FIT_FILL = "fill"
+        const val FIT_WHOLE = "whole"
 
         const val TAP_NEXT = "next"
         const val TAP_OPEN = "open"
@@ -377,7 +516,7 @@ class PhotoWidget : GlanceAppWidget() {
             // The one chosen for now; before the first choice (or if it was let go), any saved one.
             val id = prefs[CURRENT]?.takeIf { it in ids } ?: ids.firstOrNull() ?: return PhotoView.Waiting(title)
             val src = PhotoRender.load(PhotoCache.file(ctx, album, id), w, h) ?: return PhotoView.Waiting(title)
-            val cut = PhotoRender.cut(src, PhotoShape.of(prefs[SHAPE]), w, h)
+            val cut = PhotoRender.cut(src, PhotoShape.of(prefs[SHAPE]), w, h, PhotoCache.focus(ctx, album, id), whole = prefs[FIT] == FIT_WHOLE)
             src.recycle()
             return PhotoView.Showing(cut, title, album, tapNext = prefs[TAP] != TAP_OPEN)
         }
@@ -399,15 +538,44 @@ class PhotoWidget : GlanceAppWidget() {
             if (ids.isEmpty()) return false
             val current = prefs[CURRENT]
             val recent = prefs[RECENT].orEmpty().split(',').filter { it.isNotBlank() }
-            val next = PhotoPick.next(ids, current, recent) ?: return false
+            // Ones that suit this widget's shape, while there are enough of them.
+            val pool = suited(ctx, album, ids, box(ctx, id, prefs))
+            val next = PhotoPick.next(pool, current, recent) ?: return false
             updateAppWidgetState(ctx, PreferencesGlanceStateDefinition, id) { p ->
                 p.toMutablePreferences().apply {
                     this[CURRENT] = next
                     this[SHOWN_AT] = now
-                    this[RECENT] = PhotoPick.remember(recent, next, ids.size).joinToString(",")
+                    this[RECENT] = PhotoPick.remember(recent, next, pool.size).joinToString(",")
                 }
             }
             return next != current
+        }
+
+        /** The saved photos that suit a box of [box]'s proportions (all of them when it isn't known). */
+        fun suited(ctx: Context, album: String, ids: List<String>, box: Pair<Int, Int>?): List<String> {
+            val (bw, bh) = box ?: return ids
+            return PhotoPick.suited(ids) { id ->
+                val (pw, ph) = PhotoCache.size(ctx, album, id) ?: return@suited 1f
+                PhotoShapes.suits(pw, ph, bw, bh, PhotoCache.focus(ctx, album, id))
+            }
+        }
+
+        /**
+         * The proportions of the box this widget crops photos to: a square
+         * for the shapes that keep theirs, the widget's own size for the ones
+         * that fill it. Null when nothing is cropped (whole photos) or the
+         * home screen hasn't said how big the widget is.
+         */
+        private suspend fun box(ctx: Context, id: GlanceId, prefs: Preferences): Pair<Int, Int>? {
+            if (prefs[FIT] == FIT_WHOLE) return null
+            if (!PhotoShape.of(prefs[SHAPE]).fills) return 1 to 1
+            val sizes = runCatching { GlanceAppWidgetManager(ctx).getAppWidgetSizes(id) }.getOrDefault(emptyList())
+            // The home screen gives the size upright and on its side: the narrower is upright.
+            val landscape = ctx.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            val size = (if (landscape) sizes.maxByOrNull { it.width.value } else sizes.minByOrNull { it.width.value }) ?: return null
+            val w = size.width.value.roundToInt()
+            val h = size.height.value.roundToInt()
+            return if (w > 0 && h > 0) w to h else null
         }
 
         /**

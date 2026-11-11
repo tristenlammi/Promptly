@@ -64,6 +64,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - "Send that to my phone": Talk sends the email, place, note or event you were talking about to your phone as a notification, titled "From Talk". In the car, when an answer had to be cut short, the details go to your phone by themselves (at most three a drive). Account → Notifications has a "Sent from Talk" switch.
 - Read me my day: a button on Today, or say "read me my day" or "brief me" in Talk. About 45 seconds: the weather, today's events and when to leave for the first one, tasks due, bills due, birthdays, and unread email (left out in the car). Choose what it reads in Account → Voice. The weather comes from Open-Meteo using your Home place rounded to about 10 km; admins can turn it off in Admin → Talk.
 - Headsets and Bluetooth on Android: Talk uses your earbuds' microphone when they're connected, moves to the phone if they disconnect without ending the conversation, works with older Android 10 and 11 Bluetooth headsets, says so when your earbuds have no microphone, and never uses the car's Bluetooth while Android Auto is connected. A headset's or car's voice button opens Talk; Account → Voice can let it start on a locked phone (off by default; email, files, photos and your timeline still need an unlock).
+- Photo widget: a "Whole photo" choice in its settings, beside the shape. The entire picture is shown inside the shape with a soft, dimmed copy of itself behind, instead of being cropped to fill it. Needs the next Android build.
+- Photo widget: when it picks the next photo it prefers ones that suit the widget's shape (a wide view is left out of a tall widget while enough others fit), still giving every photo a turn. Needs the next Android build.
 
 ### Changed
 
@@ -87,6 +89,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Calls: the calls service's config uses LiveKit's current name for the metrics port setting, so its log no longer warns that `prometheus_port` is deprecated.
 - Mail: a reply you send now shows in its conversation straight away ("Sending…", then sent), instead of only after Sent was next checked, and a reply that couldn't go says so there with Try again. Replies sent from another mail app show within seconds, and an answer that arrives before your reply (such as an out-of-office) no longer ends up in a conversation of its own. Replies and forwards always go from the mailbox the email is in.
 - Passwords: a bookmark added, changed or deleted in one browser now shows in your other browsers in a second or two instead of up to a minute or more. The extension sends a change about a second after it's made, the server tells your other unlocked browsers to fetch it over a new live connection (`/api/passwords/live`, which carries only "this vault changed", never your data), and the minute's background sync no longer keeps getting pushed back. Passwords and other vault changes made elsewhere arrive just as fast. Needs the new server and a new extension version.
+- Photo widget: photos are cropped round the people and pets in them, not round the middle, so a subject at the side of a photo is no longer cut off. The server sends where they are (from faces and animals Photos has already found; nothing new is scanned) and the phone keeps it with the saved photo. Photos with no one found are cropped as before. Needs the next Android build.
+- Photo widget: the size sent for an edited photo is now the edited picture's, not the original's.
 
 ### Removed
 
