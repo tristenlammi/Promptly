@@ -118,6 +118,10 @@ ADMIN_ROUTES: dict[str, str] = {
     "PUT /api/mail/admin/ai-search": "config",
     "GET /api/notes/admin/transcription": "config",
     "PUT /api/notes/admin/transcription": "config",
+    # The switch for finding notes by meaning, plus two server-wide totals (notes
+    # indexed / notes in all): no note, title or per-person count.
+    "GET /api/notes/admin/ai-search": "config",
+    "PUT /api/notes/admin/ai-search": "config",
     "GET /api/passwords/admin/breach-watch": "config",
     "PUT /api/passwords/admin/breach-watch": "config",
     "GET /api/passwords/admin/policy": "config",
