@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- At-a-glance widget: Quick add. Refreshed by WorkManager (widgets-refresh), not by updatePeriodMillis. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/wg_quick_add_description"
+    android:minWidth="180dp"
+    android:minHeight="60dp"
+    android:minResizeWidth="60dp"
+    android:minResizeHeight="60dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/glance_default_loading_layout" />

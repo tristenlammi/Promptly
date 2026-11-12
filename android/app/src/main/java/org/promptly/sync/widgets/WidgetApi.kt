@@ -52,6 +52,15 @@ interface WidgetBackend {
 
     /** A picture's bytes from one of the server's own short-lived links; nothing over [max] bytes. */
     fun download(url: String, max: Long): ByteArray = throw IOException("This phone can't get pictures.")
+
+    /** The at-a-glance widgets' sections (`/api/widgets/glance`). */
+    fun glance(want: List<String>): JSONObject = JSONObject()
+
+    /** People for the Favourite people widget's settings. */
+    fun people(q: String): List<JSONObject> = emptyList()
+
+    /** "Read me my day": `{script, sections}`. */
+    fun briefing(): JSONObject = JSONObject()
 }
 
 /** An album to choose from. */
@@ -136,6 +145,18 @@ class WidgetApi(private val account: Store.Account) : WidgetBackend {
             Snapshot.note(j).copy(left = j.optInt("left", 0))
         }
     }
+
+    override fun glance(want: List<String>): JSONObject {
+        val url = "${account.server}/api/widgets/glance".toHttpUrl().newBuilder().addQueryParameter("want", want.joinToString(",")).build()
+        return call(Request.Builder().url(url).auth().get().build())
+    }
+
+    override fun people(q: String): List<JSONObject> {
+        val url = "${account.server}/api/widgets/people".toHttpUrl().newBuilder().addQueryParameter("q", q).build()
+        return call(Request.Builder().url(url).auth().get().build()).optJSONArray("people").objects()
+    }
+
+    override fun briefing(): JSONObject = call(Request.Builder().url("${account.server}/api/widgets/briefing").auth().get().build())
 
     override fun albums(): List<PhotoAlbum> {
         val arr = call(Request.Builder().url("${account.server}/api/widgets/photos/albums").auth().get().build()).optJSONArray("albums") ?: return emptyList()

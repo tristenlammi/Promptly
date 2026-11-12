@@ -59,4 +59,26 @@ object Samples {
         )
         return WidgetState(snapshot = Snapshot(now(), zone.id, cal, tasks, null), loaded = true)
     }
+
+    /** Made-up numbers for the at-a-glance widgets' previews. */
+    fun hub(): HubState {
+        val eta = java.time.OffsetDateTime.now().plusMinutes(14).toString()
+        val j = org.json.JSONObject(
+            """
+            {"counts": {"rooms": 3, "tasks": 2, "porch": 1, "mail": 4, "calendar": 2},
+             "today": {"greeting": "Good morning", "weather": "Sunny, 27 degrees.", "events_left": 2, "tasks_due": 3, "tasks_overdue": 0,
+                       "birthdays": ["Sam"], "next": {"title": "School pick-up", "time": "3:15 pm", "leave_by": "2:55 pm", "minutes": 14}},
+             "macros": {"kcal": 1240, "kcal_target": 2200, "protein": 72, "protein_target": 140},
+             "social": {"rooms": {"unread": 3, "items": [{"name": "Family", "where": "Home", "unread": 2}, {"name": "Sam", "where": "Direct message", "unread": 1}]},
+                        "porch": {"new": 2, "from": ["Mum"], "thumb": null}},
+             "maps": {"places": [{"kind": "home", "name": "Home", "minutes": 18, "traffic": true}, {"kind": "work", "name": "Work", "minutes": 25}],
+                      "next": {"title": "School pick-up", "minutes": 14, "leave_by_label": "2:55 pm"}},
+             "trips": [{"user_id": "s", "name": "Sam", "destination": "Home", "eta": "$eta"}],
+             "health": {"weight": "82.4 kg", "unit": "kg", "series": [83.5, 83.2, null, 82.9, 82.8, 82.6, 82.4], "change": "−1.1 kg",
+                        "workout": {"name": "Upper body", "date": "today", "time": "17:30"}},
+             "mail": {"unread": 4, "items": [{"from": "School office", "subject": "Excursion form"}, {"from": "Bank", "subject": "Your statement is ready"}]}}
+            """.trimIndent(),
+        )
+        return HubState(j, now(), null, 1)
+    }
 }

@@ -536,7 +536,12 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
         OutlinedButton(
             onClick = { ctx.startActivity(Intent(ctx, org.promptly.sync.maps.offline.OfflineAreasActivity::class.java)) },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Offline maps") }
+        ) { Text("Offline maps") }
+
+        OutlinedButton(
+            onClick = { org.promptly.sync.widgets.WidgetsActivity.open(ctx) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Home-screen widgets") }
 
         TextButton(onClick = { confirmUnlink = true }) { Text("Unlink this phone", color = MaterialTheme.colorScheme.error) }
         Text(

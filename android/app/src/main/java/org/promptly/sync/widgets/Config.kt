@@ -67,27 +67,27 @@ import org.promptly.sync.capture.CaptureTheme
  * works without them: every setting has a sensible default.
  */
 
-private fun widgetId(a: Activity): Int = a.intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+internal fun widgetId(a: Activity): Int = a.intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
     ?: AppWidgetManager.INVALID_APPWIDGET_ID
 
 /** Back keeps the widget with what it has: the result is OK from the start. */
-private fun ready(a: Activity, id: Int) {
+internal fun ready(a: Activity, id: Int) {
     a.setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id))
 }
 
-private suspend fun prefsOf(ctx: Context, id: Int): Preferences? = runCatching {
+internal suspend fun prefsOf(ctx: Context, id: Int): Preferences? = runCatching {
     val gid = GlanceAppWidgetManager(ctx).getGlanceIdBy(id)
     getAppWidgetState(ctx, PreferencesGlanceStateDefinition, gid)
 }.getOrNull()
 
-private suspend fun save(ctx: Context, id: Int, change: (androidx.datastore.preferences.core.MutablePreferences) -> Unit, redraw: suspend (androidx.glance.GlanceId) -> Unit) {
+internal suspend fun save(ctx: Context, id: Int, change: (androidx.datastore.preferences.core.MutablePreferences) -> Unit, redraw: suspend (androidx.glance.GlanceId) -> Unit) {
     val gid = GlanceAppWidgetManager(ctx).getGlanceIdBy(id)
     updateAppWidgetState(ctx, PreferencesGlanceStateDefinition, gid) { p -> p.toMutablePreferences().apply(change) }
     redraw(gid)
 }
 
 @Composable
-private fun Screen(title: String, onSave: () -> Unit, content: @Composable () -> Unit) {
+internal fun Screen(title: String, onSave: () -> Unit, content: @Composable () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp)) {
             Text(title, style = MaterialTheme.typography.headlineSmall)
@@ -99,7 +99,7 @@ private fun Screen(title: String, onSave: () -> Unit, content: @Composable () ->
 }
 
 @Composable
-private fun Choice(label: String, selected: Boolean, onClick: () -> Unit, dot: Color? = null) {
+internal fun Choice(label: String, selected: Boolean, onClick: () -> Unit, dot: Color? = null) {
     Row(
         Modifier.fillMaxWidth().selectable(selected = selected, onClick = onClick, role = Role.RadioButton).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -115,7 +115,7 @@ private fun Choice(label: String, selected: Boolean, onClick: () -> Unit, dot: C
 }
 
 @Composable
-private fun Tick(label: String, checked: Boolean, onChange: (Boolean) -> Unit, dot: Color? = null) {
+internal fun Tick(label: String, checked: Boolean, onChange: (Boolean) -> Unit, dot: Color? = null) {
     Row(
         Modifier.fillMaxWidth().toggleable(value = checked, onValueChange = onChange, role = Role.Checkbox).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -131,7 +131,7 @@ private fun Tick(label: String, checked: Boolean, onChange: (Boolean) -> Unit, d
 }
 
 @Composable
-private fun Toggle(label: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun Toggle(label: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(
         Modifier.fillMaxWidth().toggleable(value = checked, onValueChange = onChange, role = Role.Switch).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -145,7 +145,7 @@ private fun Toggle(label: String, hint: String, checked: Boolean, onChange: (Boo
 }
 
 @Composable
-private fun Section(text: String) {
+internal fun Section(text: String) {
     Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 12.dp, bottom = 2.dp))
 }
 

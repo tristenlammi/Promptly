@@ -25,6 +25,14 @@ object Open {
     const val TASKS = "org.promptly.app.TasksLauncher"
     const val NOTES = "org.promptly.app.NotesLauncher"
     const val PHOTOS = "org.promptly.app.PhotosLauncher"
+    const val PROMPTLY = "org.promptly.app.PromptlyLauncher"
+    const val ROOMS = "org.promptly.app.RoomsLauncher"
+    const val PORCH = "org.promptly.app.PorchLauncher"
+    const val MAPS = "org.promptly.app.MapsLauncher"
+    const val MAIL = "org.promptly.app.MailLauncher"
+    const val MEALS = "org.promptly.app.MealsLauncher"
+    const val HEALTH = "org.promptly.app.HealthLauncher"
+    const val WORKOUT = "org.promptly.app.WorkoutLauncher"
 
     /** An intent for a widget: through [OpenActivity], which decides at tap time. */
     fun page(ctx: Context, launcher: String, path: String): Intent =
@@ -49,6 +57,14 @@ object Open {
             .putExtra(SuiteLauncher.EXTRA_URL_PATH, safe)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         if (start(ctx, app)) return true
+        // That app's own icon is off (the app panel widget can hide the icons it
+        // covers): open the page inside Promptly, which is always there.
+        if (launcher != PROMPTLY) {
+            val inPromptly = Intent().setClassName(ctx.packageName, PROMPTLY)
+                .putExtra(SuiteLauncher.EXTRA_URL_PATH, safe)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            if (start(ctx, inPromptly)) return true
+        }
         val server = Store(ctx).account?.server ?: return false
         val sep = if (safe.contains('?')) "&" else "?"
         return start(ctx, Intent(Intent.ACTION_VIEW, Uri.parse("$server$safe${sep}source=android")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

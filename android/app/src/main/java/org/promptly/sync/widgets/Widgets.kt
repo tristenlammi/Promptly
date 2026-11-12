@@ -29,7 +29,8 @@ enum class Link { LINKED, NOT_LINKED, REMOVED, OFF }
 
 /** The widgets this app has, and what each needs from the snapshot. */
 object Widgets {
-    class Kind(val receiver: Class<out GlanceAppWidgetReceiver>, val widget: () -> GlanceAppWidget, val needs: List<String>)
+    /** [needs]: snapshot sections; [hub]: `/api/widgets/glance` sections (the at-a-glance widgets). */
+    class Kind(val receiver: Class<out GlanceAppWidgetReceiver>, val widget: () -> GlanceAppWidget, val needs: List<String>, val hub: List<String> = emptyList())
 
     val ALL: List<Kind> = listOf(
         Kind(AgendaWidgetReceiver::class.java, { AgendaWidget() }, listOf("calendar")),
@@ -39,6 +40,19 @@ object Widgets {
         Kind(OneNoteWidgetReceiver::class.java, { OneNoteWidget() }, listOf("notes")),
         // Photo: its pictures come from /api/widgets/photos (PhotoSync), not the snapshot.
         Kind(PhotoWidgetReceiver::class.java, { PhotoWidget() }, emptyList()),
+        // At a glance (1.9.0): numbers from /api/widgets/glance, saved in HubStore.
+        Kind(AppsWidgetReceiver::class.java, { AppsWidget() }, emptyList(), listOf("counts")),
+        Kind(TalkWidgetReceiver::class.java, { TalkWidget() }, emptyList()),
+        Kind(QuickAddWidgetReceiver::class.java, { QuickAddWidget() }, emptyList()),
+        Kind(TodayWidgetReceiver::class.java, { TodayWidget() }, emptyList(), listOf("today")),
+        Kind(MacrosWidgetReceiver::class.java, { MacrosWidget() }, emptyList(), listOf("macros")),
+        Kind(SocialWidgetReceiver::class.java, { SocialWidget() }, emptyList(), listOf("social")),
+        Kind(PeopleWidgetReceiver::class.java, { PeopleWidget() }, emptyList()),
+        Kind(MapsWidgetReceiver::class.java, { MapsWidget() }, emptyList(), listOf("maps")),
+        Kind(OnTheWayWidgetReceiver::class.java, { OnTheWayWidget() }, emptyList(), listOf("trips")),
+        Kind(CountdownWidgetReceiver::class.java, { CountdownWidget() }, emptyList()),
+        Kind(HealthWidgetReceiver::class.java, { HealthWidget() }, emptyList(), listOf("health")),
+        Kind(MailWidgetReceiver::class.java, { MailWidget() }, emptyList(), listOf("mail")),
     )
 
     /** For work that outlives a widget action (the redraw after a tick's moment). */
@@ -51,6 +65,9 @@ object Widgets {
 
     /** The snapshot sections the widgets on the home screen need. */
     fun wanted(ctx: Context): List<String> = ALL.filter { ids(ctx, it).isNotEmpty() }.flatMap { it.needs }.distinct()
+
+    /** The `/api/widgets/glance` sections the widgets on the home screen need. */
+    fun hubWanted(ctx: Context): List<String> = ALL.filter { ids(ctx, it).isNotEmpty() }.flatMap { it.hub }.distinct()
 
     /** The notes the One note widgets show (the snapshot sends them whole). */
     suspend fun noteIds(ctx: Context): List<String> = runCatching {
@@ -96,6 +113,7 @@ object Widgets {
         // Photo widgets move on to their next photo when the half hour is up.
         runCatching { PhotoWidget.rotate(ctx, System.currentTimeMillis()) }
         WidgetStore.bump()
+        HubStore.bump()
         for (k in ALL) if (ids(ctx, k).isNotEmpty()) runCatching { k.widget().updateAll(ctx) }
         Boundaries.schedule(ctx)
     }
@@ -115,6 +133,7 @@ object Widgets {
         WidgetsOff.set(app, false)
         scope.launch {
             WidgetStore.wipe(app)
+            HubStore.wipe(app)
             redraw(app)
         }
         if (placed(app)) {
@@ -128,6 +147,7 @@ object Widgets {
         val app = ctx.applicationContext
         scope.launch {
             WidgetStore.wipe(app)
+            HubStore.wipe(app)
             redraw(app)
         }
     }

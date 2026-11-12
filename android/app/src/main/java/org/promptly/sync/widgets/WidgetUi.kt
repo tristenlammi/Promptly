@@ -56,6 +56,9 @@ object WColors {
     val muted: GlanceColor = ColorProvider(day = Color(0xFF6B635C), night = Color(0xFFA8A29E))
     val accent: GlanceColor = ColorProvider(day = Color(0xFFB85A3C), night = Color(0xFFE38B6D))
     val onAccent: GlanceColor = ColorProvider(day = Color(0xFFFFFFFF), night = Color(0xFF1C1917))
+    /** Filled buttons and tiles: the brand terracotta, light and dark alike (owner's choice, v0.38.1). */
+    val fill: GlanceColor = ColorProvider(day = Color(0xFFD97757), night = Color(0xFFD97757))
+    val onFill: GlanceColor = ColorProvider(day = Color(0xFFFFFFFF), night = Color(0xFFFFFFFF))
     val late: GlanceColor = ColorProvider(day = Color(0xFFC0362C), night = Color(0xFFF28B82))
     val line: GlanceColor = ColorProvider(day = Color(0xFFE7E1DA), night = Color(0xFF3A3431))
     /** Text on an event's own colour (all-day chips). */

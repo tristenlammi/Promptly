@@ -41,12 +41,15 @@ class WidgetSync(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val store = Store(ctx)
         val account = if (store.hasAccount && !store.unlinked) store.account else null
         val outcome = if (account == null) {
-            if (store.unlinked) WidgetStore.wipe(ctx)
+            if (store.unlinked) {
+                WidgetStore.wipe(ctx)
+                HubStore.wipe(ctx)
+            }
             SyncLogic.Outcome.NOT_LINKED
         } else {
             SyncLogic.run(
                 ctx, WidgetApi(account), Widgets.wanted(ctx), System.currentTimeMillis(), Widgets.noteIds(ctx),
-                albums = PhotoWidget.albums(ctx), showing = PhotoWidget.showing(ctx),
+                albums = PhotoWidget.albums(ctx), showing = PhotoWidget.showing(ctx), hub = Widgets.hubWanted(ctx),
             )
         }
         if (outcome == SyncLogic.Outcome.REMOVED) store.unlinked = true
@@ -128,7 +131,7 @@ object SyncLogic {
 
     suspend fun run(
         ctx: Context, api: WidgetBackend, want: List<String>, now: Long, noteIds: List<String> = emptyList(),
-        albums: List<String> = emptyList(), showing: Set<String> = emptySet(),
+        albums: List<String> = emptyList(), showing: Set<String> = emptySet(), hub: List<String> = emptyList(),
     ): Outcome {
         try {
             // The outbox first, oldest first: an add then a tick of it arrive in order.
@@ -157,6 +160,12 @@ object SyncLogic {
                 WidgetsOff.set(ctx, false)
                 WidgetStore.merge(ctx, answer, now)
             }
+            // The at-a-glance widgets: one call for all their sections.
+            if (hub.isNotEmpty()) {
+                val answer = withContext(Dispatchers.IO) { api.glance(hub) }
+                WidgetsOff.set(ctx, false)
+                HubStore.save(ctx, answer, now, api)
+            }
             // Photo widgets: a few of each album's photos, kept small on the phone.
             if (albums.isNotEmpty()) {
                 withContext(Dispatchers.IO) { PhotoSync.run(ctx, api, albums, now, showing) }
@@ -165,6 +174,7 @@ object SyncLogic {
             return Outcome.OK
         } catch (e: Unlinked) {
             WidgetStore.wipe(ctx)
+            HubStore.wipe(ctx)
             return Outcome.REMOVED
         } catch (e: Refused) {
             return if (e.status == 403) off(ctx) else Outcome.RETRY
@@ -199,6 +209,7 @@ object SyncLogic {
     private suspend fun off(ctx: Context): Outcome {
         WidgetsOff.set(ctx, true)
         WidgetStore.wipe(ctx)
+        HubStore.wipe(ctx)
         return Outcome.OFF
     }
 }
