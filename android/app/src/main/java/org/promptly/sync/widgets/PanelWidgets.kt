@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
@@ -125,11 +126,11 @@ class AppsWidget : HubWidget() {
         val apps = PanelApps.keys(prefs).mapNotNull { known[it] }
         val counts = hub.section("counts")
         val size = LocalSize.current
-        val cols = ((size.width.value - 16) / 72).toInt().coerceIn(2, 6)
-        // Whole rows only: the rows share the room under the title, so a
-        // half-cut row never peeks out at the bottom (more rows still scroll).
-        val room = (size.height.value - 20 - 34).coerceAtLeast(ROW)
-        val rowHeight = (room / (room / ROW).toInt().coerceAtLeast(1)).dp
+        // The rows share all the room under the title, so there's never a
+        // gap below the last row or a half-cut row at the bottom.
+        val grid = PanelGrid.of(apps.size, size.width.value - 24, size.height.value - 54, layoutOf(prefs))
+        val cols = grid.cols
+        val rowHeight = grid.rowHeight.dp
         val edit = openIntent(
             Intent(ctx, AppsConfigActivity::class.java)
                 .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetIdOf(ctx))
@@ -146,7 +147,7 @@ class AppsWidget : HubWidget() {
                 LazyColumn(GlanceModifier.defaultWeight().fillMaxWidth()) {
                     itemsIndexed(rows, itemId = { i, _ -> i.toLong() }) { _, row ->
                         Row(GlanceModifier.fillMaxWidth().height(rowHeight), verticalAlignment = Alignment.CenterVertically) {
-                            for (a in row) AppCell(a, counts?.intOr(a.key) ?: 0, GlanceModifier.defaultWeight())
+                            for (a in row) AppCell(a, counts?.intOr(a.key) ?: 0, grid, GlanceModifier.defaultWeight())
                             repeat(cols - row.size) { Spacer(GlanceModifier.defaultWeight()) }
                         }
                     }
@@ -156,30 +157,46 @@ class AppsWidget : HubWidget() {
     }
 
     @Composable
-    private fun AppCell(a: PanelApp, count: Int, modifier: GlanceModifier) {
+    private fun AppCell(a: PanelApp, count: Int, grid: PanelGrid, modifier: GlanceModifier) {
         val ctx = LocalContext.current
         val go = openPage(ctx, a.launcher, a.path)
         Column(
             modifier.clickable(go).semantics { contentDescription = a.label + if (count > 0) ", $count new" else "" },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(GlanceModifier.size(52.dp), contentAlignment = Alignment.TopEnd) {
+            val tile = grid.tile
+            Box(GlanceModifier.size((tile + 8).dp), contentAlignment = Alignment.TopEnd) {
                 Box(GlanceModifier.fillMaxSize().padding(4.dp), contentAlignment = Alignment.Center) {
-                    Box(GlanceModifier.fillMaxSize().background(WColors.fill).cornerRadius(14.dp), contentAlignment = Alignment.Center) {
-                        Image(ImageProvider(a.icon), contentDescription = null, modifier = GlanceModifier.size(40.dp))
+                    Box(GlanceModifier.fillMaxSize().background(WColors.fill).cornerRadius((tile * 0.32f).dp), contentAlignment = Alignment.Center) {
+                        Image(ImageProvider(a.icon), contentDescription = null, modifier = GlanceModifier.size((tile * 0.9f).dp))
                     }
                 }
                 Badge(count)
             }
-            Spacer(GlanceModifier.height(2.dp))
-            Text(a.label, style = WText.style(11.sp).copy(textAlign = TextAlign.Center), maxLines = 1)
+            if (grid.labels) {
+                Spacer(GlanceModifier.height(2.dp))
+                Text(a.label, style = WText.style(if (tile < 40) 10.sp else 11.sp).copy(textAlign = TextAlign.Center), maxLines = 1)
+            }
         }
     }
 
     companion object {
         val APPS = stringPreferencesKey("panel_apps")
-        /** The least room a row of apps needs (dp). */
-        private const val ROW = 74f
+        /** "fit" (default: sized to fill the widget) or "choose" (columns, rows, size below). */
+        val LAYOUT = stringPreferencesKey("panel_layout")
+        val COLS = intPreferencesKey("panel_cols")
+        val ROWS = intPreferencesKey("panel_rows")
+        /** "small", "medium" or "large" (when choosing the layout yourself). */
+        val ICON = stringPreferencesKey("panel_icon")
+        val LABELS = booleanPreferencesKey("panel_labels")
+
+        fun layoutOf(p: Preferences): PanelLayout = PanelLayout(
+            fit = p[LAYOUT] != "choose",
+            cols = (p[COLS] ?: 5).coerceIn(PanelLayout.MIN_COLS, PanelLayout.MAX_COLS),
+            rows = (p[ROWS] ?: 3).coerceIn(PanelLayout.MIN_ROWS, PanelLayout.MAX_ROWS),
+            icon = p[ICON] ?: "medium",
+            labels = p[LABELS] ?: true,
+        )
     }
 }
 

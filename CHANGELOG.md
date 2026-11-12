@@ -21,14 +21,23 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- App panel widget layout (long-press it, then Settings): "Fit to the widget" (the new default) sizes the icons so all your apps fill the panel, with no empty space below the last row; or choose the apps in a row, the rows showing and Small, Medium or Large icons yourself. App names can be turned off to give the icons more room. Promptly for Android 1.9.2.
+
 ### Changed
 
 - Every app's assistant now knows today's date and time in your time zone, as chat does: Mail, Forms, the editors' Ask and AI tools, P Maps, @promptly in Rooms, the Tasks copilot and workspace Ask. "Tomorrow" means tomorrow, not the day after your newest email.
+- P Maps (Promptly for Android 1.9.2): the map now follows you the way Waze does, on the car's screen and the phone: from behind the car, facing the way you're going, tilted, with you low on the screen and the zoom easing in and out with your speed. With no trip set it does the same while you drive. Move the map yourself and it comes back after 15 seconds.
+- P Maps: no notifications on the phone while you drive. A trip's own notification (Android needs one) is now silent with no status-bar icon, and the next-turn alert, which is only sent while another app is in front on the car's screen, is silent on the phone. Someone sharing a trip with you still tells you.
 
 ### Fixed
 
 - Ask about your mail finds the email you mean even when it shares no words with your question. It works out what to search for first (a stay tomorrow → booking, check-in, welcome guide, lockbox and so on), searches by the best match rather than the newest email, also finds the start of a word ("lock" finds "lockbox"), and always looks at your newest emails too. Follow-up questions remember the last few questions and answers, so "the Nelly" makes sense after you've asked about it.
 - Ask about your mail tells an admin, in one quiet line, when AI search for mail is off and it could only match words.
+- P Maps: on the car's screen the map could stay flat and north-up for a whole trip. That happened when the map came up while a trip was already running (the car's screen coming back, or a trip started on the phone first); it now turns to face your way whenever a trip is running.
+- P Maps: only one marker for you. The car's screen also drew the navigation library's own dot, which trailed behind our arrow. The arrow now glides smoothly between GPS fixes, on the road, instead of jumping once a second.
+- P Maps: the route line is smoother. It ends under the arrow instead of a little ahead of it, and small kinks in the road's line are gently rounded (real turns stay sharp).
 
 ## [0.39.1] - 2026-11-12
 

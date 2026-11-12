@@ -47,9 +47,28 @@ import org.maplibre.compose.util.MaplibreComposable
 /** Your route from where you are on it: the part behind you isn't drawn. The same on
  *  the phone and the car. */
 fun routeAheadOverlay(dark: Boolean) = RouteOverlayBuilder(navigationPath = { ui ->
-    val ahead = ui.aheadLine()
+    val ahead = rememberRouteAhead(ui)
     if (ahead.size >= 2) BorderedPolyline(points = ahead, color = DriveColours.route(dark), borderColor = DriveColours.routeEdge(dark))
 })
+
+/**
+ * The line still ahead of you, ending under the arrow: cut where the arrow is shown
+ * (it glides along the route), not at the latest GPS fix, which is up to a second ahead
+ * of it. The line is gently rounded once per route ([RouteAhead.smooth]), and only
+ * re-cut every few metres, so it isn't rebuilt every frame.
+ */
+@Composable
+fun rememberRouteAhead(ui: NavigationUiState): List<GeographicCoordinate> {
+    val shown = rememberTripShown(ui)
+    val line = remember(ui.routeGeometry) {
+        ui.routeGeometry?.takeIf { it.size >= 2 }?.let { g -> RouteRuler(RouteAhead.smooth(g.map { it.lat to it.lng })) }
+    }
+    val onRoute = ui.isNavigating() && ui.routeDeviation is uniffi.ferrostar.RouteDeviation.NoDeviation
+    if (line == null || shown == null || !onRoute) return remember(ui.remainingSteps, ui.location) { ui.aheadLine() }
+    val along = line.project(shown.lat, shown.lon)
+    val step = (along / 4.0).toLong()
+    return remember(line, step) { line.from(along).map { GeographicCoordinate(it.first, it.second) } }
+}
 
 /** The trip's line from you to the end, or the whole of it before the steps are known. */
 internal fun NavigationUiState.aheadLine(): List<GeographicCoordinate> {
@@ -70,13 +89,14 @@ val HiddenLibraryPuck = NavigationMapPuckStyle(
     bearingColor = Color.Transparent,
 )
 
-/** You on a trip's map: the arrow, where the trip says you are (on the road), pointing
- *  the way you're going. */
+/** You on a trip's map: the one arrow, where the trip says you are (on the road),
+ *  pointing the way you're going. The library's own dot is never drawn. */
 @Composable
 @MaplibreComposable
 fun YouOnTrip(state: NavigationUiState) {
-    val at = state.location
-    Puck(at?.coordinates?.let { it.lat to it.lng }, at?.courseOverGround?.degrees?.toFloat() ?: 0f)
+    // Glided along the route with the camera, so it sits still on the screen.
+    val at = rememberTripShown(state)
+    Puck(at?.let { it.lat to it.lon }, at?.bearing?.toFloat() ?: 0f)
 }
 
 /** The trip's map with the turn card and arrival bar over it: the navigation library's
@@ -152,6 +172,8 @@ fun DriveNavigationView(
             navigationCameraOptions = camera,
             routeOverlayBuilder = routeOverlayBuilder,
             locationPuckStyle = locationPuckStyle,
+            // One arrow only: ours ([YouOnTrip]), never the library's dot as well.
+            showDefaultPuck = false,
             content = mapContent,
         )
         if (navigating) {

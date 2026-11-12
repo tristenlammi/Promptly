@@ -39,6 +39,9 @@ import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.car.app.navigation.model.TravelEstimate
 import androidx.car.app.validation.HostValidator
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.withFrameMillis
+import com.stadiamaps.ferrostar.maplibreui.runtime.NavigationCameraMode
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -66,7 +69,6 @@ import com.stadiamaps.ferrostar.composeui.views.components.speedlimit.SignageSty
 import com.stadiamaps.ferrostar.core.NavigationUiState
 import com.stadiamaps.ferrostar.maplibreui.runtime.navigationCameraOptions
 import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
-import com.stadiamaps.ferrostar.ui.maplibre.car.app.CarAppNavigationView
 import com.stadiamaps.ferrostar.ui.maplibre.car.app.runtime.SurfaceAreaTracker
 import com.stadiamaps.ferrostar.ui.maplibre.car.app.runtime.screenSurfaceState
 import com.stadiamaps.ferrostar.ui.maplibre.car.app.runtime.surfaceStableFractionalPadding
@@ -164,7 +166,11 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         Log.e("PromptlyCarMap", "The car's navigation link stopped; starting it again", e)
         restartBridge()
     })
-    private val notifications = TurnByTurnNotificationManager(context = carContext, channelId = "promptly_turns", smallIconRes = R.drawable.ic_map_status)
+    // The next turn, for the car's screen while another app is in front; silent on the phone.
+    private val notifications = run {
+        QuietNotes.set(carContext)
+        TurnByTurnNotificationManager(context = carContext, channelId = QuietNotes.TURNS, smallIconRes = R.drawable.ic_map_status)
+    }
     private val bridge = NavigationManagerBridge(
         navigationManager = carContext.getCarService(NavigationManager::class.java),
         viewModel = CarManeuvers.CarSafeModel(carContext, vm, scope),
@@ -312,68 +318,68 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         val tracking = surfaceStableFractionalPadding(area?.compositeArea, top = 0.5f)
         val options = navigationCameraOptions().copy(browsingPadding = padding, navigationPadding = tracking)
         val mapState = rememberNavigationMapState(navigationCameraOptions = options)
-        // Where you are with no trip: the trip's own position stops when there isn't one.
-        var here by remember { mutableStateOf<android.location.Location?>(null) }
-        var heading by remember { mutableStateOf(0f) }
-        // With no trip yet, nothing moves the camera, and it would stay on the whole
-        // world, most of which this server has no map for. Start where you are, and
-        // while you're driving with nowhere set, keep you low on the screen, heading up.
-        // Move the map yourself and it's left alone for a while.
+        val ui by vm.navigationUiState.collectAsState()
+        val plan by CarPreview.plan.collectAsState()
+        // On a trip: behind the car, facing the way it's going, tilted, you low on the
+        // screen, the zoom following your speed. Moved the map? It comes back in 15 s.
+        KeepTripCamera(mapState, ui.isNavigating(), ui.location?.speed?.value, overviewIsOurs = true)
+        // With no trip: the same, from the phone's own position (a trip's position stops
+        // when there isn't one). Where you're drawn glides from fix to fix, and the camera
+        // follows the glide every frame, so nothing jumps once a second.
+        val glide = remember { Glide() }
         LaunchedEffect(Unit) {
-            var placed = false
-            // Where the camera said it was after we last moved it: if it's somewhere else
-            // now, you moved the map. (Comparing with where we asked it to go was off by
-            // the padding that puts you low on the screen.)
-            var expected: Position? = null
-            var leftAloneUntil = 0L
             while (true) {
                 runCatching {
                     Nav.locationProvider.locationUpdates(1000L).collect { fix ->
-                        here = fix
                         val driving = fix.hasSpeed() && fix.speed >= DRIVING_MPS
-                        if (driving && fix.hasBearing()) heading = fix.bearing
-                        if (uiState?.isNavigating() == true || CarPreview.plan.value != null) {
-                            placed = false
-                            expected = null
-                            return@collect
-                        }
-                        val now = android.os.SystemClock.elapsedRealtime()
-                        val target = Position(fix.longitude, fix.latitude)
-                        if (!placed) {
-                            mapState.cameraState.position = CameraPosition(target = target, zoom = 15.0, bearing = heading.toDouble(), padding = tracking)
-                            placed = true
-                            expected = null
-                            return@collect
-                        }
-                        val at = mapState.cameraState.position
-                        val was = expected
-                        if (was == null) {
-                            expected = at.target
-                        } else if (apart(at.target, was, 0.0005)) {
-                            leftAloneUntil = now + LEFT_ALONE_MS
-                            expected = at.target
-                        }
-                        if (now < leftAloneUntil) return@collect
-                        // Parked or at the lights: only if the dot would be off where it was.
-                        if (!driving && !apart(target, at.target, 0.0003)) return@collect
-                        runCatching {
-                            mapState.cameraState.animateTo(
-                                CameraPosition(target = target, zoom = maxOf(at.zoom, 15.0), bearing = if (driving) heading.toDouble() else at.bearing, tilt = at.tilt, padding = tracking),
-                                kotlin.time.Duration.parse("900ms"),
-                            )
-                        }
-                        expected = mapState.cameraState.position.target
+                        glide.to(fix.latitude, fix.longitude, if (driving && fix.hasBearing()) fix.bearing.toDouble() else null, if (fix.hasSpeed()) fix.speed.toDouble() else null)
                     }
                 }.onFailure { Log.w("PromptlyCarMap", "Lost the position on the car map; trying again", it) }
                 // The position stopping (or failing) never leaves the map stuck: ask again.
                 delay(5_000)
             }
         }
+        LaunchedEffect(Unit) {
+            // Our camera is "OVERVIEW" to the library (it leaves it alone); a pan or pinch
+            // on the car's screen turns it to FREE, and it's left alone for a while.
+            var placed = false
+            var freeSince = 0L
+            while (true) {
+                withFrameMillis { }
+                glide.tick()
+                val shown = glide.current ?: continue
+                if (uiState?.isNavigating() == true || CarPreview.plan.value != null) {
+                    placed = false
+                    continue
+                }
+                val clock = android.os.SystemClock.elapsedRealtime()
+                when (mapState.cameraMode) {
+                    NavigationCameraMode.FREE -> {
+                        if (freeSince == 0L) freeSince = clock
+                        if (clock - freeSince < LEFT_ALONE_MS) continue
+                        freeSince = 0L
+                        mapState.cameraMode = NavigationCameraMode.OVERVIEW
+                        // Back where it should be, gently.
+                        runCatching { mapState.cameraState.animateTo(followAt(shown, mapState.cameraState.position.zoom, tracking, mapState.cameraState.position.bearing), kotlin.time.Duration.parse("800ms")) }
+                        continue
+                    }
+                    NavigationCameraMode.OVERVIEW -> Unit
+                    else -> mapState.cameraMode = NavigationCameraMode.OVERVIEW
+                }
+                freeSince = 0L
+                val zoom = if (!placed) 16.0 else mapState.cameraState.position.zoom
+                val want = FollowZoom.forSpeed(glide.speed)
+                // The zoom eases toward the speed's, a little each frame.
+                val eased = zoom + (want - zoom) * 0.02
+                mapState.cameraState.position = followAt(shown, eased, tracking, mapState.cameraState.position.bearing)
+                placed = true
+            }
+        }
         // The whole route in view, beside the card that describes it.
-        val plan by CarPreview.plan.collectAsState()
         LaunchedEffect(plan?.route) {
             val line = plan?.route?.line.orEmpty()
             if (line.size > 1) {
+                mapState.cameraMode = NavigationCameraMode.OVERVIEW
                 runCatching {
                     mapState.cameraState.animateTo(
                         boundingBox = BoundingBox(line.minOf { it.first }, line.minOf { it.second }, line.maxOf { it.first }, line.maxOf { it.second }),
@@ -384,22 +390,24 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         }
         // The route in Promptly's terracotta, as on the phone, and only the way ahead.
         val routeLine = remember(dark) { routeAheadOverlay(dark) }
-        CarAppNavigationView(
-            modifier = Modifier.fillMaxSize(),
+        CarMapView(
             styleUrl = styleUri,
-            navigationMapState = mapState,
-            navigationCameraOptions = options,
-            viewModel = vm,
+            mapState = mapState,
+            options = options,
+            ui = ui,
             config = VisualNavigationViewConfig.Default().withSpeedLimitStyle(SignageStyle.ViennaConvention),
-            surfaceAreaTracker = surfaceArea,
+            surfaceArea = surfaceArea,
             routeOverlayBuilder = routeLine,
-            // The car view has no setting for its own small dot: the arrow is drawn over it.
-            mapContent = { ui ->
+            mapContent = { state ->
                 TrafficOnRoute()
                 PreviewRoutesOnMap()
-                // The arrow: on a trip where the trip puts you, otherwise your last fix.
-                if (ui.isNavigating()) YouOnTrip(ui)
-                else Puck(here?.let { it.latitude to it.longitude }, heading)
+                // The one arrow: on a trip where the trip shows you (on the road, gliding
+                // with the camera), otherwise the glided position of the phone.
+                if (state.isNavigating()) YouOnTrip(state)
+                else {
+                    val at = glide.current
+                    Puck(at?.let { it.lat to it.lon }, (at?.bearing ?: 0.0).toFloat())
+                }
             },
         )
     }
@@ -571,7 +579,72 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
 }
 
 private const val DRIVING_MPS = 2.5f
-private const val LEFT_ALONE_MS = 20_000L
+
+/**
+ * The car's map: the navigation library's car view (CarAppNavigationView, Ferrostar
+ * 0.59) put together here, because that one always drew the library's own position dot
+ * as well as ours, two markers on the screen with one trailing the other. Speed limit
+ * top-left and road name at the bottom, inside the part of the screen the car keeps
+ * clear, as before.
+ */
+@Composable
+private fun CarMapView(
+    styleUrl: String,
+    mapState: com.stadiamaps.ferrostar.maplibreui.runtime.NavigationMapState,
+    options: com.stadiamaps.ferrostar.maplibreui.runtime.NavigationCameraOptions,
+    ui: NavigationUiState,
+    config: VisualNavigationViewConfig,
+    surfaceArea: SurfaceAreaTracker,
+    routeOverlayBuilder: com.stadiamaps.ferrostar.maplibreui.routeline.RouteOverlayBuilder,
+    mapContent: @Composable @org.maplibre.compose.util.MaplibreComposable (NavigationUiState) -> Unit,
+) {
+    surfaceArea.rememberGestureDelegate(mapState)
+    val area by screenSurfaceState(surfaceArea)
+    val grid = surfaceStableFractionalPadding(area?.compositeArea)
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+        com.stadiamaps.ferrostar.maplibreui.NavigationMapView(
+            baseStyle = org.maplibre.compose.style.BaseStyle.Uri(styleUrl),
+            navigationMapState = mapState,
+            uiState = ui,
+            mapOptions = org.maplibre.compose.map.MapOptions(ornamentOptions = org.maplibre.compose.map.OrnamentOptions.AllDisabled),
+            navigationCameraOptions = options,
+            routeOverlayBuilder = routeOverlayBuilder,
+            showDefaultPuck = false,
+            content = mapContent,
+        )
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(grid)) {
+            ui.currentAnnotation?.speedLimit?.let { limit ->
+                config.speedLimitStyle?.let { style ->
+                    com.stadiamaps.ferrostar.composeui.views.components.speedlimit.SpeedLimitView(
+                        speedLimit = limit,
+                        signageStyle = style,
+                        modifier = Modifier.align(androidx.compose.ui.Alignment.TopStart),
+                    )
+                }
+            }
+            ui.currentStepRoadName?.let { road ->
+                com.stadiamaps.ferrostar.composeui.views.components.CurrentRoadNameView(
+                    currentRoadName = road,
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter),
+                )
+            }
+        }
+    }
+}
+
+/** The no-trip camera: on [shown], facing its way, tilted, you low on the screen. */
+private fun followAt(shown: Shown, zoom: Double, padding: androidx.compose.foundation.layout.PaddingValues, keepBearing: Double = 0.0): CameraPosition =
+    CameraPosition(
+        target = Position(shown.lon, shown.lat),
+        zoom = zoom,
+        bearing = shown.bearing ?: keepBearing,
+        tilt = FOLLOW_TILT,
+        padding = padding,
+    )
+
+/** How far the map leans back while following you, as the library's trips do. */
+private const val FOLLOW_TILT = 45.0
+private const val LEFT_ALONE_MS = 15_000L
 
 /** Further apart than [degrees] in either direction. */
 private fun apart(a: Position, b: Position, degrees: Double): Boolean =
