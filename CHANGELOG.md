@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-11-12
+
 ### Added
 
 - Widgets can have a see-through background, so your wallpaper shows behind them. Choose Solid or See-through for each widget in its settings (long-press the widget, then Settings). Widgets that had no settings now have a small settings screen for this. Promptly for Android 1.9.1.
