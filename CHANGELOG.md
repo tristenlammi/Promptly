@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-12
+
 ### Added
 
 - **A notification switch for each device** — Account → Notifications now lists every device with its own on/off switch, and you can flip any of them from whichever device you're on. A device that's off gets nothing at all: messages, calls, reminders, alarms, Porch and the rest. Phones and tablets start on; computers start off, so allowing notifications on a computer no longer makes it ping until you turn its switch on. The device you're on is marked "This device".
