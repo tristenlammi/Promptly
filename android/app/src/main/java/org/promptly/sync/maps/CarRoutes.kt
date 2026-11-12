@@ -328,9 +328,14 @@ internal object CarTemplates {
     private const val TERRACOTTA_NIGHT = 0xFFE8896B.toInt()
 
     /** The map, ready to go: where to, and home and work a tap away. */
-    fun landing(context: Context, home: Stop?, work: Stop?, onWhereTo: () -> Unit, onPlace: (Stop) -> Unit, onMic: () -> Unit, micState: Voice.State = Voice.State.OFF): Template {
-        val strip = ActionStrip.Builder().addAction(
-            Action.Builder().setTitle("Where to?").setIcon(icon(context, R.drawable.ic_map_search)).setFlags(Action.FLAG_PRIMARY).setOnClickListener { onWhereTo() }.build(),
+    fun landing(context: Context, home: Stop?, work: Stop?, onWhereTo: () -> Unit, onPlace: (Stop) -> Unit, onMic: () -> Unit, micState: Voice.State = Voice.State.OFF, onCarryOn: (() -> Unit)? = null): Template {
+        val strip = ActionStrip.Builder()
+        // A trip that stopped without you ending it: carrying on comes first.
+        onCarryOn?.let { go ->
+            strip.addAction(Action.Builder().setTitle("Carry on").setIcon(icon(context, R.drawable.ic_map_heading)).setFlags(Action.FLAG_PRIMARY).setOnClickListener { go() }.build())
+        }
+        strip.addAction(
+            Action.Builder().setTitle("Where to?").setIcon(icon(context, R.drawable.ic_map_search)).setFlags(if (onCarryOn == null) Action.FLAG_PRIMARY else 0).setOnClickListener { onWhereTo() }.build(),
         )
         home?.let { s -> strip.addAction(Action.Builder().setTitle("Home").setIcon(icon(context, R.drawable.ic_map_home)).setOnClickListener { onPlace(s) }.build()) }
         work?.let { s -> strip.addAction(Action.Builder().setTitle("Work").setIcon(icon(context, R.drawable.ic_map_work)).setOnClickListener { onPlace(s) }.build()) }
@@ -406,7 +411,7 @@ internal object CarTemplates {
         if (rerouting) return RoutingInfo.Builder().setLoading(true).build()
         if (instruction == null || metresToTurn == null) return null
         val primary = instruction.primaryContent
-        val step = Step.Builder(primary.text).setManeuver(primary.toCarManeuver(context, side, exit))
+        val step = Step.Builder(primary.text).setManeuver(CarManeuvers.maneuver(context, primary, side, exit))
         instruction.secondaryContent?.text?.takeIf { it.isNotBlank() }?.let { step.setRoad(it) }
         // The server's router sends lanes with the instruction under the turn, not on it.
         val lanes = instruction.subContent?.laneInfo?.takeIf { it.isNotEmpty() } ?: primary.laneInfo?.takeIf { it.isNotEmpty() }

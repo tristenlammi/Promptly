@@ -22,6 +22,9 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import androidx.compose.ui.graphics.Color
+import com.stadiamaps.ferrostar.maplibreui.routeline.BorderedPolyline
+import uniffi.ferrostar.GeographicCoordinate
 import com.stadiamaps.ferrostar.composeui.config.NavigationViewComponentBuilder
 import com.stadiamaps.ferrostar.composeui.config.VisualNavigationViewConfig
 import com.stadiamaps.ferrostar.composeui.models.CameraControlState
@@ -40,6 +43,41 @@ import org.maplibre.compose.map.MapOptions
 import org.maplibre.compose.map.OrnamentOptions
 import org.maplibre.compose.style.BaseStyle
 import org.maplibre.compose.util.MaplibreComposable
+
+/** Your route from where you are on it: the part behind you isn't drawn. The same on
+ *  the phone and the car. */
+fun routeAheadOverlay(dark: Boolean) = RouteOverlayBuilder(navigationPath = { ui ->
+    val ahead = ui.aheadLine()
+    if (ahead.size >= 2) BorderedPolyline(points = ahead, color = DriveColours.route(dark), borderColor = DriveColours.routeEdge(dark))
+})
+
+/** The trip's line from you to the end, or the whole of it before the steps are known. */
+internal fun NavigationUiState.aheadLine(): List<GeographicCoordinate> {
+    val steps = remainingSteps.orEmpty().map { step -> step.geometry.map { it.lat to it.lng } }
+    if (steps.isEmpty()) return routeGeometry.orEmpty()
+    val here = location?.coordinates?.let { it.lat to it.lng }
+    return RouteAhead.from(steps, here).map { GeographicCoordinate(it.first, it.second) }
+}
+
+/** The library's own position dot, drawn in nothing: [Puck] (the arrow from the map
+ *  with no trip, big and turning with the car) is drawn instead, on the phone and the
+ *  car alike. */
+val HiddenLibraryPuck = NavigationMapPuckStyle(
+    dotFillColorCurrentLocation = Color.Transparent,
+    dotFillColorOldLocation = Color.Transparent,
+    accuracyStrokeColor = Color.Transparent,
+    accuracyFillColor = Color.Transparent,
+    bearingColor = Color.Transparent,
+)
+
+/** You on a trip's map: the arrow, where the trip says you are (on the road), pointing
+ *  the way you're going. */
+@Composable
+@MaplibreComposable
+fun YouOnTrip(state: NavigationUiState) {
+    val at = state.location
+    Puck(at?.coordinates?.let { it.lat to it.lng }, at?.courseOverGround?.degrees?.toFloat() ?: 0f)
+}
 
 /** The trip's map with the turn card and arrival bar over it: the navigation library's
  *  own view (DynamicallyOrientingNavigationView, 0.59), put together here so its

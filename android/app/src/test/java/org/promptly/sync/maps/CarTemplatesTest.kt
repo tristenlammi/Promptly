@@ -39,6 +39,17 @@ class CarTemplatesTest {
     }
 
     @Test
+    fun landing_offers_carry_on_first_when_a_trip_stopped() {
+        // Four is the most a navigation template's strip takes: carry on, where to, home, work.
+        val t = CarTemplates.landing(context, home, work, {}, {}, {}, onCarryOn = {}) as NavigationTemplate
+        val actions = t.actionStrip!!.actions
+        assertEquals(4, actions.size)
+        assertEquals("Carry on", actions[0].title.toString())
+        assertTrue(actions[0].flags and Action.FLAG_PRIMARY != 0)
+        assertTrue(actions[1].flags and Action.FLAG_PRIMARY == 0)
+    }
+
+    @Test
     fun preview_while_looking_is_loading() {
         val t = CarTemplates.preview(CarTripPlan(home), 3, {}, {}, carApi = 6) as RoutePreviewNavigationTemplate
         assertTrue(t.isLoading)
