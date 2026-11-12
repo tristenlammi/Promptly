@@ -78,6 +78,8 @@ object Nav {
     /** How long "You've arrived" waits for Done before the trip ends by itself, so a
      *  phone left in a pocket doesn't keep the GPS on all afternoon. */
     private const val ARRIVAL_ENDS_AFTER_MS = 180_000L
+    private const val REACHED_METRES = 100f
+    private const val CARRY_ON_AFTER_MS = 3_000L
 
     @SuppressLint("StaticFieldLeak") // the application context
     private lateinit var app: Context
@@ -123,6 +125,22 @@ object Nav {
     private var declinedSaves = 0
     private var destination: Stop? = null
     private var multiStop = false
+
+    /** A trip that stopped without you ending it or getting there: the car asked P Maps to
+     *  stop (another app started directions), or the trip stopped by itself. The car and the
+     *  phone offer to carry on with it. */
+    data class Unfinished(val stops: List<Stop>, val options: TripOptions)
+    private val _unfinished = MutableStateFlow<Unfinished?>(null)
+    val unfinished = _unfinished.asStateFlow()
+    // This trip's stops, and the ones you've been to.
+    private var tripStops: List<Stop> = emptyList()
+    private var tripOptions: TripOptions? = null
+    private val reached = HashSet<Int>()
+    // Set by stop() just before the trip is ended: who ended it.
+    private var endingByYou = false
+    private var endingByCar = false
+    // A trip that stopped by itself is picked up again once, not over and over.
+    private var carriedOn = false
 
     private val _traffic = MutableStateFlow<TrafficNow?>(null)
     val traffic = _traffic.asStateFlow()
@@ -311,7 +329,9 @@ object Nav {
         var wasNavigating = false
         vm.navigationUiState.onEach { state ->
             val navigating = state.isNavigating()
-            if (wasNavigating && !navigating && state.tripState is TripState.Complete) arrivedNow()
+            if (wasNavigating && !navigating) {
+                if (state.tripState is TripState.Complete) arrivedNow() else stoppedEarly()
+            }
             wasNavigating = navigating
             state.location?.let { lastFix = it }
             // Back on the route (or the trip's over): the "head back" note has done its job.
@@ -320,6 +340,7 @@ object Nav {
                 offRouteSaid = false
             }
             if (navigating) {
+                state.location?.let { at -> noteReached(at.coordinates.lat, at.coordinates.lng) }
                 state.routeGeometry?.let(::routeIs)
                 state.location?.let { onLocation(it.coordinates.lat, it.coordinates.lng) }
                 speedNow(
@@ -389,6 +410,24 @@ object Nav {
 
     /** Ask for the route from where you are, and go. */
     fun start(stops: List<Stop>, options: TripOptions, through: List<ThroughPoint> = emptyList()) {
+        startTrip(stops, options, through, carryingOn = false)
+    }
+
+    /** Carry on with the trip that stopped (see [unfinished]), from where you are now. */
+    fun carryOn() {
+        val trip = _unfinished.value ?: return
+        Log.i(TAG, "Carrying on with the trip that stopped: ${trip.stops.size} stop(s)")
+        startTrip(trip.stops, trip.options, emptyList(), carryingOn = true)
+    }
+
+    /** Forget the trip that stopped: you don't want it. */
+    fun forgetUnfinished() {
+        _unfinished.value = null
+    }
+
+    private fun startTrip(stops: List<Stop>, options: TripOptions, through: List<ThroughPoint>, carryingOn: Boolean) {
+        _unfinished.value = null
+        if (!carryingOn) carriedOn = false
         val vm = viewModel(options)
         rememberDriveOptions(options)
         _error.value = null
@@ -412,6 +451,11 @@ object Nav {
                 val rest = if (startsHere(stops, here)) stops.drop(1) else stops
                 destination = rest.lastOrNull()
                 multiStop = rest.size > 1
+                tripStops = rest
+                tripOptions = options
+                reached.clear()
+                endingByYou = false
+                endingByCar = false
                 hazards = emptyList()
                 spokenHazards.clear()
                 lastRemaining = 0.0
@@ -685,6 +729,40 @@ object Nav {
 
     private fun talk(text: String, done: (() -> Unit)? = null) {
         voice().say(text, "promptly-${utterances.incrementAndGet()}", done)
+    }
+
+    /** The stops you've come within reach of, so carrying on doesn't send you back to them. */
+    private fun noteReached(lat: Double, lon: Double) {
+        if (tripStops.size < 2) return
+        val metres = FloatArray(1)
+        tripStops.forEachIndexed { i, s ->
+            if (i in reached) return@forEachIndexed
+            Location.distanceBetween(lat, lon, s.lat, s.lon, metres)
+            if (metres[0] <= REACHED_METRES) reached.add(i)
+        }
+    }
+
+    /** The trip ended without arriving. Ended by you: nothing to do. Otherwise it's kept
+     *  to carry on with, and said why in the log (the car screen used to go quiet, with
+     *  nothing on it to start again). One that stopped by itself is picked up again once. */
+    private fun stoppedEarly() {
+        val byYou = endingByYou
+        val byCar = endingByCar
+        endingByYou = false
+        endingByCar = false
+        if (byYou) return
+        val options = tripOptions ?: return
+        val left = tripStops.filterIndexed { i, _ -> i !in reached }.ifEmpty { tripStops.takeLast(1) }
+        if (left.isEmpty()) return
+        Log.w(TAG, if (byCar) "The car asked P Maps to stop the trip" else "The trip stopped by itself, without arriving")
+        _unfinished.value = Unfinished(left, options)
+        if (!byCar && !carriedOn) {
+            carriedOn = true
+            watching.launch {
+                delay(CARRY_ON_AFTER_MS)
+                if (_unfinished.value != null && !onTrip()) carryOn()
+            }
+        }
     }
 
     /** You're there: both screens say so, whichever started the trip. */
@@ -1009,7 +1087,14 @@ object Nav {
         }
     }
 
-    fun stop() {
+    /** End the trip. [byYou]: you ended it (End, the phone's exit, arriving). Otherwise the
+     *  car asked to stop it, and it's kept to carry on with ([unfinished]). */
+    fun stop(byYou: Boolean = true) {
+        if (onTrip()) {
+            endingByYou = byYou
+            endingByCar = !byYou
+        }
+        if (byYou) _unfinished.value = null
         _addedStop.value = null
         _routeSource.value = null
         _offRoute.value = null

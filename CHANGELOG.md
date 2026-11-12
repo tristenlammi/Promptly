@@ -21,6 +21,17 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- P Maps in the car (Promptly for Android 1.8.1): the app stopped, and the car screen went blank with no way back, when a route had a roundabout the router gave no exit number for. Such a roundabout is now shown as "exit the roundabout" (the spoken direction is unchanged), and a turn the car can't draw no longer takes the app down.
+- P Maps in the car: with no trip set, the map now follows you. Android treats the car's screen as the background, so the map got one position when it opened and none after; P Maps now keeps your position coming while it's on the car's screen (a quiet "P Maps is on your car's screen" notification shows meanwhile).
+- P Maps in the car: a trip that stops without you ending it (the car asked P Maps to stop, or it stopped by itself) is no longer just gone. The car says so and offers "Carry on", which picks up from where you are with the stops you haven't reached; one that stopped by itself carries on by itself once.
+
+### Changed
+
+- P Maps (phone and car): the route behind you disappears as you drive; only the way ahead is drawn.
+- P Maps (phone and car): you're shown as a big white arrow in terracotta pointing the way you're going, instead of a small dot. On the car the route is Promptly's terracotta too, as on the phone.
+
 ## [0.38.1] - 2026-11-12
 
 ### Changed

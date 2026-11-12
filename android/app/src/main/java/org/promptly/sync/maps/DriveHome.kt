@@ -827,7 +827,7 @@ private fun Spot(id: String, at: Pair<Double, Double>?, colour: Color, radius: I
 /** Where you are while driving: an arrow that turns with the car. */
 @Composable
 @MaplibreComposable
-private fun Puck(at: Pair<Double, Double>?, bearing: Float) {
+internal fun Puck(at: Pair<Double, Double>?, bearing: Float) {
     val json = remember(at, bearing) {
         val features = JSONArray()
         at?.let { (lat, lon) ->

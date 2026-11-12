@@ -162,6 +162,11 @@
         <service
             android:name=".maps.TimelineService"
             android:foregroundServiceType="location" />
+        <!-- Your position on the car's screen with no trip (the car screen counts as background). -->
+        <service
+            android:name=".maps.CarLocationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
         <receiver android:name=".maps.TimelineBootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

@@ -42,6 +42,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -67,6 +70,7 @@ import com.stadiamaps.ferrostar.ui.maplibre.car.app.CarAppNavigationView
 import com.stadiamaps.ferrostar.ui.maplibre.car.app.runtime.SurfaceAreaTracker
 import com.stadiamaps.ferrostar.ui.maplibre.car.app.runtime.screenSurfaceState
 import com.stadiamaps.ferrostar.ui.maplibre.car.app.runtime.surfaceStableFractionalPadding
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -147,15 +151,28 @@ private class NotReady(context: CarContext, private val text: String) : Screen(c
 
 /** The map, and turn-by-turn once a trip's running. */
 private class DriveScreen(context: CarContext) : ComposableScreen(context) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // Something going wrong in one of this screen's jobs costs that job, never the app:
+    // an uncaught error here used to stop the whole app, and the car's screen went blank.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, e ->
+        Log.e("PromptlyCarMap", "A car screen job stopped", e)
+    })
     private val vm = Nav.viewModel()
+    // The link to the car's own navigation (its trip card, the turn notifications) gets
+    // the trip with every turn one the car can draw (see CarManeuvers). If it fails anyway,
+    // it's started again a little later rather than taking the app down.
+    private val bridgeScope = CoroutineScope(SupervisorJob(scope.coroutineContext[kotlinx.coroutines.Job]) + Dispatchers.Main + CoroutineExceptionHandler { _, e ->
+        Log.e("PromptlyCarMap", "The car's navigation link stopped; starting it again", e)
+        restartBridge()
+    })
     private val notifications = TurnByTurnNotificationManager(context = carContext, channelId = "promptly_turns", smallIconRes = R.drawable.ic_map_status)
     private val bridge = NavigationManagerBridge(
         navigationManager = carContext.getCarService(NavigationManager::class.java),
-        viewModel = vm,
+        viewModel = CarManeuvers.CarSafeModel(carContext, vm, scope),
         context = carContext,
         notificationManager = notifications,
-        onStopNavigation = { Nav.stop() },
+        // The car asked: another app started directions, or it was stopped from the car.
+        // Kept, so the car can offer to carry on.
+        onStopNavigation = { Nav.stop(byYou = false) },
         onAutoDriveEnabled = { },
         isCarForeground = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) },
     )
@@ -167,8 +184,11 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
     }
 
     init {
+        // Android counts the car's screen as the background: without this, the map with
+        // no trip got one position when it opened and none after.
+        CarLocationService.start(carContext)
         Nav.loadCarStyle(scope, carContext.isDarkMode)
-        bridge.start(scope)
+        bridge.start(bridgeScope)
         // Nav itself watches the trip for arriving, cameras and warnings, so a trip
         // the car started still has them with the phone in a pocket.
         vm.navigationUiState.onEach {
@@ -197,6 +217,14 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             invalidate()
         }
         Nav.faster.onEach { invalidate() }.launchIn(scope)
+        // A trip that stopped without you ending it: say so, and offer to carry on.
+        Nav.unfinished.drop(1).onEach { trip ->
+            if (trip != null) {
+                val to = trip.stops.lastOrNull()?.name?.takeIf { it.isNotBlank() && it != "Destination" }
+                CarToast.makeText(carContext, if (to != null) "Your trip to $to stopped. Tap Carry on." else "Your trip stopped. Tap Carry on.", CarToast.LENGTH_LONG).show()
+            }
+            invalidate()
+        }.launchIn(scope)
         // No signal: once a session, say the map and directions now come from the phone.
         var toldOffline = false
         combine(Nav.noSignal, Nav.routeSource) { none, source -> none || source == RouteSource.PHONE }.onEach { offline ->
@@ -254,56 +282,91 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 // Arrived and switched the car off: that trip is over.
                 if (Nav.arrived.value) Nav.finishArrival()
                 bridge.stop()
+                CarLocationService.stop(carContext)
                 scope.cancel()
             }
         })
+    }
+
+    private var restarting = false
+
+    private fun restartBridge() {
+        if (restarting) return
+        restarting = true
+        scope.launch {
+            delay(3_000)
+            restarting = false
+            runCatching { bridge.stop() }
+            runCatching { bridge.start(bridgeScope) }.onFailure { Log.e("PromptlyCarMap", "Couldn't start the car's navigation link", it) }
+        }
     }
 
     @Composable
     override fun content() {
         val style by Nav.carStyle.collectAsState()
         val styleUri = style ?: return
+        val dark = carContext.isDarkMode
         val area by screenSurfaceState(surfaceArea)
         val padding = surfaceStableFractionalPadding(area?.compositeArea)
+        // You low on the screen, with the road ahead above you, as Waze has it.
         val tracking = surfaceStableFractionalPadding(area?.compositeArea, top = 0.5f)
         val options = navigationCameraOptions().copy(browsingPadding = padding, navigationPadding = tracking)
         val mapState = rememberNavigationMapState(navigationCameraOptions = options)
+        // Where you are with no trip: the trip's own position stops when there isn't one.
+        var here by remember { mutableStateOf<android.location.Location?>(null) }
+        var heading by remember { mutableStateOf(0f) }
         // With no trip yet, nothing moves the camera, and it would stay on the whole
         // world, most of which this server has no map for. Start where you are, and
-        // while you're driving with nowhere set, keep you in the middle, heading up.
+        // while you're driving with nowhere set, keep you low on the screen, heading up.
         // Move the map yourself and it's left alone for a while.
         LaunchedEffect(Unit) {
-            var set: Position? = null
+            var placed = false
+            // Where the camera said it was after we last moved it: if it's somewhere else
+            // now, you moved the map. (Comparing with where we asked it to go was off by
+            // the padding that puts you low on the screen.)
+            var expected: Position? = null
             var leftAloneUntil = 0L
-            runCatching {
-                Nav.locationProvider.locationUpdates(1000L).collect { here ->
-                    if (uiState?.isNavigating() == true || CarPreview.plan.value != null) {
-                        set = null
-                        return@collect
-                    }
-                    val now = android.os.SystemClock.elapsedRealtime()
-                    val target = Position(here.longitude, here.latitude)
-                    val last = set
-                    if (last == null) {
-                        mapState.cameraState.position = CameraPosition(target = target, zoom = 14.0)
-                        set = target
-                        return@collect
-                    }
-                    val at = mapState.cameraState.position
-                    val moved = Math.abs(at.target.latitude - last.latitude) > 0.0005 || Math.abs(at.target.longitude - last.longitude) > 0.0005
-                    if (moved && now >= leftAloneUntil) leftAloneUntil = now + 20_000L
-                    if (now < leftAloneUntil) return@collect
-                    if (here.hasSpeed() && here.speed >= 2.5f) {
-                        val bearing = if (here.hasBearing()) here.bearing.toDouble() else at.bearing
+            while (true) {
+                runCatching {
+                    Nav.locationProvider.locationUpdates(1000L).collect { fix ->
+                        here = fix
+                        val driving = fix.hasSpeed() && fix.speed >= DRIVING_MPS
+                        if (driving && fix.hasBearing()) heading = fix.bearing
+                        if (uiState?.isNavigating() == true || CarPreview.plan.value != null) {
+                            placed = false
+                            expected = null
+                            return@collect
+                        }
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        val target = Position(fix.longitude, fix.latitude)
+                        if (!placed) {
+                            mapState.cameraState.position = CameraPosition(target = target, zoom = 15.0, bearing = heading.toDouble(), padding = tracking)
+                            placed = true
+                            expected = null
+                            return@collect
+                        }
+                        val at = mapState.cameraState.position
+                        val was = expected
+                        if (was == null) {
+                            expected = at.target
+                        } else if (apart(at.target, was, 0.0005)) {
+                            leftAloneUntil = now + LEFT_ALONE_MS
+                            expected = at.target
+                        }
+                        if (now < leftAloneUntil) return@collect
+                        // Parked or at the lights: only if the dot would be off where it was.
+                        if (!driving && !apart(target, at.target, 0.0003)) return@collect
                         runCatching {
                             mapState.cameraState.animateTo(
-                                CameraPosition(target = target, zoom = maxOf(at.zoom, 15.0), bearing = bearing, tilt = at.tilt, padding = tracking),
+                                CameraPosition(target = target, zoom = maxOf(at.zoom, 15.0), bearing = if (driving) heading.toDouble() else at.bearing, tilt = at.tilt, padding = tracking),
                                 kotlin.time.Duration.parse("900ms"),
                             )
                         }
-                        set = target
+                        expected = mapState.cameraState.position.target
                     }
-                }
+                }.onFailure { Log.w("PromptlyCarMap", "Lost the position on the car map; trying again", it) }
+                // The position stopping (or failing) never leaves the map stuck: ask again.
+                delay(5_000)
             }
         }
         // The whole route in view, beside the card that describes it.
@@ -319,6 +382,8 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 }
             }
         }
+        // The route in Promptly's terracotta, as on the phone, and only the way ahead.
+        val routeLine = remember(dark) { routeAheadOverlay(dark) }
         CarAppNavigationView(
             modifier = Modifier.fillMaxSize(),
             styleUrl = styleUri,
@@ -327,15 +392,20 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             viewModel = vm,
             config = VisualNavigationViewConfig.Default().withSpeedLimitStyle(SignageStyle.ViennaConvention),
             surfaceAreaTracker = surfaceArea,
-            mapContent = {
+            routeOverlayBuilder = routeLine,
+            // The car view has no setting for its own small dot: the arrow is drawn over it.
+            mapContent = { ui ->
                 TrafficOnRoute()
                 PreviewRoutesOnMap()
+                // The arrow: on a trip where the trip puts you, otherwise your last fix.
+                if (ui.isNavigating()) YouOnTrip(ui)
+                else Puck(here?.let { it.latitude to it.longitude }, heading)
             },
         )
     }
 
     /** Turn-by-turn, with the arrival time in current traffic, and any quicker way. */
-    private fun drivingTemplate(state: NavigationUiState): Template {
+    private fun drivingTemplate(state: NavigationUiState, withCard: Boolean = true): Template {
         val strip = ActionStrip.Builder()
         Nav.faster.value?.let { offer ->
             strip.addAction(
@@ -364,7 +434,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         // which the car requires) and says when a new route is being worked out.
         val trip = state.tripState
         val step = trip?.currentStep()
-        CarTemplates.routingInfo(
+        if (withCard) CarTemplates.routingInfo(
             carContext,
             instruction = trip?.visualInstruction(),
             metresToTurn = trip?.progress()?.distanceToNextManeuver,
@@ -453,7 +523,11 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
     override fun onGetTemplate(): Template {
         val state = uiState
         if (state?.isNavigating() == true) {
-            return drivingTemplate(state)
+            // A turn the car won't take must not take the screen with it.
+            return runCatching { drivingTemplate(state) }.getOrElse {
+                Log.e("PromptlyCarMap", "Couldn't build the driving card", it)
+                drivingTemplate(state, withCard = false)
+            }
         }
         if (Nav.arrived.value) {
             return CarTemplates.arrival(
@@ -491,9 +565,17 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             onPlace = { CarPreview.show(carContext, it) },
             onMic = { askFromCar() },
             micState = Voice.state.value,
+            onCarryOn = Nav.unfinished.value?.let { { Nav.carryOn() } },
         )
     }
 }
+
+private const val DRIVING_MPS = 2.5f
+private const val LEFT_ALONE_MS = 20_000L
+
+/** Further apart than [degrees] in either direction. */
+private fun apart(a: Position, b: Position, degrees: Double): Boolean =
+    Math.abs(a.latitude - b.latitude) > degrees || Math.abs(a.longitude - b.longitude) > degrees
 
 /** How many rows this car allows, which depends on the car and whether it's moving. */
 private fun carLimit(context: CarContext, type: Int): Int =

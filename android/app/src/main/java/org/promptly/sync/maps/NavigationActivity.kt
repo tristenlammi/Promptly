@@ -326,21 +326,10 @@ class NavigationActivity : ComponentActivity() {
         // Clear of the turn card above and the arrival bar below, whatever size they are.
         val under = if (navigating) with(density) { DriveLayout.banner.toDp() } else 0.dp
         val above = if (navigating) with(density) { DriveLayout.eta.toDp() } else 0.dp
-        val routeLine = remember(dark) {
-            RouteOverlayBuilder(navigationPath = { ui ->
-                ui.routeGeometry?.let { BorderedPolyline(points = it, color = DriveColours.route(dark), borderColor = DriveColours.routeEdge(dark)) }
-            })
-        }
-        val you = DriveColours.you(dark)
-        val puck = remember(you) {
-            NavigationMapPuckStyle(
-                dotFillColorCurrentLocation = you,
-                dotFillColorOldLocation = you,
-                accuracyStrokeColor = you,
-                accuracyFillColor = you.copy(alpha = 0.16f),
-                bearingColor = you,
-            )
-        }
+        // Only the way ahead: the line behind you goes as you drive.
+        val routeLine = remember(dark) { routeAheadOverlay(dark) }
+        // The arrow from the map with no trip, drawn below; the library's dot is hidden.
+        val puck = HiddenLibraryPuck
         // The sheets are for a trip that's running.
         LaunchedEffect(navigating) {
             if (!navigating) {
@@ -362,7 +351,10 @@ class NavigationActivity : ComponentActivity() {
                 locationPuckStyle = puck,
                 // Ending the trip goes back to Drive (Nav.ended).
                 onTapExit = { Nav.stop() },
-                mapContent = { TrafficOnRoute() },
+                mapContent = { ui ->
+                    TrafficOnRoute()
+                    YouOnTrip(ui)
+                },
             )
             // The road's limit in km/h, when the map has one (many Australian roads don't).
             val limit = state.currentAnnotation?.speedLimit?.value(MeasurementSpeedUnit.KilometersPerHour)?.let { Math.round(it).toInt() }?.takeIf { it in 5..150 }
