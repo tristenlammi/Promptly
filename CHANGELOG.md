@@ -21,6 +21,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Widgets can have a glass background: see-through, with your wallpaper showing behind a frosted panel (light by day, smoked at night). Choose Solid or Glass for each widget in its settings (long-press the widget, then Settings). Widgets that had no settings now have a small settings screen for this. Promptly for Android 1.9.1.
+
+### Fixed
+
+- Widgets (Promptly for Android 1.9.1): Meals & Macros, and some other new widgets, could turn into a copy of the App panel. The app's release build had merged the widgets into one, so refreshing one redrew the others as it.
+
 ## [0.39.0] - 2026-11-12
 
 ### Added

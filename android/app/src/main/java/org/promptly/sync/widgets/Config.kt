@@ -87,15 +87,37 @@ internal suspend fun save(ctx: Context, id: Int, change: (androidx.datastore.pre
 }
 
 @Composable
-internal fun Screen(title: String, onSave: () -> Unit, content: @Composable () -> Unit) {
+internal fun Screen(title: String, onSave: () -> Unit, look: Int? = null, content: @Composable () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp)) {
             Text(title, style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(12.dp))
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) { content() }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                content()
+                if (look != null) BackgroundChoice(look)
+            }
             Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text("Done") }
         }
     }
+}
+
+/** "Background: Solid / Glass" for widget [id], saved and shown as soon as it's picked. */
+@Composable
+internal fun BackgroundChoice(id: Int) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var glass by remember { mutableStateOf(false) }
+    LaunchedEffect(id) { glass = prefsOf(ctx, id)?.get(BACKGROUND) == "glass" }
+    fun pick(g: Boolean) {
+        glass = g
+        scope.launch {
+            save(ctx, id, { p -> p[BACKGROUND] = if (g) "glass" else "solid" }) { Widgets.redrawId(ctx, id) }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    Text("Background", style = MaterialTheme.typography.titleSmall)
+    Choice("Solid", !glass, { pick(false) })
+    Choice("Glass: see-through, your wallpaper shows behind it", glass, { pick(true) })
 }
 
 @Composable
@@ -171,7 +193,7 @@ class AgendaConfigActivity : ComponentActivity() {
                     }
                     if (mode == AgendaConfig.PICK && picked.isEmpty()) picked = calendars.filter { !it.hidden }.map { it.id }.toSet() + AgendaConfig.INVITED
                 }
-                Screen("Agenda widget", onSave = {
+                Screen("Agenda widget", look = id, onSave = {
                     scope.launch {
                         save(this@AgendaConfigActivity, id, { p ->
                             p[AgendaWidget.MODE] = mode
@@ -227,7 +249,7 @@ class TasksConfigActivity : ComponentActivity() {
                     lists = WidgetStore.load(this@TasksConfigActivity).snapshot.tasks?.lists.orEmpty().ifEmpty { listOf(TaskList("inbox", "Inbox", null)) }
                     prefsOf(this@TasksConfigActivity, id)?.let { TasksWidget.configOf(it) }?.let { listId = it.listId; someday = it.someday }
                 }
-                Screen("Tasks widget", onSave = {
+                Screen("Tasks widget", look = id, onSave = {
                     scope.launch {
                         save(this@TasksConfigActivity, id, { p ->
                             p[TasksWidget.LIST] = listId ?: ""
@@ -262,7 +284,7 @@ class NotesConfigActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     prefsOf(this@NotesConfigActivity, id)?.let { NotesWidget.configOf(it) }?.let { titlesOnly = it.titlesOnly }
                 }
-                Screen("Notes widget", onSave = {
+                Screen("Notes widget", look = id, onSave = {
                     scope.launch {
                         save(this@NotesConfigActivity, id, { p -> p[NotesWidget.TITLES_ONLY] = titlesOnly }) { NotesWidget().update(this@NotesConfigActivity, it) }
                         finish()
@@ -311,7 +333,7 @@ class OneNoteConfigActivity : ComponentActivity() {
                     if (fetched != null) notes = fetched
                     loading = false
                 }
-                Screen("One note widget", onSave = {
+                Screen("One note widget", look = id, onSave = {
                     val chosen = notes.firstOrNull { it.id == picked }
                     scope.launch {
                         if (picked != null) {

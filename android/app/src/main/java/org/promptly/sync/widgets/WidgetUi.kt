@@ -92,13 +92,28 @@ object WText {
 /** The phone's clock for drawing (12/24-hour from its settings). */
 fun clockOf(ctx: Context): Clock = Clock(ZoneId.systemDefault(), DateFormat.is24HourFormat(ctx))
 
-/** A widget's frame: rounded, Promptly's background, edge padding. */
+/** A widget's frame: rounded, its background (solid or glass), edge padding. */
 @Composable
 fun Frame(content: @Composable ColumnScope.() -> Unit) {
     Column(
-        GlanceModifier.fillMaxSize().background(WColors.background).cornerRadius(20.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+        GlanceModifier.fillMaxSize().widgetBackground(glassChosen()).cornerRadius(20.dp).padding(horizontal = 12.dp, vertical = 10.dp),
     ) { content() }
 }
+
+/** Each widget's own "Background" setting: "solid" (default) or "glass". */
+val BACKGROUND = androidx.datastore.preferences.core.stringPreferencesKey("wg_background")
+
+/** Whether this widget chose glass. Every widget keeps its settings as
+ *  Preferences; the cast is only a guard. */
+@Composable
+fun glassChosen(): Boolean =
+    (androidx.glance.currentState<Any?>() as? androidx.datastore.preferences.core.Preferences)?.get(BACKGROUND) == "glass"
+
+/** Solid Promptly background, or glass: a see-through frosted panel (light in
+ *  day, dark at night) with a soft rim. Android can't blur what's behind a
+ *  widget, so glass is tint, rim and highlight over the wallpaper, not blur. */
+fun GlanceModifier.widgetBackground(glass: Boolean): GlanceModifier =
+    if (glass) background(ImageProvider(R.drawable.wg_glass)) else background(WColors.background)
 
 /** The round "+" in a widget's top corner. */
 @Composable

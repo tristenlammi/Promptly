@@ -12,7 +12,6 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
-import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,6 +60,31 @@ object Widgets {
     private fun ids(ctx: Context, k: Kind): IntArray =
         runCatching { AppWidgetManager.getInstance(ctx).getAppWidgetIds(ComponentName(ctx, k.receiver)) }.getOrNull() ?: IntArray(0)
 
+    /** One kind's widgets on the home screen, found by its own receiver. Not
+     *  Glance's getGlanceIds/updateAll, which go by the widget's class name: two
+     *  kinds sharing a name (R8 merged them in 1.9.0) got each other's drawing. */
+    fun glanceIds(ctx: Context, receiver: Class<out GlanceAppWidgetReceiver>): List<androidx.glance.GlanceId> {
+        val mgr = GlanceAppWidgetManager(ctx)
+        val ids = runCatching { AppWidgetManager.getInstance(ctx).getAppWidgetIds(ComponentName(ctx, receiver)) }.getOrNull() ?: IntArray(0)
+        return ids.toList().mapNotNull { runCatching { mgr.getGlanceIdBy(it) }.getOrNull() }
+    }
+
+    /** Redraw one kind's widgets, each with that kind's own drawing. */
+    suspend fun redrawKind(ctx: Context, k: Kind) {
+        val ids = glanceIds(ctx, k.receiver)
+        if (ids.isEmpty()) return
+        val widget = k.widget()
+        for (id in ids) runCatching { widget.update(ctx, id) }
+    }
+
+    /** Redraw one widget by its id, with its own kind's drawing. */
+    suspend fun redrawId(ctx: Context, appWidgetId: Int) {
+        val provider = runCatching { AppWidgetManager.getInstance(ctx).getAppWidgetInfo(appWidgetId)?.provider?.className }.getOrNull() ?: return
+        val k = ALL.firstOrNull { it.receiver.name == provider } ?: return
+        val gid = runCatching { GlanceAppWidgetManager(ctx).getGlanceIdBy(appWidgetId) }.getOrNull() ?: return
+        runCatching { k.widget().update(ctx, gid) }
+    }
+
     fun placed(ctx: Context): Boolean = ALL.any { ids(ctx, it).isNotEmpty() }
 
     /** The snapshot sections the widgets on the home screen need. */
@@ -71,8 +95,7 @@ object Widgets {
 
     /** The notes the One note widgets show (the snapshot sends them whole). */
     suspend fun noteIds(ctx: Context): List<String> = runCatching {
-        val mgr = GlanceAppWidgetManager(ctx)
-        mgr.getGlanceIds(OneNoteWidget::class.java).mapNotNull { id ->
+        glanceIds(ctx, OneNoteWidgetReceiver::class.java).mapNotNull { id ->
             getAppWidgetState(ctx, PreferencesGlanceStateDefinition, id)[OneNoteWidget.NOTE_ID]?.takeIf { it.isNotBlank() }
         }.distinct()
     }.getOrDefault(emptyList())
@@ -114,7 +137,7 @@ object Widgets {
         runCatching { PhotoWidget.rotate(ctx, System.currentTimeMillis()) }
         WidgetStore.bump()
         HubStore.bump()
-        for (k in ALL) if (ids(ctx, k).isNotEmpty()) runCatching { k.widget().updateAll(ctx) }
+        for (k in ALL) runCatching { redrawKind(ctx, k) }
         Boundaries.schedule(ctx)
     }
 

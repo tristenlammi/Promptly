@@ -61,7 +61,7 @@ class TalkWidget : HubWidget() {
                 .setData(android.net.Uri.parse("promptly-widget://talk")),
         )
         Box(
-            GlanceModifier.fillMaxSize().background(WColors.background).cornerRadius(20.dp).clickable(open).semantics { contentDescription = "Talk to Promptly" },
+            GlanceModifier.fillMaxSize().widgetBackground(glassChosen()).cornerRadius(20.dp).clickable(open).semantics { contentDescription = "Talk to Promptly" },
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
