@@ -101,7 +101,7 @@ internal fun Screen(title: String, onSave: () -> Unit, look: Int? = null, conten
     }
 }
 
-/** "Background: Solid / Glass" for widget [id], saved and shown as soon as it's picked. */
+/** "Background: Solid / See-through" for widget [id], saved and shown as soon as it's picked. */
 @Composable
 internal fun BackgroundChoice(id: Int) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -117,7 +117,7 @@ internal fun BackgroundChoice(id: Int) {
     Spacer(Modifier.height(8.dp))
     Text("Background", style = MaterialTheme.typography.titleSmall)
     Choice("Solid", !glass, { pick(false) })
-    Choice("Glass: see-through, your wallpaper shows behind it", glass, { pick(true) })
+    Choice("See-through: your wallpaper shows behind it", glass, { pick(true) })
 }
 
 @Composable

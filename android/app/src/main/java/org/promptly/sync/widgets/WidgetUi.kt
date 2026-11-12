@@ -109,9 +109,8 @@ val BACKGROUND = androidx.datastore.preferences.core.stringPreferencesKey("wg_ba
 fun glassChosen(): Boolean =
     (androidx.glance.currentState<Any?>() as? androidx.datastore.preferences.core.Preferences)?.get(BACKGROUND) == "glass"
 
-/** Solid Promptly background, or glass: a see-through frosted panel (light in
- *  day, dark at night) with a soft rim. Android can't blur what's behind a
- *  widget, so glass is tint, rim and highlight over the wallpaper, not blur. */
+/** Solid Promptly background, or see-through: an even tint (light in day,
+ *  dark at night) the wallpaper shows through, with no rim or shine. */
 fun GlanceModifier.widgetBackground(glass: Boolean): GlanceModifier =
     if (glass) background(ImageProvider(R.drawable.wg_glass)) else background(WColors.background)
 

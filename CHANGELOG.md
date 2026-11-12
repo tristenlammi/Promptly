@@ -23,7 +23,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 
-- Widgets can have a glass background: see-through, with your wallpaper showing behind a frosted panel (light by day, smoked at night). Choose Solid or Glass for each widget in its settings (long-press the widget, then Settings). Widgets that had no settings now have a small settings screen for this. Promptly for Android 1.9.1.
+- Widgets can have a see-through background, so your wallpaper shows behind them. Choose Solid or See-through for each widget in its settings (long-press the widget, then Settings). Widgets that had no settings now have a small settings screen for this. Promptly for Android 1.9.1.
+- The app panel widget only shows whole rows of apps (no half-cut row at the bottom; more rows still scroll), and its small pencil is gone: its settings are in the long-press menu like every other widget's.
 
 ### Fixed
 
