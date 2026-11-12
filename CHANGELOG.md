@@ -21,9 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Widgets can have a see-through background, so your wallpaper shows behind them. Choose Solid or See-through for each widget in its settings (long-press the widget, then Settings). Widgets that had no settings now have a small settings screen for this. Promptly for Android 1.9.1.
+- The app panel widget only shows whole rows of apps (no half-cut row at the bottom; more rows still scroll), and its small pencil is gone: its settings are in the long-press menu like every other widget's.
+
 ### Fixed
 
 - Talk on Android phones: it could stop after a second with "Talk couldn't start on this phone" and drop to one question at a time. Newer Android versions add regional settings (like the temperature unit) to the phone's language, which made the server turn Talk away; it now ignores them. The server log also says why if it ever turns Talk away again.
+- Widgets (Promptly for Android 1.9.1): Meals & Macros, and some other new widgets, could turn into a copy of the App panel. The app's release build had merged the widgets into one, so refreshing one redrew the others as it.
 
 ## [0.39.0] - 2026-11-12
 

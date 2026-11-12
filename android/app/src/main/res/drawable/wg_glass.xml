@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A see-through widget background (day): an even light tint the wallpaper
+     shows through, just enough to keep dark text readable. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="20dp" />
+    <solid android:color="#80FFFFFF" />
+</shape>

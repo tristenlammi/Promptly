@@ -522,7 +522,7 @@ class PhotoWidget : GlanceAppWidget() {
         }
 
         private suspend fun each(ctx: Context): List<Pair<GlanceId, Preferences>> = runCatching {
-            GlanceAppWidgetManager(ctx).getGlanceIds(PhotoWidget::class.java).map { it to getAppWidgetState(ctx, PreferencesGlanceStateDefinition, it) }
+            Widgets.glanceIds(ctx, PhotoWidgetReceiver::class.java).map { it to getAppWidgetState(ctx, PreferencesGlanceStateDefinition, it) }
         }.getOrDefault(emptyList())
 
         /** The albums the Photo widgets on the home screen show. */

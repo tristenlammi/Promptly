@@ -126,21 +126,26 @@ class AppsWidget : HubWidget() {
         val counts = hub.section("counts")
         val size = LocalSize.current
         val cols = ((size.width.value - 16) / 72).toInt().coerceIn(2, 6)
+        // Whole rows only: the rows share the room under the title, so a
+        // half-cut row never peeks out at the bottom (more rows still scroll).
+        val room = (size.height.value - 20 - 34).coerceAtLeast(ROW)
+        val rowHeight = (room / (room / ROW).toInt().coerceAtLeast(1)).dp
         val edit = openIntent(
             Intent(ctx, AppsConfigActivity::class.java)
                 .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetIdOf(ctx))
                 .setData(Uri.parse("promptly-widget://apps-config")),
         )
         Frame {
-            Title("Promptly", openPage(ctx, Open.PROMPTLY, "/")) { EditButton(edit) }
+            // No pencil: its settings are in the launcher's long-press menu.
+            Title("Promptly", openPage(ctx, Open.PROMPTLY, "/"))
             if (apps.isEmpty()) {
-                Muted("Tap the pencil to choose apps.")
+                Column(GlanceModifier.defaultWeight().fillMaxWidth().clickable(edit)) { Muted("Tap to choose apps.") }
             } else {
                 // More apps than fit: the rows scroll (most launchers allow it).
                 val rows = apps.chunked(cols)
                 LazyColumn(GlanceModifier.defaultWeight().fillMaxWidth()) {
                     itemsIndexed(rows, itemId = { i, _ -> i.toLong() }) { _, row ->
-                        Row(GlanceModifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                        Row(GlanceModifier.fillMaxWidth().height(rowHeight), verticalAlignment = Alignment.CenterVertically) {
                             for (a in row) AppCell(a, counts?.intOr(a.key) ?: 0, GlanceModifier.defaultWeight())
                             repeat(cols - row.size) { Spacer(GlanceModifier.defaultWeight()) }
                         }
@@ -173,6 +178,8 @@ class AppsWidget : HubWidget() {
 
     companion object {
         val APPS = stringPreferencesKey("panel_apps")
+        /** The least room a row of apps needs (dp). */
+        private const val ROW = 74f
     }
 }
 

@@ -437,6 +437,16 @@
             </intent-filter>
         </receiver>
         <activity
+            android:name=".widgets.LookConfigActivity"
+            android:label="Widget settings"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.widgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
             android:name=".widgets.AgendaConfigActivity"
             android:label="Agenda widget"
             android:exported="true"

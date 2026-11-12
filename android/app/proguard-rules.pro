@@ -26,3 +26,7 @@
 # keep them (and their no-argument constructors) whatever its own rules say.
 -keep class * implements androidx.glance.appwidget.action.ActionCallback { <init>(); }
 -keep class org.promptly.sync.widgets.** extends androidx.glance.appwidget.GlanceAppWidgetReceiver { <init>(); }
+# Every widget its own class, by its own name. Glance tells widgets apart by the
+# GlanceAppWidget's class name; in 1.9.0 R8 merged the new ones into one class, so
+# refreshing the App panel redrew Meals & Macros (and others) as App panels.
+-keep class org.promptly.sync.widgets.** extends androidx.glance.appwidget.GlanceAppWidget { <init>(); }

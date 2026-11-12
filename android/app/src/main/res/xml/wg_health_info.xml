@@ -11,4 +11,6 @@
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:updatePeriodMillis="0"
-    android:initialLayout="@layout/glance_default_loading_layout" />
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:configure="org.promptly.sync.widgets.LookConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional" />

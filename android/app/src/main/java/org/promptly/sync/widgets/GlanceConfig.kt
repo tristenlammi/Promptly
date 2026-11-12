@@ -70,7 +70,7 @@ class AppsConfigActivity : ComponentActivity() {
                 var chosen by remember { mutableStateOf(PanelApps.DEFAULT) }
                 var hide by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { prefsOf(this@AppsConfigActivity, id)?.let { chosen = PanelApps.keys(it) } }
-                Screen("App panel", onSave = {
+                Screen("App panel", look = id, onSave = {
                     scope.launch {
                         val picked = all.filter { it.key in chosen }
                         save(this@AppsConfigActivity, id, { p -> p[AppsWidget.APPS] = chosen.joinToString(",") }) { AppsWidget().update(this@AppsConfigActivity, it) }
@@ -133,7 +133,7 @@ class PeopleConfigActivity : ComponentActivity() {
                         .onFailure { problem = "Couldn't search just now. Check the connection and try again." }
                         .getOrDefault(emptyList())
                 }
-                Screen("Favourite people", onSave = {
+                Screen("Favourite people", look = id, onSave = {
                     scope.launch {
                         val arr = JSONArray()
                         picked.forEach { arr.put(JSONObject().put("user_id", it.optString("user_id")).put("name", it.optString("name"))) }
@@ -186,7 +186,7 @@ class CountdownConfigActivity : ComponentActivity() {
                         title = if (it.title == "the day") "" else it.title; date = it.date; yearly = it.yearly
                     }
                 }
-                Screen("Countdown", onSave = {
+                Screen("Countdown", look = id, onSave = {
                     scope.launch {
                         save(this@CountdownConfigActivity, id, { p ->
                             p[CountdownWidget.TITLE] = title.trim().take(60)
@@ -372,5 +372,26 @@ class WidgetsActivity : ComponentActivity() {
 
     companion object {
         fun open(ctx: Context) = ctx.startActivity(android.content.Intent(ctx, WidgetsActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
+// ------------------------------------------------------------------ look only
+
+/** Settings for a widget with nothing else to set (Talk, Today, Macros…):
+ *  just its background. Opened from the launcher's long-press "Settings";
+ *  never forced when the widget is added. */
+class LookConfigActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        val id = widgetId(this)
+        if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return finish()
+        ready(this, id)
+        val name = runCatching { AppWidgetManager.getInstance(this).getAppWidgetInfo(id)?.loadLabel(packageManager) }.getOrNull() ?: "Widget"
+        setContent {
+            CaptureTheme {
+                Screen(name, look = id, onSave = { finish() }) {}
+            }
+        }
     }
 }
