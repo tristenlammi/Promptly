@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-12
+
 ### Added
 
 - Promptly for Android 1.9.0: eleven new home-screen widgets. **App panel**: the Promptly apps you choose in one place, each with its count (unread in Rooms, Porch and Mail, tasks due, events left today); it can take those apps' own icons off your home screen, and they still open from the panel. **Talk**: one big microphone. **Quick add**: a note, a task, a photo or a voice note, one tap each. **Today**: the weather, what's next and when to leave, tasks due and birthdays, with **Read me my day**. **Meals & Macros**: calories and protein left today as rings, and Log food. **Rooms and Porch**: who has messaged you and the newest Porch photo. **Favourite people**: the people you choose as big circles, a tap from a message or a call. **P Maps**: Home and Work in today's traffic, and when to leave for your next event. **On their way**: who's sharing a trip with you and when they'll arrive. **Countdown**: days until a day you choose (every year, for a birthday). **Health**: your weight trend, Log weight and your next workout. **Mail**: unread mail and who it's from.
