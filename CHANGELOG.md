@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.38.2] - 2026-11-12
+
 ### Fixed
 
 - Apps' Ask tab on a phone: a long web address or a table in an answer made the page wider than the screen, so the bottom bar slid off the side and you had to zoom out. Long links now wrap and wide tables scroll on their own.
