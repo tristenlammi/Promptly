@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- App panel widget layout (long-press it, then Settings): "Fit to the widget" (the new default) sizes the icons so all your apps fill the panel, with no empty space below the last row; or choose the apps in a row, the rows showing and Small, Medium or Large icons yourself. App names can be turned off to give the icons more room. Promptly for Android 1.9.2.
+
 ### Changed
 
 - P Maps (Promptly for Android 1.9.2): the map now follows you the way Waze does, on the car's screen and the phone: from behind the car, facing the way you're going, tilted, with you low on the screen and the zoom easing in and out with your speed. With no trip set it does the same while you drive. Move the map yourself and it comes back after 15 seconds.

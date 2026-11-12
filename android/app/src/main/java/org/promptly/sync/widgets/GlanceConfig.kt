@@ -69,11 +69,24 @@ class AppsConfigActivity : ComponentActivity() {
                 val scope = rememberCoroutineScope()
                 var chosen by remember { mutableStateOf(PanelApps.DEFAULT) }
                 var hide by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) { prefsOf(this@AppsConfigActivity, id)?.let { chosen = PanelApps.keys(it) } }
+                var layout by remember { mutableStateOf(PanelLayout()) }
+                LaunchedEffect(Unit) {
+                    prefsOf(this@AppsConfigActivity, id)?.let {
+                        chosen = PanelApps.keys(it)
+                        layout = AppsWidget.layoutOf(it)
+                    }
+                }
                 Screen("App panel", look = id, onSave = {
                     scope.launch {
                         val picked = all.filter { it.key in chosen }
-                        save(this@AppsConfigActivity, id, { p -> p[AppsWidget.APPS] = chosen.joinToString(",") }) { AppsWidget().update(this@AppsConfigActivity, it) }
+                        save(this@AppsConfigActivity, id, { p ->
+                            p[AppsWidget.APPS] = chosen.joinToString(",")
+                            p[AppsWidget.LAYOUT] = if (layout.fit) "fit" else "choose"
+                            p[AppsWidget.COLS] = layout.cols
+                            p[AppsWidget.ROWS] = layout.rows
+                            p[AppsWidget.ICON] = layout.icon
+                            p[AppsWidget.LABELS] = layout.labels
+                        }) { AppsWidget().update(this@AppsConfigActivity, it) }
                         if (hide) PanelApps.hideIcons(this@AppsConfigActivity, picked)
                         finish()
                     }
@@ -86,6 +99,20 @@ class AppsConfigActivity : ComponentActivity() {
                     for (a in all) {
                         Tick(a.label, a.key in chosen, { on -> chosen = if (on) chosen + a.key else chosen - a.key })
                     }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Section("Layout")
+                    Choice("Fit to the widget: icons sized so your apps fill it", layout.fit, { layout = layout.copy(fit = true) })
+                    Choice("Choose columns, rows and icon size", !layout.fit, { layout = layout.copy(fit = false) })
+                    if (!layout.fit) {
+                        Stepper("Apps in a row", layout.cols, PanelLayout.MIN_COLS, PanelLayout.MAX_COLS) { layout = layout.copy(cols = it) }
+                        Stepper("Rows showing", layout.rows, PanelLayout.MIN_ROWS, PanelLayout.MAX_ROWS) { layout = layout.copy(rows = it) }
+                        Text("More apps than fit scroll.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Section("Icon size")
+                        for ((key, label) in listOf("small" to "Small", "medium" to "Medium", "large" to "Large")) {
+                            Choice(label, layout.icon == key, { layout = layout.copy(icon = key) })
+                        }
+                    }
+                    Toggle("Show app names", "Names under the icons. Off gives the icons more room.", layout.labels) { layout = layout.copy(labels = it) }
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     val canHide = all.filter { it.key in chosen && it.key !in PanelApps.KEEP_ICON && PanelApps.iconOn(this@AppsConfigActivity, it.launcher) }
                     if (canHide.isNotEmpty() || hide) {
