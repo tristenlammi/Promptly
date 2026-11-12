@@ -17,6 +17,9 @@ without ``widgets`` gets 403; a file or task that isn't yours is 404.
     GET  /widgets/notes/pick?q=   your notes, for the One note widget's settings
     GET  /widgets/photos/albums                 the albums the Photo widget can show (photos.py)
     GET  /widgets/photos/albums/{id}?n=&have=…  a few of its photos at random, with signed links
+    GET  /widgets/glance?want=counts,today,…   the other widgets' numbers in one call (glance.py)
+    GET  /widgets/people?q=                     people for the Favourite people widget
+    GET  /widgets/briefing                      "Read me my day" for the Today widget
 
 Pictures and recordings come up first through tus (``route=note``, with the
 phone's ``upload`` scope) and are attached here by their file id.
@@ -576,3 +579,47 @@ async def photo_album_pick(
 
 
 __all__ = ["router", "widget_user"]
+
+
+# ------------------------------------------------------------------ at a glance
+
+
+@router.get("/glance")
+async def get_glance(
+    want: str = Query("counts", max_length=120),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(widget_user),
+) -> dict[str, Any]:
+    """The other widgets' numbers in one call (``glance.py``): ``counts``
+    (the app panel's badges), ``today``, ``macros``, ``social`` (Rooms and
+    Porch), ``maps``, ``trips`` (who's on their way), ``health``, ``mail``."""
+    from . import glance
+
+    wanted = [w for w in dict.fromkeys(x.strip() for x in want.split(",")) if w in glance.SECTIONS]
+    if not wanted:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Ask for one of: " + ", ".join(glance.SECTIONS) + ".")
+    out = await glance.build(db, user, wanted)
+    # Nothing here is written; drop the read transaction.
+    await db.rollback()
+    return out
+
+
+@router.get("/people")
+async def pick_people(q: str = Query("", max_length=80), db: AsyncSession = Depends(get_db), user: User = Depends(widget_user)) -> dict[str, Any]:
+    """People for the Favourite people widget's settings: names only."""
+    from . import glance
+
+    out = {"people": await glance.people(db, user, q.strip())}
+    await db.rollback()
+    return out
+
+
+@router.get("/briefing")
+async def briefing(db: AsyncSession = Depends(get_db), user: User = Depends(widget_user)) -> dict[str, Any]:
+    """The Today widget's "Read me my day": the same script Today reads out
+    (``today/briefing.py``, no model call). The phone speaks it."""
+    from app.today import briefing as b
+
+    out = await b.build(db, user)
+    await db.rollback()
+    return out
