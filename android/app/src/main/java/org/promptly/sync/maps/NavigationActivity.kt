@@ -322,6 +322,9 @@ class NavigationActivity : ComponentActivity() {
             }
         }
         val navigating = state.isNavigating()
+        // Behind the car, facing its way, tilted, the zoom following your speed; and so
+        // even when this screen opens on a trip that's already running.
+        KeepTripCamera(mapState, navigating, state.location?.speed?.value)
         val density = LocalDensity.current
         // Clear of the turn card above and the arrival bar below, whatever size they are.
         val under = if (navigating) with(density) { DriveLayout.banner.toDp() } else 0.dp

@@ -209,7 +209,11 @@ object Nav {
     }
 
     fun init(context: Context) {
-        if (!::app.isInitialized) app = context.applicationContext
+        if (!::app.isInitialized) {
+            app = context.applicationContext
+            // A trip's notification silent and out of the way (before the trip makes it).
+            QuietNotes.set(app)
+        }
     }
 
     private val _theme by lazy {
