@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-13
+
 ### Added
 
 - App panel widget layout (long-press it, then Settings): "Fit to the widget" (the new default) sizes the icons so all your apps fill the panel, with no empty space below the last row; or choose the apps in a row, the rows showing and Small, Medium or Large icons yourself. App names can be turned off to give the icons more room. Promptly for Android 1.9.2.
