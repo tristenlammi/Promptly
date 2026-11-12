@@ -121,7 +121,10 @@ async def _hello(ws: WebSocket) -> Hello | None:
     try:
         raw = await asyncio.wait_for(ws.receive_text(), timeout=HELLO_TIMEOUT_S)
         return Hello.model_validate(json.loads(raw))
-    except (asyncio.TimeoutError, ValueError, ValidationError, KeyError):
+    except (asyncio.TimeoutError, ValueError, ValidationError, KeyError) as exc:
+        # Say why in the server log: on a phone this only shows as "Talk
+        # couldn't start".
+        logger.warning("talk: hello refused: %s", str(exc)[:300])
         await _refuse(ws, CLOSE_BAD_HELLO, "bad_hello", "Talk needs a hello first.")
     except (WebSocketDisconnect, RuntimeError):
         pass

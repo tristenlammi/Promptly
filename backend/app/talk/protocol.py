@@ -90,8 +90,8 @@ class Hello(BaseModel):
     play: Literal["pcm16", "opus"] | None = None
     device: Literal["web", "android", "car"] = "web"
     caps: list[str] = Field(default_factory=list, max_length=16)
-    tz: str | None = Field(default=None, max_length=64)
-    lang: str | None = Field(default=None, max_length=16)
+    tz: str | None = None
+    lang: str | None = None
     turn_mode: Literal["hands_free", "tap"] | None = None
     interrupt_mode: Literal["talk", "tap"] | None = None
     trip: dict[str, Any] | None = None
@@ -99,6 +99,27 @@ class Hello(BaseModel):
     # person allowed it in Account -> Voice). Their email, files, photos and
     # timeline stay behind the lock for this conversation.
     locked: bool = False
+
+    @field_validator("lang", mode="before")
+    @classmethod
+    def _plain_lang(cls, v: Any) -> str | None:
+        # Android 14+ adds regional preferences to the language tag
+        # ("en-AU-u-fw-mon-mu-celsius"). Only the language is used, so keep
+        # the language and region and never refuse the hello over the rest.
+        if not isinstance(v, str) or not v.strip():
+            return None
+        tag = v.strip().replace("_", "-")
+        for ext in ("-u-", "-x-", "-t-"):
+            tag = tag.split(ext, 1)[0]
+        return tag[:16] or None
+
+    @field_validator("tz", mode="before")
+    @classmethod
+    def _plain_tz(cls, v: Any) -> str | None:
+        # A zone name too long to be real is ignored rather than refused.
+        if not isinstance(v, str) or not v.strip() or len(v) > 64:
+            return None
+        return v.strip()
 
     @field_validator("caps")
     @classmethod

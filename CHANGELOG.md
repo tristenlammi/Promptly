@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Talk on Android phones: it could stop after a second with "Talk couldn't start on this phone" and drop to one question at a time. Newer Android versions add regional settings (like the temperature unit) to the phone's language, which made the server turn Talk away; it now ignores them. The server log also says why if it ever turns Talk away again.
+
 ## [0.39.0] - 2026-11-12
 
 ### Added
