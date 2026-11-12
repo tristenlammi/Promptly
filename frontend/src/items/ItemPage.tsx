@@ -398,7 +398,9 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
           {body}
         </main>
         {isPhone && tab === "ask" && spec && (
-          <div className="min-h-0 flex-1 pb-[calc(64px+env(safe-area-inset-bottom,0px))]">
+          // min-w-0: a long link or table in an answer must not widen the page
+          // past the screen (it pushed the tab bar off the side).
+          <div className="min-h-0 min-w-0 flex-1 pb-[calc(64px+env(safe-area-inset-bottom,0px))]">
             <ItemAiPanel
               item={item}
               spec={spec}

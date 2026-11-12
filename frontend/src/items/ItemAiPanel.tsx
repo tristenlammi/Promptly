@@ -192,7 +192,7 @@ export function ItemAiPanel({
 
   const empty = !isLoading && turns.length === 0;
   return (
-    <div className={cn("flex h-full min-h-0 flex-col bg-[var(--bg)]", variant === "side" && "border-l border-[var(--border)]")}>
+    <div className={cn("flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--bg)]", variant === "side" && "border-l border-[var(--border)]")}>
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3">
         <Sparkles className="h-4 w-4 text-[var(--item-accent)]" />
         <span className="flex-1 truncate text-sm font-semibold text-[var(--text)]">Ask {spec.name}</span>
@@ -223,7 +223,7 @@ export function ItemAiPanel({
         )}
       </div>
 
-      <div ref={list} className="min-h-0 flex-1 overflow-y-auto px-3 py-3" aria-live="polite">
+      <div ref={list} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3" aria-live="polite">
         {isLoading && (
           <div className="flex justify-center py-8 text-[var(--text-muted)]">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -285,7 +285,7 @@ export function ItemAiPanel({
                   </ul>
                 )}
                 {t.content ? (
-                  <div className="prose prose-sm max-w-none text-[var(--text)] dark:prose-invert prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5 prose-headings:mb-1 prose-headings:mt-3 prose-table:text-xs">
+                  <div className="prose prose-sm max-w-none text-[var(--text)] dark:prose-invert prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5 prose-headings:mb-1 prose-headings:mt-3 prose-table:text-xs [overflow-wrap:anywhere] prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-a:break-all">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{t.content}</ReactMarkdown>
                   </div>
                 ) : busy && i === turns.length - 1 ? (
