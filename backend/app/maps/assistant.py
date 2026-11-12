@@ -253,7 +253,7 @@ async def decide(db: AsyncSession, user: User, messages: list[Any], system: str 
         return {"do": "answer", "say": NO_MODEL}
     provider, model_id = found
     try:
-        raw = await complete(provider, model_id, system=system or SYSTEM + _catalog(), messages=messages, max_tokens=300, temperature=0.2, timeout=15.0)
+        raw = await complete(provider, model_id, system=system or SYSTEM + _catalog(), messages=messages, max_tokens=300, temperature=0.2, timeout=15.0, user=user)
     except HTTPException as e:
         logger.info("The voice model failed: %s", e.status_code)
         return None

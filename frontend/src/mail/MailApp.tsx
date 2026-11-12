@@ -1458,12 +1458,16 @@ function MessageCard({ message, people, startOpen, onReply, onForward, replyAll 
 function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; accounts: MailAccount[]; viewing?: string; compactModel: boolean }) {
   const selected = useSelectedModel();
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<{ text: string; read: number } | null>(null);
+  const [answer, setAnswer] = useState<{ text: string; read: number; hint?: string } | null>(null);
+  // The last few questions and answers, so a follow-up ("and the Nelly?")
+  // makes sense. Starts again when you close the answer or open another email.
+  const [history, setHistory] = useState<{ q: string; a: string }[]>([]);
   const [busy, setBusy] = useState(false);
   // Follows the mailbox you're looking at, until you choose otherwise.
   const [scope, setScope] = useState<string | undefined>(viewing);
   const [choosing, setChoosing] = useState(false);
   useEffect(() => setScope(viewing), [viewing]);
+  useEffect(() => setHistory([]), [open?.key, scope]);
   const scoped = accounts.find((a) => a.id === scope);
   const canScope = accounts.length > 1 && !open;
 
@@ -1473,8 +1477,9 @@ function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; 
     if (!selected) return toast.error("Pick a model first.");
     setBusy(true);
     try {
-      const got = await mailApi.ask({ question: q, provider_id: selected.provider_id, model_id: selected.model_id, account_id: open?.account_id ?? scoped?.id, thread_key: open?.key });
-      setAnswer({ text: got.answer, read: got.read });
+      const got = await mailApi.ask({ question: q, provider_id: selected.provider_id, model_id: selected.model_id, account_id: open?.account_id ?? scoped?.id, thread_key: open?.key, history });
+      setAnswer({ text: got.answer, read: got.read, hint: got.hint });
+      setHistory((h) => [...h, { q, a: got.answer }].slice(-4));
       setQuestion("");
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't get an answer."));
@@ -1489,9 +1494,10 @@ function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; 
         <div className="mx-auto mb-2 max-w-3xl rounded-xl bg-[var(--accent)]/10 p-3 text-sm text-[var(--text)]">
           <div className="flex gap-2">
             <p className="min-w-0 flex-1 whitespace-pre-wrap">{answer.text}</p>
-            <button type="button" onClick={() => setAnswer(null)} aria-label="Close answer" className="self-start text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
+            <button type="button" onClick={() => { setAnswer(null); setHistory([]); }} aria-label="Close answer" className="self-start text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
           </div>
           <p className="mt-1 text-xs text-[var(--text-muted)]">From {answer.read} {answer.read === 1 ? "email" : "emails"}. AI can get things wrong, so check anything important.</p>
+          {answer.hint && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{answer.hint}</p>}
         </div>
       )}
       <div className="mx-auto flex max-w-3xl items-center gap-2">

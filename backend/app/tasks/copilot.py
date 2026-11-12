@@ -147,6 +147,11 @@ async def _metered(db: AsyncSession, user: User, **kw) -> str:
 
     if (await check_budget(db, user)).verdict == "blocked":
         raise CopilotError("Your usage budget is used up.")
+    from app.chat.personal_context import with_now
+
+    # Today's date and time, as chat has: "due Friday" means this Friday.
+    if isinstance(kw.get("system"), str):
+        kw["system"] = with_now(kw["system"], user)
     usage: dict = {}
     chunks: list[str] = []
     # Recorded below as a full turn, so not billed again as a side call.

@@ -755,7 +755,7 @@ async def summarise_answers(
     )
     # No tools on this call: complete() streams a plain answer.
     raw = await complete(provider, model_id, system=form_ai_mod.SUMMARY_SYSTEM,
-                         messages=[ChatMessage(role="user", content=prompt)], max_tokens=2500, temperature=0.2)
+                         messages=[ChatMessage(role="user", content=prompt)], max_tokens=2500, temperature=0.2, user=user)
     try:
         themes = form_ai_mod.themes_from(parse_json(raw), dict(answers))
     except EditorAiError as exc:

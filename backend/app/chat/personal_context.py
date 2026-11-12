@@ -61,6 +61,32 @@ def _format_local_now(zone: ZoneInfo) -> tuple[str, str, str]:
     return date_str, time_str, abbr
 
 
+def now_line(user: User | None) -> str:
+    """Today's date, weekday and time, in ``user``'s time zone (UTC when they
+    haven't set one, or for work done for no one in particular). Every app's
+    assistant gets this (``with_now``), as chat does, so "tomorrow" or "this
+    Friday" is counted from today and never guessed from the newest email."""
+    settings: Mapping[str, object] = (user.settings or {}) if user is not None else {}
+    raw_timezone = settings.get("timezone")
+    zone = _safe_zone(raw_timezone if isinstance(raw_timezone, str) else None)
+    if zone is not None:
+        date_str, time_str, abbr = _format_local_now(zone)
+        where = f"{abbr}, {zone.key}" if abbr else zone.key
+        when = f"{date_str}, {time_str} ({where})"
+    else:
+        utc_now = datetime.now(timezone.utc)
+        when = f"{utc_now.strftime('%A, %d %B %Y')}, {utc_now.strftime('%I:%M %p').lstrip('0')} UTC"
+    return (
+        f"Right now it is {when}. Count days like today, tomorrow or next week "
+        "from this. Don't mention that you were told."
+    )
+
+
+def with_now(system: str, user: User | None) -> str:
+    """``system`` with the current date and time added (see ``now_line``)."""
+    return f"{system.rstrip()}\n\n{now_line(user)}"
+
+
 def build_personal_context_prompt(user: User) -> str:
     """Return the ambient-context block for ``user`` — always non-empty.
 

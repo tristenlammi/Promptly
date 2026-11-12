@@ -104,14 +104,22 @@ async def complete(
     *,
     system: str,
     messages: list[Any],
+    user: User | None,
     max_tokens: int = 2048,
     temperature: float = 0.3,
     timeout: float = 120.0,
 ) -> str:
     """One whole answer (no streaming to the browser), ``<think>`` stripped.
-    Retries with reasoning on for models that refuse to switch it off."""
+    Retries with reasoning on for models that refuse to switch it off.
+
+    ``user`` is required on purpose: the model is always told today's date
+    and time in their time zone (``None``: UTC, for work done for no one),
+    as chat is, so no assistant guesses what day it is."""
+    from app.chat.personal_context import with_now
     from app.chat.titler import _strip_think_blocks
     from app.models_config.provider import ProviderError, model_router
+
+    system = with_now(system, user)
 
     async def _collect(reasoning: str | None) -> str:
         parts: list[str] = []
@@ -248,7 +256,7 @@ async def ask_about_file(
     messages += [ChatMessage(role=t.role, content=t.content) for t in body.history[-6:]]
     messages.append(ChatMessage(role="user", content=body.question))
     answer = await complete(
-        provider, model_id, system=ASK_SYSTEM.format(what=what, name=name), messages=messages, max_tokens=1800,
+        provider, model_id, system=ASK_SYSTEM.format(what=what, name=name), messages=messages, max_tokens=1800, user=user,
     )
     if not answer:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The model gave an empty answer — try again.")
@@ -333,7 +341,7 @@ async def generate_deck(
         ask += f"\nThe talk: {body.brief.strip()}"
     raw = await complete(
         provider, model_id, system=DECK_SYSTEM.format(n=body.slides),
-        messages=[ChatMessage(role="user", content="\n\n".join(parts) + "\n\n" + ask)], max_tokens=6000, timeout=200.0,
+        messages=[ChatMessage(role="user", content="\n\n".join(parts) + "\n\n" + ask)], max_tokens=6000, timeout=200.0, user=user,
     )
     try:
         got = parse_json(raw)
@@ -469,7 +477,7 @@ async def sheet_ai(
                 "Rows:\n" + "\n".join(lines)
             )
             raw = await complete(provider, model_id, system=FILL_SYSTEM, messages=[ChatMessage(role="user", content=prompt)],
-                                 max_tokens=min(8000, 60 * len(body.rows) + 200), temperature=0.2)
+                                 max_tokens=min(8000, 60 * len(body.rows) + 200), temperature=0.2, user=user)
             data = parse_json(raw)
             got = {int(v["row"]): v.get("value") for v in data.get("values", []) if isinstance(v, dict) and "row" in v}
             wanted = [r.row for r in body.rows]
@@ -485,7 +493,7 @@ async def sheet_ai(
             )
             n = sum(len(r) for r in body.cells)
             raw = await complete(provider, model_id, system=CLEAN_SYSTEM, messages=[ChatMessage(role="user", content=prompt)],
-                                 max_tokens=min(12000, 25 * n + 300), temperature=0.1)
+                                 max_tokens=min(12000, 25 * n + 300), temperature=0.1, user=user)
             data = parse_json(raw)
             out = data.get("cells")
             if not isinstance(out, list) or len(out) != len(body.cells) or any(
@@ -499,7 +507,7 @@ async def sheet_ai(
             return SheetAiResponse(cells=cleaned, changed=changed)
 
         raw = await complete(provider, model_id, system=BUILD_SYSTEM,
-                             messages=[ChatMessage(role="user", content=body.instruction)], max_tokens=6000, temperature=0.4)
+                             messages=[ChatMessage(role="user", content=body.instruction)], max_tokens=6000, temperature=0.4, user=user)
         data = parse_json(raw)
         columns = [str(c)[:120] for c in (data.get("columns") or [])][:MAX_BUILD_COLS]
         if not columns:
@@ -563,14 +571,14 @@ async def form_ai(
             if body.existing:
                 prompt += "Options it already has: " + "; ".join(x[:100] for x in body.existing[:50]) + "\n"
             raw = await complete(provider, model_id, system=form_ai_mod.OPTIONS_SYSTEM,
-                                 messages=[ChatMessage(role="user", content=prompt)], max_tokens=1200, temperature=0.4)
+                                 messages=[ChatMessage(role="user", content=prompt)], max_tokens=1200, temperature=0.4, user=user)
             have = {x.strip().lower() for x in body.existing}
             opts = [o for o in form_ai_mod.options_from(parse_json(raw)) if o["label"].lower() not in have]
             if not opts:
                 raise EditorAiError("No new options came back. Try saying what kind of options you want.")
             return FormAiResponse(options=opts)
         raw = await complete(provider, model_id, system=form_ai_mod.DRAFT_SYSTEM,
-                             messages=[ChatMessage(role="user", content=body.prompt.strip())], max_tokens=6000, temperature=0.4)
+                             messages=[ChatMessage(role="user", content=body.prompt.strip())], max_tokens=6000, temperature=0.4, user=user)
         try:
             draft = form_ai_mod.items_from(parse_json(raw))
         except DefinitionError as exc:
@@ -686,7 +694,7 @@ async def _vision_call(provider: ModelProvider, model_id: str, raw: bytes, mime:
         raise EditorAiError("That image couldn't be read.")
     msg = ChatMessage(role="user", content=[TextPart(text=prompt), part])
     return await complete(provider, model_id, system="You transcribe documents accurately.", messages=[msg],
-                          max_tokens=6000, temperature=0.1, timeout=VISION_TIMEOUT_S)
+                          max_tokens=6000, temperature=0.1, timeout=VISION_TIMEOUT_S, user=None)
 
 
 async def _relay(db: AsyncSession, user: User) -> tuple[ModelProvider, str] | None:
@@ -749,7 +757,7 @@ async def convert_with_ai(
             text_layer = text_layer[:MAX_CONTEXT_CHARS]
             system = TEXT_TABLE_SYSTEM if body.to == "sheet" else TEXT_DOC_SYSTEM
             raw = await complete(provider, model_id, system=system,
-                                 messages=[ChatMessage(role="user", content=text_layer)], max_tokens=8000, temperature=0.1)
+                                 messages=[ChatMessage(role="user", content=text_layer)], max_tokens=8000, temperature=0.1, user=user)
             pieces = [raw]
             notes.append("Read from the PDF's text.")
         else:

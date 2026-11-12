@@ -152,8 +152,12 @@ async def _enforce_ask_quotas(request: Request, user: User, db: AsyncSession) ->
 
 
 async def _ask_model(
-    provider: ModelProvider, model_id: str, system: str, user_msg: str
+    provider: ModelProvider, model_id: str, system: str, user_msg: str, user: User | None = None
 ) -> str:
+    from app.chat.personal_context import with_now
+
+    # Today's date and time, as chat has, so "this week" means this week.
+    system = with_now(system, user)
     try:
         parts: list[str] = []
         async for token in model_router.stream_chat(
@@ -272,7 +276,7 @@ async def ask_workspace(
             model_id,
             _ASK_SYSTEM_FULL,
             f"Workspace content:\n{injection.system_block}\n\n"
-            f"Question: {payload.question}",
+            f"Question: {payload.question}", user=user,
         )
         return AskResponse(answer=answer or "(no answer)", citations=[])
 
@@ -306,7 +310,7 @@ async def ask_workspace(
                 model_id,
                 _ASK_SYSTEM_FULL,
                 f"Workspace content:\n{injection.system_block}\n\n"
-                f"Question: {payload.question}",
+                f"Question: {payload.question}", user=user,
             )
             return AskResponse(answer=answer or "(no answer)", citations=[], degraded=degraded)
     if not chunks:
@@ -338,7 +342,7 @@ async def ask_workspace(
     context = "\n\n".join(blocks)
 
     user_msg = f"Workspace context:\n{context}\n\nQuestion: {payload.question}"
-    answer = await _ask_model(provider, model_id, _ASK_SYSTEM, user_msg)
+    answer = await _ask_model(provider, model_id, _ASK_SYSTEM, user_msg, user=user)
 
     citations = []
     for idx, fid in enumerate(order, start=1):

@@ -21,6 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Every app's assistant now knows today's date and time in your time zone, as chat does: Mail, Forms, the editors' Ask and AI tools, P Maps, @promptly in Rooms, the Tasks copilot and workspace Ask. "Tomorrow" means tomorrow, not the day after your newest email.
+
+### Fixed
+
+- Ask about your mail finds the email you mean even when it shares no words with your question. It works out what to search for first (a stay tomorrow → booking, check-in, welcome guide, lockbox and so on), searches by the best match rather than the newest email, also finds the start of a word ("lock" finds "lockbox"), and always looks at your newest emails too. Follow-up questions remember the last few questions and answers, so "the Nelly" makes sense after you've asked about it.
+- Ask about your mail tells an admin, in one quiet line, when AI search for mail is off and it could only match words.
+
 ## [0.39.1] - 2026-11-12
 
 ### Added

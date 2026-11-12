@@ -17,7 +17,6 @@ from app.net.send_links import strip_send_keys
 
 import logging
 import uuid
-from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -76,7 +75,6 @@ async def can_read_history(db, room: Room) -> bool:  # noqa: ANN001
 async def build(db, room: Room, ask: RoomMessage, asker) -> tuple[str, list[dict]]:  # noqa: ANN001
     """The system prompt and messages @promptly is given."""
     from app.auth.models import User
-    from app.items.service import zone_for
 
     space = await db.get(RoomSpace, room.space_id) if room.space_id else None
     where = (f"the voice channel {room.name}’s text chat" if room.kind == "voice" else f"the room #{room.name}") + f" in the space “{space.name}”" if space else ("a direct message" if room.kind == "dm" else "a group conversation")
@@ -107,7 +105,6 @@ async def build(db, room: Room, ask: RoomMessage, asker) -> tuple[str, list[dict
         who = "Promptly" if r.kind == "promptly" else names.get(r.author_id, "someone")
         lines.append(f"{who}: {strip_send_keys(r.body)}")
     transcript = "\n".join(lines)[-MAX_CHARS:]
-    now = datetime.now(timezone.utc).astimezone(zone_for(asker))
     seen = (
         "You can see this conversation's recent messages (below)."
         if history
@@ -117,7 +114,7 @@ async def build(db, room: Room, ask: RoomMessage, asker) -> tuple[str, list[dict
     )
     system = (
         f"You are Promptly, a helpful assistant people can @-mention in a group chat. You're in {where}. "
-        f"{asker.username} just asked you something. It is {now.strftime('%A %d %B %Y, %H:%M')} ({now.tzname()}).\n"
+        f"{asker.username} just asked you something.\n"
         f"{seen}\n"
         "You can't see anyone's files, photos, notes, memories or other rooms, and you can't take actions. "
         "Reply like a person in a chat: short and direct (a few sentences; bullet points or Markdown only when they help). "
@@ -154,7 +151,7 @@ async def answer(ask_id: uuid.UUID) -> uuid.UUID | None:
             else:
                 system, messages = await build(db, room, ask, asker)
                 try:
-                    text = await complete(provider, model_id, system=system, messages=messages, max_tokens=1200, temperature=0.4, timeout=90.0)
+                    text = await complete(provider, model_id, system=system, messages=messages, max_tokens=1200, temperature=0.4, timeout=90.0, user=asker)
                 except Exception as e:  # noqa: BLE001
                     logger.info("@promptly failed in %s: %s", room.id, e)
                     text = f"@{asker.username} Sorry — the model didn't answer ({getattr(e, 'detail', 'error')})."

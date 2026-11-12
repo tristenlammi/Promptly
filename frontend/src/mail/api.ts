@@ -330,8 +330,8 @@ export const mailApi = {
     return (await apiClient.post<{ images: Record<string, string> }>("/mail/images", { urls })).data.images;
   },
   // With an account and no thread: only that mailbox.
-  async ask(body: { question: string; provider_id: string; model_id: string; account_id?: string; thread_key?: string }) {
-    return (await apiClient.post<{ answer: string; read: number; model: string }>("/mail/ask", body)).data;
+  async ask(body: { question: string; provider_id: string; model_id: string; account_id?: string; thread_key?: string; history?: { q: string; a: string }[] }) {
+    return (await apiClient.post<{ answer: string; read: number; model: string; hint?: string }>("/mail/ask", body)).data;
   },
   async download(messageId: string, part: number, name: string) {
     const { data } = await apiClient.get<Blob>(`/mail/messages/${messageId}/attachments/${part}`, { responseType: "blob" });

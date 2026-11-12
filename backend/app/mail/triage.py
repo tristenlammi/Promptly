@@ -120,7 +120,7 @@ async def _for_user(db, user: User, choice: dict) -> int:
                 answer = await complete(
                     provider, model_id, system=_SYSTEM,
                     messages=[ChatMessage(role="user", content=await _prompt(db, m, own))],
-                    max_tokens=120, temperature=0.0, timeout=45.0,
+                    max_tokens=120, temperature=0.0, timeout=45.0, user=user,
                 )
             except Exception as e:  # noqa: BLE001 — try again later, once the model's back
                 logger.info("Mail sorting failed: %s", type(e).__name__)
