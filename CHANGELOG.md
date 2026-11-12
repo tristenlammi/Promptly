@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-11-12
+
+### Changed
+
+- Buttons are the lighter brand terracotta again, the colour they were before v0.37.0, not the deeper shade. Switches, ticked boxes, count badges and selected tabs follow.
+
 ## [0.38.0] - 2026-11-12
 
 ### Added
