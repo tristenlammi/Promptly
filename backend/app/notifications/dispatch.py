@@ -486,7 +486,9 @@ async def _vapid(db: AsyncSession) -> tuple[str, str] | None:
 
 async def _has_subscriptions(db: AsyncSession, user_id: UUID) -> bool:
     got = await db.execute(
-        select(PushSubscription.id).where(PushSubscription.user_id == user_id).limit(1)
+        select(PushSubscription.id)
+        .where(PushSubscription.user_id == user_id, PushSubscription.enabled.is_(True))
+        .limit(1)
     )
     return got.first() is not None
 
@@ -511,8 +513,10 @@ async def deliver(
     subs = (
         (
             await db.execute(
+                # Only devices whose own switch is on (0442).
                 select(PushSubscription).where(
-                    PushSubscription.user_id == user_id
+                    PushSubscription.user_id == user_id,
+                    PushSubscription.enabled.is_(True),
                 )
             )
         )
@@ -640,7 +644,7 @@ def _send_one(
                 "keys": {"p256dh": p256dh, "auth": auth},
             },
             data=payload_json,
-            vapid_private_key=vapid_private_key,
+            vapid_private_key=_signing_key(vapid_private_key),
             vapid_claims={"sub": vapid_contact},
             **extra,
         )
@@ -649,6 +653,27 @@ def _send_one(
         if status in (404, 410):
             raise _PushGone() from exc
         raise
+
+
+def _signing_key(vapid_private_key: str) -> Any:
+    """The stored VAPID key in a form ``pywebpush`` can sign with.
+
+    We store a PEM (``bootstrap._generate_vapid_keypair``), but pywebpush
+    hands any string that isn't a file path to ``Vapid.from_string``, which
+    only reads bare base64 (raw or DER) and fails on a PEM: every push
+    failed with "Could not deserialize key data". So load a PEM ourselves
+    and pass the key object; a bare base64 key (an old ``.env`` value) goes
+    through as it is."""
+    if "-----BEGIN" not in vapid_private_key:
+        return vapid_private_key
+    from cryptography.hazmat.primitives import serialization
+    from py_vapid import Vapid
+
+    return Vapid(
+        private_key=serialization.load_pem_private_key(
+            vapid_private_key.strip().encode("ascii"), password=None
+        )
+    )
 
 
 async def _get_prefs(db: AsyncSession, user_id: UUID) -> PushPreferences:

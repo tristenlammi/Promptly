@@ -30,13 +30,20 @@ class SubscriptionSummary(BaseModel):
     user_agent: str | None = None
     created_at: datetime
     last_used_at: datetime | None = None
+    #: The device's own switch: off, nothing is pushed to it.
+    enabled: bool = True
+    #: A phone or tablet (they start on; computers start off).
+    mobile: bool = False
+    #: SHA-256 of the push endpoint, so a page can find its own row.
+    endpoint_hash: str = ""
 
 
 class SubscriptionUpdate(BaseModel):
-    """Patch payload for the Devices list — only the label is user-
-    editable; everything else is opaque push-service config."""
+    """Patch payload for the Devices list: its name and its switch;
+    everything else is opaque push-service config."""
 
     label: str | None = Field(default=None, max_length=120)
+    enabled: bool | None = None
 
 
 class PreferencesSchema(BaseModel):

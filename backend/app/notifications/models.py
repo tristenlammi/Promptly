@@ -76,6 +76,12 @@ class PushSubscription(UUIDPKMixin, Base):
 
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # The device's own switch (0442): off means nothing is pushed to it,
+    # whatever the category. Phones and tablets start on, computers off
+    # (``devices.starts_on``); changed in Account → Notifications.
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

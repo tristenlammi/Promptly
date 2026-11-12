@@ -20,7 +20,7 @@ import {
 import { porchApi } from "@/api/porch";
 import { Button } from "@/components/shared/Button";
 import { IosPushNote } from "@/components/pwa/IosPushNote";
-import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { DEVICE_OFF_HINT, usePushSubscription } from "@/hooks/usePushSubscription";
 import { isIosDevice, isStandaloneDisplay } from "@/lib/installPrompt";
 import { cn } from "@/utils/cn";
 
@@ -36,8 +36,9 @@ import { cn } from "@/utils/cn";
  *     PATCHes the backend immediately; optimistic UI with a tiny
  *     spinner on the row that's still in flight. Rooms and Mail can be
  *     set to the daily summary instead of straight away.
- *  4. **Other devices** — the rest of the user's subscribed
- *     browsers. Each row is individually unsubscribe-able.
+ *  4. **Devices** — every device that allowed notifications, each
+ *     with its own on/off switch (phones and tablets start on,
+ *     computers start off) and a remove button.
  */
 export function NotificationsPanel() {
   const push = usePushSubscription();
@@ -51,11 +52,15 @@ export function NotificationsPanel() {
   const [subs, setSubs] = useState<SubscriptionSummary[] | null>(null);
   const [subsError, setSubsError] = useState<string | null>(null);
 
+  const [switchBusy, setSwitchBusy] = useState<string | null>(null);
+
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [testBusy, setTestBusy] = useState(false);
 
   useEffect(() => {
-    if (!push.serverConfigured) return;
+    // A browser that can't get notifications never learns whether the
+    // server is set up (it stays null); it still lists the devices.
+    if (push.serverConfigured === false) return;
     void (async () => {
       try {
         const [p, s] = await Promise.all([
@@ -68,7 +73,7 @@ export function NotificationsPanel() {
         setSubsError((e as Error)?.message ?? "Couldn't load preferences.");
       }
     })();
-  }, [push.serverConfigured, push.subscribed]);
+  }, [push.serverConfigured, push.subscribed, push.deviceEnabled]);
 
   /** Save a change straight away: show it first, put it back if the
    *  server says no. */
@@ -130,7 +135,11 @@ export function NotificationsPanel() {
       if (removed)
         parts.push(`${removed} had stopped accepting notifications and ${removed === 1 ? "was" : "were"} removed.`);
       setTestStatus(
-        parts.length ? parts.join(" ") : "No devices are set up for notifications yet."
+        parts.length
+          ? parts.join(" ")
+          : subs && subs.length > 0
+          ? "No devices are switched on for notifications. Turn one on under Devices below."
+          : "No devices are set up for notifications yet."
       );
     } catch (e) {
       setTestStatus((e as Error)?.message ?? "Test failed.");
@@ -148,6 +157,21 @@ export function NotificationsPanel() {
       setSubs((list) => list?.map((s) => (s.id === id ? fresh : s)) ?? null);
     } catch (e) {
       setSubsError((e as Error)?.message ?? "Couldn't rename device.");
+    }
+  }
+
+  async function switchSubscription(id: string, enabled: boolean) {
+    setSubsError(null);
+    setSwitchBusy(id);
+    try {
+      const fresh = await notificationsApi.setSubscriptionEnabled(id, enabled);
+      setSubs((list) => list?.map((s) => (s.id === id ? fresh : s)) ?? null);
+      // The "This device" block reads the same switch.
+      if (id === push.deviceId) await push.refresh();
+    } catch (e) {
+      setSubsError((e as Error)?.message ?? "Couldn't change that device.");
+    } finally {
+      setSwitchBusy(null);
     }
   }
 
@@ -213,7 +237,9 @@ export function NotificationsPanel() {
                     This device
                   </div>
                   <div className="truncate text-[11px] text-[var(--text-muted)]">
-                    {push.subscribed
+                    {push.subscribed && push.deviceEnabled === false
+                      ? "Allowed, but switched off. Nothing is sent here until you turn it on."
+                      : push.subscribed
                       ? "Subscribed — you'll receive push notifications here."
                       : push.permission === "denied"
                       ? "Notifications are blocked in your browser settings."
@@ -224,6 +250,15 @@ export function NotificationsPanel() {
               <div className="flex shrink-0 items-center gap-2">
                 {push.subscribed ? (
                   <>
+                    {push.deviceEnabled === false && (
+                      <Button
+                        variant="primary"
+                        onClick={() => void push.setDeviceEnabled(true)}
+                        leftIcon={<BellRing className="h-3.5 w-3.5" />}
+                      >
+                        Turn on
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       onClick={sendTest}
@@ -249,7 +284,11 @@ export function NotificationsPanel() {
                 ) : (
                   <Button
                     variant="primary"
-                    onClick={push.subscribe}
+                    onClick={() =>
+                      void push.subscribe().then((r) => {
+                        if (r === "off") setTestStatus(DEVICE_OFF_HINT_HERE);
+                      })
+                    }
                     disabled={push.loading || push.permission === "denied"}
                     leftIcon={<BellRing className="h-3.5 w-3.5" />}
                   >
@@ -462,17 +501,31 @@ export function NotificationsPanel() {
             </div>
           )}
 
-          {/* -- Device list -- */}
+        </>
+      )}
+
+      {/* -- Device list: shown on any browser, so a device can be switched
+          from one that can't get notifications itself -- */}
+      {push.serverConfigured !== false && (
+        <>
           {subs && subs.length > 0 && (
-            <div>
-              <div className="mb-2 text-xs font-medium text-[var(--text-muted)]">
+            <div className="mt-4">
+              <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
                 Devices
               </div>
+              <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+                Each device has its own switch for every kind of notification:
+                messages, calls, reminders, alarms and the rest. Phones and
+                tablets start on; computers start off.
+              </p>
               <ul className="divide-y divide-[var(--border)] rounded-md border border-[var(--border)]">
                 {subs.map((s) => (
                   <DeviceRow
                     key={s.id}
                     summary={s}
+                    here={s.id === push.deviceId}
+                    busy={switchBusy === s.id}
+                    onSwitch={(on) => void switchSubscription(s.id, on)}
                     onRename={(label) => renameSubscription(s.id, label)}
                     onDelete={() => removeSubscription(s.id)}
                   />
@@ -617,12 +670,25 @@ function CategoryRow({
   );
 }
 
+/** Said under "This device" when a computer has just been set up. */
+const DEVICE_OFF_HINT_HERE = DEVICE_OFF_HINT.replace(
+  " in Account → Notifications.",
+  " with the switch under Devices below."
+);
+
 function DeviceRow({
   summary,
+  here,
+  busy,
+  onSwitch,
   onRename,
   onDelete,
 }: {
   summary: SubscriptionSummary;
+  /** The device you're looking at this on. */
+  here: boolean;
+  busy: boolean;
+  onSwitch: (enabled: boolean) => void;
   onRename: (label: string) => void;
   onDelete: () => void;
 }) {
@@ -664,17 +730,36 @@ function DeviceRow({
             className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
           />
         ) : (
-          <button
-            onClick={() => setEditing(true)}
-            className="w-full truncate text-left font-medium hover:underline"
-          >
-            {label}
-          </button>
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              onClick={() => setEditing(true)}
+              className="min-w-0 truncate text-left font-medium hover:underline"
+            >
+              {label}
+            </button>
+            {here && (
+              <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-text)]">
+                This device
+              </span>
+            )}
+          </div>
         )}
         <div className="truncate text-[11px] text-[var(--text-muted)]">
           {subtitle}
         </div>
       </div>
+      <label className="relative inline-flex shrink-0 cursor-pointer items-center">
+        <input
+          type="checkbox"
+          className="peer sr-only"
+          aria-label={`Notifications on ${label}`}
+          checked={summary.enabled}
+          disabled={busy}
+          onChange={(e) => onSwitch(e.target.checked)}
+        />
+        <div className="h-5 w-9 rounded-full bg-[var(--border)] transition peer-checked:bg-[var(--accent-strong)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--accent)]" />
+        <div className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition peer-checked:translate-x-4" />
+      </label>
       <button
         onClick={onDelete}
         className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--background)] hover:text-red-500"

@@ -5,7 +5,7 @@ import { useId, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { porchApi, type NotificationSettings, type PushKind, type PushMode } from "@/api/porch";
-import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { DEVICE_OFF_HINT, usePushSubscription } from "@/hooks/usePushSubscription";
 import { IosPushNote } from "@/components/pwa/IosPushNote";
 import { useInstallPrompt } from "@/lib/installPrompt";
 import { EmptyState, ItemButton, List, Section } from "@/items/ui";
@@ -77,10 +77,11 @@ function ThisDevice() {
         variant="primary"
         icon={<Bell className="h-4 w-4" />}
         onClick={() =>
-          void push.subscribe().then(
-            () => toast.success("Notifications are on for this device."),
-            () => toast.error("Couldn't turn on notifications. Try again."),
-          )
+          void push.subscribe().then((result) => {
+            if (result === "on") toast.success("Notifications are on for this device.");
+            else if (result === "off") toast.info(DEVICE_OFF_HINT, { duration: 10_000 });
+            else toast.error("Couldn't turn on notifications. Try again.");
+          })
         }
       >
         Turn on for this device

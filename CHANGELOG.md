@@ -21,6 +21,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- **A notification switch for each device** — Account → Notifications now lists every device with its own on/off switch, and you can flip any of them from whichever device you're on. A device that's off gets nothing at all: messages, calls, reminders, alarms, Porch and the rest. Phones and tablets start on; computers start off, so allowing notifications on a computer no longer makes it ping until you turn its switch on. The device you're on is marked "This device".
+
+### Changed
+
+- **Computers that already had notifications are switched off by this update** (phones and tablets stay on). Turn a computer back on with its switch in Account → Notifications.
+
+### Fixed
+
+- **Push notifications never arrived** — messages, calls, reminders and the test push all failed on every device ("couldn't be reached"). The server couldn't read its own signing key, so nothing was ever sent to a phone. Devices that are already set up start getting notifications as soon as the server is updated; nobody has to turn them on again.
+- **Unsubscribe could remove the wrong device** — "Unsubscribe" on one device guessed which entry in the device list was its own, and could take another device off instead. It now removes exactly the device you pressed it on.
+- **Turning notifications on from Rooms said nothing when it failed** — it now says so.
+
 ## [0.37.0] - 2026-11-11
 
 ### Added

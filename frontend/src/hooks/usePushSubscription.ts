@@ -18,12 +18,29 @@ export interface PushSubscriptionState {
    * can call ``.endpoint`` if we ever surface "this device is id=
    * ..." diagnostics. */
   subscription: PushSubscription | null;
+  /** This device's row in the device list (null: not subscribed, or the
+   * server doesn't know it). */
+  deviceId: string | null;
+  /** This device's own switch. Phones and tablets start on, computers
+   * start off; null when there's no row to read it from. */
+  deviceEnabled: boolean | null;
 }
+
+/** What to say when a computer has allowed notifications but its switch
+ * is still off. */
+export const DEVICE_OFF_HINT =
+  "Notifications are allowed here, but computers start switched off. Turn this one on in Account → Notifications.";
 
 export interface UsePushSubscriptionResult extends PushSubscriptionState {
   loading: boolean;
   error: string | null;
-  subscribe: () => Promise<void>;
+  /** Resolves "on" when this device will now get notifications, "off"
+   * when it's set up but its switch is off (a computer: see
+   * ``DEVICE_OFF_HINT``), null when it couldn't be set up (``error``
+   * says why). Never rejects. */
+  subscribe: () => Promise<"on" | "off" | null>;
+  /** Flip this device's own switch. */
+  setDeviceEnabled: (enabled: boolean) => Promise<void>;
   unsubscribe: () => Promise<void>;
   /** Re-check the browser state after an external change (e.g. user
    * flipped site permission in chrome://settings). Not usually
@@ -49,6 +66,32 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return output;
 }
 
+/** SHA-256 hex of a push endpoint: how a page finds its own row in the
+ * device list (the server never hands endpoints back). */
+async function endpointHash(endpoint: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(endpoint)
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** This device's row on the server, if it has one. */
+async function ownRow(sub: PushSubscription | null) {
+  if (!sub) return null;
+  try {
+    const [hash, rows] = await Promise.all([
+      endpointHash(sub.endpoint),
+      notificationsApi.listSubscriptions(),
+    ]);
+    return rows.find((r) => r.endpoint_hash === hash) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function encodeKey(buf: ArrayBuffer | null | undefined): string {
   if (!buf) return "";
   return btoa(String.fromCharCode(...new Uint8Array(buf)))
@@ -64,6 +107,8 @@ export function usePushSubscription(): UsePushSubscriptionResult {
     permission: "default",
     subscribed: false,
     subscription: null,
+    deviceId: null,
+    deviceEnabled: null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,12 +127,15 @@ export function usePushSubscription(): UsePushSubscriptionResult {
       // unavailable" (VAPID not configured). We cache the flag so
       // repeated renders don't hammer the endpoint.
       const serverKey = await notificationsApi.getPublicKey().catch(() => null);
+      const row = serverKey !== null ? await ownRow(sub) : null;
       setState({
         supported: true,
         serverConfigured: serverKey !== null,
         permission: Notification.permission,
         subscribed: sub !== null,
         subscription: sub,
+        deviceId: row?.id ?? null,
+        deviceEnabled: row ? row.enabled : null,
       });
     } catch (e) {
       setError(
@@ -106,23 +154,23 @@ export function usePushSubscription(): UsePushSubscriptionResult {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const subscribe = async () => {
+  const subscribe = async (): Promise<"on" | "off" | null> => {
     setError(null);
     if (!isSupported()) {
       setError("This browser doesn't support push notifications.");
-      return;
+      return null;
     }
     try {
       const serverKey = await notificationsApi.getPublicKey();
       if (!serverKey) {
         setError("Push notifications aren't configured on this server.");
-        return;
+        return null;
       }
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
         setError("Permission was denied — enable it in your browser settings.");
         await refresh();
-        return;
+        return null;
       }
       const reg = await navigator.serviceWorker.ready;
       // Cast via ``BufferSource`` — TS 5.x tightened ``ArrayBufferLike``
@@ -136,7 +184,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
         ) as unknown as BufferSource,
       });
       const json = sub.toJSON();
-      await notificationsApi.subscribe({
+      const row = await notificationsApi.subscribe({
         endpoint: json.endpoint!,
         keys: {
           p256dh: encodeKey(sub.getKey("p256dh")),
@@ -145,10 +193,28 @@ export function usePushSubscription(): UsePushSubscriptionResult {
         user_agent: navigator.userAgent,
       });
       await refresh();
+      return row.enabled === false ? "off" : "on";
     } catch (e) {
       setError(
         (e as Error)?.message ?? "Couldn't subscribe to push notifications."
       );
+      return null;
+    }
+  };
+
+  const setDeviceEnabled = async (enabled: boolean) => {
+    setError(null);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const row = await ownRow(await reg.pushManager.getSubscription());
+      if (!row) {
+        setError("This device isn't set up for notifications yet.");
+        return;
+      }
+      await notificationsApi.setSubscriptionEnabled(row.id, enabled);
+      await refresh();
+    } catch (e) {
+      setError((e as Error)?.message ?? "Couldn't change this device.");
     }
   };
 
@@ -158,21 +224,12 @@ export function usePushSubscription(): UsePushSubscriptionResult {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
-        // Look up the matching backend row first so we can delete
-        // it — the browser-side ``unsubscribe()`` tears down the
-        // push endpoint but leaves our DB row orphaned.
-        const serverSubs = await notificationsApi
-          .listSubscriptions()
-          .catch(() => [] as Awaited<ReturnType<typeof notificationsApi.listSubscriptions>>);
+        // Look up this device's own row first so we can delete it —
+        // the browser-side ``unsubscribe()`` tears down the push
+        // endpoint but leaves our DB row orphaned. (This used to guess
+        // by "last used", which could remove a different device.)
+        const match = await ownRow(sub);
         await sub.unsubscribe();
-        const match = serverSubs.find((s) => {
-          // We don't store the endpoint on the list response (it's
-          // sensitive), so fall back to "last active" sorting to
-          // pick the row most likely to be this device. The backend
-          // also prunes stale rows on the next failed send so a
-          // mismatch here self-heals.
-          return s.last_used_at !== null;
-        });
         if (match) {
           await notificationsApi.deleteSubscription(match.id);
         }
@@ -190,6 +247,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
     loading,
     error,
     subscribe,
+    setDeviceEnabled,
     unsubscribe,
     refresh,
   };

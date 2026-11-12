@@ -25,11 +25,17 @@ export function SettingsView({ item }: ItemViewProps<TasksData>) {
               <div className="min-w-0 flex-1 text-sm">
                 <p className="font-medium text-[var(--text)]">Push on this device</p>
                 <p className="text-xs text-[var(--text-muted)]">
-                  {push.subscribed ? "On — reminders pop up here." : push.permission === "denied" ? "Blocked in the browser's site settings." : "Off — reminders only reach your inbox."}
+                  {push.subscribed && push.deviceEnabled === false ? "Switched off for this device — reminders only reach your inbox." : push.subscribed ? "On — reminders pop up here." : push.permission === "denied" ? "Blocked in the browser's site settings." : "Off — reminders only reach your inbox."}
                 </p>
               </div>
               {!push.subscribed && push.permission !== "denied" && push.serverConfigured !== false && (
+                // On a computer this allows notifications but leaves the device's switch off; the button below then turns it on.
                 <ItemButton size="sm" variant="primary" disabled={push.loading} onClick={() => void push.subscribe()}>
+                  Turn on
+                </ItemButton>
+              )}
+              {push.subscribed && push.deviceEnabled === false && (
+                <ItemButton size="sm" variant="primary" disabled={push.loading} onClick={() => void push.setDeviceEnabled(true)}>
                   Turn on
                 </ItemButton>
               )}

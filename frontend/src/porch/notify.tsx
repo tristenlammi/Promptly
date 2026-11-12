@@ -9,7 +9,7 @@ import { Bell, BellOff, BellRing } from "lucide-react";
 import { useState } from "react";
 
 import { porchApi, type PorchGroup } from "@/api/porch";
-import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { DEVICE_OFF_HINT, usePushSubscription } from "@/hooks/usePushSubscription";
 import { useInstallPrompt } from "@/lib/installPrompt";
 import { ItemButton } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -32,12 +32,10 @@ export function useAskForPush() {
       return;
     }
     if (push.loading || !push.supported || push.serverConfigured !== true || push.subscribed || push.permission === "denied") return;
-    try {
-      await push.subscribe();
-      toast.success(why);
-    } catch {
-      toast.error("Couldn't turn on notifications on this device. You can try again in Porch → Settings.");
-    }
+    const result = await push.subscribe();
+    if (result === "on") toast.success(why);
+    else if (result === "off") toast.info(DEVICE_OFF_HINT, { duration: 10_000 });
+    else toast.error("Couldn't turn on notifications on this device. You can try again in Porch → Settings.");
   };
 }
 

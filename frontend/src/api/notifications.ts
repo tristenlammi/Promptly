@@ -6,6 +6,12 @@ export interface SubscriptionSummary {
   user_agent: string | null;
   created_at: string;
   last_used_at: string | null;
+  /** The device's own switch: off, nothing is pushed to it. */
+  enabled: boolean;
+  /** A phone or tablet (they start on; computers start off). */
+  mobile: boolean;
+  /** SHA-256 of the push endpoint, so a page can find its own row. */
+  endpoint_hash: string;
 }
 
 export interface NotificationPreferences {
@@ -143,6 +149,17 @@ export const notificationsApi = {
     const { data } = await apiClient.patch<SubscriptionSummary>(
       `/notifications/subscriptions/${id}`,
       { label }
+    );
+    return data;
+  },
+  /** Turn one device's notifications on or off. */
+  async setSubscriptionEnabled(
+    id: string,
+    enabled: boolean
+  ): Promise<SubscriptionSummary> {
+    const { data } = await apiClient.patch<SubscriptionSummary>(
+      `/notifications/subscriptions/${id}`,
+      { enabled }
     );
     return data;
   },

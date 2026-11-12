@@ -8,7 +8,8 @@ Endpoints (mounted under ``/api/notifications``):
   browsers / devices.
 * ``POST /subscriptions``       — register a new device (idempotent
   via the ``(user_id, endpoint)`` unique constraint).
-* ``PATCH /subscriptions/{id}`` — rename a device.
+* ``PATCH /subscriptions/{id}`` — rename a device, or turn its switch
+  on or off.
 * ``DELETE /subscriptions/{id}``— unsubscribe one device.
 * ``GET  /preferences``         — read per-user category toggles.
 * ``PATCH /preferences``        — update one or more toggles.
@@ -32,6 +33,7 @@ from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
+from app.notifications.devices import starts_on
 from app.notifications.dispatch import notify_user
 from app.notifications.models import (
     Notification,
@@ -176,6 +178,15 @@ async def get_public_key(
 # ---------------------------------------------------------------------
 
 
+def _summary(row: PushSubscription) -> SubscriptionSummary:
+    from app.notifications import devices
+
+    out = SubscriptionSummary.model_validate(row)
+    out.mobile = devices.is_mobile(row.user_agent)
+    out.endpoint_hash = devices.endpoint_hash(row.endpoint)
+    return out
+
+
 @router.get("/subscriptions", response_model=list[SubscriptionSummary])
 async def list_subscriptions(
     db: AsyncSession = Depends(get_db),
@@ -192,7 +203,7 @@ async def list_subscriptions(
         .scalars()
         .all()
     )
-    return [SubscriptionSummary.model_validate(r) for r in rows]
+    return [_summary(r) for r in rows]
 
 
 @router.post(
@@ -243,7 +254,7 @@ async def create_subscription(
         existing.last_used_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(existing)
-        return SubscriptionSummary.model_validate(existing)
+        return _summary(existing)
 
     row = PushSubscription(
         user_id=user.id,
@@ -252,6 +263,9 @@ async def create_subscription(
         auth=auth,
         user_agent=user_agent,
         label=payload.label,
+        # Phones and tablets start on; a computer stays off until its
+        # switch is turned on (Account → Notifications).
+        enabled=starts_on(user_agent),
     )
     db.add(row)
     try:
@@ -269,7 +283,7 @@ async def create_subscription(
             )
         ).scalar_one()
     await db.refresh(row)
-    return SubscriptionSummary.model_validate(row)
+    return _summary(row)
 
 
 @router.patch("/subscriptions/{sub_id}", response_model=SubscriptionSummary)
@@ -286,9 +300,11 @@ async def update_subscription(
     data = payload.model_dump(exclude_unset=True)
     if "label" in data:
         row.label = data["label"]
+    if data.get("enabled") is not None:
+        row.enabled = data["enabled"]
     await db.commit()
     await db.refresh(row)
-    return SubscriptionSummary.model_validate(row)
+    return _summary(row)
 
 
 @router.delete(

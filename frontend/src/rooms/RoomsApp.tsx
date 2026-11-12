@@ -8,7 +8,7 @@ import { NetworkStatusToast } from "@/components/layout/NetworkStatusToast";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { InstallFromLink } from "@/components/pwa/InstallFromLink";
-import { usePushSubscription } from "@/hooks/usePushSubscription";
+import { DEVICE_OFF_HINT, usePushSubscription } from "@/hooks/usePushSubscription";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { IosPushNote } from "@/components/pwa/IosPushNote";
 import { EmptyState, ItemButton, Segmented, Sheet } from "@/items/ui";
@@ -584,10 +584,10 @@ function SideFooter() {
             variant="primary"
             icon={<Bell className="h-3.5 w-3.5" />}
             onClick={() =>
-              void push.subscribe().then(
-                () => undefined,
-                () => toast.error("Couldn't turn on notifications."),
-              )
+              void push.subscribe().then((result) => {
+                if (result === "off") toast.info(DEVICE_OFF_HINT, { duration: 10_000 });
+                else if (result === null) toast.error("Couldn't turn on notifications on this device.");
+              })
             }
           >
             Turn on notifications

@@ -145,6 +145,8 @@ imapclient==3.0.1
 # Python and depends only on ``cryptography`` which is already pinned
 # above, so it doesn't add any system-library baggage to the image.
 pywebpush==2.0.0
+# pywebpush's signer; dispatch.py loads the stored PEM key with it directly.
+py-vapid==1.9.2
 
 # ---- Calendar ----
 # Repeating events (RRULE expansion). Already a transitive dependency;
