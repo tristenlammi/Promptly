@@ -22,8 +22,6 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.cornerRadius
-import androidx.glance.appwidget.lazy.LazyColumn
-import androidx.glance.appwidget.lazy.itemsIndexed
 import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
@@ -142,16 +140,43 @@ class AppsWidget : HubWidget() {
             if (apps.isEmpty()) {
                 Column(GlanceModifier.defaultWeight().fillMaxWidth().clickable(edit)) { Muted("Tap to choose apps.") }
             } else {
-                // More apps than fit: the rows scroll (most launchers allow it).
-                val rows = apps.chunked(cols)
-                LazyColumn(GlanceModifier.defaultWeight().fillMaxWidth()) {
-                    itemsIndexed(rows, itemId = { i, _ -> i.toLong() }) { _, row ->
+                // It never scrolls (a scrolling widget takes the home screen's swipe
+                // up). More apps than fit: the last place is "+3", opening Apps.
+                val room = grid.cols * grid.rows
+                val over = apps.size > room
+                val cells: List<PanelApp?> = if (over) apps.take(room - 1) + listOf(null) else apps
+                Column(GlanceModifier.defaultWeight().fillMaxWidth()) {
+                    for (row in cells.chunked(cols)) {
                         Row(GlanceModifier.fillMaxWidth().height(rowHeight), verticalAlignment = Alignment.CenterVertically) {
-                            for (a in row) AppCell(a, counts?.intOr(a.key) ?: 0, grid, GlanceModifier.defaultWeight())
+                            for (a in row) {
+                                if (a != null) AppCell(a, counts?.intOr(a.key) ?: 0, grid, GlanceModifier.defaultWeight())
+                                else MoreCell(apps.size - (room - 1), grid, GlanceModifier.defaultWeight())
+                            }
                             repeat(cols - row.size) { Spacer(GlanceModifier.defaultWeight()) }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /** The last place when there are more apps than fit: "+3", opening Promptly's Apps page. */
+    @Composable
+    private fun MoreCell(more: Int, grid: PanelGrid, modifier: GlanceModifier) {
+        val ctx = LocalContext.current
+        Column(
+            modifier.clickable(openPage(ctx, Open.PROMPTLY, "/apps")).semantics { contentDescription = "$more more apps" },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            val tile = grid.tile
+            Box(GlanceModifier.size((tile + 8).dp).padding(4.dp), contentAlignment = Alignment.Center) {
+                Box(GlanceModifier.fillMaxSize().background(WColors.surface).cornerRadius((tile * 0.32f).dp), contentAlignment = Alignment.Center) {
+                    Text("+$more", style = WText.style(if (tile < 40) 13.sp else 16.sp, WColors.accent, bold = true), maxLines = 1)
+                }
+            }
+            if (grid.labels) {
+                Spacer(GlanceModifier.height(2.dp))
+                Text("More", style = WText.style(if (tile < 40) 10.sp else 11.sp).copy(textAlign = TextAlign.Center), maxLines = 1)
             }
         }
     }

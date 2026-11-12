@@ -34,8 +34,6 @@ import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
-import androidx.glance.appwidget.lazy.LazyColumn
-import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.color.ColorProvider
@@ -100,7 +98,8 @@ object NoteTint {
 // ------------------------------------------------------------------ Notes
 
 class NotesWidget : GlanceAppWidget() {
-    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE, TALL))
+    // Exact: the cards that fit this widget's real size (it never scrolls).
+    override val sizeMode = SizeMode.Exact
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -198,6 +197,12 @@ fun NotesContent(state: WidgetState, cfg: NotesConfig, now: Long, clock: Clock, 
     val grid = !narrow && size.height >= NotesWidget.TALL.height
     val cards = NotesLogic.cards(state, now)
     val stale = staleLabel(state.snapshot.fetchedAt, now, clock)
+    val notice = state.notices.lastOrNull { it.area == "notes" }
+    val scale = ctx.resources.configuration.fontScale
+    // What fits, whole, then "3 more notes" (no scrolling: see Fit).
+    val room = size.height.value - Fit.FRAME - Fit.SPARE - (36f + 8f) - Fit.footer(notice != null, stale != null, scale)
+    val inner = size.width.value - 24f
+    val all = actionStartActivity(Open.page(ctx, Open.NOTES, "/notes"))
     Frame {
         CaptureBar(ctx, narrow)
         when {
@@ -209,22 +214,36 @@ fun NotesContent(state: WidgetState, cfg: NotesConfig, now: Long, clock: Clock, 
             }
             // Two columns, a row at a time: a home-screen grid gives every cell the
             // first card's height, so cards of different heights overlapped.
-            !narrow -> LazyColumn(GlanceModifier.defaultWeight()) {
-                items(cards.chunked(2), itemId = { row -> row.joinToString("|") { it.id }.hashCode().toLong() }) { row ->
-                    Row(GlanceModifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Box(GlanceModifier.defaultWeight()) { NoteCardView(row[0], cfg, lines = if (grid) 4 else 3, items = 4) }
-                        Spacer(GlanceModifier.width(6.dp))
-                        Box(GlanceModifier.defaultWeight()) { if (row.size > 1) NoteCardView(row[1], cfg, lines = if (grid) 4 else 3, items = 4) }
+            !narrow -> {
+                val lines = if (grid) 4 else 3
+                val rows = cards.chunked(2)
+                val cardW = (inner - 6f) / 2
+                fun fits(c: NotesConfig) = Fit.count(rows.map { r -> r.maxOf { noteCardHeight(it, c, cardW, lines, 4, scale) } + 6f }, room, Fit.more(scale))
+                // Not even one row whole: titles only, so some still show.
+                val look = if (fits(cfg) == 0) cfg.copy(titlesOnly = true) else cfg
+                val n = fits(look)
+                Column(GlanceModifier.defaultWeight().fillMaxWidth()) {
+                    for (row in rows.take(n)) {
+                        Row(GlanceModifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                            Box(GlanceModifier.defaultWeight()) { NoteCardView(row[0], look, lines = lines, items = 4) }
+                            Spacer(GlanceModifier.width(6.dp))
+                            Box(GlanceModifier.defaultWeight()) { if (row.size > 1) NoteCardView(row[1], look, lines = lines, items = 4) }
+                        }
                     }
+                    MoreNotes(cards.size - minOf(cards.size, n * 2), shown = n > 0, all)
                 }
             }
-            else -> LazyColumn(GlanceModifier.defaultWeight()) {
-                items(cards, itemId = { it.id.hashCode().toLong() }) { c ->
-                    Box(GlanceModifier.padding(vertical = 3.dp)) { NoteCardView(c, cfg, lines = if (narrow) 2 else 3, items = if (narrow) 3 else 4) }
+            else -> {
+                fun fits(c: NotesConfig) = Fit.count(cards.map { noteCardHeight(it, c, inner, 2, 3, scale) + 6f }, room, Fit.more(scale))
+                val look = if (fits(cfg) == 0) cfg.copy(titlesOnly = true) else cfg
+                val n = fits(look)
+                Column(GlanceModifier.defaultWeight().fillMaxWidth()) {
+                    for (c in cards.take(n)) Box(GlanceModifier.padding(vertical = 3.dp)) { NoteCardView(c, look, lines = 2, items = 3) }
+                    MoreNotes(cards.size - n, shown = n > 0, all)
                 }
             }
         }
-        Footer(state.notices.lastOrNull { it.area == "notes" }, stale)
+        Footer(notice, stale)
     }
 }
 
@@ -235,6 +254,37 @@ private fun Glyph(icon: Int, label: String, tint: GlanceColor) {
         ImageProvider(icon), contentDescription = label,
         modifier = GlanceModifier.size(14.dp).padding(end = 2.dp), colorFilter = ColorFilter.tint(tint),
     )
+}
+
+/** "3 more notes", or "3 notes" when none fit above it. */
+@Composable
+private fun MoreNotes(left: Int, shown: Boolean, open: androidx.glance.action.Action) {
+    if (left <= 0) return
+    MoreLine(
+        when {
+            !shown -> if (left == 1) "1 note" else "$left notes"
+            left == 1 -> "1 more note"
+            else -> "$left more notes"
+        },
+        open,
+    )
+}
+
+/** How tall one note card is drawn (dp, rounded up) at [width]: see [NoteCardView]. */
+internal fun noteCardHeight(c: NoteCard, cfg: NotesConfig, width: Float, lines: Int, items: Int, scale: Float = 1f): Float {
+    val text = width - 20f
+    var h = 16f + Fit.lines(c.title, 13f, text - if (c.pinned) 14f else 0f, 2, scale) * Fit.line(13f, scale)
+    if (!cfg.titlesOnly) {
+        if (c.isList) {
+            val shown = c.items.filter { !it.checked || it.settling }.take(items)
+            h += shown.size * Fit.CHECK
+            if (NotesLogic.listLine(c, shown.size) != null) h += Fit.line(11f, scale)
+        } else if (c.text.isNotBlank()) {
+            h += Fit.lines(c.text, 12f, text, lines, scale) * Fit.line(12f, scale)
+        }
+    }
+    if (c.voice || c.image || c.shared || c.pending) h += 4f + maxOf(14f, Fit.line(10f, scale))
+    return h
 }
 
 @Composable
@@ -337,7 +387,8 @@ class TickNoteItem : ActionCallback {
 // ------------------------------------------------------------------ One note
 
 class OneNoteWidget : GlanceAppWidget() {
-    override val sizeMode = SizeMode.Responsive(setOf(NotesWidget.SMALL, NotesWidget.WIDE, NotesWidget.TALL))
+    // Exact: the items that fit this widget's real size (it never scrolls).
+    override val sizeMode = SizeMode.Exact
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -349,12 +400,12 @@ class OneNoteWidget : GlanceAppWidget() {
             val ctx = LocalContext.current
             val link = Widgets.link(ctx)
             if (link != Link.LINKED) LinkMessage(ctx, link)
-            else OneNoteContent(state, prefs[NOTE_ID]?.ifBlank { null }, prefs[NOTE_TITLE].orEmpty(), System.currentTimeMillis(), clockOf(ctx), widgetId)
+            else OneNoteContent(state, prefs[NOTE_ID]?.ifBlank { null }, prefs[NOTE_TITLE].orEmpty(), System.currentTimeMillis(), clockOf(ctx), widgetId, LocalSize.current)
         }
     }
 
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        provideContent { OneNoteContent(Samples.notes(), Samples.LIST_ID, "Shopping", Samples.now(), clockOf(context), AppWidgetManager.INVALID_APPWIDGET_ID) }
+        provideContent { OneNoteContent(Samples.notes(), Samples.LIST_ID, "Shopping", Samples.now(), clockOf(context), AppWidgetManager.INVALID_APPWIDGET_ID, NotesWidget.TALL) }
     }
 
     companion object {
@@ -408,7 +459,7 @@ private fun Centered(title: String, hint: String, action: Action?) {
 }
 
 @Composable
-fun OneNoteContent(state: WidgetState, noteId: String?, savedTitle: String, now: Long, clock: Clock, widgetId: Int) {
+fun OneNoteContent(state: WidgetState, noteId: String?, savedTitle: String, now: Long, clock: Clock, widgetId: Int, size: DpSize = NotesWidget.TALL) {
     val ctx = LocalContext.current
     val pick = if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) actionStartActivity(pickNote(ctx, widgetId)) else null
     if (noteId == null) return Centered("Pick a note", "Tap to choose the note or list to show here.", pick)
@@ -421,6 +472,12 @@ fun OneNoteContent(state: WidgetState, noteId: String?, savedTitle: String, now:
     val fg = NoteTint.text(note.color)
     val muted = NoteTint.muted(note.color)
     val stale = staleLabel(state.snapshot.fetchedAt, now, clock)
+    val notice = state.notices.lastOrNull { it.area == "notes" }
+    val scale = ctx.resources.configuration.fontScale
+    val openNote = actionStartActivity(Open.page(ctx, Open.NOTES, if (note.pending) "/notes" else notePath(note.id)))
+    // The room under the title for the list or the words (no scrolling: see Fit).
+    val head = maxOf(if (note.isList && !note.pending) 32f else 0f, Fit.line(15f, scale) + if (note.isList) Fit.line(12f, scale) else 0f) + 4f
+    val room = size.height.value - Fit.FRAME - Fit.SPARE - head - Fit.footer(notice != null, stale != null, scale)
     Column(
         GlanceModifier.fillMaxSize().background(NoteTint.background(note.color)).cornerRadius(20.dp).padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
@@ -451,8 +508,17 @@ fun OneNoteContent(state: WidgetState, noteId: String?, savedTitle: String, now:
             } else {
                 val rows: List<Pair<String, NoteItemRow?>> = open.map { "i" + it.id to it } +
                     (if (done.isNotEmpty()) listOf("h" to null) else emptyList()) + done.map { "i" + it.id to it }
-                LazyColumn(GlanceModifier.defaultWeight()) {
-                    items(rows, itemId = { it.first.hashCode().toLong() }) { (_, row) ->
+                val itemW = size.width.value - 24f - 32f
+                val heights = rows.map { (_, row) ->
+                    if (row == null) Fit.line(11f, scale) + 8f
+                    else maxOf(Fit.CHECK, Fit.lines(row.text, 13f, itemW - if (row.indent) 16f else 0f, 3, scale) * Fit.line(13f, scale))
+                }
+                var n = Fit.count(heights, room, Fit.more(scale))
+                // "2 ticked" with nothing under it goes too.
+                while (n > 0 && rows[n - 1].second == null) n--
+                val left = rows.drop(n).count { it.second != null }
+                Column(GlanceModifier.defaultWeight().fillMaxWidth()) {
+                    for ((_, row) in rows.take(n)) {
                         if (row == null) {
                             Text(
                                 if (done.size == 1) "1 ticked" else "${done.size} ticked",
@@ -460,16 +526,19 @@ fun OneNoteContent(state: WidgetState, noteId: String?, savedTitle: String, now:
                             )
                         } else NoteItemLine(note, row, fg, muted, compact = false)
                     }
+                    if (left > 0) MoreLine("$left more", openNote)
                 }
             }
         } else {
-            LazyColumn(GlanceModifier.defaultWeight()) {
-                item {
-                    Text(note.text.ifBlank { if (note.voice) "A voice note — open it to listen." else "Nothing written yet." }, style = WText.style(13.sp, if (note.text.isBlank()) muted else fg))
-                }
+            // As many whole lines as fit, then "…"; tap to read the rest.
+            Column(GlanceModifier.defaultWeight().fillMaxWidth().clickable(openNote)) {
+                Text(
+                    note.text.ifBlank { if (note.voice) "A voice note — open it to listen." else "Nothing written yet." },
+                    style = WText.style(13.sp, if (note.text.isBlank()) muted else fg),
+                    maxLines = maxOf(1, (room / Fit.line(13f, scale)).toInt()),
+                )
             }
         }
-        val notice = state.notices.lastOrNull { it.area == "notes" }
         if (notice != null || stale != null) Footer(notice, stale)
     }
 }

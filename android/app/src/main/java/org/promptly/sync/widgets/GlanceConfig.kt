@@ -106,7 +106,7 @@ class AppsConfigActivity : ComponentActivity() {
                     if (!layout.fit) {
                         Stepper("Apps in a row", layout.cols, PanelLayout.MIN_COLS, PanelLayout.MAX_COLS) { layout = layout.copy(cols = it) }
                         Stepper("Rows showing", layout.rows, PanelLayout.MIN_ROWS, PanelLayout.MAX_ROWS) { layout = layout.copy(rows = it) }
-                        Text("More apps than fit scroll.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("More apps than fit: the last place shows how many more, and opens Apps.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Section("Icon size")
                         for ((key, label) in listOf("small" to "Small", "medium" to "Medium", "large" to "Large")) {
                             Choice(label, layout.icon == key, { layout = layout.copy(icon = key) })

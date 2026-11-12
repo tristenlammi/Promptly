@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Widgets no longer scroll, so swiping up on one opens your apps like anywhere else on the home screen. Agenda, Tasks, Notes, One note and the App panel show what fits in the widget's size, whole, then a line like "3 more" that opens the app (the App panel's last place shows "+3" and opens Apps). Ticking tasks and list items off on the widget works as before. Promptly for Android 1.9.3.
+
 ## [0.40.0] - 2026-11-13
 
 ### Added
