@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-11-13
+
 ### Added
 
 - P Maps: choose a place on the map instead of typing it. When adding a stop or choosing where to start, "Choose on the map" lets you tap the spot. A dropped pin (long-press the map) or any place now has "Directions from here" to make it the start, then you type or tap where you're going.
