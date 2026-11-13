@@ -730,10 +730,11 @@ async def test_quiet_hours_never_hold_a_ring_and_it_goes_urgent_with_a_45s_ttl(d
     assert out["delivered"] == 1 and out["held"] == 0
     [s] = sent
     assert s["ttl"] == 45 and s["urgency"] == "high" and json.loads(s["payload_json"])["tag"] == "call:x"
-    # Ordinary pushes keep pywebpush's defaults.
+    # Ordinary pushes are kept a day for a phone that's asleep (pywebpush's
+    # own default is 0 s: "now or never").
     sent.clear()
     await d._dispatch(user_id=ben.id, category="test", payload=d.PushPayload(title="t", body="b"))
-    assert sent[0]["ttl"] is None and sent[0]["urgency"] is None
+    assert sent[0]["ttl"] == d.DEFAULT_TTL and sent[0]["urgency"] == "high"
 
     # The "Calls" switch in Account > Notifications still turns them off.
     prefs = await db.get(PushPreferences, ben.id)

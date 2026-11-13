@@ -360,6 +360,9 @@ async def _dispatch(
     """Write the inbox row and push to every device. Returns what happened
     to the pushes: ``{"delivered", "failed", "removed", "held", "blocked"}``."""
     outcome = {"delivered": 0, "failed": 0, "removed": 0, "held": 0, "blocked": 0}
+    # The kind decides how urgently it's delivered (``default_urgency``).
+    if payload.category is None:
+        payload.category = category
     async with _session_maker() as db:
         # 0) Blocks (D7): nothing at all from someone the recipient blocked,
         #    or who blocked them — not the push, not the inbox row. Central,
@@ -539,8 +542,8 @@ async def deliver(
             payload_json=payload.to_json(),
             vapid_private_key=vapid_private,
             vapid_contact=vapid_contact,
-            ttl=payload.ttl,
-            urgency=payload.urgency,
+            ttl=payload.ttl if payload.ttl is not None else DEFAULT_TTL,
+            urgency=payload.urgency or default_urgency(payload.category),
         )
         for sub in subs
     ]
@@ -610,6 +613,20 @@ class _PushGone(Exception):
     Not an error per se — it just means the browser has
     unsubscribed (tab closed permanently, incognito expired, user
     revoked permission) and we should drop the row."""
+
+
+# How long the push service keeps a push for a phone it can't reach right now.
+# pywebpush's own default is 0 seconds: "now or never", so a phone asleep in a
+# pocket (most of the time) never got anything but a test sent while holding it.
+DEFAULT_TTL = 24 * 3600
+
+# Pushes a person expects at once: these wake a dozing phone ("high");
+# everything else may wait for the phone's next check-in ("normal").
+_URGENT = frozenset({"room_message", "call", "item_reminder", "calendar", "talk_followup", "maps", "test"})
+
+
+def default_urgency(category: str | None) -> str:
+    return "high" if category in _URGENT else "normal"
 
 
 def _send_one(
