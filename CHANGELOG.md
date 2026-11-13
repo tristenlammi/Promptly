@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.40.2] - 2026-11-13
+
 ### Fixed
 
 - Notifications reach a phone that's asleep. Every push was sent as "deliver now or throw it away", so a Rooms message, reminder or anything else only arrived if the phone happened to be awake at that moment; the test notification worked because you send it holding the phone. Pushes are now kept for up to a day until the phone checks in, and messages, calls and reminders wake a dozing phone straight away.
