@@ -20,8 +20,6 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
-import androidx.glance.appwidget.lazy.LazyColumn
-import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.currentState
@@ -45,11 +43,13 @@ import java.time.Instant
  * Agenda: today and the next days. A date header with **+** (a new event in
  * P Calendar); Today / Tomorrow / "Wed 12" groups; all-day events as chips;
  * time, title, place and the calendar's colour; "Nothing else today".
- * 2×2 shows the next two things; 4×2 and bigger scroll through the week.
+ * 2×2 shows the next two things; bigger shows what fits of the week, then "3 more"
+ * (it never scrolls: a scrolling widget takes the home screen's swipe up).
  * Tap an event → it opens in P Calendar.
  */
 class AgendaWidget : GlanceAppWidget() {
-    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE, TALL))
+    // Exact: the list shows the rows that fit this widget's real size.
+    override val sizeMode = SizeMode.Exact
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -62,13 +62,13 @@ class AgendaWidget : GlanceAppWidget() {
             val ctx = LocalContext.current
             val link = Widgets.link(ctx)
             if (link != Link.LINKED) LinkMessage(ctx, link)
-            else AgendaContent(state, configOf(prefs), System.currentTimeMillis(), clockOf(ctx), LocalSize.current.width < WIDE.width)
+            else AgendaContent(state, configOf(prefs), System.currentTimeMillis(), clockOf(ctx), LocalSize.current.width < WIDE.width, LocalSize.current)
         }
     }
 
     /** The widget picker's preview (Android 15+): made-up events and tasks. */
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        provideContent { AgendaContent(Samples.calendarAndTasks(), AgendaConfig(), Samples.now(), clockOf(context), small = false) }
+        provideContent { AgendaContent(Samples.calendarAndTasks(), AgendaConfig(), Samples.now(), clockOf(context), small = false, size = TALL) }
     }
 
     companion object {
@@ -98,7 +98,7 @@ class AgendaWidgetReceiver : GlanceAppWidgetReceiver() {
     }
 }
 
-/** One line in the list (a flat list: Glance's LazyColumn wants one). */
+/** One line in the list. */
 internal sealed class Line(val key: Long) {
     class Day(val d: AgendaDay) : Line(-d.date.toEpochDay())
     /** [prefix]: the day, when a small widget shows something after today. */
@@ -133,13 +133,14 @@ internal fun lines(days: List<AgendaDay>, small: Boolean): List<Line> {
 }
 
 @Composable
-fun AgendaContent(state: WidgetState, cfg: AgendaConfig, now: Long, clock: Clock, small: Boolean) {
+fun AgendaContent(state: WidgetState, cfg: AgendaConfig, now: Long, clock: Clock, small: Boolean, size: DpSize = AgendaWidget.TALL) {
     val ctx = LocalContext.current
     val cal = state.snapshot.calendar
     val days = Agenda.days(cal, cfg, now, clock)
     val today = Instant.ofEpochMilli(now).atZone(clock.zone).toLocalDate()
     val all = lines(days, small)
     val stale = if (cal == null && state.snapshot.fetchedAt == 0L) null else staleLabel(state.snapshot.fetchedAt, now, clock)
+    val notice = state.notices.lastOrNull { it.area == "tasks" }
     Frame {
         Row(GlanceModifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(
@@ -153,11 +154,32 @@ fun AgendaContent(state: WidgetState, cfg: AgendaConfig, now: Long, clock: Clock
         if (cal == null) {
             Muted(if (state.snapshot.fetchedAt == 0L) "Getting your calendar…" else "Your calendar isn't here yet.")
         } else {
-            LazyColumn(GlanceModifier.defaultWeight()) {
-                items(all, itemId = { it.key }) { line -> AgendaLine(line, cfg, small) }
+            // What fits, whole, then "3 more" (no scrolling: see Fit).
+            val scale = ctx.resources.configuration.fontScale
+            val head = Fit.line(15f, scale) + Fit.line(12f, scale) + 6f
+            val room = size.height.value - Fit.FRAME - Fit.SPARE - head - Fit.footer(notice != null, stale != null, scale)
+            var n = Fit.count(all.map { agendaLineHeight(it, cfg, small, scale) }, room, Fit.more(scale))
+            // A day's name with nothing under it goes too.
+            while (n > 0 && all[n - 1] is Line.Day) n--
+            val hidden = all.drop(n).count { it is Line.AllDay || it is Line.Timed }
+            Column(GlanceModifier.defaultWeight().fillMaxWidth()) {
+                for (line in all.take(n)) AgendaLine(line, cfg, small)
+                if (hidden > 0) MoreLine("$hidden more", actionStartActivity(Open.page(ctx, Open.CALENDAR, "/calendar")))
             }
         }
-        Footer(state.notices.lastOrNull { it.area == "tasks" }, stale)
+        Footer(notice, stale)
+    }
+}
+
+/** How tall one line of the agenda is drawn (dp, rounded up): see [AgendaLine]. */
+internal fun agendaLineHeight(line: Line, cfg: AgendaConfig, small: Boolean, scale: Float = 1f): Float = when (line) {
+    is Line.Day -> Fit.line(12f, scale) + 10f
+    is Line.Empty -> Fit.line(12f, scale) + 8f
+    is Line.AllDay -> Fit.line(12f, scale) + 10f
+    is Line.Timed -> {
+        val place = !small && !cfg.titlesOnly && line.r.occ.location.isNotBlank()
+        val words = Fit.line(13f, scale) + if (small || place) Fit.line(11f, scale) else 0f
+        maxOf(if (place) 32f else 18f, words) + 6f
     }
 }
 

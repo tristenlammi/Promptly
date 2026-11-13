@@ -28,8 +28,6 @@ import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
-import androidx.glance.appwidget.lazy.LazyColumn
-import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.currentState
 import androidx.glance.layout.Alignment
@@ -56,7 +54,8 @@ import org.promptly.sync.capture.QuickTaskActivity
  * signal. Tap a task → it opens in P Tasks.
  */
 class TasksWidget : GlanceAppWidget() {
-    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE, TALL))
+    // Exact: the list shows the rows that fit this widget's real size.
+    override val sizeMode = SizeMode.Exact
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -69,13 +68,13 @@ class TasksWidget : GlanceAppWidget() {
             val ctx = LocalContext.current
             val link = Widgets.link(ctx)
             if (link != Link.LINKED) LinkMessage(ctx, link)
-            else TasksContent(state, configOf(prefs), System.currentTimeMillis(), clockOf(ctx), LocalSize.current.width < WIDE.width)
+            else TasksContent(state, configOf(prefs), System.currentTimeMillis(), clockOf(ctx), LocalSize.current.width < WIDE.width, LocalSize.current)
         }
     }
 
     /** The widget picker's preview (Android 15+): made-up events and tasks. */
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        provideContent { TasksContent(Samples.calendarAndTasks(), TasksConfig(), Samples.now(), clockOf(context), small = false) }
+        provideContent { TasksContent(Samples.calendarAndTasks(), TasksConfig(), Samples.now(), clockOf(context), small = false, size = TALL) }
     }
 
     companion object {
@@ -109,12 +108,14 @@ fun taskPath(fileId: String?, taskId: String): String =
     if (fileId == null || taskId.startsWith("local:")) "/app/open/tasks" else "/apps/tasks/$fileId?task=$taskId"
 
 @Composable
-fun TasksContent(state: WidgetState, cfg: TasksConfig, now: Long, clock: Clock, small: Boolean) {
+fun TasksContent(state: WidgetState, cfg: TasksConfig, now: Long, clock: Clock, small: Boolean, size: DpSize = TasksWidget.TALL) {
     val ctx = LocalContext.current
     val view = Tasks.view(state, cfg, now, clock)
     val sec = state.snapshot.tasks
     val count = view.rows.count { !it.struck }
     val stale = staleLabel(state.snapshot.fetchedAt, now, clock)
+    val notice = state.notices.lastOrNull { it.area == "tasks" }
+    val list = actionStartActivity(Open.page(ctx, Open.TASKS, sec?.fileId?.let { "/apps/tasks/$it" } ?: "/app/open/tasks"))
     Frame {
         Row(GlanceModifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(
@@ -137,11 +138,23 @@ fun TasksContent(state: WidgetState, cfg: TasksConfig, now: Long, clock: Clock, 
                 Text(if (state.snapshot.tasks?.tasks.isNullOrEmpty()) "Nothing to do" else "All done for today", style = WText.style(13.sp, bold = true), maxLines = 1)
                 Muted("Tap + to add a task.", size = 12.sp)
             }
-            else -> LazyColumn(GlanceModifier.defaultWeight()) {
-                items(view.rows, itemId = { (it.fileId + "/" + it.id + "/" + it.due).hashCode().toLong() }) { row -> TaskLine(row, small) }
+            // What fits, whole, then "3 more" (no scrolling: see Fit). Ticking
+            // off the rows shown works as before.
+            else -> {
+                val scale = ctx.resources.configuration.fontScale
+                val sub = !small && (view.overdue > 0 || view.listName != null)
+                val head = maxOf(32f, Fit.line(15f, scale) + if (sub) Fit.line(12f, scale) else 0f) + 6f
+                val room = size.height.value - Fit.FRAME - Fit.SPARE - head - Fit.footer(notice != null, stale != null, scale)
+                val width = size.width.value - 24f - 32f
+                val n = Fit.count(view.rows.map { taskLineHeight(it, small, width, scale) }, room, Fit.more(scale))
+                Column(GlanceModifier.defaultWeight().fillMaxWidth()) {
+                    for (row in view.rows.take(n)) TaskLine(row, small)
+                    val left = view.rows.size - n
+                    if (left > 0) MoreLine("$left more", list)
+                }
             }
         }
-        Footer(state.notices.lastOrNull { it.area == "tasks" }, stale)
+        Footer(notice, stale)
     }
 }
 
@@ -150,6 +163,14 @@ fun quickTask(ctx: Context, listId: String?): Intent =
         .putExtra(QuickTaskActivity.EXTRA_LIST, listId)
         .setData(android.net.Uri.parse("promptly-widget://quick-task/${listId ?: ""}"))
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+
+/** How tall one task is drawn (dp, rounded up): see [TaskLine]. [width] is the
+ *  room for its words, beside the check box. */
+internal fun taskLineHeight(row: TaskRow, small: Boolean, width: Float, scale: Float = 1f): Float {
+    val title = Fit.lines(row.title, 13f, width, if (small) 1 else 2, scale) * Fit.line(13f, scale)
+    val bits = !row.struck && (row.label.isNotBlank() || (row.listId != "inbox" && !small))
+    return maxOf(Fit.CHECK, title + if (bits) Fit.line(11f, scale) else 0f) + 2f
+}
 
 @Composable
 private fun TaskLine(row: TaskRow, small: Boolean) {

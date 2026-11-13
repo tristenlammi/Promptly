@@ -29,6 +29,8 @@ class NotesLayoutTest {
     private val tall = DpSize(300.dp, 300.dp)
     private val wide = DpSize(300.dp, 140.dp)
     private val small = DpSize(120.dp, 120.dp)
+    /** Narrow, and tall enough for a card under the buttons (the widget doesn't scroll). */
+    private val narrowTall = DpSize(120.dp, 300.dp)
 
     private val shopping = NoteCard(
         "L", "list", "Shopping", "sand", pinned = true,
@@ -60,11 +62,20 @@ class NotesLayoutTest {
     @Test
     fun notes_narrow_has_three_buttons() = runGlanceAppWidgetUnitTest {
         setContext(ctx)
-        setAppWidgetSize(small)
-        provideComposable { NotesContent(state(), NotesConfig(), now, clock, small) }
+        setAppWidgetSize(narrowTall)
+        provideComposable { NotesContent(state(), NotesConfig(), now, clock, narrowTall) }
         onNode(hasContentDescription("Take a note")).assertExists()
         onNode(hasText("Take a note…")).assertDoesNotExist()
         onNode(hasText("Shopping")).assertExists()
+    }
+
+    @Test
+    fun notes_too_small_for_a_card_says_how_many_instead_of_cutting_one_off() = runGlanceAppWidgetUnitTest {
+        setContext(ctx)
+        setAppWidgetSize(small)
+        provideComposable { NotesContent(state(), NotesConfig(), now, clock, small) }
+        onNode(hasContentDescription("Take a note")).assertExists()
+        onNode(hasText("3 notes")).assertExists()
     }
 
     @Test
@@ -95,10 +106,10 @@ class NotesLayoutTest {
     @Test
     fun a_voice_note_waiting_to_sync() = runGlanceAppWidgetUnitTest {
         setContext(ctx)
-        setAppWidgetSize(wide)
+        setAppWidgetSize(tall)
         val op = Op("new1", Op.NEW_NOTE, JSONObject().put("kind", "text").put("source", "voice")
             .put("files", org.json.JSONArray().put(JSONObject().put("id", "a").put("mime", "audio/mp4").put("path", "/x"))), now, "Voice note")
-        provideComposable { NotesContent(state(ops = listOf(op)), NotesConfig(), now, clock, wide) }
+        provideComposable { NotesContent(state(ops = listOf(op)), NotesConfig(), now, clock, tall) }
         onNode(hasText("Will sync")).assertExists()
         onNode(hasContentDescription("Saved on this phone — will sync")).assertExists()
     }

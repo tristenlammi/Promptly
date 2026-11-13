@@ -25,6 +25,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 - P Maps: choose a place on the map instead of typing it. When adding a stop or choosing where to start, "Choose on the map" lets you tap the spot. A dropped pin (long-press the map) or any place now has "Directions from here" to make it the start, then you type or tap where you're going.
 
+### Changed
+
+- Widgets no longer scroll, so swiping up on one opens your apps like anywhere else on the home screen. Agenda, Tasks, Notes, One note and the App panel show what fits in the widget's size, whole, then a line like "3 more" that opens the app (the App panel's last place shows "+3" and opens Apps). Ticking tasks and list items off on the widget works as before. Promptly for Android 1.9.3.
+
 ### Fixed
 
 - P Maps: a place you pick now lands in the middle of the map you can still see, above the panel, instead of behind it. The same for the go-to-my-location button.
