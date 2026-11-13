@@ -9,7 +9,9 @@ import { PLACE_ICON_SVG } from "./placeIcons";
 import { decodeShape, type Charger, type Parked, type Route, type RouteIncident, type SavedPlace, type Spot } from "./api";
 
 export interface MapViewHandle {
-  flyTo(lat: number, lon: number, zoom?: number): void;
+  /** Centre on a point. [covered]: how much of each side panels cover, so the
+   *  point lands in the middle of the map you can still see. */
+  flyTo(lat: number, lon: number, zoom?: number, covered?: { top: number; bottom: number; left: number; right: number }): void;
   fit(points: [number, number][], padding?: { top: number; bottom: number; left: number; right: number }): void;
   center(): { lat: number; lon: number } | null;
   bounds(): [number, number, number, number] | null;
@@ -123,8 +125,10 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
   const view = useRef<{ center: [number, number]; zoom: number }>({ center: [134, -27], zoom: 3.4 });
 
   useImperativeHandle(ref, () => ({
-    flyTo(lat, lon, zoom) {
-      mapRef.current?.easeTo({ center: [lon, lat], zoom: zoom ?? Math.max(mapRef.current.getZoom(), 14), duration: 600 });
+    flyTo(lat, lon, zoom, covered) {
+      // An offset, not padding: padding would stay on the map after the panel closes.
+      const offset: [number, number] = covered ? [(covered.left - covered.right) / 2, (covered.top - covered.bottom) / 2] : [0, 0];
+      mapRef.current?.easeTo({ center: [lon, lat], zoom: zoom ?? Math.max(mapRef.current.getZoom(), 14), offset, duration: 600 });
     },
     fit(points, padding) {
       const map = mapRef.current;

@@ -61,8 +61,12 @@ const asStop = (s: Spot): StopRow => ({ lat: s.lat, lon: s.lon, name: s.name, ad
 /** What to tell someone whose phone hasn't given a location, with the phone's own
  *  words, so a problem report says what actually happened. */
 function locationProblemText(e: GeolocationPositionError): string {
-  const why = e.code === e.TIMEOUT ? "Can't find your location yet. Check Location is on, or move near a window." : "Your phone isn't giving a location. Check Location is on in its settings.";
-  return e.message ? `${why} (${e.message})` : why;
+  // Chrome asks the Promptly phone app for the location, and couldn't find one it
+  // trusts for this server: a server setting, not the phone's Location switch.
+  if (/NoTwaFound|TwaNotFound|Delegation/i.test(e.message ?? "")) {
+    return "Location comes through the Promptly phone app, and Chrome couldn't confirm the app belongs to this server. An admin needs to add the app's Google Play key to the server.";
+  }
+  return e.code === e.TIMEOUT ? "Can't find your location yet. Check Location is on, or move near a window." : "Your phone isn't giving a location. Check Location is on in its settings.";
 }
 
 /** ``promptlyNav``: full screen on a phone but inside Promptly (not the
@@ -206,8 +210,10 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     raise();
     setQuery("");
     setFollowing(false);
-    map.current?.flyTo(s.lat, s.lon);
-  }, [raise]);
+    // Into the middle of the map you can still see, above the panel (once the
+    // panel has slid up, so its height is the real one).
+    window.setTimeout(() => map.current?.flyTo(s.lat, s.lon, undefined, coveredNow()), 260);
+  }, [raise]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hold = useCallback(async (lat: number, lon: number) => {
     setPlace({ kind: "pin", name: "Dropped pin", lat, lon });
@@ -250,8 +256,19 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
   const viaRef = useRef(via);
   viaRef.current = via;
   const [pickingVia, setPickingVia] = useState(false);
+  // Choosing a stop (or where to start) by tapping the map instead of typing.
+  const [pickingStop, setPickingStop] = useState(false);
+  // "Directions from here": the one stop so far is the start, so the next is where to.
+  const [addingEnd, setAddingEnd] = useState(false);
   const [nearMarks, setNearMarks] = useState<SearchResult[]>([]);
   const sheetRef = useRef<HTMLDivElement>(null);
+  /** How much of the map the search bar and the open panel cover right now. */
+  const coveredNow = () => {
+    if (!isMobile) return { top: 0, bottom: 0, left: 400, right: 0 };
+    const sheet = sheetRef.current?.getBoundingClientRect();
+    const bottom = sheet ? Math.max(0, window.innerHeight - sheet.top) : Math.round(window.innerHeight * 0.45);
+    return { top: 80, bottom: Math.min(bottom, Math.round(window.innerHeight * 0.75)), left: 0, right: 0 };
+  };
   const panelPadding = useCallback(() => {
     if (!isMobile) return { top: 40, bottom: 40, left: 420, right: 40 };
     // What the sheet covers, up to half the screen: beyond that the map's mostly hidden anyway.
@@ -313,6 +330,34 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     changeStops(rows);
   };
 
+  /** A stop from the search or the map. With one stop so far, it's where from,
+   *  unless that one is already the start ("Directions from here"). */
+  const addStop = (s: Spot) => {
+    const rows = stopsRef.current;
+    changeStops(rows.length === 1 && !addingEnd ? [asStop(s), ...rows] : [...rows, asStop(s)]);
+    setAddingEnd(false);
+    setAddingStop(false);
+    setQuery("");
+  };
+
+  /** This place is point A: ask where to next (typed, or tapped on the map). */
+  const directionsFrom = (s: Spot) => {
+    void removals.settle("recents").then(() => mapsApi.recent(s)).then(refreshMine).catch(() => undefined);
+    setPanel("route");
+    raise();
+    setFindingYou(false);
+    setAddingEnd(true);
+    setAddingStop(true);
+    changeStops([asStop(s)]);
+  };
+
+  /** A stop chosen by tapping the map: named from the address there. */
+  const addStopAt = async (lat: number, lon: number) => {
+    setPickingStop(false);
+    const named = await mapsApi.reverse(lat, lon).catch(() => null);
+    addStop({ lat, lon, name: named?.name || named?.address?.split(",")[0] || "Dropped pin", address: named?.address ?? null });
+  };
+
   useEffect(() => {
     if (!findingYou) return;
     if (locationBlocked) {
@@ -341,6 +386,8 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     viaRef.current = [];
     setVia([]);
     setPickingVia(false);
+    setPickingStop(false);
+    setAddingEnd(false);
     setNearMarks([]);
     setStops([]);
     setRoutes([]);
@@ -747,7 +794,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
           you={you}
           onRemove={removePlace}
           onEdited={refreshMine}
-          onClose={() => setPanel(stops.length ? "route" : "home")} onDirections={() => directionsTo(place)} onSave={(kind, list, look) => save(place, kind, list, look)} addTo={stops.length > 0 ? () => {
+          onClose={() => setPanel(stops.length ? "route" : "home")} onDirections={() => directionsTo(place)} onDirectionsFrom={() => directionsFrom(place)} onSave={(kind, list, look) => save(place, kind, list, look)} addTo={stops.length > 0 ? () => {
           changeStops([...stops, asStop(place)]);
           setPanel("route");
         } : undefined} />
@@ -839,11 +886,15 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
           onRemoveVia={(i) => changeVia(via.filter((_, n) => n !== i))}
           onMarks={setNearMarks}
           onAddOnWay={(s) => changeStops([...stops.slice(0, -1), asStop(s), stops[stops.length - 1]])}
-          onAddStop={(s) => {
-            // With one stop so far, that's where you're going: this is where from.
-            changeStops(stops.length === 1 ? [asStop(s), ...stops] : [...stops, asStop(s)]);
-            setAddingStop(false);
-            setQuery("");
+          onAddStop={addStop}
+          addingEnd={addingEnd}
+          pickingStop={pickingStop}
+          onPickStop={(on) => {
+            setPickingStop(on);
+            if (on) {
+              setAddingStop(false);
+              setQuery("");
+            }
           }}
         />
       )}
@@ -868,7 +919,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
           showTraffic={!!config?.traffic && trafficOn}
           onPickIncident={(i) => showPlace({ kind: "pin", name: i.label, address: i.text !== i.label ? i.text : null, lat: i.lat, lon: i.lon })}
           marks={dayOnMap?.stays ?? nearMarks}
-          onPickPoint={pickingVia ? (lat, lon) => void addVia(lat, lon) : undefined}
+          onPickPoint={pickingVia ? (lat, lon) => void addVia(lat, lon) : pickingStop ? (lat, lon) => void addStopAt(lat, lon) : undefined}
           trail={dayOnMap?.lines}
           squares={panel === "offline" ? squares ?? undefined : undefined}
           onPickSaved={(p) => showPlace({ ...p })}
@@ -997,7 +1048,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
                 return;
               }
               setFollowing(true);
-              map.current?.flyTo(you.lat, you.lon, 15);
+              map.current?.flyTo(you.lat, you.lon, 15, coveredNow());
             }}
           >
             {locationBlocked ? (
@@ -1280,7 +1331,7 @@ function PrimaryButton({ icon: Icon, children, onClick }: { icon: typeof Car; ch
   );
 }
 
-function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, onClose, onDirections, onSave, addTo }: {
+function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, onClose, onDirections, onDirectionsFrom, onSave, addTo }: {
   place: SearchResult;
   isHome: boolean;
   isWork: boolean;
@@ -1290,6 +1341,8 @@ function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, o
   onEdited: () => void;
   onClose: () => void;
   onDirections: () => void;
+  /** Use this place as the start instead of where you are. */
+  onDirectionsFrom: () => void;
   onSave: (kind: SavedPlace["kind"], list?: string, look?: { name: string; icon: string; colour: string }) => void;
   addTo?: () => void;
 }) {
@@ -1315,6 +1368,11 @@ function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, o
       {away != null && away >= 0.05 && <p className="px-4 pt-0.5 text-xs text-[var(--text-muted)]">{formatKm(away)} from you, in a straight line</p>}
       <div className="flex gap-2 px-4 pt-3">
         <PrimaryButton icon={Navigation} onClick={onDirections}>Directions</PrimaryButton>
+        {!addTo && (
+          <button type="button" onClick={onDirectionsFrom} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
+            <MapPin className="h-4 w-4" />Directions from here
+          </button>
+        )}
         {addTo && (
           <button type="button" onClick={addTo} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
             <Plus className="h-4 w-4" />Add stop
@@ -1669,6 +1727,11 @@ function RoutePanel(p: {
   onSaveOffline?: () => void;
   savingOffline: boolean;
   onAddStop: (s: Spot) => void;
+  /** The one stop so far is the start ("Directions from here"). */
+  addingEnd: boolean;
+  /** Waiting for a tap on the map to add a stop. */
+  pickingStop: boolean;
+  onPickStop: (on: boolean) => void;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [showSteps, setShowSteps] = useState(false);
@@ -1696,9 +1759,13 @@ function RoutePanel(p: {
           }}><ArrowLeft className="h-4 w-4" /></SmallIcon>
           <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] px-2">
             <Search className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-            <input autoFocus value={p.query} onChange={(e) => p.setQuery(e.target.value)} placeholder={p.stops.length === 1 ? "Start from where?" : "Add a stop"} aria-label="Add a stop" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
+            <input autoFocus value={p.query} onChange={(e) => p.setQuery(e.target.value)} placeholder={p.stops.length === 1 ? (p.addingEnd ? "Where to?" : "Start from where?") : "Add a stop"} aria-label="Add a stop" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
           </div>
         </div>
+        <button type="button" onClick={() => p.onPickStop(true)} className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]">
+          <MapPin className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />
+          <span className="min-w-0 flex-1">Choose on the map</span>
+        </button>
         {p.query.trim().length > 1 ? (
           (p.results ?? []).slice(0, 8).map((r, i) => <ResultRow key={i} result={r} onPick={() => p.onAddStop(r)} />)
         ) : route && p.mode !== "walk" && (
@@ -1725,6 +1792,13 @@ function RoutePanel(p: {
       </div>
 
       <div className="px-4 pt-2">
+        {p.pickingStop && (
+          <div role="status" className="mb-1 flex items-center gap-2 rounded-lg bg-[var(--accent)]/10 px-3 py-2 text-sm text-[var(--accent-text)]">
+            <MapPin className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1">{p.stops.length === 1 ? (p.addingEnd ? "Tap the map where you're going." : "Tap the map where you're starting from.") : "Tap the map to add a stop."}</span>
+            <button type="button" onClick={() => p.onPickStop(false)} className="inline-flex min-h-10 items-center px-1 text-xs underline md:min-h-0">Cancel</button>
+          </div>
+        )}
         {p.findingYou && (
           <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1 text-sm text-[var(--text-muted)]">
             <span className="min-w-0 flex-1 basis-40">{p.locationProblem ?? "Finding your location…"}</span>

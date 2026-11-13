@@ -18,10 +18,10 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mail import search
@@ -32,6 +32,12 @@ logger = logging.getLogger("promptly.mail.ask")
 # How many emails are read in full, how many headers come along.
 READ_FULL = 12
 RECENT_HEADERS = 40
+# The best few matches bring along their conversation and the sender's other
+# recent emails (up to RELATED_MAX more, from within RELATED_DAYS).
+RELATED_FROM = 3
+RELATED_EACH = 3
+RELATED_MAX = 6
+RELATED_DAYS = 120
 PER_SEARCH = 15
 MAX_SEARCHES = 8
 # Reciprocal-rank fusion constant: the usual 60 keeps one list from dominating.
@@ -199,12 +205,36 @@ async def find(db: AsyncSession, accounts: list[uuid.UUID], question: str, plan:
     if ids:
         got = {m.id: m for m in (await db.execute(select(MailMessage).where(MailMessage.id.in_(ids)))).scalars()}
         messages = [got[i] for i in ids if i in got]
+        messages += await _related(db, accounts, messages[:RELATED_FROM], {m.id for m in messages})
     recent = list((await db.execute(
         select(MailMessage).join(MailFolder, MailFolder.id == MailMessage.folder_id)
         .where(MailMessage.account_id.in_(accounts), MailFolder.role == "inbox")
         .order_by(MailMessage.sent_at.desc()).limit(RECENT_HEADERS)
     )).scalars())
     return Found(messages=messages, recent=recent, by_meaning=by_meaning)
+
+
+async def _related(db: AsyncSession, accounts: list[uuid.UUID], top: list[MailMessage], have: set[uuid.UUID]) -> list[MailMessage]:
+    """The rest of the conversation and the sender's other recent emails, for the
+    best few matches: a welcome guide's booking dates are often in an earlier
+    email from the same host."""
+    out: list[MailMessage] = []
+    for m in top:
+        near = (await db.execute(
+            select(MailMessage).where(
+                MailMessage.account_id.in_(accounts),
+                MailMessage.id.not_in(have | {x.id for x in out}),
+                or_(
+                    and_(MailMessage.account_id == m.account_id, MailMessage.thread_key == m.thread_key),
+                    func.lower(MailMessage.from_addr) == (m.from_addr or "").lower(),
+                ),
+                MailMessage.sent_at >= m.sent_at - timedelta(days=RELATED_DAYS),
+            ).order_by(MailMessage.sent_at.desc()).limit(RELATED_EACH)
+        )).scalars().all()
+        out.extend(near)
+        if len(out) >= RELATED_MAX:
+            break
+    return out[:RELATED_MAX]
 
 
 def header(m: MailMessage) -> str:

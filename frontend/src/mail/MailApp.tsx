@@ -1,3 +1,5 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import {
   AlarmClock, Archive, ArrowLeft, CalendarPlus, Check, CheckCheck, CheckSquare, ChevronDown, ChevronUp, Download, Forward, Inbox, ListFilter, Loader2, Mail, MailOpen, Paperclip, Pen, Plus, Reply, ReplyAll, Search, Send, Settings, Sparkles, Star, Tag, Trash2, UserPlus, X, type LucideIcon,
@@ -1453,21 +1455,26 @@ function MessageCard({ message, people, startOpen, onReply, onForward, replyAll 
   );
 }
 
+/** One question in the Ask conversation; no answer yet while it's being read. */
+type AskTurnShown = { q: string; a?: string; read?: number; hint?: string };
+
 /** Always there, never in the way. It knows which conversation you've got open,
  *  and says which model will read your mail before you press anything. */
 function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; accounts: MailAccount[]; viewing?: string; compactModel: boolean }) {
   const selected = useSelectedModel();
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<{ text: string; read: number; hint?: string } | null>(null);
-  // The last few questions and answers, so a follow-up ("and the Nelly?")
-  // makes sense. Starts again when you close the answer or open another email.
-  const [history, setHistory] = useState<{ q: string; a: string }[]>([]);
+  // This conversation with the assistant: every question and answer stays on
+  // screen; the last few go back with a follow-up ("and the Nelly?") so it makes
+  // sense. Starts again when you close it or open another email.
+  const [turns, setTurns] = useState<AskTurnShown[]>([]);
+  const thread = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: "smooth" }); }, [turns]);
   const [busy, setBusy] = useState(false);
   // Follows the mailbox you're looking at, until you choose otherwise.
   const [scope, setScope] = useState<string | undefined>(viewing);
   const [choosing, setChoosing] = useState(false);
   useEffect(() => setScope(viewing), [viewing]);
-  useEffect(() => setHistory([]), [open?.key, scope]);
+  useEffect(() => setTurns([]), [open?.key, scope]);
   const scoped = accounts.find((a) => a.id === scope);
   const canScope = accounts.length > 1 && !open;
 
@@ -1476,12 +1483,16 @@ function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; 
     if (!q || busy) return;
     if (!selected) return toast.error("Pick a model first.");
     setBusy(true);
+    const history = turns.filter((t) => t.a !== undefined).slice(-4).map((t) => ({ q: t.q, a: t.a as string }));
+    setTurns((all) => [...all, { q }]);
+    setQuestion("");
     try {
       const got = await mailApi.ask({ question: q, provider_id: selected.provider_id, model_id: selected.model_id, account_id: open?.account_id ?? scoped?.id, thread_key: open?.key, history });
-      setAnswer({ text: got.answer, read: got.read, hint: got.hint });
-      setHistory((h) => [...h, { q, a: got.answer }].slice(-4));
-      setQuestion("");
+      setTurns((all) => all.map((t, i) => (i === all.length - 1 ? { q, a: got.answer, read: got.read, hint: got.hint } : t)));
     } catch (e) {
+      // Put the question back so it isn't lost.
+      setTurns((all) => all.slice(0, -1));
+      setQuestion(q);
       toast.error(apiErrorMessage(e, "Couldn't get an answer."));
     } finally {
       setBusy(false);
@@ -1490,14 +1501,27 @@ function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; 
 
   return (
     <div className="border-t border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-      {answer && (
-        <div className="mx-auto mb-2 max-w-3xl rounded-xl bg-[var(--accent)]/10 p-3 text-sm text-[var(--text)]">
-          <div className="flex gap-2">
-            <p className="min-w-0 flex-1 whitespace-pre-wrap">{answer.text}</p>
-            <button type="button" onClick={() => { setAnswer(null); setHistory([]); }} aria-label="Close answer" className="self-start text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
+      {turns.length > 0 && (
+        <div className="relative mx-auto mb-2 max-w-3xl rounded-xl bg-[var(--accent)]/10 text-sm text-[var(--text)]">
+          <button type="button" onClick={() => setTurns([])} aria-label="Close this conversation" title="Close" className="absolute right-2 top-2 z-10 rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--hover)]"><X className="h-4 w-4" /></button>
+          <div ref={thread} className="promptly-scroll flex max-h-[min(55vh,32rem)] flex-col gap-3 overflow-y-auto p-3 pr-9" aria-live="polite">
+            {turns.map((t, i) => (
+              <div key={i} className="flex flex-col gap-1.5">
+                <p className="ml-8 self-end whitespace-pre-wrap rounded-2xl rounded-br-md bg-[var(--surface-2)] px-3 py-1.5">{t.q}</p>
+                {t.a === undefined ? (
+                  <p className="flex items-center gap-2 text-xs text-[var(--text-muted)]"><Loader2 className="h-3.5 w-3.5 animate-spin" />Reading your mail…</p>
+                ) : (
+                  <>
+                    <div className="prose prose-sm max-w-none break-words text-[var(--text)] dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-strong:text-[var(--text)] prose-a:text-[var(--accent-text)]">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _n, ...p }) => <a {...p} target="_blank" rel="noopener noreferrer" /> }}>{t.a}</ReactMarkdown>
+                    </div>
+                    <p className="text-xs text-[var(--text-muted)]">From {t.read} {t.read === 1 ? "email" : "emails"}. AI can get things wrong, so check anything important.</p>
+                    {t.hint && <p className="text-xs text-[var(--text-muted)]">{t.hint}</p>}
+                  </>
+                )}
+              </div>
+            ))}
           </div>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">From {answer.read} {answer.read === 1 ? "email" : "emails"}. AI can get things wrong, so check anything important.</p>
-          {answer.hint && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{answer.hint}</p>}
         </div>
       )}
       <div className="mx-auto flex max-w-3xl items-center gap-2">

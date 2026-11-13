@@ -30,7 +30,7 @@ def model(monkeypatch):
         return None
 
     async def complete(provider, model_id, *, system, messages, user, **kw):
-        call = {"system": system, "messages": [(m.role, m.content) for m in messages], "user": user}
+        call = {"system": system, "messages": [(m.role, m.content) for m in messages], "user": user, "max_tokens": kw.get("max_tokens")}
         state["calls"].append(call)
         if PLANNING in system:
             if state["fail_plan"]:
@@ -212,3 +212,30 @@ def test_searches_cant_smuggle_in_query_syntax():
     assert tsquery("welcome guide") == "welcome:* & guide:*"
     assert tsquery("a') | !(b") == "a:* & b:*"
     assert tsquery("!!!") is None
+
+
+async def test_the_senders_earlier_booking_email_comes_along(client, db, model):  # noqa: F811
+    """The welcome guide has no dates; the host's earlier booking email does, and
+    shares no words with the question. It's read because it's from the same sender."""
+    u = await mk_user(db, "owner")
+    account, nelly = await _inbox(db, u)
+    await _msg(
+        db, account, uid=2, subject="Your upcoming visit", sender="Esther Kieft", addr="esther@example.com",
+        body="Hello! Confirming your dates: arriving Friday 13 November, leaving Sunday 15 November.",
+        sent_at=nelly.sent_at - timedelta(days=14),
+    )
+    await db.commit()
+    model["plan"] = {"searches": ["welcome guide", "lockbox"], "senders": []}
+
+    await _ask(client, u, "When is my stay at the Nelly?")
+
+    read = _read_in_full(_asked(model))
+    assert "Nelly - Welcome Guide & Lockbox Code" in read
+    assert "Your upcoming visit" in read
+
+
+async def test_the_answer_has_room_to_finish(client, db, model):  # noqa: F811
+    u = await mk_user(db, "owner")
+    await _inbox(db, u, noise=2)
+    await _ask(client, u, "Tell me everything about the Nelly")
+    assert model["calls"][-1]["max_tokens"] >= 1500

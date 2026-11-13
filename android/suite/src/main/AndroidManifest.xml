@@ -44,6 +44,14 @@
         <activity android:name=".ManageData" android:exported="false" />
         <activity android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity" android:exported="false" />
 
+        <!-- Android 13+: when a page asks to send notifications, Chrome has this app
+             ask for Android's notification permission, through this screen. Without
+             it the hand-off fails and notifications come from Chrome instead. -->
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.NotificationPermissionRequestActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Web push from the site shows as this app's notifications, and pages get
              their location through this app. -->
         <service

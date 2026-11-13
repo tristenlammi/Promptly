@@ -21,6 +21,17 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- P Maps: choose a place on the map instead of typing it. When adding a stop or choosing where to start, "Choose on the map" lets you tap the spot. A dropped pin (long-press the map) or any place now has "Directions from here" to make it the start, then you type or tap where you're going.
+
+### Fixed
+
+- P Maps: a place you pick now lands in the middle of the map you can still see, above the panel, instead of behind it. The same for the go-to-my-location button.
+- P Maps: when the phone can't give a location because the Promptly phone app isn't confirmed for this server, it now says that in plain words instead of "Check Location is on (NoTwaFound)".
+- Notifications on Android (Promptly for Android 1.9.3): turning notifications on inside a Promptly app on Android 13 or later could fall back to Chrome's own permission, so notifications arrived as Chrome's. The app now shows Android's permission prompt itself, so they arrive as Promptly's.
+- Ask about your mail: answers are formatted (bold, lists) instead of showing the raw ** and - marks, start with the direct answer, and are no longer cut off mid-sentence. The whole conversation stays on screen, each question above its answer, instead of only the last answer. It also reads the rest of the conversation and the sender's other recent emails for its best matches, so a booking's dates in the host's earlier email aren't missed.
+
 ## [0.40.0] - 2026-11-13
 
 ### Added
