@@ -83,6 +83,11 @@ class PushSubscription(UUIDPKMixin, Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
 
+    # A browser on a phone where the Promptly Android app shows notifications
+    # itself (0455): the SHA-256 of the app's push address. While that
+    # subscription exists, nothing is sent here (``devices.covered``).
+    covered_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -46,6 +46,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Mail: new mail shows up within a second or two. The mail server now tells Promptly the moment something arrives (IMAP IDLE), where it used to be looked for every 20 seconds. The 20-second look stays as the safety net, and is all that's used with a server that can't do this.
 - Today: a stay or a booked day in your email shows under Coming up before it's on your calendar, marked "from an email", with one tap to add it and a cross to put it away for good. Only when the email spells the days out ("Check-in: Fri 20 Nov 2026"); nothing is added until you tap, and it's gone once the calendar has it.
 - Maps: a link can open straight into directions to a place from where you are (`/maps?to=…&go=1`), used by the new place window.
+- Android app: notifications are shown by the Promptly app itself, with its name and icon, in place of Chrome's. A linked phone registers with Google's push service using your server's own key and receives the same encrypted pushes a browser does; nothing new to set up on the server, and no Google project. Reply and Mark as read work from the notification, and each kind (messages, reminders, mail…) has its own Android channel.
+- Account → Notifications on an Android phone with the app: a "The Promptly app" card. Turn on hands the phone to the app (it asks first, links the phone if it isn't, and asks Android's permission); once on, the card says so and has Send test.
+- A phone never gets a notification twice: while the app shows notifications, Chrome's own subscription on that phone stays quiet and is left out of the device list. If the app stops (unlinked, removed, or its notifications turned off in Android's settings), Chrome's carries on by itself.
 
 ### Changed
 

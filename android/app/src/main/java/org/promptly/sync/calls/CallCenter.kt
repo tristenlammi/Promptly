@@ -90,25 +90,33 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
     /** The server this app is set up with (`:suite`'s Server). */
     fun server(context: Context): String? =
         context.getSharedPreferences("promptly", Context.MODE_PRIVATE).getString("server", null)
+            // Linked (widgets, backup, the app's own notifications) but no P icon opened yet.
+            ?: org.promptly.sync.Store(context).account?.server
 
     fun picture(callId: String): Icon? = pictures[callId]
 
     // ================================================================ from Chrome (binder thread)
 
     override fun onNotify(context: Context, platformTag: String, notification: Notification): Boolean {
+        val extras = notification.extras
+        return ring(
+            context,
+            platformTag,
+            extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString(),
+            extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
+            notification.getLargeIcon(),
+        )
+    }
+
+    /** A call push, from Chrome's notification or from this app's own push
+     *  (`push.PushNotes`), by its tag. True when it's been dealt with here. */
+    fun ring(context: Context, platformTag: String, title: String?, text: String?, picture: Icon?): Boolean {
         init(context)
         val tag = CallTag.parse(platformTag) ?: return false
         if (server(context) == null) return false
         return when (tag.kind) {
             CallTag.Kind.RING -> {
-                val extras = notification.extras
-                val ring = Ring.of(
-                    tag,
-                    extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString(),
-                    extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
-                    System.currentTimeMillis(),
-                ) ?: return false
-                val picture = notification.getLargeIcon()
+                val ring = Ring.of(tag, title, text, System.currentTimeMillis()) ?: return false
                 main.post {
                     if (picture != null) pictures[ring.callId] = picture
                     dispatch(CallEvent.Rang(ring, System.currentTimeMillis()))
@@ -120,7 +128,7 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
                 main.post { dispatch(CallEvent.Stopped(tag.callId)) }
                 true
             }
-            // Missed: stop ringing, and Chrome shows "Missed call" (tap → the conversation).
+            // Missed: stop ringing, and "Missed call" shows (tap → the conversation).
             CallTag.Kind.MISSED -> {
                 main.post { dispatch(CallEvent.Missed(tag.callId)) }
                 false

@@ -91,6 +91,7 @@ object Maps {
         if (server == null || code == null) throw IOException("Open this from P Maps.")
         val account = Api.claim(PairLink(server.trimEnd('/'), code), Api.deviceName())
         Store(context).account = account
+        org.promptly.sync.push.NativePush.start(context, force = true)
     }
 
     /** Whether this phone's sign-in works. With no signal it can't be checked, and the

@@ -11,5 +11,7 @@ class SyncApp : Application() {
         // DM calls: Chrome hands call pushes to the app (Delegation), which rings.
         org.promptly.sync.calls.CallCenter.init(this)
         org.promptly.sync.widgets.Widgets.upgrade(this)
+        // Notifications shown by the app itself, once this phone is linked.
+        org.promptly.sync.push.NativePush.start(this)
     }
 }

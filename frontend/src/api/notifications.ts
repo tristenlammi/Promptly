@@ -12,6 +12,10 @@ export interface SubscriptionSummary {
   mobile: boolean;
   /** SHA-256 of the push endpoint, so a page can find its own row. */
   endpoint_hash: string;
+  /** The Promptly Android app, showing notifications itself. */
+  app?: boolean;
+  /** A phone's browser, quiet while the app on that phone does it instead. */
+  covered?: boolean;
 }
 
 export interface NotificationPreferences {
@@ -160,6 +164,15 @@ export const notificationsApi = {
     const { data } = await apiClient.patch<SubscriptionSummary>(
       `/notifications/subscriptions/${id}`,
       { enabled }
+    );
+    return data;
+  },
+  /** Mark this browser as on a phone whose Promptly app shows notifications
+   *  itself (the app's push-address hash), or "" to take that back. */
+  async setSubscriptionCover(id: string, covered_by: string): Promise<SubscriptionSummary> {
+    const { data } = await apiClient.patch<SubscriptionSummary>(
+      `/notifications/subscriptions/${id}`,
+      { covered_by }
     );
     return data;
   },

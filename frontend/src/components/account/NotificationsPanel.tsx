@@ -22,6 +22,9 @@ import { Button } from "@/components/shared/Button";
 import { IosPushNote } from "@/components/pwa/IosPushNote";
 import { DEVICE_OFF_HINT, usePushSubscription } from "@/hooks/usePushSubscription";
 import { isIosDevice, isStandaloneDisplay } from "@/lib/installPrompt";
+import { nativePushHash, nativePushLink, rememberNativePush, syncNativePushCover } from "@/lib/androidPush";
+import { hasAndroidCallsApp } from "@/rtc/voice/androidApp";
+import { apiClient } from "@/api/client";
 import { cn } from "@/utils/cn";
 
 /** Account -> Notifications. Two stacked blocks:
@@ -56,6 +59,50 @@ export function NotificationsPanel() {
 
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [testBusy, setTestBusy] = useState(false);
+
+  // An Android phone with the Promptly app: the app can show notifications
+  // itself ("Promptly", its icon), in place of Chrome's.
+  const hasApp = hasAndroidCallsApp();
+  const [appHash, setAppHash] = useState<string | null>(() => nativePushHash());
+  const appRow = subs?.find((r) => r.app && r.endpoint_hash === appHash) ?? null;
+  const [appBusy, setAppBusy] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
+
+  /** Hand a one-time code to the app; it asks, links the phone and registers. */
+  async function turnOnAppNotifications() {
+    setAppError(null);
+    setAppBusy(true);
+    const before = new Set((subs ?? []).filter((r) => r.app).map((r) => r.id));
+    try {
+      const { data } = await apiClient.post<{ code: string }>("/devices/pair", { origin: window.location.origin });
+      window.location.href = nativePushLink(data.code);
+    } catch (e) {
+      setAppError((e as Error)?.message ?? "Couldn't reach the app.");
+      setAppBusy(false);
+      return;
+    }
+    // Back from the app: its registration shows up in the device list.
+    const started = Date.now();
+    const look = async () => {
+      try {
+        const rows = await notificationsApi.listSubscriptions();
+        const fresh = rows.find((r) => r.app && !before.has(r.id));
+        if (fresh) {
+          rememberNativePush(fresh.endpoint_hash);
+          setAppHash(fresh.endpoint_hash);
+          await syncNativePushCover();
+          setSubs(await notificationsApi.listSubscriptions());
+          setAppBusy(false);
+          return;
+        }
+      } catch {
+        /* try again */
+      }
+      if (Date.now() - started < 90_000) window.setTimeout(() => void look(), 2500);
+      else setAppBusy(false);
+    };
+    window.setTimeout(() => void look(), 2500);
+  }
 
   useEffect(() => {
     // A browser that can't get notifications never learns whether the
@@ -225,10 +272,54 @@ export function NotificationsPanel() {
         </div>
       )}
 
-      {/* -- This device -- */}
+      {/* -- This phone's Promptly app -- */}
+      {hasApp && push.serverConfigured !== false && (
+        <div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--background)] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <BellRing className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+              <div className="min-w-0">
+                <div className="text-sm font-medium">The Promptly app</div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  {appRow
+                    ? appRow.enabled
+                      ? "Notifications on this phone come from the Promptly app, with its own name and sounds."
+                      : "Set up, but switched off under Devices below."
+                    : "Get notifications from the Promptly app on this phone, in place of Chrome's."}
+                </div>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {appRow ? (
+                <Button
+                  variant="ghost"
+                  onClick={sendTest}
+                  disabled={testBusy}
+                  leftIcon={testBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                >
+                  Send test
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={() => void turnOnAppNotifications()}
+                  disabled={appBusy}
+                  leftIcon={appBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BellRing className="h-3.5 w-3.5" />}
+                >
+                  Turn on
+                </Button>
+              )}
+            </div>
+          </div>
+          {appError && <div className="mt-2 text-[11px] text-red-500">{appError}</div>}
+          {appRow && testStatus && <div className="mt-2 text-[11px] text-[var(--text-muted)]">{testStatus}</div>}
+        </div>
+      )}
+
+      {/* -- This device (not shown where the app does it: Chrome's own is quiet there) -- */}
       {push.supported && push.serverConfigured && (
         <>
-          <div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--background)] p-3">
+          {!appRow && (<div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--background)] p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <Smartphone className="h-4 w-4 text-[var(--text-muted)]" />
@@ -307,7 +398,7 @@ export function NotificationsPanel() {
                 {push.error}
               </div>
             )}
-          </div>
+          </div>)}
 
           {/* -- Quiet hours -- */}
           {prefs && (
@@ -519,11 +610,11 @@ export function NotificationsPanel() {
                 tablets start on; computers start off.
               </p>
               <ul className="divide-y divide-[var(--border)] rounded-md border border-[var(--border)]">
-                {subs.map((s) => (
+                {subs.filter((s) => !s.covered).map((s) => (
                   <DeviceRow
                     key={s.id}
                     summary={s}
-                    here={s.id === push.deviceId}
+                    here={s.id === push.deviceId || (!!appHash && !!s.app && s.endpoint_hash === appHash)}
                     busy={switchBusy === s.id}
                     onSwitch={(on) => void switchSubscription(s.id, on)}
                     onRename={(label) => renameSubscription(s.id, label)}
@@ -697,7 +788,7 @@ function DeviceRow({
 
   const label = summary.label ?? inferLabel(summary);
   const subtitle = [
-    summary.user_agent ? truncate(summary.user_agent, 48) : null,
+    summary.app ? "Promptly app" : summary.user_agent ? truncate(summary.user_agent, 48) : null,
     summary.last_used_at
       ? `Last used ${new Date(summary.last_used_at).toLocaleDateString()}`
       : "Never used",

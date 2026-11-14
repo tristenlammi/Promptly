@@ -578,6 +578,12 @@ export default function App() {
     if (userId) noteSignedInUser(userId);
   }, [userId]);
 
+  // On a phone whose Promptly app shows notifications itself, Chrome's own
+  // subscription stays quiet (and wakes again if the app stops).
+  useEffect(() => {
+    if (userId) void import("@/lib/androidPush").then((m) => m.syncNativePushCover());
+  }, [userId]);
+
   // No time zone saved yet: this browser's. The chat's "current time" and
   // the days in Photos for pictures without a zone of their own use it;
   // Account → Personal context can change it.

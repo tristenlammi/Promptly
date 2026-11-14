@@ -516,16 +516,18 @@ async def deliver(
     subs = (
         (
             await db.execute(
-                # Only devices whose own switch is on (0442).
-                select(PushSubscription).where(
-                    PushSubscription.user_id == user_id,
-                    PushSubscription.enabled.is_(True),
-                )
+                select(PushSubscription).where(PushSubscription.user_id == user_id)
             )
         )
         .scalars()
         .all()
     )
+    # Only devices whose own switch is on (0442), and not a phone's browser
+    # while the Promptly app on that phone shows notifications itself (0455).
+    from app.notifications import devices
+
+    quiet = devices.covered(subs)
+    subs = [s for s in subs if s.enabled and s.id not in quiet]
     if not subs:
         return outcome
 

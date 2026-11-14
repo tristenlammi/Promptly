@@ -152,6 +152,7 @@ private fun App(incoming: PairLink?, consumed: () -> Unit) {
                 store.lastError = null
                 account = it
                 org.promptly.sync.widgets.Widgets.linked(ctx)
+                org.promptly.sync.push.NativePush.start(ctx, force = true)
             }
             !media -> PermissionScreen(partial = remember(permTick) { hasSomeMedia(ctx) }) { permTick++ }
             buckets == null || choosing -> FolderScreen(initial = buckets) {
