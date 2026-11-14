@@ -178,13 +178,43 @@ async def get_public_key(
 # ---------------------------------------------------------------------
 
 
-def _summary(row: PushSubscription) -> SubscriptionSummary:
+def _summary(row: PushSubscription, quiet: frozenset | set = frozenset()) -> SubscriptionSummary:
     from app.notifications import devices
 
     out = SubscriptionSummary.model_validate(row)
     out.mobile = devices.is_mobile(row.user_agent)
     out.endpoint_hash = devices.endpoint_hash(row.endpoint)
+    out.app = devices.is_native(row.user_agent)
+    out.covered = row.id in quiet
     return out
+
+
+async def _one(db: AsyncSession, user: User, row: PushSubscription) -> SubscriptionSummary:
+    """A row's summary, knowing whether the app on its phone covers it."""
+    from app.notifications import devices
+
+    mine = (
+        await db.execute(select(PushSubscription).where(PushSubscription.user_id == user.id))
+    ).scalars().all()
+    return _summary(row, devices.covered(mine))
+
+
+async def _cover(db: AsyncSession, user: User, row: PushSubscription, covered_by: str | None) -> None:
+    """Mark a browser's subscription as on a phone the app covers. Only
+    for an app subscription this person really has; anything else is ignored
+    (a stale address from the launcher: the browser carries on as it was)."""
+    from app.notifications import devices
+
+    if covered_by is None or devices.is_native(row.user_agent):
+        return
+    if covered_by == "":
+        row.covered_by = None
+        return
+    mine = (
+        await db.execute(select(PushSubscription).where(PushSubscription.user_id == user.id))
+    ).scalars().all()
+    if any(devices.is_native(r.user_agent) and devices.endpoint_hash(r.endpoint) == covered_by for r in mine):
+        row.covered_by = covered_by
 
 
 @router.get("/subscriptions", response_model=list[SubscriptionSummary])
@@ -203,7 +233,10 @@ async def list_subscriptions(
         .scalars()
         .all()
     )
-    return [_summary(r) for r in rows]
+    from app.notifications import devices
+
+    quiet = devices.covered(rows)
+    return [_summary(r, quiet) for r in rows]
 
 
 @router.post(
@@ -231,6 +264,7 @@ async def create_subscription(
         keys=payload.keys,
         user_agent=payload.user_agent or request.headers.get("user-agent"),
         label=payload.label,
+        covered_by=payload.covered_by,
     )
 
 
@@ -242,6 +276,7 @@ async def _upsert_subscription(
     keys: dict[str, str],
     user_agent: str | None,
     label: str | None,
+    covered_by: str | None = None,
 ) -> SubscriptionSummary:
     """One row per (person, endpoint): a repeat updates it in place."""
     p256dh = keys.get("p256dh")
@@ -270,9 +305,10 @@ async def _upsert_subscription(
         if label:
             existing.label = label
         existing.last_used_at = datetime.now(timezone.utc)
+        await _cover(db, user, existing, covered_by)
         await db.commit()
         await db.refresh(existing)
-        return _summary(existing)
+        return await _one(db, user, existing)
 
     row = PushSubscription(
         user_id=user.id,
@@ -300,9 +336,11 @@ async def _upsert_subscription(
                 )
             )
         ).scalar_one()
+    if covered_by:
+        await _cover(db, user, row, covered_by)
+        await db.commit()
     await db.refresh(row)
-    return _summary(row)
-
+    return await _one(db, user, row)
 
 
 # ---------------------------------------------------------------------
@@ -320,6 +358,8 @@ class NativeSubscribe(BaseModel):
     device: str = Field(default="", max_length=80)
     version: str = Field(default="", max_length=20)
     replaces: str | None = Field(default=None, max_length=2000)
+    #: Which phone (``devices.native_install``): 12 hex characters.
+    install: str = Field(default="", max_length=12)
 
 
 async def _phone_user(request: Request, db: AsyncSession) -> User:
@@ -349,15 +389,32 @@ async def register_native(
                 PushSubscription.user_id == user.id, PushSubscription.endpoint == payload.replaces
             )
         )
+    # The same phone again with a new address and nothing remembered (the app
+    # was reinstalled): its old row goes, with the owner's switch carried over.
+    was_off = False
+    if devices.native_install(devices.native_user_agent("0", "x", payload.install)):
+        mine = (
+            await db.execute(select(PushSubscription).where(PushSubscription.user_id == user.id))
+        ).scalars().all()
+        for old in mine:
+            if old.endpoint != payload.endpoint and devices.native_install(old.user_agent) == payload.install:
+                was_off = was_off or not old.enabled
+                await db.delete(old)
     name = payload.device.strip() or "Android phone"
-    return await _upsert_subscription(
+    out = await _upsert_subscription(
         db,
         user,
         endpoint=payload.endpoint,
         keys=payload.keys,
-        user_agent=devices.native_user_agent(payload.version, name),
+        user_agent=devices.native_user_agent(payload.version, name, payload.install),
         label=name,
     )
+    if was_off and out.enabled:
+        row = await db.get(PushSubscription, out.id)
+        row.enabled = False
+        await db.commit()
+        out.enabled = False
+    return out
 
 
 class NativeGone(BaseModel):
@@ -394,9 +451,10 @@ async def update_subscription(
         row.label = data["label"]
     if data.get("enabled") is not None:
         row.enabled = data["enabled"]
+    await _cover(db, user, row, data.get("covered_by"))
     await db.commit()
     await db.refresh(row)
-    return _summary(row)
+    return await _one(db, user, row)
 
 
 @router.delete(

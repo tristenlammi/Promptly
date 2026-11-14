@@ -180,7 +180,28 @@ public class SuiteLauncher extends LauncherActivity {
         // page gives its rings the answer token and leaves the ringing to it.
         // callout: Call / Video call on the page hands the call to this app too
         // (promptly://call/start, Calls WP-D5), with the phone's own camera.
-        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice,calls,callout");
+        // np: this app shows Promptly's notifications itself (the app module's push
+        // package), so the page keeps Chrome's own quiet on this phone. Its value says
+        // which registration (the SHA-256 of its push address), nothing more.
+        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice,calls,callout" + nativePush());
+    }
+
+    /** "&np=<sha-256>" while the app's own notifications are on (see NativePush), else "". */
+    private String nativePush() {
+        try {
+            android.content.SharedPreferences p = getSharedPreferences("push", MODE_PRIVATE);
+            String endpoint = p.getString("endpoint", null);
+            String server = p.getString("server", null);
+            if (!p.getBoolean("sent", false) || endpoint == null || server == null || !server.equals(Server.get(this))) return "";
+            android.app.NotificationManager nm = getSystemService(android.app.NotificationManager.class);
+            if (nm == null || !nm.areNotificationsEnabled()) return "";
+            byte[] d = java.security.MessageDigest.getInstance("SHA-256").digest(endpoint.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder("&np=");
+            for (byte b : d) hex.append(String.format("%02x", b));
+            return hex.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     // ---- Share targets (Porch, WP-P1.7) ----------------------------------------

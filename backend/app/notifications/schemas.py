@@ -20,6 +20,9 @@ class SubscribePayload(BaseModel):
     keys: dict[str, str]
     user_agent: str | None = None
     label: str | None = None
+    #: On a phone whose Promptly app shows notifications itself: the SHA-256
+    #: of the app's push address (the app's launcher hands it to the page).
+    covered_by: str | None = Field(default=None, max_length=64)
 
 
 class SubscriptionSummary(BaseModel):
@@ -36,6 +39,10 @@ class SubscriptionSummary(BaseModel):
     mobile: bool = False
     #: SHA-256 of the push endpoint, so a page can find its own row.
     endpoint_hash: str = ""
+    #: The Promptly Android app, showing notifications itself (no browser).
+    app: bool = False
+    #: A phone's browser, quiet while the app on that phone does it instead.
+    covered: bool = False
 
 
 class SubscriptionUpdate(BaseModel):
@@ -44,6 +51,8 @@ class SubscriptionUpdate(BaseModel):
 
     label: str | None = Field(default=None, max_length=120)
     enabled: bool | None = None
+    #: See ``SubscribePayload.covered_by``; "" clears it.
+    covered_by: str | None = Field(default=None, max_length=64)
 
 
 class PreferencesSchema(BaseModel):

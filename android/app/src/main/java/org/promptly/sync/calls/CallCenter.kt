@@ -90,6 +90,8 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
     /** The server this app is set up with (`:suite`'s Server). */
     fun server(context: Context): String? =
         context.getSharedPreferences("promptly", Context.MODE_PRIVATE).getString("server", null)
+            // Linked (widgets, backup, the app's own notifications) but no P icon opened yet.
+            ?: org.promptly.sync.Store(context).account?.server
 
     fun picture(callId: String): Icon? = pictures[callId]
 

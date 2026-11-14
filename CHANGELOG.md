@@ -24,6 +24,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 
 - Android app: notifications are shown by the Promptly app itself, with its name and icon, in place of Chrome's. A linked phone registers with Google's push service using your server's own key and receives the same encrypted pushes a browser does; nothing new to set up on the server, and no Google project. Reply and Mark as read work from the notification, and each kind (messages, reminders, mail…) has its own Android channel.
+- Account → Notifications on an Android phone with the app: a "The Promptly app" card. Turn on hands the phone to the app (it asks first, links the phone if it isn't, and asks Android's permission); once on, the card says so and has Send test.
+- A phone never gets a notification twice: while the app shows notifications, Chrome's own subscription on that phone stays quiet and is left out of the device list. If the app stops (unlinked, removed, or its notifications turned off in Android's settings), Chrome's carries on by itself.
 - Today: someone sharing their trip with you shows under "Needs you" and on the Getting there card ("Sam arrives in 12 min"). When they arrive, never where they are.
 - Today: a trip or stay on your calendar is called out a day or two before it starts ("Nelly starts tomorrow · 2 nights"), and email waiting for a reply is under "Needs you" with who it's from.
 - Today: an event with a place has a Directions button on the schedule, and Coming up includes your next planned workouts.

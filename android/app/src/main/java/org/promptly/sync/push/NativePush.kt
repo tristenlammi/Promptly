@@ -52,6 +52,10 @@ object NativePush {
     /** This phone shows Promptly's notifications itself (the server has its address). */
     fun active(context: Context): Boolean = prefs(context).getBoolean(KEY_SENT, false)
 
+    /** Android lets this app show notifications at all (its permission, its master switch). */
+    fun allowed(context: Context): Boolean =
+        context.getSystemService(android.app.NotificationManager::class.java)?.areNotificationsEnabled() == true
+
     /** Register, if this phone is linked. Cheap to call often: it only talks to
      *  anything once a day, or when the server changed. */
     fun start(context: Context, force: Boolean = false) {
@@ -69,6 +73,16 @@ object NativePush {
     private fun register(app: Context, force: Boolean) {
         val account = Store(app).account ?: return
         val p = prefs(app)
+        if (!allowed(app)) {
+            // Android won't show anything from this app: don't take the phone's
+            // notifications over from the browser (and hand them back if we had).
+            Log.i(TAG, "notifications are off for the app: the browser's stay")
+            if (p.getBoolean(KEY_SENT, false)) {
+                UnifiedPush.unregister(app)
+                gone(app)
+            }
+            return
+        }
         val fresh = p.getString(KEY_SERVER, null) == account.server && p.getBoolean(KEY_SENT, false) &&
             System.currentTimeMillis() - p.getLong(KEY_AT, 0) < AGAIN_MS
         if (fresh && !force) return
@@ -116,6 +130,7 @@ object NativePush {
             .put("keys", JSONObject().put("p256dh", keys.pubKey).put("auth", keys.auth))
             .put("device", Api.deviceName())
             .put("version", BuildConfig.VERSION_NAME)
+            .put("install", install(app))
         if (before != null && before != endpoint.url) body.put("replaces", before)
         try {
             Maps.send(app, "POST", "/api/notifications/native", body, timeoutSeconds = 30)
@@ -127,6 +142,17 @@ object NativePush {
             p.edit().remove(KEY_SENT).apply()
             Log.w(TAG, "couldn't tell the server: ${e.message}")
         }
+    }
+
+    /** Which phone this is, for the server to replace this phone's old row after a
+     *  reinstall: 12 hex characters derived from Android's per-app device id
+     *  (the same after reinstalling, different for every app and phone). */
+    private fun install(app: Context): String = try {
+        val id = android.provider.Settings.Secure.getString(app.contentResolver, android.provider.Settings.Secure.ANDROID_ID).orEmpty()
+        java.security.MessageDigest.getInstance("SHA-256").digest("promptly-push:$id".toByteArray())
+            .joinToString("") { "%02x".format(it) }.take(12)
+    } catch (e: Exception) {
+        ""
     }
 
     /** Google dropped the registration: the server needn't keep trying it. */

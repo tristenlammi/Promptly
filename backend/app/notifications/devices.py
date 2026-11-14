@@ -35,10 +35,24 @@ def endpoint_hash(endpoint: str) -> str:
 NATIVE_PREFIX = "PromptlyAndroid/"
 
 
-def native_user_agent(version: str, device: str) -> str:
+def native_user_agent(version: str, device: str, install: str = "") -> str:
     safe = re.sub(r"[^\w .\-]", "", device)[:80]
     v = re.sub(r"[^\w.\-]", "", version)[:20] or "0"
-    return f"{NATIVE_PREFIX}{v} (Android; {safe})"
+    which = f"; {install}" if _INSTALL.fullmatch(install or "") else ""
+    return f"{NATIVE_PREFIX}{v} (Android; {safe}{which})"
+
+
+# Which phone a registration came from: a short id the app derives from
+# Android's per-app device id. A phone that registers again after the app was
+# reinstalled (new address, nothing remembered) replaces its old row by it.
+_INSTALL = re.compile(r"[0-9a-f]{12}")
+
+
+def native_install(user_agent: str | None) -> str | None:
+    if not is_native(user_agent):
+        return None
+    m = re.search(r"; ([0-9a-f]{12})\)$", user_agent or "")
+    return m.group(1) if m else None
 
 
 def is_native(user_agent: str | None) -> bool:
@@ -48,3 +62,12 @@ def is_native(user_agent: str | None) -> bool:
 def is_push_service(endpoint: str) -> bool:
     """The app registers with Google's push service, the one Chrome uses."""
     return endpoint.startswith("https://fcm.googleapis.com/")
+
+
+def covered(rows) -> set:  # noqa: ANN001 — PushSubscription rows
+    """The ids of browser subscriptions on a phone whose Promptly app shows
+    notifications itself: the app's subscription is still there, so the
+    browser's stays quiet (otherwise the phone would get everything twice).
+    The app's switch counts for the phone: off there, and neither is sent."""
+    native = {endpoint_hash(r.endpoint) for r in rows if is_native(r.user_agent)}
+    return {r.id for r in rows if r.covered_by and r.covered_by in native and not is_native(r.user_agent)}

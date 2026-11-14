@@ -96,6 +96,21 @@
             </intent-filter>
         </service>
         <receiver android:name=".push.PushButtonReceiver" android:exported="false" />
+        <!-- "Get notifications from the Promptly app" on the web app
+             (promptly://notifications?server=…&code=…): asks, links, registers. -->
+        <activity
+            android:name=".push.PushLinkActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.pushlink"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptly" android:host="notifications" />
+            </intent-filter>
+        </activity>
 
         <!-- P Maps. The web app opens these for what a web page can't do. -->
         <activity
