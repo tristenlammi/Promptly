@@ -21,6 +21,24 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- P Maps: a place's panel is tidier. Directions and "From here" on top; then Save, Share and More in one row, with Add to a list, Set as Home, Set as Work and Copy coordinates under More. A place you've saved shows as "Saved" with a tick (and Home or Work say so) instead of looking like another button to press; "Edit" beside it renames or removes it.
+- P Maps on a phone: a place's panel is only as tall as what it says, so more of the map and the pin stay in view.
+- P Maps opens where you left the map on this device. With nothing to go on and no location yet, it opens on Home (or the last place you looked at) instead of the whole country.
+- P Maps: choosing where to start, or adding a stop, lists Home, Work, your car and recent places to tap, above typing or choosing on the map.
+- P Maps: search results say how far each one is from you.
+- P Maps: the directions panel has a share button that tells someone when you'll arrive ("On my way to… I should get there about 5:40 pm") with a link to the place, through your phone's own share sheet.
+
+### Fixed
+
+- P Maps: Home, a favourite, your car and people sharing with you no longer sit on top of each other when the map is zoomed out; they spread out side by side so each can be seen and tapped.
+- P Maps: pressing the location button with no location shows a short line beside the button (and asks the phone again) instead of a message over your Recent list.
+- P Maps on a phone: with the panel scrolled, a line and soft shadow under the handle show that rows continue under it, instead of a row that looked cut in half.
+- P Maps on a phone: "Choose on the map" now shrinks the panel to one line so the map is in view while you tap (it could stay covering most of the map); the search results no longer sit under the location and layers buttons; a route's last stop isn't half hidden under the panel.
+- P Maps driving (phone and car, next Promptly for Android): on a road the route uses twice (out and back, or a round trip that ends where it started) the arrow and the line ahead stay on the stretch you're actually on instead of jumping to the later pass. A map you're still moving isn't pulled back to you mid-pan: it comes back 15 seconds after you stop.
+- P Maps driving: the turn card no longer adds "Then" with the same road's name at a roundabout.
+
 ## [0.40.2] - 2026-11-13
 
 ### Fixed

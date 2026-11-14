@@ -3,8 +3,8 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, ArrowUp, ArrowUpDown, BatteryCharging, Bike, Bookmark, Briefcase, Car, ChevronDown, ChevronUp, Clock, CloudDownload, Copy, SlidersHorizontal, Crosshair, Footprints, GripVertical,
-  Home, Layers, List, Loader2, LocateFixed, LocateOff, MapPin, Minus, Navigation, ParkingCircle, Plus, Route as RouteIcon, Search, Share2, Smartphone, SunMoon, TrafficCone, Trash2, User, Users, X,
+  ArrowLeft, ArrowUp, ArrowUpDown, BatteryCharging, Bike, Bookmark, Briefcase, Car, Check, ChevronDown, ChevronUp, Clock, CloudDownload, Copy, SlidersHorizontal, Crosshair, Footprints, GripVertical,
+  Home, Layers, List, Loader2, LocateFixed, LocateOff, MapPin, Minus, MoreHorizontal, Navigation, ParkingCircle, Plus, Route as RouteIcon, Search, Share2, Smartphone, SunMoon, TrafficCone, Trash2, User, Users, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -176,6 +176,16 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
   }, []);
   const noLocationYet = () =>
     locationBlocked ? "Promptly isn't allowed to use your location. Turn it on in your phone's settings." : locationProblem ?? "Waiting for your location.";
+  // Why the location button did nothing: a short line beside it (not a toast over the list).
+  const [locationHint, setLocationHint] = useState<string | null>(null);
+  useEffect(() => {
+    if (!locationHint) return;
+    const t = window.setTimeout(() => setLocationHint(null), 9000);
+    return () => window.clearTimeout(t);
+  }, [locationHint]);
+  useEffect(() => {
+    if (you) setLocationHint(null);
+  }, [you]);
 
   // The day you're looking at on your timeline.
   const [dayOnMap, setDayOnMap] = useState<{ lines: [number, number][][]; stays: { lat: number; lon: number; name: string }[] } | null>(null);
@@ -273,7 +283,8 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     if (!isMobile) return { top: 40, bottom: 40, left: 420, right: 40 };
     // What the sheet covers, up to half the screen: beyond that the map's mostly hidden anyway.
     const half = Math.round(window.innerHeight * 0.5);
-    return { top: 90, bottom: Math.min(half, sheetRef.current?.offsetHeight ?? half), left: 30, right: 30 };
+    // A little more than the sheet, so a stop's letter at the edge isn't half under it.
+    return { top: 90, bottom: Math.min(half, sheetRef.current?.offsetHeight ?? half) + 28, left: 30, right: 30 };
   }, [isMobile]);
 
   const runRoute = useCallback(async (rows: StopRow[], bestOrder = false) => {
@@ -887,6 +898,12 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
           onMarks={setNearMarks}
           onAddOnWay={(s) => changeStops([...stops.slice(0, -1), asStop(s), stops[stops.length - 1]])}
           onAddStop={addStop}
+          quickStops={[
+            ...(saved.home ? [{ ...saved.home, name: "Home", kind: "home" as const }] : []),
+            ...(saved.work ? [{ ...saved.work, name: "Work", kind: "work" as const }] : []),
+            ...(parked ? [{ kind: "place" as const, lat: parked.lat, lon: parked.lon, name: "Your car", address: parked.note }] : []),
+            ...recents.slice(0, 4).map((r) => ({ kind: "recent" as const, ...r })),
+          ].filter((q, i, all) => !stops.some((s) => samePlace(s, q)) && all.findIndex((o) => samePlace(o, q)) === i)}
           addingEnd={addingEnd}
           pickingStop={pickingStop}
           onPickStop={(on) => {
@@ -907,6 +924,9 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
         <MapView
           ref={map}
           basemap={config?.basemap ?? null}
+          rememberView
+          // Somewhere you know while the phone finds you: Home, or the last place you looked at.
+          startAt={saved.home ?? recents[0] ?? saved.work ?? saved.rest[0] ?? null}
           colours={colours}
           routes={routes}
           selected={selected}
@@ -995,6 +1015,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
                             id={`maps-option-${i}`}
                             active={i === active}
                             result={r}
+                            from={you}
                             onPick={() => {
                               searchBox.current?.blur();
                               showPlace(r);
@@ -1023,13 +1044,31 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
             onSnap={setSnap}
             bottom={keyboard}
             // Typing, or choosing a road: as tall as what's in it, and no taller than this.
-            fit={keyboard || addingStop ? `calc(100% - ${keyboard}px - 3rem)` : panel === "route" && pickingVia ? "62%" : null}
+            fit={
+              keyboard || addingStop
+                ? `calc(100% - ${keyboard}px - 3rem)`
+                : panel === "route" && (pickingVia || pickingStop)
+                  ? "62%"
+                  // A place: as tall as what it says, so the map (and the pin) stay in view.
+                  : panel === "place" || panel === "charger"
+                    ? "72%"
+                    : null
+            }
           >
-            {panel === "route" && pickingVia ? (
+            {panel === "route" && (pickingVia || pickingStop) ? (
               // The map's what you need to see: only this, until you've tapped.
               <div className="flex items-center justify-between gap-3 px-4 pb-4 text-sm text-[var(--text)]">
-                <span>Tap the road you want to go along.</span>
-                <button type="button" onClick={() => setPickingVia(false)} className="inline-flex min-h-10 shrink-0 items-center px-2 text-[var(--accent-text)] underline">Cancel</button>
+                <span>{pickingVia ? "Tap the road you want to go along." : stops.length === 1 ? (addingEnd ? "Tap the map where you're going." : "Tap the map where you're starting from.") : "Tap the map to add a stop."}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPickingVia(false);
+                    setPickingStop(false);
+                  }}
+                  className="inline-flex min-h-10 shrink-0 items-center px-2 text-[var(--accent-text)] underline"
+                >
+                  Cancel
+                </button>
               </div>
             ) : (
               <PanelSlide name={panel} back={goingBack}>{body}</PanelSlide>
@@ -1038,13 +1077,15 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
         )}
 
         {/* Map buttons. */}
-        <div className={`absolute right-3 top-[4.5rem] z-10 flex-col gap-2 md:top-3 ${isMobile && (addingStop || keyboard > 0) ? "hidden" : "flex"}`}>
+        <div className={`absolute right-3 top-[4.5rem] z-10 flex-col gap-2 md:top-3 ${isMobile && (addingStop || keyboard > 0 || dropdown) ? "hidden" : "flex"}`}>
           <MapButton
             label={locationBlocked ? "Promptly isn't allowed to use your location" : following ? "The map is following you" : you ? "Go to your location" : "Waiting for your location"}
             active={following}
             onClick={() => {
               if (!you) {
-                toast.info(noLocationYet());
+                setLocationHint(noLocationYet());
+                // Ask again: the phone may have an answer by now.
+                if (!locationBlocked) setWatching((n) => n + 1);
                 return;
               }
               setFollowing(true);
@@ -1059,6 +1100,12 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
               <Crosshair className={`h-5 w-5 ${you ? "" : "opacity-50"}`} />
             )}
           </MapButton>
+          {locationHint && !you && (
+            <div role="status" className="absolute right-full top-0 mr-2 flex w-64 max-w-[calc(100vw-5rem)] items-start gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-2 pl-3 pr-1 text-xs text-[var(--text)] shadow-lg">
+              <span className="min-w-0 flex-1">{locationHint}</span>
+              <button type="button" onClick={() => setLocationHint(null)} aria-label="Close" className="-my-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)]"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          )}
           <div className="relative">
             <MapButton label="Map layers" active={chargersOn || trafficOn} expanded={layersOpen} onClick={() => setLayersOpen((v) => !v)}>
               <Layers className="h-5 w-5" />
@@ -1138,8 +1185,9 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   );
 }
 
-function ResultRow({ result, onPick, id, active }: { result: SearchResult; onPick: () => void; /** In a list the arrow keys move through. */ id?: string; active?: boolean }) {
+function ResultRow({ result, onPick, id, active, from }: { result: SearchResult; onPick: () => void; /** In a list the arrow keys move through. */ id?: string; active?: boolean; /** Where you are, to say how far each is. */ from?: { lat: number; lon: number } | null }) {
   const Icon = KIND_ICON[result.kind] ?? MapPin;
+  const away = from ? distanceKm(from, result) : null;
   return (
     <button type="button" id={id} role={id ? "option" : undefined} aria-selected={id ? !!active : undefined} tabIndex={id ? -1 : undefined} onClick={onPick} className={`flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--hover)] ${active ? "bg-[var(--hover)]" : ""}`}>
       <Icon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
@@ -1147,6 +1195,7 @@ function ResultRow({ result, onPick, id, active }: { result: SearchResult; onPic
         <span className="block truncate text-sm text-[var(--text)]">{result.name}</span>
         {result.address && <span className="block truncate text-xs text-[var(--text-muted)]">{result.address}</span>}
       </span>
+      {away != null && away >= 0.1 && <span className="ml-auto shrink-0 pl-2 text-xs text-[var(--text-muted)]">{formatKm(away)}</span>}
     </button>
   );
 }
@@ -1347,6 +1396,7 @@ function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, o
   addTo?: () => void;
 }) {
   const [picking, setPicking] = useState<"save" | "list" | null>(null);
+  const [more, setMore] = useState(false);
   const title = already?.name ?? place.name;
   const away = you ? distanceKm(you, place) : null;
   const share = async () => {
@@ -1369,8 +1419,8 @@ function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, o
       <div className="flex gap-2 px-4 pt-3">
         <PrimaryButton icon={Navigation} onClick={onDirections}>Directions</PrimaryButton>
         {!addTo && (
-          <button type="button" onClick={onDirectionsFrom} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
-            <MapPin className="h-4 w-4" />Directions from here
+          <button type="button" onClick={onDirectionsFrom} title="Directions from here" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
+            <MapPin className="h-4 w-4" />From here
           </button>
         )}
         {addTo && (
@@ -1379,14 +1429,47 @@ function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, o
           </button>
         )}
       </div>
-      <div className="flex flex-wrap gap-2 px-4 pt-3">
-        <SaveButton icon={Bookmark} on={!!already || picking === "save"} onClick={() => setPicking(picking === "save" ? null : "save")}>{already ? "Saved" : "Save"}</SaveButton>
-        {!already && <SaveButton icon={List} on={picking === "list"} onClick={() => setPicking(picking === "list" ? null : "list")}>Add to list</SaveButton>}
-        <SaveButton icon={Home} on={isHome} onClick={() => onSave("home")}>{isHome ? "Home" : "Set as Home"}</SaveButton>
-        <SaveButton icon={Briefcase} on={isWork} onClick={() => onSave("work")}>{isWork ? "Work" : "Set as Work"}</SaveButton>
+      {/* One row: what it already is (Home, Work, Saved) reads as a fact with a tick;
+          the rest are things you can do, and the rarer ones are under More. */}
+      <div className="flex items-center gap-2 px-4 pt-3">
+        {isHome || isWork ? (
+          <SavedMark icon={isHome ? Home : Briefcase}>{isHome ? "Home" : "Work"}</SavedMark>
+        ) : already ? (
+          <SavedMark icon={Check} onEdit={() => setPicking(picking === "save" ? null : "save")} label={`Saved${already.kind === "list" && already.list_name ? ` in ${already.list_name}` : ""}. Change its name or icon, or remove it`}>
+            {already.kind === "list" && already.list_name ? already.list_name : "Saved"}
+          </SavedMark>
+        ) : (
+          <SaveButton icon={Bookmark} on={picking === "save"} onClick={() => setPicking(picking === "save" ? null : "save")}>Save</SaveButton>
+        )}
         <SaveButton icon={Share2} onClick={() => void share()}>Share</SaveButton>
-        <SaveButton icon={Copy} onClick={() => void copyText(`${place.lat.toFixed(5)}, ${place.lon.toFixed(5)}`, "Coordinates copied")}>Copy coordinates</SaveButton>
+        <button
+          type="button"
+          onClick={() => setMore((v) => !v)}
+          aria-expanded={more}
+          className={`ml-auto inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs hover:bg-[var(--hover)] md:h-8 ${more ? "border-[var(--accent)] text-[var(--accent-text)]" : "border-[var(--border)] text-[var(--text)]"}`}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />More
+        </button>
       </div>
+      {more && (
+        <div className="pt-1">
+          {!already && !isHome && !isWork && (
+            <MoreRow icon={List} onClick={() => {
+              setPicking("list");
+              setMore(false);
+            }}>Add to a list</MoreRow>
+          )}
+          {!isHome && <MoreRow icon={Home} onClick={() => {
+            onSave("home");
+            setMore(false);
+          }}>Set as Home</MoreRow>}
+          {!isWork && <MoreRow icon={Briefcase} onClick={() => {
+            onSave("work");
+            setMore(false);
+          }}>Set as Work</MoreRow>}
+          <MoreRow icon={Copy} onClick={() => void copyText(`${place.lat.toFixed(5)}, ${place.lon.toFixed(5)}`, "Coordinates copied")}>Copy coordinates</MoreRow>
+        </div>
+      )}
       <MoreDetails place={place} />
       {picking && (
         <SavePicker
@@ -1543,6 +1626,30 @@ function SavePicker({ place, already, withList, onDone, onRemove, onEdited, onSa
         {already && <button type="button" onClick={remove} className="ml-auto h-10 rounded-lg md:h-9 px-3 text-sm text-[var(--danger,#c0392b)] hover:bg-[var(--hover)]">Remove</button>}
       </div>
     </form>
+  );
+}
+
+/** What this place already is: a fact with a tick, not something to press. A
+ *  saved place can still be opened to rename or remove (the small "Edit"). */
+function SavedMark({ icon: Icon, children, onEdit, label }: { icon: typeof Car; children: React.ReactNode; onEdit?: () => void; label?: string }) {
+  return (
+    <span className="inline-flex h-10 min-w-0 items-center gap-1.5 rounded-full bg-[var(--accent)]/15 pl-3 pr-1 text-xs font-medium text-[var(--accent-text)] md:h-8">
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 truncate pr-2">{children}</span>
+      {onEdit && (
+        <button type="button" onClick={onEdit} aria-label={label} className="inline-flex h-8 shrink-0 items-center rounded-full px-2 text-xs font-normal text-[var(--text-muted)] underline hover:text-[var(--text)] md:h-6">
+          Edit
+        </button>
+      )}
+    </span>
+  );
+}
+
+function MoreRow({ icon: Icon, children, onClick }: { icon: typeof Car; children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)] md:min-h-9">
+      <Icon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />{children}
+    </button>
   );
 }
 
@@ -1727,6 +1834,8 @@ function RoutePanel(p: {
   onSaveOffline?: () => void;
   savingOffline: boolean;
   onAddStop: (s: Spot) => void;
+  /** Places one tap away when choosing a start or a stop: Home, Work, the car, recent ones. */
+  quickStops: SearchResult[];
   /** The one stop so far is the start ("Directions from here"). */
   addingEnd: boolean;
   /** Waiting for a tap on the map to add a stop. */
@@ -1742,6 +1851,23 @@ function RoutePanel(p: {
   // Worth saying only when there's a choice.
   const fastest = p.routes.length > 1 ? p.routes.reduce((best, r, i) => (routeSeconds(r) < routeSeconds(p.routes[best]) ? i : best), 0) : -1;
   const arriving = (r: Route) => new Date(Date.now() + routeSeconds(r) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  // "On my way": the words and a link to the place, through the phone's own share
+  // sheet (a message, P Rooms, anything), or copied where there isn't one.
+  const shareArrival = async () => {
+    const to = p.stops[p.stops.length - 1];
+    if (!route || !to) return;
+    const text = `On my way to ${to.name}. I should get there about ${arriving(route)}.`;
+    const url = `${window.location.origin}${mapsPinLink(to.lat, to.lon, to.name)}`;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ text, url });
+        return;
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+      }
+    }
+    await copyText(`${text} ${url}`, "Copied. Paste it into a message.");
+  };
   const drop = (e: DragEndEvent) => {
     if (!e.over || e.active.id === e.over.id) return;
     const from = p.stops.findIndex((s) => s.key === e.active.id);
@@ -1768,7 +1894,10 @@ function RoutePanel(p: {
         </button>
         {p.query.trim().length > 1 ? (
           (p.results ?? []).slice(0, 8).map((r, i) => <ResultRow key={i} result={r} onPick={() => p.onAddStop(r)} />)
-        ) : route && p.mode !== "walk" && (
+        ) : !route ? (
+          // Nothing typed, no route yet: the places you most likely mean.
+          p.quickStops.map((r, i) => <ResultRow key={i} result={r} onPick={() => p.onAddStop(r)} />)
+        ) : p.mode !== "walk" && (
           <OnTheWay route={route} stops={p.stops} mode={p.mode} onMarks={p.onMarks} onAdd={(r) => {
             p.onAddOnWay(r);
             p.setAdding(false);
@@ -1930,6 +2059,9 @@ function RoutePanel(p: {
                 <span className="sm:hidden">Offline</span>
               </button>
             )}
+            <button type="button" onClick={() => void shareArrival()} aria-label="Tell someone when you'll arrive" title="Tell someone when you'll arrive" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
+              <Share2 className="h-4 w-4" />
+            </button>
             <button type="button" onClick={() => setShowSteps((v) => !v)} aria-expanded={showSteps} className="inline-flex h-10 items-center gap-1 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
               Steps{showSteps ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>

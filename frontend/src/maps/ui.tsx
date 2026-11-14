@@ -284,6 +284,9 @@ export const PhoneSheet = forwardRef<HTMLDivElement, {
   const box = useRef<HTMLDivElement | null>(null);
   const drag = useRef<{ y: number; h: number; moved: boolean; lastY: number; lastT: number; speed: number } | null>(null);
   const dragged = useRef(false);
+  // Scrolled down: a line and a soft shadow under the handle, so the row that's
+  // half out of sight reads as "under the handle", not as cut off.
+  const [scrolled, setScrolled] = useState(false);
 
   const heights = (): [number, number, number] => {
     const all = box.current?.parentElement?.clientHeight ?? window.innerHeight;
@@ -358,11 +361,19 @@ export const PhoneSheet = forwardRef<HTMLDivElement, {
           e.preventDefault();
         }}
         aria-label={snap === 2 ? "Make the panel smaller" : "Make the panel bigger. Drag to resize"}
-        className="flex h-7 w-full shrink-0 cursor-grab touch-none items-center justify-center"
+        className={`relative z-10 flex h-7 w-full shrink-0 cursor-grab touch-none items-center justify-center rounded-t-2xl border-b transition-shadow ${scrolled ? "border-[var(--border)] shadow-[0_6px_10px_-6px_rgba(0,0,0,0.35)]" : "border-transparent"}`}
       >
         <span aria-hidden="true" className="h-1 w-10 rounded-full bg-[var(--border)]" />
       </button>
-      <div className={`min-h-0 flex-1 pb-[env(safe-area-inset-bottom)] ${!fit && snap === 0 ? "overflow-hidden" : "overflow-y-auto"}`}>{children}</div>
+      <div
+        onScroll={(e) => {
+          const down = e.currentTarget.scrollTop > 2;
+          if (down !== scrolled) setScrolled(down);
+        }}
+        className={`min-h-0 flex-1 pb-[env(safe-area-inset-bottom)] ${!fit && snap === 0 ? "overflow-hidden" : "overflow-y-auto"}`}
+      >
+        {children}
+      </div>
     </div>
   );
 });

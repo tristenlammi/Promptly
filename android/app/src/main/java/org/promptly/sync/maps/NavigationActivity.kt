@@ -80,6 +80,7 @@ import kotlinx.coroutines.launch
 import org.maplibre.compose.style.BaseStyle
 import org.promptly.sync.R
 import org.promptly.sync.maps.offline.Offline
+import uniffi.ferrostar.ManeuverType
 import uniffi.ferrostar.DrivingSide
 
 /** The driving screen: `promptlymaps://navigate?server=…&code=…&stops=…`.
@@ -541,6 +542,14 @@ private val driveViews = NavigationViewComponentBuilder.Default()
             // The turn straight after this one, when there's no time to wait to be told.
             val then = uiState.remainingSteps?.getOrNull(1)?.takeIf { it.distance < 400 }
                 ?.visualInstructions?.firstOrNull()?.primaryContent
+                // A roundabout is "enter" then "leave" onto the same road: the card already
+                // says which exit, so the second half would only repeat the road's name.
+                ?.takeUnless { next ->
+                    next.text.equals(instruction.primaryContent.text, ignoreCase = true) && (
+                        next.maneuverType == ManeuverType.EXIT_ROUNDABOUT || next.maneuverType == ManeuverType.EXIT_ROTARY ||
+                            instruction.primaryContent.maneuverType in setOf(ManeuverType.ROUNDABOUT, ManeuverType.ROTARY, ManeuverType.ROUNDABOUT_TURN)
+                        )
+                }
             TurnBanner(
                 instruction = instruction,
                 metres = uiState.progress?.distanceToNextManeuver,
