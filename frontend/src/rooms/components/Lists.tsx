@@ -10,6 +10,8 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
+import { isMuted } from "../receipts";
+
 import { BOOTSTRAP_KEY, dmTitle, effectiveNotify, updateBootstrap } from "../cache";
 import { plainSnippet, shortWhen } from "../format";
 import { CountBadge, Popover, UserAvatar } from "./ui";
@@ -90,7 +92,7 @@ export function SpaceRoomList({
             className={cn("flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl px-2 text-left hover:bg-[var(--hover)]", rowFocus)}
           >
             <span className="min-w-0 flex-1 truncate font-semibold text-[var(--text)]">{space.name}</span>
-            {space.notify === "none" && <BellOff className="h-3.5 w-3.5 text-[var(--text-muted)]" aria-label="Muted" />}
+            {(space.notify === "none" || isMuted(space.muted_until)) && <BellOff className="h-3.5 w-3.5 text-[var(--text-muted)]" aria-label="Muted" />}
             <ChevronDown className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
           </button>
         </div>
@@ -198,7 +200,7 @@ export function SpaceRoomList({
                 >
                   <Hash className="h-4 w-4 shrink-0 opacity-70" />
                   <span className={cn("min-w-0 flex-1 truncate", (unread || active) && "font-semibold")}>{r.name}</span>
-                  {r.notify === "none" && <BellOff className="h-3.5 w-3.5 shrink-0 opacity-60" aria-label="Muted" />}
+                  {(r.notify === "none" || isMuted(r.muted_until)) && <BellOff className="h-3.5 w-3.5 shrink-0 opacity-60" aria-label="Muted" />}
                   <CountBadge n={r.mentions} />
                   {unread && r.mentions === 0 && <span className="sr-only">unread</span>}
                 </Link>

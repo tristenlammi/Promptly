@@ -39,6 +39,28 @@ class PushPayloadTest {
     }
 
     @Test
+    fun aClearSaysWhichRoomAndHowFar() {
+        val p = PushPayload.parse("""{"title":"","body":"","tag":"room:abc","category":"room_read","clear":true,"seq":41,"app_badge":0}""")
+        assertTrue(p.clear)
+        assertEquals("room:abc", p.tag)
+        assertEquals(41L, p.seq)
+        // An ordinary message isn't one, and says which message it is.
+        val m = PushPayload.parse("""{"title":"Ann","body":"hi","tag":"room:abc","category":"room_message","seq":42}""")
+        assertFalse(m.clear)
+        assertEquals(42L, m.seq)
+        assertNull(PushPayload.parse("""{"title":"Ann","body":"hi"}""").seq)
+    }
+
+    @Test
+    fun aMessageReadElsewhereIsntShownLate() {
+        assertTrue(PushClears.stillNews(null, 5))      // never cleared
+        assertTrue(PushClears.stillNews(41, 42))       // newer than what was read
+        assertFalse(PushClears.stillNews(41, 41))      // the one that was read
+        assertFalse(PushClears.stillNews(41, 7))       // an older one arriving late
+        assertTrue(PushClears.stillNews(41, null))     // a push that doesn't say (an older server)
+    }
+
+    @Test
     fun plainWordsStillShow() {
         val p = PushPayload.parse("Something happened")
         assertEquals("Promptly", p.title)

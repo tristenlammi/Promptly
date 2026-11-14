@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import { roomsApi, type Bootstrap, type Message, type NotifyLevel, type Room, type RoomUser, type Space } from "@/api/rooms";
 
+import { isMuted } from "./receipts";
 import { useRoomsStore } from "./store";
 
 export const BOOTSTRAP_KEY = ["rooms", "bootstrap"] as const;
@@ -91,6 +92,8 @@ export function roomTitle(b: Bootstrap | undefined, room: Room): string {
 }
 
 export function effectiveNotify(room: Room, space: Space | null): NotifyLevel {
+  // Muted for a while (the room, or its whole space) is "none" until then.
+  if (isMuted(room.muted_until) || isMuted(space?.muted_until)) return "none";
   return room.notify ?? space?.notify ?? "all";
 }
 

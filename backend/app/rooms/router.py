@@ -20,7 +20,7 @@ from app.background import spawn
 from app.database import get_db
 from app.files.storage import absolute_path
 
-from . import core, service
+from . import core, receipts, service
 from .models import Room, RoomAttachment, RoomMember, RoomMessage, RoomReaction, RoomSpace, RoomSpaceMember
 from .push import fan_out
 
@@ -83,6 +83,7 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
                 "color": s.color,
                 "role": m.role,
                 "notify": m.notify,
+                "muted_until": receipts.iso(m.muted_until),
                 "member_ids": members_by_space.get(s.id, []),
                 "member_roles": roles_by_space.get(s.id, {}),
                 "rooms": [by_id[str(r.id)] for r in rooms if r.space_id == s.id],
@@ -101,11 +102,17 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
     from app.calls import dm as calls_dm
 
     calls_live = await calls_dm.live_for(db, user) if voice_on else []
+    # This list carries every conversation's latest message, so they have all
+    # reached this device: "Delivered" for the people who sent them.
+    me_out = core.user_out(user)
+    users_out = await core.users_map(db, people)
+    missed = await calls_dm.missed_count(db, user.id) if voice_on else 0
+    await receipts.delivered_all(db, user.id)
     return {
-        "me": core.user_out(user),
+        "me": me_out,
         "spaces": out_spaces,
         "dms": [by_id[str(r.id)] for r in dms],
-        "users": await core.users_map(db, people),
+        "users": users_out,
         "voice_available": voice_on,
         "voice": await calls_voice.members_map(voice_ids) if voice_on else {},
         "voice_me": (
@@ -120,7 +127,7 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
         # Live DM calls in your conversations (ringing you, or on with a Join).
         "calls": calls_live,
         # The Calls tab's badge: missed calls you haven't seen (Calls WP-D4).
-        "calls_missed": await calls_dm.missed_count(db, user.id) if voice_on else 0,
+        "calls_missed": missed,
     }
 
 
@@ -174,7 +181,8 @@ async def create_space(body: SpaceIn, db: AsyncSession = Depends(get_db), user: 
     space = RoomSpace(name=body.name.strip(), emoji=body.emoji.strip(), color=body.color, created_by=user.id)
     db.add(space)
     await db.flush()
-    db.add(RoomSpaceMember(space_id=space.id, user_id=user.id, role="owner"))
+    start = (await receipts.server(db))[1]
+    db.add(RoomSpaceMember(space_id=space.id, user_id=user.id, role="owner", notify=start))
     room = Room(space_id=space.id, kind="text", name="general", position=0, created_by=user.id)
     db.add(room)
     await db.commit()
@@ -185,7 +193,7 @@ async def create_space(body: SpaceIn, db: AsyncSession = Depends(get_db), user: 
         "emoji": space.emoji,
         "color": space.color,
         "role": "owner",
-        "notify": "all",
+        "notify": start,
         "member_ids": [str(user.id)],
         "member_roles": {str(user.id): "owner"},
         "rooms": [await core.room_out(db, room, user)],
@@ -235,8 +243,9 @@ async def add_members(space_id: uuid.UUID, body: MembersIn, db: AsyncSession = D
     found = (await db.execute(select(User.id).where(User.id.in_(body.user_ids), User.disabled.is_(False)))).scalars().all()
     existing = set(await core.space_member_ids(db, space.id))
     added = [u for u in found if u not in existing]
+    start = (await receipts.server(db))[1]  # the level the admin starts people on
     for uid in added:
-        db.add(RoomSpaceMember(space_id=space.id, user_id=uid, role="member"))
+        db.add(RoomSpaceMember(space_id=space.id, user_id=uid, role="member", notify=start))
     await db.commit()
     await _space_event(db, space.id)
     return {"added": [str(u) for u in added]}
@@ -300,12 +309,14 @@ async def remove_member(space_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSessio
 
 
 class NotifyIn(BaseModel):
-    notify: str
+    notify: str | None = None
+    # Quiet until then (a week at most); null ends a mute.
+    muted_until: datetime | None = None
 
     @field_validator("notify")
     @classmethod
-    def _n(cls, v: str) -> str:
-        if v not in core.NOTIFY:
+    def _n(cls, v: str | None) -> str | None:
+        if v is not None and v not in core.NOTIFY:
             raise ValueError("notify is all, mentions or none")
         return v
 
@@ -313,7 +324,13 @@ class NotifyIn(BaseModel):
 @router.patch("/spaces/{space_id}/me")
 async def space_me(space_id: uuid.UUID, body: NotifyIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     _space, me = await core.load_space(db, space_id, user)
-    me.notify = body.notify
+    data = body.model_dump(exclude_unset=True)
+    if data.get("notify") is not None:
+        me.notify = data["notify"]
+        # Choosing a level ends a "mute for a while".
+        me.muted_until = None
+    if "muted_until" in data:
+        me.muted_until = receipts.mute_until(data["muted_until"])
     await db.commit()
     await core.publish([user.id], {"type": "space", "space_id": str(space_id)})
     return {"ok": True}
@@ -453,6 +470,8 @@ async def open_dm(body: DmIn, db: AsyncSession = Depends(get_db), user: User = D
 
 class MeIn(BaseModel):
     notify: str | None = None
+    # Quiet until then (a week at most); null ends a mute.
+    muted_until: datetime | None = None
     hidden: bool | None = None
 
     @field_validator("notify")
@@ -470,6 +489,10 @@ async def room_me(room_id: uuid.UUID, body: MeIn, db: AsyncSession = Depends(get
     data = body.model_dump(exclude_unset=True)
     if "notify" in data:
         st.notify = None if data["notify"] in (None, "default") else data["notify"]
+        # Choosing a level ends a "mute for a while".
+        st.muted_until = None
+    if "muted_until" in data:
+        st.muted_until = receipts.mute_until(data["muted_until"])
     if data.get("hidden") is not None:
         if room.space_id is not None:
             raise core.forbidden("Only conversations can be closed")
@@ -574,6 +597,9 @@ async def _sent(db: AsyncSession, room: Room, user: User, msg: RoomMessage) -> d
                 if u is not None:
                     await core.publish([uid], {"type": "room", "room": await core.room_out(db, room, u)})
     spawn(fan_out(msg.id), name=f"rooms-push-{msg.id}")
+    # Writing in it is reading it: the others see you've seen theirs, and its
+    # notification comes off your phone.
+    await receipts.after_read(db, room, me, msg.seq)
     if "promptly" in (msg.mentions or []):
         from .promptly import answer
 
@@ -603,6 +629,7 @@ async def read_from_notification(db: AsyncSession, user: User, room_id: uuid.UUI
         st.last_read_seq = upto
         await db.commit()
         await core.publish([me], {"type": "read", "room_id": str(rid), "seq": upto})
+        await receipts.after_read(db, room, me, upto)
 
 
 class MessagePatch(BaseModel):
@@ -765,7 +792,16 @@ async def mark_read(room_id: uuid.UUID, body: ReadIn, db: AsyncSession = Depends
         st.last_read_seq = seq
         await db.commit()
         await core.publish([user.id], {"type": "read", "room_id": str(room.id), "seq": seq})
+        await receipts.after_read(db, room, user.id, seq)
     return {"last_read_seq": st.last_read_seq}
+
+
+@router.post("/rooms/{room_id}/delivered", status_code=204)
+async def mark_delivered(room_id: uuid.UUID, body: ReadIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    """One of your open pages has the conversation's messages up to ``seq``
+    (they arrived on its live feed): "Delivered" for whoever sent them."""
+    room, _sm = await core.load_room(db, room_id, user)
+    await receipts.delivered(db, room, user.id, body.seq)
 
 
 @router.post("/rooms/{room_id}/typing", status_code=204)

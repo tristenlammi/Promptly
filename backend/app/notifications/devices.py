@@ -59,6 +59,24 @@ def is_native(user_agent: str | None) -> bool:
     return bool(user_agent) and user_agent.startswith(NATIVE_PREFIX)
 
 
+def native_version(user_agent: str | None) -> tuple[int, ...]:
+    """The app's version from its row ("PromptlyAndroid/1.10.0 (…)" → (1, 10, 0))."""
+    if not is_native(user_agent):
+        return ()
+    m = re.match(r"(\d+(?:\.\d+)*)", (user_agent or "")[len(NATIVE_PREFIX):])
+    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
+
+
+# Promptly for Android after this one takes a notification down when a
+# silent "clear" push says its conversation was read elsewhere; this one and
+# older would show it as an empty notification, so they're never sent one.
+CLEARS_AFTER = (1, 10, 0)
+
+
+def takes_clears(user_agent: str | None) -> bool:
+    return native_version(user_agent) > CLEARS_AFTER
+
+
 def is_push_service(endpoint: str) -> bool:
     """The app registers with Google's push service, the one Chrome uses."""
     return endpoint.startswith("https://fcm.googleapis.com/")
