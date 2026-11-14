@@ -51,9 +51,13 @@ def first_name(user: User) -> str:
 
 
 def greeting(now: datetime, user: User) -> str:
+    """By the person's own clock (``now`` is in their zone). The evening runs
+    to 2 am; from then until 4 it's just late."""
     h = now.hour
-    part = "morning" if 4 <= h < 12 else "afternoon" if 12 <= h < 18 else "evening"
     name = first_name(user)
+    if 2 <= h < 4:
+        return f"Up late, {name}" if name else "Up late"
+    part = "morning" if 4 <= h < 12 else "afternoon" if 12 <= h < 18 else "evening"
     return f"Good {part}, {name}" if name else f"Good {part}"
 
 

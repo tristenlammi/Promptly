@@ -12,6 +12,7 @@ import re
 import smtplib
 import socket
 import ssl
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -376,3 +377,36 @@ def move_found(client: IMAPClient, path: str, message_ids: list[str], target: st
 
 def append_sent(client: IMAPClient, path: str, raw: bytes) -> None:
     client.append(path, raw, flags=[b"\\Seen"])
+
+
+# ---- being told about new mail (IDLE)
+
+# A server may drop an idle connection after 29 minutes (RFC 2177), and home
+# routers forget a quiet one sooner, so it's asked again well before that.
+IDLE_FOR_S = 14 * 60
+# How long one wait for news lasts, so being told to stop is noticed quickly.
+IDLE_CHECK_S = 5
+_NEWS = (b"EXISTS", b"RECENT")
+
+
+def can_idle(client: IMAPClient) -> bool:
+    return client.has_capability("IDLE")
+
+
+def _has_news(responses: Any) -> bool:
+    return any(isinstance(r, tuple) and len(r) >= 2 and r[1] in _NEWS for r in responses or [])
+
+
+def wait_for_mail(client: IMAPClient, stop: Any, seconds: float = IDLE_FOR_S) -> bool:
+    """Sits in IDLE on the selected folder until the server says something
+    arrived (True), or ``seconds`` pass or ``stop`` is set (False). IDLE is
+    always ended before returning, so the connection can be used or idled again."""
+    client.idle()
+    news = False
+    try:
+        until = time.monotonic() + seconds
+        while not news and not stop.is_set() and time.monotonic() < until:
+            news = _has_news(client.idle_check(timeout=IDLE_CHECK_S))
+    finally:
+        _text, late = client.idle_done()
+    return news or _has_news(late)

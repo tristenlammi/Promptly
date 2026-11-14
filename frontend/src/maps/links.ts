@@ -11,6 +11,11 @@ export function mapsRouteLink(stops: { lat: number; lon: number; name: string }[
   return `/maps?route=${encodeURIComponent(route)}${mode ? `&mode=${mode}` : ""}`;
 }
 
+/** Directions to a spot from wherever you are. */
+export function mapsDirectionsLink(lat: number, lon: number, name = "Pin"): string {
+  return `${mapsPinLink(lat, lon, name)}&go=1`;
+}
+
 export function mapsPinLink(lat: number, lon: number, name = "Pin"): string {
   return `/maps?to=${lat},${lon},${encodeURIComponent(name)}`;
 }

@@ -237,13 +237,18 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
   }, [raise]);
 
   // Another app sent you here: /maps?to=lat,lon,name (and /maps?q=text, above).
+  // With &go=1 it's straight to directions there, from where you are.
+  const directionsToLatest = useRef<(s: Spot) => void>(() => undefined);
   useEffect(() => {
     const to = params.get("to");
     if (!to) return;
+    const go = params.get("go") === "1";
     const [lat, lon, ...name] = to.split(",");
     const spot = { lat: Number(lat), lon: Number(lon), name: name.join(",") || "Dropped pin" };
     setParams({}, { replace: true });
-    if (Number.isFinite(spot.lat) && Number.isFinite(spot.lon)) window.setTimeout(() => showPlace({ kind: "place", ...spot }), 800);
+    if (Number.isFinite(spot.lat) && Number.isFinite(spot.lon)) {
+      window.setTimeout(() => (go ? directionsToLatest.current(spot) : showPlace({ kind: "place", ...spot })), 800);
+    }
     // Only the link you arrived with.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -340,6 +345,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     setAddingStop(!you && !canFind);
     changeStops(rows);
   };
+  directionsToLatest.current = directionsTo;
 
   /** A stop from the search or the map. With one stop so far, it's where from,
    *  unless that one is already the start ("Directions from here"). */

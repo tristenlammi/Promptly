@@ -3,16 +3,11 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markd
 import { Link } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 
+import { addressPattern } from "@/lib/addresses";
+
 const REMARK = [remarkGfm];
 
 const urlTransform = (url: string) => (url.startsWith("mention:") ? url : defaultUrlTransform(url));
-
-/** A street address as people type one: "342 Palmwoods-Montville Road",
- *  "12 Smith St, Baringa". Deliberately narrow (a number, capitalised words, a
- *  road word) so ordinary sentences aren't turned into links; the short
- *  road words that are also titles ("Dr", "St") don't count before a name. */
-const ADDRESS =
-  /\b\d{1,5}[A-Za-z]?(?:[-/]\d{1,5})?\s+(?:[A-Z][A-Za-z']+[ -]){1,4}(?:Street|Road|Rd|Avenue|Ave|Drive|Court|Place|Lane|Ln|Terrace|Tce|Parade|Pde|Boulevard|Blvd|Crescent|Cres|Highway|Hwy|Circuit|Cct|Close|(?:St|Dr|Ct|Pl|Cl|Way)(?!\s+[A-Z][a-z]))\b(?:,\s*[A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)?)?/g;
 
 /** Addresses become links that open the place in Maps. Code, links already
  *  written and web addresses are left exactly as they are. */
@@ -20,7 +15,7 @@ export function linkAddresses(text: string): string {
   if (!/\d/.test(text)) return text;
   return text
     .split(/(```[\s\S]*?```|`[^`\n]*`|!?\[[^\]]*\]\([^)]*\)|https?:\/\/\S+)/g)
-    .map((part, i) => (i % 2 === 1 ? part : part.replace(ADDRESS, (addr) => `[${addr}](/maps?q=${encodeURIComponent(addr)})`)))
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(addressPattern(), (addr) => `[${addr}](/maps?q=${encodeURIComponent(addr)})`)))
     .join("");
 }
 

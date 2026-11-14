@@ -23,6 +23,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 
+- Mail: a street address in an email can be tapped. A small window shows it on the map first, with "Open in P Maps" and "Directions" if you want the whole thing. In a formatted email the addresses are listed just under it. The address is looked up on your own server.
+- Mail: new mail shows up within a second or two. The mail server now tells Promptly the moment something arrives (IMAP IDLE), where it used to be looked for every 20 seconds. The 20-second look stays as the safety net, and is all that's used with a server that can't do this.
+- Today: a stay or a booked day in your email shows under Coming up before it's on your calendar, marked "from an email", with one tap to add it and a cross to put it away for good. Only when the email spells the days out ("Check-in: Fri 20 Nov 2026"); nothing is added until you tap, and it's gone once the calendar has it.
+- Maps: a link can open straight into directions to a place from where you are (`/maps?to=…&go=1`), used by the new place window.
 - Today: someone sharing their trip with you shows under "Needs you" and on the Getting there card ("Sam arrives in 12 min"). When they arrive, never where they are.
 - Today: a trip or stay on your calendar is called out a day or two before it starts ("Nelly starts tomorrow · 2 nights"), and email waiting for a reply is under "Needs you" with who it's from.
 - Today: an event with a place has a Directions button on the schedule, and Coming up includes your next planned workouts.
@@ -40,6 +44,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Changed
 
+- Today: a new account starts without the Passwords, Forms and Automations cards. Customise brings them back. Accounts that already exist keep the Today they have.
+- Today: it says "Good evening" until 2 am, then "Up late" until 4, by your own clock.
 - Today: tasks open the task itself, not just the list, from the Tasks card, the schedule and Coming up.
 - Today: an event that runs over several days is one line in Coming up ("Nelly · until Tuesday") instead of a line for every day, and while you're there it sits at the top of the schedule as "until Tuesday" rather than repeating its start time.
 - Today: a bill under "Needs you" says which day it's due ("due tomorrow", "due Monday") instead of "due soon"; messages from several people name them.
@@ -61,6 +67,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- Today: the Body & Health card no longer shows "Sleep 0 h" and "Steps 0" for someone who only logs their weight. A goal the Health app came with shows once you've logged that thing at least once.
+- Today: hiding the Mail, Passwords, Forms, Notes, Porch or Hanging out now card in Customise now sticks. The server was quietly dropping those six from what you'd hidden.
 - Today, the Today widget, "Read me my day" and the Journal's day strip: an all-day event showed on two days if you live far from UTC (in Brisbane, on its own day and again the next morning). All-day events are now on their own day wherever you are.
 - Mail on a phone: the Compose button floated in the middle of the list, over senders and subjects. It now sits in the bottom corner, and the list scrolls clear of it.
 - The assistant in an app could sit on "Thinking…" for ever. A stream that stopped without an ending (a sleeping phone, a dropped connection, a model that went quiet) was never noticed. Every message now ends with an answer or a plain error with "Try again".

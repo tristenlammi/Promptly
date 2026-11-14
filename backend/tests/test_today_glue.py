@@ -299,5 +299,5 @@ async def test_a_new_account_has_a_clean_page(client, db, pushes, caplog):  # no
     assert [rec.getMessage() for rec in caplog.records if rec.name.startswith("promptly.today")] == []
     assert day["attention"] == [] and day["coming"] == [] and day["progress"] is None
     assert day["schedule"] == {"items": [], "all_day": []}
-    assert len(day["discover"]) == 4 and day["greeting"].startswith("Good ")
+    assert len(day["discover"]) == 4 and day["greeting"].startswith(("Good ", "Up late"))
     assert uuid.UUID(str(u.id))  # the page is theirs alone

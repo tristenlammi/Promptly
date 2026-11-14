@@ -764,6 +764,23 @@ async def add_event(account_id: uuid.UUID, key: str, body: NewEventBody, db: Asy
     return {"url": f"/calendar?event={event.id}"}
 
 
+@router.post("/bookings/{message_id}/calendar", status_code=status.HTTP_201_CREATED)
+async def booking_to_calendar(message_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, str]:
+    """Today's "Add to calendar" on a booking found in your mail (``bookings.py``)."""
+    from app.items.service import zone_for
+
+    from . import bookings
+
+    return {"url": await bookings.add_to_calendar(db, user, message_id, datetime.now(zone_for(user)).date())}
+
+
+@router.post("/bookings/{message_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
+async def booking_dismiss(message_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    from . import bookings
+
+    await bookings.dismiss(db, user, message_id)
+
+
 @router.post("/threads/{account_id}/{key}/task-draft")
 async def task_draft(account_id: uuid.UUID, key: str, body: EventDraftBody, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, str]:
     """The AI's reading of what there is to do (a bill: who, how much, by when).

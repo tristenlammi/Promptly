@@ -215,7 +215,7 @@ function TodayBody({ data }: { data: TodayData }) {
     meds: s.health && s.health.doses.length > 0 && <MedsCard health={s.health} />,
     health: s.health && <HealthCard health={s.health} today={data.date} hideWater={!!s.nutrition} />,
     nutrition: s.nutrition && <NutritionCard n={s.nutrition} />,
-    coming: data.coming.length > 0 && <ComingCard coming={data.coming} today={data.date} />,
+    coming: (data.coming.length > 0 || (data.bookings?.length ?? 0) > 0) && <ComingCard coming={data.coming} today={data.date} bookings={data.bookings} />,
     budget: s.budget && <BudgetCard b={s.budget} today={data.date} />,
     trip: s.trip && <TripCard t={s.trip} />,
     maps: s.maps && <MapsCard m={s.maps} />,
