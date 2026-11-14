@@ -21,6 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Mail on a phone: swiping an email follows your finger, springs back if you let go early, and slides off with the gap closing up when you go far enough, with a tick as it crosses the mark.
+
+### Fixed
+
+- Mail on a phone: the notice after archiving or deleting is one slim line that sits above the folders bar, where it used to be a tall card over it. Several in a row share one notice ("Archived 3 conversations") with one Undo for all of them, where each used to add another card.
+- Short notices with an action ("Archived · Undo") are one line everywhere, with the action at the end.
+
 ## [0.41.0] - 2026-11-15
 
 ### Added

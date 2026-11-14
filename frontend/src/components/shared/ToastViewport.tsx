@@ -210,6 +210,34 @@ function ToastItem({ toast, leaving }: { toast: Toast; leaving: boolean }) {
     );
   };
 
+  // A short notice with an action ("Archived · Undo") is one slim line,
+  // with the action at the end, not a card with a button underneath.
+  const slim = !!toast.action && !toast.title && toast.message.length <= 44 && !toast.message.includes("\n");
+  const actions = toast.action && (
+    <div className={cn("flex gap-1.5", slim ? "shrink-0" : "flex-wrap")}>
+      {[toast.action, toast.secondary].map(
+        (a) =>
+          a && (
+            <button
+              key={a.label}
+              type="button"
+              onClick={() => {
+                a.onClick();
+                dismiss(toast.id);
+              }}
+              className={cn(
+                "rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
+                !slim && "mt-1.5",
+                "bg-[var(--accent)]/10 text-[var(--accent-text)] hover:bg-[var(--accent)]/20",
+              )}
+            >
+              {a.label}
+            </button>
+          ),
+      )}
+    </div>
+  );
+
   return (
     <div
       role={meta.role}
@@ -223,13 +251,14 @@ function ToastItem({ toast, leaving }: { toast: Toast; leaving: boolean }) {
       }}
       aria-hidden={leaving || undefined}
       className={cn(
-        "flex w-full max-w-sm items-start gap-2.5 rounded-card border p-3 shadow-lg",
+        "flex w-full max-w-sm gap-2.5 rounded-card border shadow-lg",
+        slim ? "items-center py-1.5 pl-3 pr-2" : "items-start p-3",
         leaving ? "motion-toast-out pointer-events-none" : "motion-toast-in pointer-events-auto",
         "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
       )}
       style={{ borderInlineStartWidth: 3, borderInlineStartColor: meta.accent }}
     >
-      <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", meta.iconClass)} aria-hidden />
+      <Icon className={cn("h-4 w-4 shrink-0", !slim && "mt-0.5", meta.iconClass)} aria-hidden />
       <div className="min-w-0 flex-1">
         {toast.title && (
           <div className="text-sm font-semibold leading-snug">
@@ -244,36 +273,16 @@ function ToastItem({ toast, leaving }: { toast: Toast; leaving: boolean }) {
         >
           {toast.message}
         </div>
-        {toast.action && (
-          <div className="flex flex-wrap gap-1.5">
-            {[toast.action, toast.secondary].map(
-              (a) =>
-                a && (
-                  <button
-                    key={a.label}
-                    type="button"
-                    onClick={() => {
-                      a.onClick();
-                      dismiss(toast.id);
-                    }}
-                    className={cn(
-                      "mt-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
-                      "bg-[var(--accent)]/10 text-[var(--accent-text)] hover:bg-[var(--accent)]/20",
-                    )}
-                  >
-                    {a.label}
-                  </button>
-                ),
-            )}
-          </div>
-        )}
+        {!slim && actions}
       </div>
+      {slim && actions}
       <button
         type="button"
         onClick={() => dismiss(toast.id)}
         aria-label="Dismiss notification"
         className={cn(
-          "-m-1 shrink-0 rounded-md p-1 text-[var(--text-muted)] transition",
+          "shrink-0 rounded-md p-1 text-[var(--text-muted)] transition",
+          !slim && "-m-1",
           "hover:bg-[var(--hover)] hover:text-[var(--text)]",
         )}
       >

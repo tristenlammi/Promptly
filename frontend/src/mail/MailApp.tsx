@@ -13,6 +13,8 @@ import { sendInRooms } from "@/rooms/incomingShare";
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
 import { Skeleton } from "@/components/shared/Skeleton";
+import { useBottomBarInset } from "@/components/shared/ToastViewport";
+import { prefersReducedMotion } from "@/components/shared/usePresence";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -160,6 +162,10 @@ export function MailApp() {
   const location = useLocation();
   const undoTimer = useRef<number | null>(null);
   const undoToast = useRef<string | null>(null);
+  // Archived or binned and still inside the undo time: one run, one notice.
+  const away = useRef<{ action: "archive" | "trash"; rows: Open[]; timer: number; shown: string } | null>(null);
+  // Notices sit above the folders bar on a phone, not over it.
+  useBottomBarInset(56, isMobile);
   // Moves still inside their undo time, by conversation: call one to send it now.
   const waiting = useRef(new Map<string, (closing?: boolean) => void>());
   const [prefill, setPrefill] = useState<string | null>(null);
@@ -351,50 +357,72 @@ export function MailApp() {
     });
   }, []);
 
-  /** Off the list at once. It only really happens once the undo has passed. */
-  const moveAway = useCallback((what: Open | Open[], action: "archive" | "trash", label: string) => {
+  /** Send what's been archived or binned so far, now. */
+  const flushAway = useCallback((closing = false) => {
+    const b = away.current;
+    if (!b) return;
+    away.current = null;
+    window.clearTimeout(b.timer);
+    waiting.current.delete("away");
+    toast.dismiss(b.shown);
+    if (closing) {
+      mailApi.actManyAsPageCloses(b.rows, b.action);
+      return;
+    }
+    const ids = b.rows.map(idOf);
+    void (async () => {
+      try {
+        await mailApi.actMany(b.rows, b.action);
+        // Kept off the list until the new list is here, or it flashes back.
+        await qc.invalidateQueries({ queryKey: ["mail-threads"] });
+        void qc.invalidateQueries({ queryKey: ["mail-overview"] });
+        void qc.invalidateQueries({ queryKey: ["mail-conversation"] });
+      } catch (e) {
+        toast.error(apiErrorMessage(e, "Couldn't do that."));
+      } finally {
+        ids.forEach(stay);
+      }
+    })();
+  }, [qc, stay]);
+
+  /** Off the list at once. It only really happens once the undo has passed.
+   *  Several in a row (swiping down the list) share one notice that counts
+   *  them, and one Undo that puts them all back. */
+  const moveAway = useCallback((what: Open | Open[], action: "archive" | "trash", _label?: string) => {
     const many = Array.isArray(what) ? what : [what];
-    const ids = many.map(idOf);
-    const id = ids.join(",");
-    ids.forEach(leave);
+    many.map(idOf).forEach(leave);
     setPicked(NONE);
     setOpen((o) => (o && many.some((r) => r.key === o.key) ? null : o));
-    let shown = "";
-    const send = (closing = false) => {
-      window.clearTimeout(timer);
-      waiting.current.delete(id);
-      toast.dismiss(shown);
-      if (closing) {
-        mailApi.actManyAsPageCloses(many, action);
-        return;
-      }
-      void (async () => {
-        try {
-          await mailApi.actMany(many, action);
-          // Kept off the list until the new list is here, or it flashes back.
-          await qc.invalidateQueries({ queryKey: ["mail-threads"] });
-          void qc.invalidateQueries({ queryKey: ["mail-overview"] });
-          void qc.invalidateQueries({ queryKey: ["mail-conversation"] });
-        } catch (e) {
-          toast.error(apiErrorMessage(e, "Couldn't do that."));
-        } finally {
-          ids.forEach(stay);
-        }
-      })();
-    };
-    const timer = window.setTimeout(() => send(), UNDO_MS);
-    waiting.current.set(id, send);
-    shown = toast.success(label, {
-      action: {
-        label: "Undo",
-        onClick: () => {
-          window.clearTimeout(timer);
-          waiting.current.delete(id);
-          ids.forEach(stay);
+    // The other kind of move, or a very long run: the earlier ones go now.
+    if (away.current && (away.current.action !== action || away.current.rows.length + many.length > MAX_PICKED)) flushAway();
+    const before = away.current;
+    if (before) window.clearTimeout(before.timer);
+    const rows = before ? [...before.rows, ...many] : many;
+    const n = rows.length;
+    const words = action === "archive" ? (n > 1 ? `Archived ${conversations(n)}` : "Archived") : (n > 1 ? `Moved ${conversations(n)} to Trash` : "Moved to Trash");
+    const timer = window.setTimeout(() => flushAway(), UNDO_MS);
+    let shown = before?.shown ?? "";
+    if (shown) toast.update(shown, { message: words });
+    else {
+      shown = toast.success(words, {
+        // Ours to take down: it stays for as long as Undo still works.
+        duration: 0,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const b = away.current;
+            if (!b) return;
+            away.current = null;
+            window.clearTimeout(b.timer);
+            waiting.current.delete("away");
+            b.rows.map(idOf).forEach(stay);
+          },
         },
-      },
-    });
-  }, [qc, leave, stay]);
+      });
+    }
+    away.current = { action, rows, timer, shown };
+    waiting.current.set("away", flushAway);
+  }, [leave, stay, flushAway]);
 
   const sendAway = useCallback((chosen: Open[], action: "archive" | "trash") => {
     const n = chosen.length;
@@ -1067,17 +1095,40 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
   const held = useRef(false);
   // Swipe right to archive, left to delete. Only once you're clearly going sideways.
   const [slide, setSlide] = useState(0);
+  // drag: under the finger. back: let go early, springing home. out: let go
+  // past the mark, sliding off. shut: the gap it left closing up.
+  const [phase, setPhase] = useState<"idle" | "drag" | "back" | "out" | "shut">("idle");
+  const [tall, setTall] = useState(0);
   const sideways = useRef(false);
+  const wasArmed = useRef(false);
   const shell = useRef<HTMLDivElement>(null);
+  const mark = (shell.current?.offsetWidth ?? 360) * SWIPE_AT;
+  const armed = Math.abs(slide) > mark;
+  const pull = Math.min(1, Math.abs(slide) / mark);
+  // Which way it went, kept while it springs home (slide is 0 by then).
+  const side = useRef(1);
+  if (slide !== 0) side.current = slide > 0 ? 1 : -1;
+  const right = side.current > 0;
   const cancelPress = () => {
     if (press.current) window.clearTimeout(press.current.timer);
     press.current = null;
   };
   return (
-    <div ref={shell} className="group/row relative overflow-hidden">
-    {slide !== 0 && (
-      <div aria-hidden className={`absolute inset-0 flex items-center px-5 text-white ${slide > 0 ? "justify-start bg-[var(--accent-strong)]" : "justify-end bg-[var(--danger)]"}`}>
-        {slide > 0 ? <Archive className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
+    <div
+      ref={shell}
+      className="group/row relative overflow-hidden"
+      style={phase === "out" || phase === "shut" ? { height: phase === "shut" ? 0 : tall, transition: "height 170ms cubic-bezier(0.3, 0, 0.2, 1)" } : undefined}
+    >
+    {(slide !== 0 || phase !== "idle") && (
+      <div
+        aria-hidden
+        className={`absolute inset-0 flex items-center gap-2 px-5 text-sm font-medium text-white transition-opacity duration-150 ${right ? "justify-start bg-[var(--accent-strong)]" : "flex-row-reverse justify-start bg-[var(--danger)]"}`}
+        style={{ opacity: armed || phase === "out" || phase === "shut" ? 1 : 0.55 + pull * 0.25 }}
+      >
+        <span className="transition-transform duration-150" style={{ transform: `scale(${armed ? 1.2 : 0.7 + pull * 0.3})` }}>
+          {right ? <Archive className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
+        </span>
+        <span className="transition-opacity duration-150" style={{ opacity: armed ? 1 : 0 }}>{right ? "Archive" : "Delete"}</span>
       </div>
     )}
     <button
@@ -1101,23 +1152,57 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
         const dx = t.clientX - origin.current.x;
         const dy = t.clientY - origin.current.y;
         if (onSwipe && !sideways.current && Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.5) sideways.current = true;
-        if (sideways.current) setSlide(dx);
+        if (sideways.current && phase !== "out" && phase !== "shut") {
+          if (phase !== "drag") setPhase("drag");
+          setSlide(dx);
+          // A tick as it crosses the mark, either way.
+          const now = Math.abs(dx) > mark;
+          if (now !== wasArmed.current) {
+            wasArmed.current = now;
+            if (now) navigator.vibrate?.(10);
+          }
+        }
       }}
       onTouchEnd={() => {
         cancelPress();
-        const width = shell.current?.offsetWidth ?? 1;
-        if (sideways.current) {
+        if (sideways.current && phase === "drag") {
           held.current = true;
-          if (Math.abs(slide) > width * SWIPE_AT) onSwipe?.(slide > 0 ? "archive" : "trash");
           window.setTimeout(() => { held.current = false; }, 300);
+          const action = slide > 0 ? "archive" : "trash";
+          if (!armed) {
+            setPhase("back");
+            setSlide(0);
+            window.setTimeout(() => setPhase("idle"), 220);
+          } else if (prefersReducedMotion()) {
+            setPhase("idle");
+            setSlide(0);
+            onSwipe?.(action);
+          } else {
+            const width = shell.current?.offsetWidth ?? 360;
+            setTall(shell.current?.offsetHeight ?? 0);
+            setPhase("out");
+            setSlide(slide > 0 ? width : -width);
+            window.setTimeout(() => setPhase("shut"), 170);
+            window.setTimeout(() => {
+              onSwipe?.(action);
+              // Still here (it couldn't be moved): back where it was.
+              setPhase("idle");
+              setSlide(0);
+            }, 340);
+          }
         }
         sideways.current = false;
-        setSlide(0);
+        wasArmed.current = false;
       }}
-      onTouchCancel={() => { cancelPress(); sideways.current = false; setSlide(0); }}
+      onTouchCancel={() => { cancelPress(); sideways.current = false; wasArmed.current = false; if (phase === "drag") { setPhase("back"); setSlide(0); window.setTimeout(() => setPhase("idle"), 220); } }}
       aria-current={selected ? "true" : undefined}
       aria-pressed={picked ? true : undefined}
-      style={{ WebkitTouchCallout: "none", transform: slide ? `translateX(${slide}px)` : undefined, touchAction: "pan-y" }}
+      style={{
+        WebkitTouchCallout: "none",
+        transform: slide ? `translateX(${slide}px)` : undefined,
+        transition: phase === "drag" || phase === "idle" ? undefined : "transform 190ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+        touchAction: "pan-y",
+      }}
       className={`relative flex w-full gap-3 border-b border-[var(--border)] px-3 py-3 text-left transition-colors ${selected ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg,var(--surface)))]" : "bg-[var(--bg,var(--surface))] hover:bg-[var(--hover)]"}`}>
       {picked
         ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white"><Check className="h-5 w-5" /></span>
