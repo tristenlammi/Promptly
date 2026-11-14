@@ -23,6 +23,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 
+- Rooms on a phone: a camera button in the message box, like Messenger's. It opens the camera inside Rooms: tap the round button for a photo, press and hold it for a video (up to a minute, with sound). You see what you took, with Retake, room for a few words, and Send. Switch between the front and back camera, and turn the light on where the phone has one. It tucks away while you type, and "Camera" is under + too. The camera and microphone are let go the moment you close it.
+- Rooms: a video in a message plays right there, where it used to be a file to download.
 - Rooms: your messages in a conversation (a DM or a group conversation) say how far they've got. Under your latest: Sent, then Delivered once it has reached one of their devices (an open page has it, or their phone's push service took the notification), then Seen with their picture. In a group conversation each person's picture sits under the last of your messages they've read. Space rooms show none of this.
 - Rooms: mute a room, a conversation or a whole space for 1 hour, 8 hours or until tomorrow morning (room settings, space settings). It's quiet until then, mentions included, and then goes back to the level it had. Calls still ring. A muted room shows the crossed bell in the list and doesn't count towards the Rooms number.
 - Rooms on Android: reading a conversation anywhere (another device, the page, or replying) takes its notification off your phone, even with the app closed. A message you'd already read that turns up late isn't shown. Needs the next Promptly for Android; browsers aren't sent these, because a push that shows nothing makes Chrome put up its own notice.

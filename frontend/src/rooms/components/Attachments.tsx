@@ -12,13 +12,19 @@ export function isImage(a: Pick<Attachment, "mime">) {
   return a.mime.startsWith("image/");
 }
 
+export function isVideo(a: Pick<Attachment, "mime">) {
+  return a.mime.startsWith("video/");
+}
+
 export function AttachmentList({ attachments, saveable }: { attachments: Attachment[]; /** GIFs get a "Save" button (sent messages only). */ saveable?: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
   const all = attachments.filter(isImage);
   // GIFs play on their own, one each; stills share the grid.
   const moving = all.filter(isAnimated);
   const images = all.filter((a) => !isAnimated(a));
-  const files = attachments.filter((a) => !isImage(a));
+  // A video plays where it is (one from the camera, or any you attach).
+  const videos = attachments.filter(isVideo);
+  const files = attachments.filter((a) => !isImage(a) && !isVideo(a));
   if (!attachments.length) return null;
   return (
     <div className="mt-1 flex flex-col gap-1.5">
@@ -54,6 +60,17 @@ export function AttachmentList({ attachments, saveable }: { attachments: Attachm
       )}
       {moving.map((a) => (
         <AnimatedAttachment key={a.id} a={a} saveable={saveable} onOpen={() => setOpen(all.indexOf(a))} />
+      ))}
+      {videos.map((a) => (
+        <video
+          key={a.id}
+          src={a.url}
+          controls
+          playsInline
+          preload="metadata"
+          aria-label={a.filename}
+          className="max-h-[340px] w-fit max-w-[min(100%,420px)] rounded-xl bg-black"
+        />
       ))}
       {files.map((a) => (
         <a

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, BarChart3, CalendarPlus, Clapperboard, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
+import { AtSign, BarChart3, CalendarPlus, Camera, Clapperboard, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { crossApi, type ShareKind } from "@/api/crossapp";
@@ -22,6 +22,7 @@ import { AttachedPlace } from "./PlaceCard";
 import { useRoomFeatures } from "../features";
 import { canRecord } from "../voiceRecorder";
 import { PollSheet } from "./PollSheet";
+import { CameraView } from "./CameraView";
 import { VoiceButton } from "./VoiceButton";
 
 const MAX_FILE = 50 * 1024 * 1024;
@@ -81,6 +82,8 @@ export const Composer = forwardRef<
   const qc = useQueryClient();
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // The camera, one tap from a phone's composer (``CameraView``).
+  const [cameraOpen, setCameraOpen] = useState(false);
   const emojiBtn = useRef<HTMLButtonElement>(null);
   const [text, setText] = useState(() => getDraft(meId, roomId));
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -543,6 +546,24 @@ export const Composer = forwardRef<
               <Paperclip className="h-5 w-5" />
             </button>
           ))}
+        {/* Straight to the camera on a phone, as in Messenger: tap its
+            button for a photo, hold it for a video. This one folds away once
+            you start typing, so the words keep the room; "Camera" is under +
+            as well. */}
+        {!editing && isPhone && (
+          <button
+            type="button"
+            aria-label="Take a photo or video"
+            title="Camera"
+            data-testid="composer-camera"
+            tabIndex={text.trim() ? -1 : 0}
+            aria-hidden={text.trim() ? true : undefined}
+            onClick={() => setCameraOpen(true)}
+            className={cn(iconBtn, "overflow-hidden transition-[width,opacity] duration-150", text.trim() && "pointer-events-none !w-0 opacity-0")}
+          >
+            <Camera className="h-5 w-5 shrink-0" />
+          </button>
+        )}
         <input
           ref={fileInput}
           type="file"
@@ -553,6 +574,18 @@ export const Composer = forwardRef<
             e.target.value = "";
           }}
         />
+        {cameraOpen && (
+          <CameraView
+            roomId={roomId}
+            replyToId={replyTo?.id ?? null}
+            onClose={() => setCameraOpen(false)}
+            onSent={() => {
+              setCameraOpen(false);
+              onCancelReply();
+            }}
+            onGallery={() => fileInput.current?.click()}
+          />
+        )}
         <textarea
           ref={ta}
           rows={1}
@@ -564,7 +597,9 @@ export const Composer = forwardRef<
             thingMention.onSelect();
           }}
           onPaste={onPaste}
-          placeholder={editing ? "Edit your message" : attached || withPlace ? "Add a message (optional)" : placeholder}
+          // On a phone the row also holds the camera: "Message" fits on one line
+          // where "Message #general" wrapped. The header says where you are.
+          placeholder={editing ? "Edit your message" : attached || withPlace ? "Add a message (optional)" : isPhone ? "Message" : placeholder}
           aria-label={editing ? "Edit message" : attached ? "Message to send with it" : placeholder}
           enterKeyHint={isPhone ? "enter" : "send"}
           className="max-h-[40vh] min-h-[44px] flex-1 resize-none bg-transparent px-1 py-[11px] text-base leading-[22px] text-[var(--text)] !outline-none placeholder:text-[var(--text-muted)] md:min-h-[40px] md:py-[9px] md:text-sm"
@@ -638,6 +673,17 @@ export const Composer = forwardRef<
                   fileInput.current?.click();
                 }}
               />
+              {isPhone && (
+                <PlusRow
+                  icon={Camera}
+                  label="Camera"
+                  hint="Tap for a photo, hold for a video"
+                  onClick={() => {
+                    setPlusOpen(false);
+                    setCameraOpen(true);
+                  }}
+                />
+              )}
               {isPhone && (
                 <PlusRow
                   icon={Clapperboard}
