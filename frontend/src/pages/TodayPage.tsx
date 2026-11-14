@@ -112,11 +112,17 @@ export function TodayPage() {
         <div className="mx-auto w-full max-w-7xl px-4 py-5 md:py-8">
           <InstallNudge />
           {isLoading ? (
-            <div className="space-y-3">
-              <Skeleton className="h-10 w-64" />
-              <div className="grid gap-3 md:grid-cols-2">
+            <div aria-busy="true" aria-label="Loading your day">
+              <Skeleton className="h-8 w-64 md:h-9" />
+              <Skeleton className="mt-2 h-4 w-48" />
+              <div className="mb-4 mt-5 flex gap-2 overflow-hidden lg:gap-3">
                 {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-36 w-full" />
+                  <Skeleton key={i} className="h-[4.5rem] w-36 shrink-0 sm:w-auto sm:flex-1" />
+                ))}
+              </div>
+              <div className="columns-1 gap-3 md:columns-2 md:gap-4 xl:columns-3">
+                {[44, 36, 52, 36, 44, 28].map((h, i) => (
+                  <Skeleton key={i} className="mb-3 w-full break-inside-avoid md:mb-4" style={{ height: `${h * 4}px` }} />
                 ))}
               </div>
             </div>
@@ -508,7 +514,7 @@ function TasksCard({ tasks }: { tasks: NonNullable<TodayData["sections"]["tasks"
         label={`Mark "${t.title}" done`}
         onClick={() => void run(t.id, () => itemsApi.action(tasks.file_id, "complete_tasks", { tasks: [t.id] }), `Done: ${t.title}`)}
       />
-      <Link to={tasks.url} className="min-w-0 flex-1">
+      <Link to={t.url ?? tasks.url} className="min-w-0 flex-1">
         <span className="block truncate text-sm text-[var(--text)]">{t.title}</span>
         <span className={cn("block truncate text-xs", overdue ? "text-[var(--danger)]" : "text-[var(--text-muted)]")}>
           {[overdue && t.due ? `Due ${new Date(`${t.due}T12:00:00`).toLocaleDateString([], { day: "numeric", month: "short" })}` : "", t.time, t.list].filter(Boolean).join(" · ") || "Today"}

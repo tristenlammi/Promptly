@@ -27,6 +27,8 @@ export interface TodayTask {
   time: string | null;
   priority: number;
   list: string;
+  /** Straight to this task in the Tasks app. */
+  url?: string;
 }
 
 export interface TodayHabit {
@@ -98,6 +100,8 @@ export interface TodayScheduleItem {
   color?: string | null;
   done: boolean;
   due?: boolean;
+  /** An event with a place: open it in P Maps. */
+  directions?: string | null;
 }
 
 /** Something that needs you now. */
@@ -118,6 +122,11 @@ export interface TodayComing {
   title: string;
   url: string;
   color?: string | null;
+  /** An event that runs past its first day: the day it ends, and how many nights. */
+  until?: string | null;
+  nights?: number;
+  location?: string;
+  directions?: string | null;
 }
 
 export interface TodayNoteCard {
@@ -210,6 +219,8 @@ export interface TodayHub {
   maps?: {
     next: { title: string; place: string; minutes: number; km: number; leave_by: string; leave_by_label: string; soon: boolean; url: string; traffic?: boolean; adds?: number; warning?: string | null } | null;
     parked: { at: string; url: string } | null;
+    /** People sharing a trip with you right now: when they arrive, never where they are. */
+    arriving?: { user_id: string; name: string; destination: string | null; eta: string | null; minutes: number | null; url: string }[];
   };
   trip?: {
     file_id: string;
@@ -259,7 +270,7 @@ export interface TodayData {
   greeting: string;
   sections: TodaySections & TodayHub;
   morning: MorningSummary;
-  schedule: { items: TodayScheduleItem[]; all_day: { kind: string; title: string; url: string; color?: string | null; done?: boolean }[] };
+  schedule: { items: TodayScheduleItem[]; all_day: { kind: string; title: string; url: string; color?: string | null; done?: boolean; directions?: string | null }[] };
   attention: TodayAttention[];
   coming: TodayComing[];
   progress: { done: number; total: number; pct: number } | null;

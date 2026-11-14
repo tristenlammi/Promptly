@@ -21,6 +21,23 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Today: someone sharing their trip with you shows under "Needs you" and on the Getting there card ("Sam arrives in 12 min"). When they arrive, never where they are.
+- Today: a trip or stay on your calendar is called out a day or two before it starts ("Nelly starts tomorrow · 2 nights"), and email waiting for a reply is under "Needs you" with who it's from.
+- Today: an event with a place has a Directions button on the schedule, and Coming up includes your next planned workouts.
+
+### Changed
+
+- Today: tasks open the task itself, not just the list, from the Tasks card, the schedule and Coming up.
+- Today: an event that runs over several days is one line in Coming up ("Nelly · until Tuesday") instead of a line for every day, and while you're there it sits at the top of the schedule as "until Tuesday" rather than repeating its start time.
+- Today: a bill under "Needs you" says which day it's due ("due tomorrow", "due Monday") instead of "due soon"; messages from several people name them.
+- Today on a phone: "Needs you" shows the first three, with a button for the rest, so the day isn't pushed off the screen. The loading outline now matches the page, so it doesn't jump when your day arrives.
+
+### Fixed
+
+- Today, the Today widget, "Read me my day" and the Journal's day strip: an all-day event showed on two days if you live far from UTC (in Brisbane, on its own day and again the next morning). All-day events are now on their own day wherever you are.
+
 ## [0.40.2] - 2026-11-13
 
 ### Fixed

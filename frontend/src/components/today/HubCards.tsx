@@ -223,11 +223,19 @@ const ATTENTION_ICON: Record<string, LucideIcon> = {
   person: Cake,
   message: MessageCircle,
   automation: Workflow,
+  leave: Navigation,
+  arriving: Navigation,
+  trip: Plane,
+  mail: Mail,
 };
+
+const ATTENTION_ON_PHONE = 3;
 
 /** What needs you now, most pressing first. Hidden when nothing does. */
 export function AttentionStrip({ items }: { items: TodayAttention[] }) {
   const navigate = useNavigate();
+  // On a phone the first few show, so the day itself isn't pushed off the screen.
+  const [all, setAll] = useState(false);
   if (!items.length) return null;
   const go = (a: TodayAttention) => {
     const here = a.anchor && document.getElementById(`today-${a.anchor}`);
@@ -245,7 +253,8 @@ export function AttentionStrip({ items }: { items: TodayAttention[] }) {
             role="listitem"
             onClick={() => go(a)}
             className={cn(
-              "inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-left text-sm transition hover:brightness-110",
+              "min-w-0 max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-left text-sm transition hover:brightness-110",
+              i >= ATTENTION_ON_PHONE && !all ? "hidden sm:inline-flex" : "inline-flex",
               a.level === "danger" && "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--text)]",
               a.level === "warn" && "border-amber-500/40 bg-amber-500/10 text-[var(--text)]",
               a.level === "info" && "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
@@ -257,6 +266,11 @@ export function AttentionStrip({ items }: { items: TodayAttention[] }) {
           </button>
         );
       })}
+      {items.length > ATTENTION_ON_PHONE && !all && (
+        <button type="button" onClick={() => setAll(true)} className="inline-flex items-center rounded-full border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--accent-text)] sm:hidden">
+          {items.length - ATTENTION_ON_PHONE} more
+        </button>
+      )}
     </div>
   );
 }
@@ -336,8 +350,8 @@ export function ScheduleCard({ data }: { data: TodayData }) {
   const row = (i: TodayScheduleItem, key: number) => {
     const Icon = SCHEDULE_ICON[i.kind] ?? CalendarDays;
     return (
-      <li key={`${i.kind}-${i.time}-${key}`}>
-        <Link to={i.url} className="flex items-center gap-2.5 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+      <li key={`${i.kind}-${i.time}-${key}`} className="flex items-center gap-1">
+        <Link to={i.url} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
           <span className={cn("w-[3.75rem] shrink-0 text-right text-xs tabular-nums", i.due ? "font-semibold text-[var(--danger)]" : "text-[var(--text-muted)]")}>{hhmm(i.time)}</span>
           <span
             className={cn(
@@ -356,6 +370,16 @@ export function ScheduleCard({ data }: { data: TodayData }) {
           </span>
           {i.due && <span className="shrink-0 rounded-full bg-[var(--danger-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]">Due</span>}
         </Link>
+        {i.directions && !i.done && (
+          <Link
+            to={i.directions}
+            aria-label={`Directions to ${i.title}`}
+            title="Directions"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--accent-text)] hover:bg-[var(--hover)]"
+          >
+            <Navigation className="h-4 w-4" />
+          </Link>
+        )}
       </li>
     );
   };
@@ -697,6 +721,19 @@ export function BudgetCard({ b, today }: { b: NonNullable<Sections["budget"]>; t
 export function MapsCard({ m }: { m: NonNullable<Sections["maps"]> }) {
   return (
     <HubCard icon={Navigation} title="Getting there" to="/maps" open="Open maps">
+      {(m.arriving ?? []).map((a) => (
+        <Link key={a.user_id} to={a.url} className="flex items-center gap-2.5 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-text)]">
+            <Navigation className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-[var(--text)]">
+              {a.name} {a.minutes == null ? "is on the way" : a.minutes === 0 ? "is arriving" : `arrives in ${a.minutes} min`}
+            </span>
+            {a.destination && <span className="block truncate text-xs text-[var(--text-muted)]">Going to {a.destination}</span>}
+          </span>
+        </Link>
+      ))}
       {m.next && (
         <Link to={m.next.url} className="block rounded-lg px-1 py-1 hover:bg-[var(--hover)]">
           <span className="flex items-baseline gap-2">
@@ -926,6 +963,7 @@ const COMING_ICON: Record<string, LucideIcon> = {
   shift: Clock,
   trip: Plane,
   task: ListChecks,
+  workout: Dumbbell,
 };
 
 export function ComingCard({ coming, today }: { coming: TodayComing[]; today: string }) {
@@ -951,7 +989,10 @@ export function ComingCard({ coming, today }: { coming: TodayComing[]; today: st
                     <li key={i}>
                       <Link to={r.url} className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-[var(--hover)]">
                         <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" style={r.color ? { color: r.color } : undefined} />
-                        <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{r.title}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">
+                          {r.title}
+                          {r.until ? <span className="text-[var(--text-muted)]"> · until {dayName(r.until, today)}</span> : null}
+                        </span>
                         {r.time && <span className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]">{hhmm(r.time)}</span>}
                       </Link>
                     </li>

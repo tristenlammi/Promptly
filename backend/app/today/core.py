@@ -64,18 +64,79 @@ def item_url(kind: str, file_id: uuid.UUID | str, extra: str = "") -> str:
 # ------------------------------------------------------------------ events
 
 
-async def events_on(db: AsyncSession, user: User, day: date, tz: ZoneInfo, limit: int = 50) -> list[dict]:
-    """Your events on ``day`` — not free/busy-only ones (someone else's
+def directions_url(location: str) -> str:
+    """Open this place in P Maps (its place panel has Directions)."""
+    from urllib.parse import quote
+
+    return f"/maps?q={quote(location.strip()[:200])}"
+
+
+def _local_day(iso: str, tz: ZoneInfo) -> date | None:
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(tz).date()
+    except ValueError:
+        return None
+
+
+def event_days(o: dict, tz: ZoneInfo) -> tuple[date, date] | None:
+    """The first and last calendar day an occurrence is on, for this person.
+
+    An all-day event is whole dates, the same in every time zone (the
+    calendar stores them at UTC midnight, so they must not be turned into
+    local instants: in Brisbane that put one day's event on two days). A
+    timed event is on the local days it runs across; one ending exactly at
+    midnight doesn't count the next day."""
+    if o.get("all_day"):
+        try:
+            first = date.fromisoformat(str(o["start"])[:10])
+            last = date.fromisoformat(str(o.get("end") or o["start"])[:10])
+        except ValueError:
+            return None
+        return first, max(first, last)
+    first = _local_day(str(o["start"]), tz)
+    if first is None:
+        return None
+    last = first
+    try:
+        end = datetime.fromisoformat(str(o.get("end") or "").replace("Z", "+00:00")).astimezone(tz)
+        last = max(first, (end - timedelta(seconds=1)).date())
+    except ValueError:
+        pass
+    return first, last
+
+
+async def occurrences_between(db: AsyncSession, user: User, first: date, last: date, tz: ZoneInfo) -> list[tuple[dict, date, date]]:
+    """Your events on any day from ``first`` to ``last`` (each occurrence
+    once, with the days it's on) — not free/busy-only ones (someone else's
     time), not hidden ones (``occurrences_out`` drops those), not ones you
-    declined."""
+    declined. One query for the whole range."""
     from app.calendars import core as cal
 
-    start, end = day_bounds(day, tz)
+    # A day wider each side: all-day events sit at UTC midnight, outside the
+    # local window when you're far from UTC. ``event_days`` then decides.
+    start = day_bounds(first - timedelta(days=1), tz)[0]
+    end = day_bounds(last + timedelta(days=1), tz)[1]
     events = await cal.visible_events(db, user, start, end)
     out = []
     for o in await cal.occurrences_out(db, user, events, start, end):
         if o.get("busy_only") or o.get("my_status") == "declined":
             continue
+        days = event_days(o, tz)
+        if days is None or days[1] < first or days[0] > last:
+            continue
+        out.append((o, days[0], days[1]))
+    return out
+
+
+async def events_on(db: AsyncSession, user: User, day: date, tz: ZoneInfo, limit: int = 50) -> list[dict]:
+    """Your events on ``day`` (see :func:`occurrences_between`).
+
+    ``continues``: it started on an earlier day (a stay, a conference), so
+    its start time isn't a time today. ``last_day``: the day it runs to,
+    when that's after today."""
+    out = []
+    for o, first, last in await occurrences_between(db, user, day, day, tz):
+        location = o.get("location") or ""
         out.append(
             {
                 "id": o["id"],
@@ -84,9 +145,12 @@ async def events_on(db: AsyncSession, user: User, day: date, tz: ZoneInfo, limit
                 "start": o["start"],
                 "end": o["end"],
                 "all_day": o["all_day"],
-                "location": o.get("location") or "",
+                "location": location,
                 "color": o.get("color"),
                 "url": f"/calendar?event={o['event_id']}",
+                "directions": directions_url(location) if location.strip() else None,
+                "continues": first < day,
+                "last_day": last.isoformat() if last > day else None,
             }
         )
     # All-day first, then by time.
@@ -185,6 +249,8 @@ def tasks_section(file_id: uuid.UUID, data: dict, today: date) -> dict:
             "time": t.get("time"),
             "priority": t.get("priority", 0),
             "list": L.list_name(data, t.get("list_id", "inbox")) if t.get("list_id", "inbox") != "inbox" else "",
+            # Straight to this task, not just the list.
+            "url": item_url("tasks", file_id, f"?task={t['id']}"),
         }
 
     return {
@@ -478,6 +544,6 @@ async def build(db: AsyncSession, user: User, now: datetime | None = None, *, ph
 
 
 __all__ = [
-    "build", "day_bounds", "events_on", "greeting", "local_clock", "on_this_day", "photos_taken_on",
+    "build", "day_bounds", "directions_url", "event_days", "events_on", "occurrences_between", "greeting", "local_clock", "on_this_day", "photos_taken_on",
     "rooms_unread", "tasks_section", "habits_section", "workout_section", "meals_section", "zone_of",
 ]

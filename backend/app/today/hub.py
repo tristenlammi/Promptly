@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 
-from .core import _primary, events_on, item_url, local_clock
+from .core import _primary, directions_url, item_url, local_clock, occurrences_between
 
 logger = logging.getLogger("promptly.today.hub")
 
@@ -32,6 +32,9 @@ WEIGHT_TREND_DAYS = 30
 TREND_DAYS = 14
 PEOPLE_DAYS = 14
 MAX_COMING = 16
+# A trip or stay on your calendar (it runs overnight) is called out this many
+# days ahead.
+STAY_DAYS = 2
 
 # Apps a person could add for more on this page, in the order worth suggesting.
 DISCOVER = (
@@ -371,12 +374,20 @@ def build_schedule(sec: dict, today: date, tz: ZoneInfo) -> dict:
     """Today, in time order, whichever app each thing lives in."""
     items: list[dict] = []
     all_day: list[dict] = []
+    going = (sec.get("maps") or {}).get("next") or {}
     for e in (sec.get("events") or {}).get("events", []):
-        if e.get("all_day"):
-            all_day.append({"kind": "event", "title": e["title"], "url": e["url"], "color": e.get("color")})
+        # The route Today already worked out for the next event, else a search for the place.
+        directions = going.get("url") if (going.get("title"), going.get("place")) == (e["title"], e.get("location")) else e.get("directions")
+        if e.get("all_day") or e.get("continues"):
+            # Something that began on an earlier day (a stay) has no time today.
+            until = _day_word(e["last_day"], today) if e.get("last_day") else ""
+            all_day.append({"kind": "event", "title": e["title"] + (f" · until {until}" if until else ""), "url": e["url"], "color": e.get("color"),
+                            "directions": directions})
         else:
-            items.append({"time": local_clock(e["start"], tz), "end": local_clock(e["end"], tz) if e.get("end") else None, "kind": "event",
-                          "title": e["title"], "detail": e.get("location") or "", "url": e["url"], "color": e.get("color"), "done": False})
+            ends_today = not e.get("last_day")
+            items.append({"time": local_clock(e["start"], tz), "end": local_clock(e["end"], tz) if e.get("end") and ends_today else None, "kind": "event",
+                          "title": e["title"], "detail": e.get("location") or "", "url": e["url"], "color": e.get("color"), "done": False,
+                          "directions": directions})
     h = sec.get("health")
     if h:
         for d in h["doses"]:
@@ -392,7 +403,7 @@ def build_schedule(sec: dict, today: date, tz: ZoneInfo) -> dict:
     if t:
         for x in t["today"]:
             if x.get("time"):
-                items.append({"time": x["time"], "kind": "task", "title": x["title"], "detail": x.get("list") or "", "url": t["url"], "done": False,
+                items.append({"time": x["time"], "kind": "task", "title": x["title"], "detail": x.get("list") or "", "url": x.get("url") or t["url"], "done": False,
                               "task_id": x["id"], "file_id": t["file_id"]})
     w = sec.get("workout")
     if w:
@@ -420,12 +431,31 @@ def build_schedule(sec: dict, today: date, tz: ZoneInfo) -> dict:
     return {"items": items, "all_day": all_day}
 
 
-def build_attention(sec: dict, today: date) -> list[dict]:
+def _day_word(day: str, today: date) -> str:
+    """"today", "tomorrow", else the weekday ("Sunday"), else the date."""
+    try:
+        d = date.fromisoformat(day[:10])
+    except ValueError:
+        return ""
+    n = (d - today).days
+    if n == 0:
+        return "today"
+    if n == 1:
+        return "tomorrow"
+    return f"{d:%A}" if 1 < n < 7 else f"{d.day} {d:%b}"
+
+
+def build_attention(sec: dict, today: date, coming: list[dict] | None = None) -> list[dict]:
     """What needs you now, most pressing first."""
     out: list[dict] = []
     trip = (sec.get("maps") or {}).get("next")
     if trip and trip.get("soon"):
         out.append({"kind": "leave", "level": "warn", "title": f"Leave by {trip['leave_by_label']} for {trip['title']}", "detail": trip.get("warning") or f"{trip['minutes']} min drive", "url": trip["url"]})
+    for a in (sec.get("maps") or {}).get("arriving") or []:
+        mins = a.get("minutes")
+        out.append({"kind": "arriving", "level": "info",
+                    "title": f"{a['name']} arrives in {mins} min" if mins else (f"{a['name']} is arriving" if mins == 0 else f"{a['name']} is on the way"),
+                    "detail": a.get("destination") or "", "url": a.get("url") or "/maps"})
     h = sec.get("health")
     if h and h["doses_due"]:
         names = [d["name"] for d in h["doses"] if d["state"] == "due"]
@@ -444,7 +474,7 @@ def build_attention(sec: dict, today: date) -> list[dict]:
         soon = (today + timedelta(days=2)).isoformat()
         for bill in b["bills"]:
             if bill["date"] <= soon:
-                when = "today" if bill["date"] == today.isoformat() else "soon"
+                when = _day_word(bill["date"], today) or "soon"
                 out.append({"kind": "bill", "level": "warn", "title": f"{bill['name']} due {when}", "detail": bill["amount"], "url": b["url"]})
         if b["overspent"]:
             n = len(b["overspent"])
@@ -455,12 +485,24 @@ def build_attention(sec: dict, today: date) -> list[dict]:
         for x in p["dates"]:
             if x["in_days"] == 0:
                 out.append({"kind": "person", "level": "info", "title": f"{x['name']}'s {x['label'].lower()} today", "detail": f"turns {x['turns']}" if x.get("turns") else "", "url": x["url"]})
+    # A trip or stay on your calendar that starts in the next couple of days.
+    for c in coming or []:
+        if c.get("kind") == "event" and c.get("nights") and (date.fromisoformat(c["date"]) - today).days <= STAY_DAYS:
+            n = c["nights"]
+            out.append({"kind": "trip", "level": "info", "title": f"{c['title']} starts {_day_word(c['date'], today)}",
+                        "detail": " · ".join(x for x in (f"{n} night{'' if n == 1 else 's'}", c.get("location") or "") if x), "url": c["url"]})
     r = sec.get("rooms")
     if r:
         dms = [x for x in r["rooms"] if x["dm"]]
         if dms:
-            out.append({"kind": "message", "level": "info", "title": f"Message from {dms[0]['name']}" if len(dms) == 1 else f"Messages from {len(dms)} people",
-                        "detail": "", "url": dms[0]["url"] if len(dms) == 1 else r["url"]})
+            names = [x["name"] for x in dms]
+            out.append({"kind": "message", "level": "info", "title": f"Message from {names[0]}" if len(dms) == 1 else f"Messages from {len(dms)} people",
+                        "detail": "" if len(dms) == 1 else ", ".join(names[:3]), "url": dms[0]["url"] if len(dms) == 1 else r["url"]})
+    m = sec.get("mail")
+    if m and m.get("needs_reply"):
+        n, first = m["needs_reply"], (m.get("items") or [{}])[0]
+        out.append({"kind": "mail", "level": "info", "title": f"{first.get('from') or 'An email'} is waiting for a reply" if n == 1 else f"{n} emails are waiting for a reply",
+                    "detail": first.get("subject") or "", "url": (first.get("url") if n == 1 else None) or m["url"]})
     a = sec.get("automations")
     if a and a["failed_24h"]:
         n = a["failed_24h"]
@@ -468,14 +510,23 @@ def build_attention(sec: dict, today: date) -> list[dict]:
     return out[:8]
 
 
-async def build_coming(db: AsyncSession, user: User, sec: dict, tasks_data: dict | None, today: date, tz: ZoneInfo) -> list[dict]:
+async def build_coming(
+    db: AsyncSession, user: User, sec: dict, tasks_data: dict | None, today: date, tz: ZoneInfo,
+    workouts: list[dict] | None = None, workout_url: str = "",
+) -> list[dict]:
     """The next week across the apps: events, appointments, birthdays, bills,
-    shifts, tasks and the trip, by day."""
+    shifts, tasks, workouts and the trip, by day."""
     rows: list[dict] = []
-    for i in range(1, COMING_DAYS + 1):
-        day = today + timedelta(days=i)
-        for e in await events_on(db, user, day, tz, limit=8):
-            rows.append({"date": day.isoformat(), "time": None if e.get("all_day") else local_clock(e["start"], tz), "kind": "event", "title": e["title"], "url": e["url"], "color": e.get("color")})
+    # One query for the week. Each event shows once, on the day it starts (a
+    # three-day stay is one line saying how long, not three lines).
+    for o, first, last in await occurrences_between(db, user, today + timedelta(days=1), today + timedelta(days=COMING_DAYS), tz):
+        if first <= today:
+            continue  # already under way: it's on today's schedule
+        location = (o.get("location") or "").strip()
+        rows.append({"date": first.isoformat(), "time": None if o.get("all_day") else local_clock(o["start"], tz), "kind": "event",
+                     "title": o["title"] or "Untitled event", "url": f"/calendar?event={o['event_id']}", "color": o.get("color"),
+                     "until": last.isoformat() if last > first else None, "nights": (last - first).days, "location": location,
+                     "directions": directions_url(location) if location else None})
     end = (today + timedelta(days=COMING_DAYS)).isoformat()
     t0 = today.isoformat()
     in_range = lambda d: d and t0 < d <= end  # noqa: E731
@@ -498,7 +549,10 @@ async def build_coming(db: AsyncSession, user: User, sec: dict, tasks_data: dict
     if ts and tasks_data:
         for t in tasks_data.get("tasks", []):
             if not t.get("done") and in_range(t.get("due")):
-                rows.append({"date": t["due"], "time": t.get("time"), "kind": "task", "title": t["title"], "url": ts["url"]})
+                rows.append({"date": t["due"], "time": t.get("time"), "kind": "task", "title": t["title"], "url": f"{ts['url']}?task={t['id']}"})
+    for s in workouts or []:
+        if s.get("status") == "planned" and in_range(s.get("date")):
+            rows.append({"date": s["date"], "time": s.get("time"), "kind": "workout", "title": s.get("name") or "Workout", "url": workout_url})
     rows.sort(key=lambda r: (r["date"], r["time"] or "99:99", r["title"]))
     return rows[:MAX_COMING]
 
@@ -599,6 +653,16 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
             sec["maps"] = m
     except Exception:  # noqa: BLE001
         logger.exception("today maps section failed")
+    # Someone sharing their trip with you: who, and when they get there. The
+    # same rows as Maps → People (no position), on the same card.
+    try:
+        from app.widgets.glance import trips as shared_trips
+
+        arriving = await shared_trips(db, user, now)
+        if arriving:
+            sec.setdefault("maps", {"next": None, "parked": None})["arriving"] = arriving
+    except Exception:  # noqa: BLE001
+        logger.exception("today arriving section failed")
     # Notes (app/notes): pinned notes and voice notes still being transcribed.
     try:
         from app.notes.today import section as notes_section
@@ -641,12 +705,16 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
     found = await _primary(db, user, "tasks")
     tasks_data = found[1].data if found else None
     out["schedule"] = build_schedule(sec, today, tz)
-    out["attention"] = build_attention(sec, today)
     try:
-        out["coming"] = await build_coming(db, user, sec, tasks_data, today, tz)
+        wk = await _primary(db, user, "workout")
+        out["coming"] = await build_coming(
+            db, user, sec, tasks_data, today, tz,
+            workouts=(wk[1].data or {}).get("planned") if wk else None, workout_url=item_url("workout", wk[0].id) if wk else "",
+        )
     except Exception:  # noqa: BLE001
         logger.exception("today coming-up failed")
         out["coming"] = []
+    out["attention"] = build_attention(sec, today, out["coming"])
     out["progress"] = build_progress(sec, tasks_data, today)
     try:
         have = await service.installed_kinds(db, user)
