@@ -81,8 +81,23 @@ SETTINGS: dict[str, Bool | Int | Choice] = {
     # ---- Custom emoji ----
     "emoji_max_per_space": Int(100, 0, 500),
     "emoji_max_kb": Int(512, 32, 2048),
-    # ---- Add new settings below this line (voice messages, polls,
-    #      read receipts…). See the three steps at the top of this file. ----
+    # ---- Messages ----
+    # Sent / Delivered / Seen in conversations (``receipts.py``).
+    "read_receipts": Bool(True),
+    # The notification level a person starts with in a space they make or
+    # are added to (``receipts.server``).
+    "default_notify": Choice("all", ("all", "mentions", "none")),
+    # Voice messages, and how long one may be (``features.py``).
+    "voice_messages": Bool(True),
+    "voice_max_seconds": Int(600, 10, 3600),
+    # Their words underneath. local: only when this server's own
+    # speech-to-text is set up (recordings never leave it). cloud: also
+    # with a cloud speech-to-text service, which is then sent every
+    # recording. off: never. No language model is involved either way.
+    "voice_transcripts": Choice("local", ("local", "cloud", "off")),
+    "polls": Bool(True),
+    # ---- Add new settings below this line. See the three steps at the top
+    #      of this file. ----
 }
 
 

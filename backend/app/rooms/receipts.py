@@ -245,13 +245,11 @@ async def clear_elsewhere(user_id: uuid.UUID, room_id: uuid.UUID, seq: int) -> i
 
 
 async def server(db: AsyncSession) -> tuple[bool, str]:
-    """``(read receipts on, the level a person starts a space with)``: the
-    admin's two Rooms settings (``app_settings.rooms_read_receipts``,
-    ``rooms_default_notify``). A server without the row has them on / "all"."""
-    from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+    """``(read receipts on, the level a person starts a space with)``: two of
+    the admin's Rooms settings (Admin → Rooms; ``settings.py``
+    ``read_receipts`` and ``default_notify``)."""
+    from . import settings
 
-    row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if row is None:
-        return True, "all"
-    start = row.rooms_default_notify if row.rooms_default_notify in core.NOTIFY else "all"
-    return bool(row.rooms_read_receipts), start
+    s = await settings.load(db)
+    start = s["default_notify"] if s["default_notify"] in core.NOTIFY else "all"
+    return bool(s["read_receipts"]), start

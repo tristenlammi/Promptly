@@ -240,9 +240,8 @@ export function NotificationsPanel() {
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold">Notifications</h2>
           <p className="text-xs text-[var(--text-muted)]">
-            Get a native PWA notification when long-running tasks finish
-            — exam grading, PDF exports, bulk imports, or a shared
-            conversation update.
+            Messages, calls, reminders and finished jobs (an export, an
+            import) can reach this device even when Promptly is closed.
           </p>
         </div>
       </header>

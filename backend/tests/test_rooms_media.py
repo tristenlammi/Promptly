@@ -104,6 +104,30 @@ async def test_bad_settings_are_refused(client, db, people):  # noqa: F811
         assert r.status_code == 400, (bad, r.text)
 
 
+async def test_the_admin_page_changes_every_message_setting(client, db, people):  # noqa: F811
+    """The switches other parts of Rooms read (receipts, voice messages,
+    polls) are the same settings the admin page saves."""
+    from app.rooms import features, receipts
+
+    admin = await mk_admin(db)
+    got = (await client.get("/api/admin/rooms/settings", headers=H(admin))).json()
+    assert got["settings"]["read_receipts"] is True
+    assert got["settings"]["voice_transcripts"] == "local" and got["kinds"]["voice_max_seconds"] == {"kind": "int", "default": 600, "min": 10, "max": 3600}
+    r = await client.patch(
+        "/api/admin/rooms/settings",
+        headers=H(admin),
+        json={"settings": {"read_receipts": False, "default_notify": "mentions", "voice_messages": False, "voice_max_seconds": 90, "voice_transcripts": "off", "polls": False}},
+    )
+    assert r.status_code == 200, r.text
+    assert await receipts.server(db) == (False, "mentions")
+    f = await features.load(db)
+    assert (f.voice_messages, f.voice_max_seconds, f.voice_transcripts, f.polls) == (False, 90, False, False)
+    ann = people[0]
+    assert (await client.get("/api/rooms/bootstrap", headers=H(ann))).json()["features"] == {"voice_messages": False, "voice_max_seconds": 90, "polls": False}
+    for bad in ({"voice_max_seconds": 5}, {"voice_transcripts": "yes"}, {"default_notify": "loud"}):
+        assert (await client.patch("/api/admin/rooms/settings", headers=H(admin), json={"settings": bad})).status_code == 400
+
+
 async def test_the_page_learns_about_gif_search_only_while_its_on(client, db, people):  # noqa: F811
     ann, *_ = people
     boot = (await client.get("/api/rooms/bootstrap", headers=H(ann))).json()

@@ -167,15 +167,6 @@ class AppSettings(Base):
     # Notes: transcribe voice notes. Unset: on with the server's own Whisper,
     # off with cloud speech-to-text until the admin agrees (app/notes/transcription.py).
     notes_transcribe: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Rooms (0466): voice messages and polls, for the whole server
-    # (app/rooms/features.py). Voice messages: on or off, and how long one
-    # may be, in seconds. Their transcripts: unset follows the same rule as
-    # voice notes (on with the server's own Whisper, off with cloud
-    # speech-to-text until the admin agrees); True/False is the admin's say.
-    rooms_voice_messages: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    rooms_voice_max_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=600, server_default="600")
-    rooms_voice_transcripts: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    rooms_polls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     # ----- Public origins (replaces the old static .env ALLOWED_ORIGINS) -----
     # JSON array of fully-qualified origins (scheme + host [+ :port]) the
@@ -392,12 +383,6 @@ class AppSettings(Base):
     porch_user_group_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     porch_video_max_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300, server_default="300")
     porch_video_max_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=1024, server_default="1024")
-
-    # ----- Rooms (0470, app/rooms/receipts.py) -----
-    # Sent / Delivered / Seen in conversations, for the whole server; and the
-    # notification level a person starts with in a space they join.
-    rooms_read_receipts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    rooms_default_notify: Mapped[str] = mapped_column(String(8), nullable=False, default="all", server_default="all")
 
     # ----- Bookkeeping -----
     created_at: Mapped[datetime] = mapped_column(

@@ -41,6 +41,7 @@ object NativePush {
     private const val KEY_VAPID = "vapid"
     private const val KEY_AT = "registered_at"
     private const val KEY_SENT = "sent"
+    private const val KEY_VERSION = "version"
 
     /** Ask Google's push service again this often, in case the address moved. */
     private val AGAIN_MS = TimeUnit.HOURS.toMillis(24)
@@ -83,7 +84,10 @@ object NativePush {
             }
             return
         }
+        // An updated app tells the server straight away: what it's sent
+        // (a silent "clear", say) depends on the version it knows.
         val fresh = p.getString(KEY_SERVER, null) == account.server && p.getBoolean(KEY_SENT, false) &&
+            p.getString(KEY_VERSION, null) == BuildConfig.VERSION_NAME &&
             System.currentTimeMillis() - p.getLong(KEY_AT, 0) < AGAIN_MS
         if (fresh && !force) return
         if (!playServices(app)) {
@@ -135,6 +139,7 @@ object NativePush {
         try {
             Maps.send(app, "POST", "/api/notifications/native", body, timeoutSeconds = 30)
             p.edit().putString(KEY_ENDPOINT, endpoint.url).putBoolean(KEY_SENT, true)
+                .putString(KEY_VERSION, BuildConfig.VERSION_NAME)
                 .putLong(KEY_AT, System.currentTimeMillis()).apply()
             Log.i(TAG, "the server has this phone's address")
         } catch (e: Exception) {

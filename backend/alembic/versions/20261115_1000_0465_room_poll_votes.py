@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0465_room_poll_votes"
-down_revision = "0455_push_covered_by"
+down_revision = "0460_rooms_media"
 branch_labels = None
 depends_on = None
 

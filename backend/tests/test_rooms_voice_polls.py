@@ -39,14 +39,16 @@ async def _voice(client, u, room, data: bytes, *, duration_ms=2000, **kw):
 
 
 async def _settings(db, **values):
-    from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+    """Admin → Rooms settings (``rooms/settings.py``), by their old names."""
+    from app.rooms import settings
 
-    row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if row is None:
-        row = AppSettings(id=SINGLETON_APP_SETTINGS_ID)
-        db.add(row)
+    patch = {}
     for k, v in values.items():
-        setattr(row, k, v)
+        k = k.removeprefix("rooms_")
+        if k == "voice_transcripts":
+            v = {True: "cloud", False: "off", None: "local"}[v]
+        patch[k] = v
+    await settings.save(db, patch)
     await db.commit()
 
 

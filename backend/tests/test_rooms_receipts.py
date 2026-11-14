@@ -178,13 +178,9 @@ async def test_someone_outside_cant_mark_or_see(client, db, people):  # noqa: F8
 
 
 async def test_the_server_can_turn_receipts_off(client, db, people, events):  # noqa: F811
-    from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+    from app.rooms import settings
 
-    row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if row is None:
-        row = AppSettings(id=SINGLETON_APP_SETTINGS_ID)
-        db.add(row)
-    row.rooms_read_receipts = False
+    await settings.save(db, {"read_receipts": False})
     await db.commit()
     ann, bob, *_ = people
     dm = await _dm(client, ann, bob)
@@ -278,13 +274,9 @@ async def test_a_muted_conversation_doesnt_count(client, db, people, monkeypatch
 
 
 async def test_new_members_start_on_the_servers_level(client, db, people):  # noqa: F811
-    from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+    from app.rooms import settings
 
-    row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if row is None:
-        row = AppSettings(id=SINGLETON_APP_SETTINGS_ID)
-        db.add(row)
-    row.rooms_default_notify = "mentions"
+    await settings.save(db, {"default_notify": "mentions"})
     await db.commit()
     ann, bob, *_ = people
     await make_space(client, ann, bob)

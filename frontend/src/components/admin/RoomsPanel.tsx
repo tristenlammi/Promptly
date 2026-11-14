@@ -100,6 +100,33 @@ const ROWS: Row[] = [
   { key: "link_previews", card: "links", label: "Show a preview for links", help: "Off: links are just links. Previews already shown stay until their message is edited." },
   { key: "emoji_max_per_space", card: "emoji", label: "Most emoji a space can have", unit: "emoji" },
   { key: "emoji_max_kb", card: "emoji", label: "Largest emoji file", unit: "KB" },
+  {
+    key: "read_receipts",
+    card: "messages",
+    label: "Show Sent, Delivered and Seen in conversations",
+    help: "Off: nobody on this server sees whether their message was delivered or read. Space rooms never show this.",
+  },
+  {
+    key: "default_notify",
+    card: "messages",
+    label: "Notifications in a space someone has just joined",
+    choiceLabels: { all: "Every message", mentions: "Only when they're mentioned", none: "Nothing" },
+    help: "Where each person starts. They can change it for themselves, and spaces they're already in stay as they are.",
+  },
+  { key: "voice_messages", card: "messages", label: "Voice messages", help: "Off: the microphone button is hidden and none can be sent. Ones already sent still play." },
+  { key: "voice_max_seconds", card: "messages", label: "Longest voice message", unit: "seconds" },
+  {
+    key: "voice_transcripts",
+    card: "messages",
+    label: "Write out what a voice message says",
+    choiceLabels: {
+      local: "Only with this server's own speech-to-text",
+      cloud: "Also with a cloud speech-to-text service",
+      off: "Never",
+    },
+    help: "The words appear under the recording and can be searched. With this server's own speech-to-text, recordings never leave it. If you allow a cloud service, every voice message is sent to that company to be written out. Nothing is written out if no speech-to-text is set up.",
+  },
+  { key: "polls", card: "messages", label: "Polls", help: "Off: nobody can ask a new poll. Polls already asked can still be voted on." },
   // ── Add new rows here (see the note at the top of this file). ──
 ];
 

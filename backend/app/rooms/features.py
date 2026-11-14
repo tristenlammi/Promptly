@@ -1,5 +1,6 @@
-"""Rooms' server-wide switches (``app_settings.rooms_*``): what the admin
-has turned on for everyone. Read on each use, so a change applies at once."""
+"""Rooms' server-wide switches for voice messages and polls: what the admin
+has turned on for everyone (Admin → Rooms; stored with the rest of Rooms'
+settings, ``settings.py``). Read on each use, so a change applies at once."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,8 +16,8 @@ VOICE_DEFAULT_S = 600
 class Features:
     voice_messages: bool = True
     voice_max_seconds: int = VOICE_DEFAULT_S
-    # The admin's say on transcripts: None follows the server's default
-    # (``app.notes.transcription.config``).
+    # The admin's say on transcripts: None is "with this server's own
+    # speech-to-text only", True allows a cloud service too, False is never.
     voice_transcripts: bool | None = None
     polls: bool = True
 
@@ -26,20 +27,16 @@ class Features:
 
 
 async def load(db: AsyncSession) -> Features:
-    from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+    from . import settings
 
-    row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if row is None:
-        return Features()
-    try:
-        secs = int(getattr(row, "rooms_voice_max_seconds", None) or VOICE_DEFAULT_S)
-    except (TypeError, ValueError):
-        secs = VOICE_DEFAULT_S
+    s = await settings.load(db)
     return Features(
-        voice_messages=getattr(row, "rooms_voice_messages", True) is not False,
-        voice_max_seconds=max(VOICE_MIN_S, min(VOICE_MAX_S, secs)),
-        voice_transcripts=getattr(row, "rooms_voice_transcripts", None),
-        polls=getattr(row, "rooms_polls", True) is not False,
+        voice_messages=s["voice_messages"],
+        voice_max_seconds=max(VOICE_MIN_S, min(VOICE_MAX_S, int(s["voice_max_seconds"]))),
+        # local: the server's own speech-to-text only. cloud: that, or a
+        # cloud service. off: never.
+        voice_transcripts={"cloud": True, "off": False}.get(s["voice_transcripts"]),
+        polls=s["polls"],
     )
 
 

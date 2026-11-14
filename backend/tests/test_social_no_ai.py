@@ -114,3 +114,53 @@ async def test_promptly_is_given_the_one_message():
     system, messages = await promptly.build(NoDb(), room, ask, SimpleNamespace(username="ann"))
     assert messages == [{"role": "user", "content": "ann: @promptly when does Bunnings close?"}]
     assert "only see the one message" in system
+
+
+# Speech-to-text writes out a voice message's words (owner decision: kept).
+# It is not a language model and is reached from one place only.
+SPEECH_TO_TEXT = re.compile(r"\b(notes\.transcription|meetings_runner|_transcribe|_segment_audio)\b")
+ONLY_VOICE = "rooms/voice.py"
+# ...and ``features.py`` asks whether speech-to-text is set up (and where it
+# runs), to decide if a recording may be written out. It hands it nothing.
+ASKS_IF_SET_UP = "rooms/features.py"
+
+
+def test_speech_to_text_is_reached_from_voice_messages_only():
+    inside = [
+        rel for rel, src in _sources()
+        if (rel.startswith("rooms/") or rel.startswith("porch/")) and rel not in (ONLY_VOICE, ASKS_IF_SET_UP) and SPEECH_TO_TEXT.search(src)
+    ]
+    assert inside == [], f"Speech-to-text is reached from Rooms or Porch outside voice messages: {inside}"
+    # ...and voice messages reach nothing else: no language or embedding model.
+    voice = (APP / ONLY_VOICE).read_text(encoding="utf-8")
+    assert not MODEL.search(voice)
+    asks = (APP / ASKS_IF_SET_UP).read_text(encoding="utf-8")
+    assert "_transcribe" not in asks and "RoomMessage" not in asks and "RoomAttachment" not in asks
+
+
+async def test_voice_words_go_to_a_cloud_service_only_if_the_admin_says_so(db, monkeypatch):
+    """The default keeps recordings on this server: with cloud speech-to-text
+    set up, nothing is written out until the admin allows it."""
+    from types import SimpleNamespace
+
+    import app.notes.transcription as transcription
+    from app.rooms import features, settings
+
+    kind = {"backend": "cloud"}
+
+    async def _config(db):
+        return SimpleNamespace(ready=True, backend=kind["backend"])
+
+    monkeypatch.setattr(transcription, "config", _config)
+    assert (await settings.load(db))["voice_transcripts"] == "local"
+    assert await features.transcripts_on(db) is False
+    kind["backend"] = "local"
+    assert await features.transcripts_on(db) is True
+    kind["backend"] = "cloud"
+    await settings.save(db, {"voice_transcripts": "cloud"})
+    await db.commit()
+    assert await features.transcripts_on(db) is True
+    await settings.save(db, {"voice_transcripts": "off"})
+    await db.commit()
+    kind["backend"] = "local"
+    assert await features.transcripts_on(db) is False
