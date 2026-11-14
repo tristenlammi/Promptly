@@ -156,7 +156,18 @@ export function AddFood({
       ensureDay(d, day).entries.push(entry);
     });
     setAdded((n) => n + 1);
-    toast.success(`Added ${p.name} to ${s.meal_slots.find((x) => x.id === toSlot)?.name ?? "your diary"}`);
+    toast.success(`Added ${p.name} to ${s.meal_slots.find((x) => x.id === toSlot)?.name ?? "your diary"}`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          item.update((d) => {
+            const x = ensureDay(d, day);
+            x.entries = x.entries.filter((e) => e.id !== entry.id);
+          });
+          setAdded((n) => Math.max(0, n - 1));
+        },
+      },
+    });
   };
 
   /** An online food → a library food (reusing one with the same barcode / name). */

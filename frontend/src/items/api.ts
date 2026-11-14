@@ -22,6 +22,8 @@ export interface StoreItem {
 
 export interface ItemSpecInfo extends Omit<StoreItem, "installed" | "disabled" | "files"> {
   ai_suggestions: string[];
+  /** What the assistant's box says when empty ("What did you eat?"). */
+  ai_placeholder?: string | null;
   ai_web: boolean;
   actions: { name: string; description: string; writes: boolean }[];
 }

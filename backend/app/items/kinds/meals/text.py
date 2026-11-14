@@ -104,6 +104,50 @@ def to_text(data: dict) -> str:
     return "\n".join(lines)[:MAX_CHARS]
 
 
+def ai_context(data: dict, ctx: ItemContext) -> str:
+    """For the assistant, on every turn: today's entries and what's been
+    eaten lately, each with its entry id. "Another scotch finger" and "the
+    same lunch as Tuesday" then need no lookup first: log_foods with
+    repeat_entry_id. (The full data may be cut to a summary without ids.)"""
+    data = _recent_full(data, keep=46)
+    days = data.get("days") or {}
+    today = ctx.today.isoformat()
+    since = (ctx.today - timedelta(days=45)).isoformat()
+    slots = {x["id"]: x["name"] for x in (data.get("settings") or {}).get("meal_slots") or []}
+    tot = science.total((days.get(today) or {}).get("entries", []))
+    tgt = science.targets_for(data.get("targets") or {}, today)
+    lines = [
+        f"Today ({today}) so far: {_f(tot['kcal'])} kcal and {_f(tot['protein'])} g protein eaten; "
+        f"{_f((tgt['kcal'] or 0) - tot['kcal'])} kcal and {_f((tgt['protein'] or 0) - tot['protein'])} g protein left."
+    ]
+
+    def words(e: dict) -> str:
+        label = (e.get("serving_label") or "").strip()
+        if e["unit"] == "serving" and label:
+            return label if e["amount"] == 1 else f"{e['amount']:g} × {label}"
+        return f"{e['amount']:g} {label or e['unit']}".strip()
+
+    def row(e: dict) -> str:
+        return f"{e['name']} ({words(e)}, {'~' if e.get('estimate') else ''}{_f(e['n']['kcal'])} kcal, P {_f(e['n']['protein'])} g)"
+
+    todays = (days.get(today) or {}).get("entries", [])
+    if todays:
+        lines.append("Today's entries (entry id: meal: food):")
+        lines += [f"- {e['id']}: {slots.get(e['slot'], e['slot'])}: {row(e)}" for e in todays[:60]]
+    seen: dict[tuple, list] = {}
+    for d in sorted((d for d in days if since <= d <= today), reverse=True):
+        for e in reversed(days[d].get("entries", [])):
+            key = (e["name"].lower(), e["amount"], e["unit"], round(e["n"]["kcal"]))
+            if key in seen:
+                seen[key][2] += 1
+            else:
+                seen[key] = [e, d, 1]
+    if seen:
+        lines.append("Eaten in the last few weeks (entry id: food, last eaten, times). To log one again use log_foods with repeat_entry_id:")
+        lines += [f"- {e['id']}: {row(e)}, {d}, {n}×" for e, d, n in list(seen.values())[:40]]
+    return "\n".join(lines)
+
+
 def _recent_full(data: dict, keep: int) -> dict:
     """The file with defaults filled in, but only its newest ``keep`` days
     (to_text and reminders never look further back — no need to rebuild

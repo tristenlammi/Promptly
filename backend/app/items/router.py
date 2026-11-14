@@ -83,6 +83,7 @@ def doc_out(row: UserFile, doc: ItemDocument, access: str, user: User) -> dict[s
         else {
             **spec_brief(spec),
             "ai_suggestions": spec.ai_suggestions,
+            "ai_placeholder": spec.ai_placeholder or None,
             "ai_web": spec.ai_web,
             "actions": [
                 {"name": a.name, "description": a.description, "writes": a.writes} for a in spec.actions

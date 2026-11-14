@@ -168,6 +168,12 @@ class ItemSpec:
     actions: list[ItemAction] = field(default_factory=list)
     ai_brief: str = ""
     ai_suggestions: list[str] = field(default_factory=list)
+    # What the assistant's box says when empty ("What did you eat?"); the app's name when blank.
+    ai_placeholder: str = ""
+    # (data, ctx) -> a few lines the assistant always gets on top of the data:
+    # what it needs for the app's most common ask without a tool call first
+    # (Meals: today's entries and recent foods, with ids). Never instructions.
+    ai_context: Callable[[dict, "ItemContext"], str] | None = None
     ai_web: bool = False
     reads: tuple[str, ...] = ()
     version: int = 1

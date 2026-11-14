@@ -21,6 +21,28 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Meals & Macros: "another one", "the same again" and "2 more" log the earlier food again with the same portion and numbers, straight away. The assistant now always has today's entries and what you've eaten in the last few weeks in front of it, so it doesn't look anything up or estimate again.
+- Meals & Macros: Undo on the "Added" and "Removed" messages in the diary.
+
+### Changed
+
+- Every app's assistant (the Ask tab) keeps working when your phone locks, the screen sleeps or the connection drops: it finishes on the server, and the panel picks it back up, or shows the finished answer, when you return. One message at a time: a second tap while it's still working is held, never run twice.
+- The assistant says what it's doing while it works ("Looking up “scotch finger”…", "Searching the web for …", "Reading guzmanygomez.com.au…", "Writing it up…").
+- Meals & Macros answers are short: what was logged with calories and protein, and what's left today. Web addresses go under a "Sources" line you can open, in every app's assistant.
+- Meals & Macros logs faster: one lookup for a whole meal, and no web search for food it already knows.
+- Meals & Macros Trends: today's half-logged day no longer drags down the averages. It counts once you mark the day complete.
+- The widget's "Log food" opens the Ask tab with the cursor in the box, which now asks "What did you eat?".
+
+### Fixed
+
+- The assistant in an app could sit on "Thinking…" for ever. A stream that stopped without an ending (a sleeping phone, a dropped connection, a model that went quiet) was never noticed. Every message now ends with an answer or a plain error with "Try again".
+- Meals & Macros said a meal you'd asked for once was "already in today's diary". It was reading the entry it had logged a moment earlier as an old one; each step is now told what the reply has already done, so nothing is repeated or logged twice.
+- If the model dies after logging your food but before replying, the food is kept and the reply says what was logged (it used to be thrown away with an error).
+- A reply with no words in it is now an error you can retry, not an empty bubble.
+- The assistant's box goes back to one line after you send a long message.
+
 ## [0.40.2] - 2026-11-13
 
 ### Fixed

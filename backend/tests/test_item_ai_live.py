@@ -306,3 +306,34 @@ async def test_another_one_logs_the_same_food_with_the_same_numbers(client, db, 
 
     r = await client.post(f"/api/items/{fid}/actions/log_foods", headers=h, json={"args": {"items": [{"name": "x", "repeat_entry_id": "nope"}]}})
     assert r.status_code == 400 or "No diary entry" in r.text
+
+
+async def test_the_assistant_is_given_todays_entries_and_recent_foods_with_ids(client, db, user, monkeypatch):  # noqa: F811
+    """"Another scotch finger" in one step: the id is in the prompt, no search first."""
+    fid = await _meals(client, user)
+    h = _auth(user)
+    r = await client.post(f"/api/items/{fid}/actions/log_foods", headers=h, json={"args": LOG[1]})
+    eid = r.json()["result"]["entries"][0]["id"]
+    fake = _Model([{"tools": [("log_foods", {"slot": "snacks", "items": [{"name": "Scotch Finger", "repeat_entry_id": eid}]})]}, {"text": "Logged another Scotch Finger, 88 kcal."}])
+    events = await _turn(db, user, fid, "another scotch finger", fake, monkeypatch)
+
+    system = fake.calls[0]["system"]
+    assert "Today's entries" in system and "Eaten in the last few weeks" in system
+    assert f"- {eid}: Snacks: Scotch Finger (1 biscuit, ~88 kcal" in system and "kcal and" in system
+    entries = [e for day in events[-1]["data"]["days"].values() for e in day["entries"]]
+    assert [(e["name"], e["n"]["kcal"]) for e in entries] == [("Scotch Finger", 88), ("Scotch Finger", 88)]
+    assert len({e["id"] for e in entries}) == 2
+
+
+async def test_the_box_asks_what_you_ate(client, db, user):  # noqa: F811
+    fid = await _meals(client, user)
+    spec = (await client.get(f"/api/items/{fid}", headers=_auth(user))).json()["spec"]
+    assert spec["ai_placeholder"] == "What did you eat?"
+
+
+def test_a_model_failure_is_said_in_plain_words():
+    from app.items.ai import _model_failure
+
+    assert _model_failure("Connection error talking to the model: peer closed connection (incomplete chunked read)") == "The model didn't finish its answer."
+    assert "quota" in _model_failure("429 rate limit exceeded")
+    assert "Admin" in _model_failure("401 Unauthorized: invalid api key")

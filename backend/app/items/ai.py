@@ -355,6 +355,14 @@ def build_system(spec: ItemSpec, user: User, title: str, data: dict, ctx: Any) -
             "The file is large, so here's its summary — read the exact data you need with read_data "
             f"(top-level keys: {keys}).\n\n{summary}"
         )
+    if spec.ai_context is not None:
+        try:
+            extra = spec.ai_context(data, ctx)
+        except Exception:  # noqa: BLE001 — a hint, never a reason to fail the turn
+            logger.info("item AI: %s.ai_context failed", spec.kind, exc_info=True)
+            extra = ""
+        if extra:
+            block += "\n\n" + extra[:8000]
     now = ctx.now
     return FRAMEWORK_PROMPT.format(
         name=spec.name,
@@ -616,6 +624,20 @@ def _running(file_id: uuid.UUID, user_id: uuid.UUID) -> _Live | None:
     return live if live is not None and not live.done else None
 
 
+def _model_failure(detail: str) -> str:
+    """Why the model didn't answer, in the person's words. What they can act
+    on (no key, no credit, too busy) is said; a dropped connection isn't a
+    paragraph of network terms."""
+    low = detail.lower()
+    if any(w in low for w in ("api key", "unauthor", "401", "403", "permission")):
+        return "The model turned the request away (its key or access needs checking in Admin → Models)."
+    if any(w in low for w in ("429", "rate limit", "quota", "credit", "billing", "insufficient")):
+        return "The model is out of quota or too busy right now."
+    if any(w in low for w in ("not found", "404", "does not exist", "no such model")):
+        return "That model isn't available any more. Pick another one."
+    return "The model didn't finish its answer."
+
+
 def _done_note(actions_log: list[dict]) -> str:
     """What this reply has already changed, said to the model on every later
     step. The data in the prompt is rebuilt after each change, so without this
@@ -767,7 +789,8 @@ async def run_turn(
                     yield {"type": "action", **entry}
                 history.append({"role": "tool", "tool_call_id": call["id"], "content": result[:MAX_TOOL_RESULT_CHARS]})
     except ProviderError as e:
-        failure = f"The model failed: {e}"
+        logger.info("item AI: the model failed on %s: %s", file_id, e)
+        failure = _model_failure(str(e))
     except TimeoutError:
         failure = "The model stopped answering."
     if failure and not writes:

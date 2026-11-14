@@ -281,6 +281,8 @@ export function ItemAiPanel({
         return;
       }
       setDraft("");
+      // The box grew with what was typed: back to one line.
+      if (input.current) input.current.style.height = "auto";
       const sending = attached;
       setAttached([]);
       const shown = sending.length ? `${message}\n\n[Attached: ${sending.map((a) => a.name).join(", ")}]` : message;
@@ -571,7 +573,7 @@ export function ItemAiPanel({
                 void send(draft || (attached.length ? ATTACHED_ONLY : ""));
               }
             }}
-            placeholder={item.canEdit ? `Ask ${spec.name} to do something…` : "Ask about this file…"}
+            placeholder={item.canEdit ? (spec.ai_placeholder ?? `Ask ${spec.name}…`) : "Ask about this file…"}
             aria-label={`Ask ${spec.name}`}
             className="max-h-40 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-base text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] md:text-sm"
           />
