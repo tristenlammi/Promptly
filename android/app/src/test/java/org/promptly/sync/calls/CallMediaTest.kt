@@ -113,7 +113,7 @@ class CallMediaTest {
     @Test
     fun saysHowAnUnansweredCallEnded() {
         for ((why, tell, cause) in listOf(
-            Triple("ended:declined", "Call declined.", EndCause.REJECTED),
+            Triple("ended:declined", "Can't talk right now.", EndCause.REJECTED),
             Triple("ended:missed", "No answer.", EndCause.REMOTE),
             Triple("ended:cancelled", null, EndCause.REMOTE),
             Triple("failed", "Couldn't start the call.", EndCause.MISSED),

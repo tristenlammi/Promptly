@@ -28,9 +28,11 @@ describe("call lines", () => {
     expect(callLineWords(m, ALICE, names, false)).toEqual({ text: "No answer", missed: false, again: "Call again" });
   });
 
-  it("a declined call never tells the caller it was declined", () => {
+  it("a declined call tells the caller they can't talk, not that it was declined or rang out", () => {
     const m = meta({ outcome: "declined", declined: [BOB], joined: [ALICE], media: "video" });
-    expect(callLineWords(m, ALICE, names, false).text).toBe("No answer");
+    expect(callLineWords(m, ALICE, names, false)).toEqual({ text: "Can't talk right now", missed: false, again: "Call again" });
+    // A group call rang several people: it only ever says "No answer".
+    expect(callLineWords(m, ALICE, names, true).text).toBe("No answer");
     expect(callLineWords(m, BOB, names, false).text).toBe("You declined a video call from alice");
   });
 
@@ -62,7 +64,8 @@ describe("call words", () => {
   it("how a call ended", () => {
     expect(endedWords("ended", 125)).toBe("Call ended · 2:05");
     expect(endedWords("ended", 0)).toBe("Call ended");
-    expect(endedWords("declined", 0)).toBe("No answer");
+    expect(endedWords("declined", 0)).toBe("Can't talk right now");
+    expect(endedWords("no-answer", 0)).toBe("No answer");
     expect(endedWords("cancelled", 0)).toBe("Call cancelled");
   });
 });

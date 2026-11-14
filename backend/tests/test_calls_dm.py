@@ -219,6 +219,15 @@ async def lines(db, room_id):
     return [m for m in rows if (m.meta or {}).get("call")]
 
 
+async def lines_all(db, room_id):
+    """Every message in the conversation, oldest first."""
+    from sqlalchemy import select as _select
+
+    from app.rooms.models import RoomMessage as _RoomMessage
+
+    return list((await db.execute(_select(_RoomMessage).where(_RoomMessage.room_id == uuid.UUID(str(room_id))).order_by(_RoomMessage.seq))).scalars())
+
+
 async def read_seq(db, room_id, user):
     from app.rooms.models import Room, RoomMember
 
@@ -1496,3 +1505,71 @@ async def test_call_back_from_the_missed_calls_push(client, db, lk, jobs, pushes
     w.ben.token_version = (w.ben.token_version or 0) + 1
     await db.commit()
     assert (await client.post("/api/calls/callback", json={"token": token})).status_code == 404
+
+
+# ---------------------------------------------------------------- a muted conversation doesn't ring
+
+
+async def test_a_muted_conversation_does_not_ring_or_leave_a_missed_notification(client, db, lk, jobs, events, pushes):
+    from datetime import datetime, timedelta, timezone
+
+    w = await world(client, db)
+    until = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    r = await client.patch(f"/api/rooms/rooms/{w.dm}/me", headers=H(w.ben), json={"muted_until": until})
+    assert r.status_code == 200, r.text
+    events.clear()
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    # No ring push, and nothing telling Ben's open pages to ring.
+    assert kinds(pushes, w.ben) == []
+    assert not [e for e in of_type(events, "call_ring") if str(w.ben.id) in e[0]]
+    # A page Ben opens mid-ring lists the call but isn't told it's ringing him.
+    live = (await client.get("/api/calls/live", headers=H(w.ben))).json()["calls"]
+    assert [c["id"] for c in live] == [cid] and str(w.ben.id) not in live[0]["ringing"]
+    # For Ann it rings out as usual...
+    assert str(w.ben.id) in (await client.get("/api/calls/live", headers=H(w.ann))).json()["calls"][0]["ringing"]
+    pushes.clear()
+    assert await run_timeout(jobs, cid) == "missed"
+    # ...and Ben gets no missed-call notification, but the line is there, unread.
+    assert kinds(pushes, w.ben) == []
+    [ln] = await lines(db, w.dm)
+    assert ln.body == "Missed call" and ln.meta["call"]["missed"] == [str(w.ben.id)]
+    read, last = await read_seq(db, w.dm, w.ben)
+    assert read < last
+
+    # "Nothing" does the same; "Mentions only" still rings.
+    await client.patch(f"/api/rooms/rooms/{w.dm}/me", headers=H(w.ben), json={"muted_until": None, "notify": "none"})
+    pushes.clear()
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    assert kinds(pushes, w.ben) == []
+    await act(client, w.ann, cid, "leave")
+    await client.patch(f"/api/rooms/rooms/{w.dm}/me", headers=H(w.ben), json={"notify": "mentions"})
+    pushes.clear()
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    assert kinds(pushes, w.ben) == ["call_ring"]
+    await act(client, w.ann, cid, "leave")
+
+
+async def test_a_group_call_rings_everyone_but_whoever_muted_it(client, db, lk, pushes):
+    from datetime import datetime, timedelta, timezone
+
+    w = await world(client, db)
+    until = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
+    await client.patch(f"/api/rooms/rooms/{w.group}/me", headers=H(w.cat), json={"muted_until": until})
+    await start(client, w.ann, w.group)
+    assert kinds(pushes, w.cat) == []
+    assert kinds(pushes, w.ben) == ["call_ring"] and kinds(pushes, w.dan) == ["call_ring"]
+
+
+async def test_a_missed_call_can_be_answered_with_a_message(client, db, lk, jobs, pushes):
+    w = await world(client, db)
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    pushes.clear()
+    assert await run_timeout(jobs, cid) == "missed"
+    [p] = pushes
+    [button] = p["extra"]["actions"]
+    assert button["action"] == "room_reply" and button["title"] == "Message" and button["type"] == "text"
+    # The same signed action as a message's Reply: it posts in that conversation, as Ben.
+    r = await client.post("/api/notifications/action", json={"token": button["token"], "text": "Sorry, in a meeting. Call you at 3?"})
+    assert r.status_code == 200, r.text
+    last = (await lines_all(db, w.dm))[-1]
+    assert last.body == "Sorry, in a meeting. Call you at 3?" and last.author_id == w.ben.id

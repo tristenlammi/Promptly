@@ -343,14 +343,14 @@ test.describe("DM calls", () => {
     await expect(alice.getByTestId("room-call-audio")).toBeVisible({ timeout: 20_000 });
     await bob.waitForTimeout(1000);
 
-    // Declined: Alice hears "No answer" (never "declined").
+    // Declined: Alice is told "Can't talk right now" (not "declined", not the "No answer" of a ring that timed out).
     await alice.getByTestId("room-call-audio").click();
     await expect(incoming(bob)).toContainText("Incoming call", { timeout: 20_000 });
     await incoming(bob).getByRole("button", { name: "Decline" }).click();
     await expect(incoming(bob)).toHaveCount(0);
-    await expect(alice.getByTestId("call-ended")).toContainText("No answer", { timeout: 15_000 });
+    await expect(alice.getByTestId("call-ended")).toContainText("Can't talk right now", { timeout: 15_000 });
     await expect(bob.getByTestId("call-line").last()).toContainText(`You declined a call from ${A}`, { timeout: 15_000 });
-    await expect(alice.getByTestId("call-line").last()).toContainText("No answer", { timeout: 15_000 });
+    await expect(alice.getByTestId("call-line").last()).toContainText("Can't talk right now", { timeout: 15_000 });
     await expect(screen(alice)).toHaveCount(0, { timeout: 15_000 });
 
     // Missed: nobody answers; the 45 s timeout (run now) ends it.

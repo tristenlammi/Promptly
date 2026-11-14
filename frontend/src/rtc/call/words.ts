@@ -29,8 +29,9 @@ export function lengthWords(seconds: number): string {
 export function endedWords(kind: CallEndKind, seconds: number): string {
   switch (kind) {
     case "no-answer":
-    case "declined":
       return "No answer";
+    case "declined":
+      return CANT_TALK;
     case "cancelled":
       return "Call cancelled";
     case "lost":
@@ -52,9 +53,14 @@ export interface CallLineWords {
   again: string | null;
 }
 
-/** A call's line in the conversation, as ``meId`` sees it. Someone who
- *  was called never learns whether a 1:1 call was declined or just not
- *  answered: the caller sees "No answer" either way. */
+/** What the caller is told when the person they rang pressed Decline: not
+ *  "Declined", and not the "No answer" of a ring nobody picked up. */
+export const CANT_TALK = "Can't talk right now";
+
+/** A call's line in the conversation, as ``meId`` sees it. A 1:1 call the
+ *  other person declined reads "Can't talk right now" to the caller; one
+ *  that rang out reads "No answer". (A group call rings several people, so
+ *  it only ever says "No answer".) */
 export function callLineWords(c: CallLineMeta, meId: string, names: Record<string, { username: string } | undefined>, group: boolean): CallLineWords {
   const video = c.media === "video";
   const kind = video ? "video call" : "call";
@@ -68,6 +74,7 @@ export function callLineWords(c: CallLineMeta, meId: string, names: Record<strin
   }
   if (mine) {
     if (c.outcome === "cancelled") return { text: `You cancelled a ${kind}`, missed: false, again: "Call again" };
+    if (c.outcome === "declined" && !group) return { text: CANT_TALK, missed: false, again: "Call again" };
     return { text: "No answer", missed: false, again: "Call again" };
   }
   if (c.declined.includes(meId)) return { text: `You declined a ${kind} from ${starter}`, missed: false, again: "Call back" };

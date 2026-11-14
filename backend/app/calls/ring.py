@@ -64,6 +64,25 @@ async def rings_quietly(db: AsyncSession, user_id: uuid.UUID) -> bool:
     return quiet.is_quiet(prefs, quiet._now(), quiet.zone_of(user.settings if user is not None else None))
 
 
+async def silenced(db: AsyncSession, room: Room, user_id: uuid.UUID) -> bool:
+    """This person has the conversation muted (for a while, or set to
+    Nothing): a call from it doesn't ring them and leaves no missed-call
+    notification. The caller hears it ring out as usual; the "Missed call"
+    line is still there in the conversation when they look."""
+    from app.rooms import receipts
+    from app.rooms.models import RoomSpaceMember
+
+    state = (
+        await db.execute(select(RoomMember).where(RoomMember.room_id == room.id, RoomMember.user_id == user_id))
+    ).scalar_one_or_none()
+    space = None
+    if room.space_id is not None:
+        space = (
+            await db.execute(select(RoomSpaceMember).where(RoomSpaceMember.space_id == room.space_id, RoomSpaceMember.user_id == user_id))
+        ).scalar_one_or_none()
+    return receipts.level(state, space) == "none"
+
+
 async def _notify(**kw: Any) -> None:
     """``notify_user`` (tests swap this to see what would be pushed)."""
     from app.notifications.dispatch import notify_user
@@ -111,6 +130,9 @@ async def ring(
     for t in targets:
         if await rings_quietly(db, t.id):
             # Quiet hours: no ring anywhere (it rings out to a missed call).
+            continue
+        if await silenced(db, room, t.id):
+            # They muted this conversation: no ring, no heads-up.
             continue
         conv = await conversation_name(db, room, t.id) if group else ""
         title = conv if group else caller.username
@@ -212,10 +234,20 @@ async def missed(db: AsyncSession, call: Call, room: Room, user_ids: list[uuid.U
                 # notification lasts (``POST /api/calls/callback``). The
                 # browser's notification has no use for it and never shows it.
                 "callback_token": actions.sign(target, CALLBACK_ACTION, str(room.id), ttl_s=MISSED_TTL) if target is not None else None,
+                # "Message": write back from the notification (a box to type
+                # in on Android and in Chrome), the same button and the same
+                # signed action as a message's "Reply".
+                "actions": (
+                    [{"action": "room_reply", "title": "Message", "token": actions.sign(target, "room_reply", str(room.id)), "type": "text", "placeholder": "Message"}]
+                    if target is not None
+                    else []
+                ),
             },
             "ttl": MISSED_TTL,
         }
-        if await rings_quietly(db, uid):
+        if await silenced(db, room, uid):
+            pass  # muted: the line in the conversation is all there is
+        elif await rings_quietly(db, uid):
             await _hold_missed(db, push)
         else:
             await _notify(**push)

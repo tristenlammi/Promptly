@@ -41,8 +41,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Changed
 
+- Rooms calls: a conversation you've muted, or set to Nothing, doesn't ring you. No ring, no heads-up, and no missed-call notification; the caller hears it ring out as usual, and the "Missed call" line is there in the conversation when you look. "Mentions only" still rings.
+- Rooms calls: when the person you rang presses Decline, you're told "Can't talk right now" on the call screen and in the conversation. "No answer" is now only for a call nobody picked up.
+- A missed call's notification has a Message button beside Call back: type a reply right there (Android and Chrome).
 - Mail on a phone: swiping an email follows your finger, springs back if you let go early, and slides off with the gap closing up when you go far enough, with a tick as it crosses the mark.
-- Rooms: `@promptly` only ever sees the one message that mentions it. Not the message you replied to, not earlier messages, not attachments. If it needs something, put it in the message.
+- Rooms: `@promptly` only sees the one message that mentions it and, when that message is a reply, the one message you replied to (who wrote it and its words; a voice message's written-out words). So "@promptly double this" works as a reply to the recipe, and you can follow up by replying to its answer. It never sees earlier messages, anyone else's messages, files or pictures, and nothing can switch that on.
 - Porch search finds posts by their words, place and who posted them. It no longer uses the photo model to match other people's posts by what's in their pictures. Searching your own library in Photos is unchanged.
 - Rooms calls on Android (next Promptly for Android): during a voice call held to your ear the screen goes dark, as on a phone call, so your cheek can't press Mute or Hang up. It stays on with the loudspeaker, a headset, or video.
 

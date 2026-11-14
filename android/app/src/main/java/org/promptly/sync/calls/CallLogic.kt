@@ -269,7 +269,7 @@ class CallMachine {
                         e.why == "failed" && s.outgoing -> listOf(CallEffect.Tell("Couldn't start the call."))
                         e.why == "failed" -> listOf(CallEffect.Tell("Couldn't answer: this call has ended."))
                         e.why == "lost" -> listOf(CallEffect.Tell("Lost the connection to the call."))
-                        unanswered && reason == "declined" -> listOf(CallEffect.Tell("Call declined."))
+                        unanswered && reason == "declined" -> listOf(CallEffect.Tell("Can't talk right now."))
                         unanswered && reason == "missed" -> listOf(CallEffect.Tell("No answer."))
                         else -> emptyList()
                     }

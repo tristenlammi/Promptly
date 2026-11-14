@@ -220,9 +220,19 @@ async def live_for(db: AsyncSession, user: User) -> list[dict]:
     calls = (
         await db.execute(select(Call).where(Call.kind == "dm", Call.ended_at.is_(None), Call.room_id.in_(mine)).order_by(Call.started_at))
     ).scalars().all()
+    from app.calls import ring
+
     out = []
     for c in calls:
-        out.append(await describe(db, c))
+        d = await describe(db, c)
+        me = str(user.id)
+        if me in d["ringing"]:
+            room = await db.get(Room, c.room_id)
+            if room is not None and await ring.silenced(db, room, user.id):
+                # A page opened mid-ring doesn't ring in a muted conversation
+                # either; the call is still listed, to join if they like.
+                d = {**d, "ringing": [u for u in d["ringing"] if u != me]}
+        out.append(d)
     return out
 
 

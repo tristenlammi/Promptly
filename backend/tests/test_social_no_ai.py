@@ -14,7 +14,9 @@ does: it reads the code, so a new path fails here before it ships.
 * Inside ``app/rooms`` and ``app/porch`` nothing calls a model at all,
   ``promptly.py`` aside.
 * No tool reads Rooms or Porch, and no switch on a room or a member widens
-  what ``@promptly`` sees.
+  what ``@promptly`` sees: the message that mentions it, and (owner decision,
+  same day) the one message that message replies to, since the asker put the
+  quote there for everyone to see. Never history.
 
 Kept on purpose (owner decisions, same day): ``post_to_room`` (the main chat
 *sends* a message for you after a yes; it reads nothing), plain word search
@@ -92,28 +94,59 @@ def test_no_switch_widens_what_promptly_sees():
 
     assert not hasattr(Room, "ai_context") and not hasattr(RoomMember, "ai_ok")
     assert not hasattr(promptly, "can_read_history") and not hasattr(promptly, "HISTORY")
-    # build() loads no messages: it is handed the asking one and uses only that.
+    # build() loads no messages itself: it is handed the asking one, and may
+    # ask quoted() for the single message that one replies to.
     src = inspect.getsource(promptly.build)
-    assert "select(" not in src and "reply_to" not in src and "RoomAttachment" not in src
+    assert "select(" not in src and "db.get(RoomMessage" not in src and "RoomAttachment" not in src
+    # quoted() fetches exactly that one message, by the id on the ask: one
+    # get, no query, no attachments, no walking further up a chain of replies.
+    q = inspect.getsource(promptly.quoted)
+    assert q.count("db.get(RoomMessage") == 1 and "ask.reply_to_id" in q
+    assert "select(" not in q and "execute(" not in q and "RoomAttachment" not in q and "m.reply_to_id" not in q
+    # Nothing else in the module reads messages: answer() gets the ask, post() writes.
+    whole = inspect.getsource(promptly)
+    assert whole.count("db.get(RoomMessage") == 2 and "select(RoomMessage" not in whole and "RoomAttachment" not in whole
 
 
 async def test_promptly_is_given_the_one_message():
     from types import SimpleNamespace
 
     from app.rooms import promptly
+    from app.rooms.models import RoomMessage
+
+    asked_for: list = []
 
     class NoDb:
-        async def get(self, *a, **kw):  # a space's name is all it may look up
-            return SimpleNamespace(name="Family")
+        async def get(self, model, key, *a, **kw):
+            asked_for.append((getattr(model, "__name__", str(model)), key))
+            if model is RoomMessage:
+                assert key == 3, "only the message the ask replies to may be fetched"
+                return SimpleNamespace(id=3, room_id=1, deleted_at=None, kind="user", author_id=5, body="250g flour, 3 eggs", meta={}, reply_to_id=2)
+            return SimpleNamespace(name="Family", username="bob")
 
         async def execute(self, *a, **kw):
-            raise AssertionError("@promptly ran a query: it may only be handed the asking message")
+            raise AssertionError("@promptly ran a query: it may only be handed the asking message and the one it replies to")
 
     room = SimpleNamespace(id=1, space_id=2, kind="text", name="general")
-    ask = SimpleNamespace(body="@promptly when does Bunnings close?", reply_to_id=3, seq=9, author_id=4)
+    # Not a reply: the one message, and no message is fetched at all.
+    ask = SimpleNamespace(body="@promptly when does Bunnings close?", reply_to_id=None, seq=9, author_id=4, room_id=1)
     system, messages = await promptly.build(NoDb(), room, ask, SimpleNamespace(username="ann"))
     assert messages == [{"role": "user", "content": "ann: @promptly when does Bunnings close?"}]
     assert "only see the one message" in system
+    assert not [a for a in asked_for if a[0] == "RoomMessage"]
+
+    # A reply: that one message too, and nothing further up the chain (the
+    # quoted message is itself a reply to message 2, which is never fetched).
+    asked_for.clear()
+    ask = SimpleNamespace(body="@promptly double this", reply_to_id=3, seq=9, author_id=4, room_id=1)
+    system, messages = await promptly.build(NoDb(), room, ask, SimpleNamespace(username="ann"))
+    assert messages == [{"role": "user", "content": "ann is replying to this message from bob:\n<quoted>\n250g flour, 3 eggs\n</quoted>\n\nann: @promptly double this"}]
+    assert [a for a in asked_for if a[0] == "RoomMessage"] == [("RoomMessage", 3)]
+
+    # A message from another room is never handed over, whatever the id says.
+    ask = SimpleNamespace(body="@promptly double this", reply_to_id=3, seq=9, author_id=4, room_id=99)
+    _system, messages = await promptly.build(NoDb(), room, ask, SimpleNamespace(username="ann"))
+    assert messages == [{"role": "user", "content": "ann: @promptly double this"}]
 
 
 # Speech-to-text writes out a voice message's words (owner decision: kept).

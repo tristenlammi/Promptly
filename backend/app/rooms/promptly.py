@@ -3,12 +3,15 @@
 A message that mentions it gets an answer posted in the room (kind
 ``promptly``, a reply to the ask), made with the *asking* person's model.
 
-What it sees, and nothing else: **the one message that mentions it**, and the
-name of the person who wrote it. Not the message it replies to, not earlier
-messages, not other people's messages, not attachments, not its own earlier
-answers. There is no switch that widens this (owner rule, 2026-11-15: Rooms
-and Porch are never read or indexed by AI; ``tests/test_social_no_ai.py``
-holds it).
+What it sees, and nothing else: **the one message that mentions it**, the
+name of the person who wrote it, and, when that message is a *reply*, **the
+one message it replies to** (who wrote it and its words; :func:`quoted`). The
+quote shows in the room above the ask, which is how the asker chose to show
+it. Replying to one of its own answers is the same thing, so a follow-up
+works by replying. Never earlier messages, other people's messages,
+attachments or pictures. There is no switch that widens this (owner rule,
+2026-11-15: Rooms and Porch are never read or indexed by AI;
+``tests/test_social_no_ai.py`` holds it).
 
 No tools: it can't reach anyone's files, photos, memories or other rooms.
 """
@@ -65,23 +68,63 @@ async def model_for(db, user):  # noqa: ANN001, ANN201
     return await resolve_model(db, user, uuid.UUID(str(pid)), str(mid))
 
 
+QUOTE_CHARS = 8_000
+
+
+async def quoted(db, ask: RoomMessage) -> tuple[str, str] | None:  # noqa: ANN001
+    """``(who wrote it, its words)`` for the one message ``ask`` replies to,
+    or None. This is the only other message @promptly is ever given: fetched
+    by its id from the ask itself, never searched for, and words only (a
+    voice message's are its transcript; files and pictures are never read)."""
+    from app.auth.models import User
+
+    if ask.reply_to_id is None:
+        return None
+    m = await db.get(RoomMessage, ask.reply_to_id)
+    if m is None or m.room_id != ask.room_id or m.deleted_at is not None or m.kind == "system":
+        return None
+    if m.kind == "promptly":
+        who = "you (Promptly), earlier"
+    else:
+        author = await db.get(User, m.author_id) if m.author_id else None
+        who = author.username if author is not None else "someone"
+    voice = (m.meta or {}).get("voice")
+    if isinstance(voice, dict):
+        words = " ".join(str(voice.get("transcript") or "").split())
+        text = f"(a voice message) {words}" if words else "(a voice message; its words haven't been written out, so you can't tell what it says)"
+    else:
+        text = strip_send_keys(m.body or "").strip() or "(no words: a file or a picture, which you can't see)"
+    return who, text[:QUOTE_CHARS]
+
+
 async def build(db, room: Room, ask: RoomMessage, asker) -> tuple[str, list[dict]]:  # noqa: ANN001
-    """The system prompt and messages @promptly is given: the asking message
-    alone. Nothing else of the room is loaded here, on purpose."""
+    """The system prompt and messages @promptly is given: the asking message,
+    and the one message it replies to if it is a reply (:func:`quoted`).
+    Nothing else of the room is loaded here, on purpose."""
     space = await db.get(RoomSpace, room.space_id) if room.space_id else None
     where = (f"the voice channel {room.name}’s text chat" if room.kind == "voice" else f"the room #{room.name}") + f" in the space “{space.name}”" if space else ("a direct message" if room.kind == "dm" else "a group conversation")
     question = strip_send_keys(ask.body)[-MAX_CHARS:]
+    quote = await quoted(db, ask)
+    sees = (
+        "You can only see the one message that mentions you, and the one message it was written in reply to (quoted below). "
+        if quote
+        else "You can only see the one message that mentions you. "
+    )
     system = (
         f"You are Promptly, a helpful assistant people can @-mention in a group chat. You're in {where}. "
         f"{asker.username} just asked you something.\n"
-        "You can only see the one message that mentions you. You can't see earlier messages, replies, attachments "
+        f"{sees}You can't see earlier messages, attachments "
         "or anything else in this conversation, and nobody can switch that on. If the question needs them, say so "
-        "and ask for what you need to be put in the message.\n"
+        "and ask for what you need to be put in the message (or for them to reply to the message they mean).\n"
         "You can't see anyone's files, photos, notes, memories or other rooms, and you can't take actions. "
         "Reply like a person in a chat: short and direct (a few sentences; bullet points or Markdown only when they help). "
         "Don't start with a greeting or restate the question."
     )
-    messages = [{"role": "user", "content": f"{asker.username}: {question}"}]
+    content = f"{asker.username}: {question}"
+    if quote:
+        who, text = quote
+        content = f"{asker.username} is replying to this message from {who}:\n<quoted>\n{text}\n</quoted>\n\n{content}"
+    messages = [{"role": "user", "content": content}]
     return system, messages
 
 

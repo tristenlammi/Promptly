@@ -402,19 +402,74 @@ async def test_promptly_sees_only_the_ask_by_default(client, people, fake_model)
     assert (await client.delete(f"/api/rooms/messages/{reply_id}", headers=H(ann))).status_code == 204
 
 
-async def test_promptly_never_sees_the_quoted_message(client, people, fake_model):
-    """A reply that mentions it: still only the mentioning message."""
+async def test_promptly_sees_the_one_message_you_replied_to(client, people, fake_model):
+    """A reply that mentions it: the quoted message and the ask, nothing else."""
     from app.rooms.promptly import answer
 
     ann, bob, *_ = people
     _sid, room = await make_space(client, ann, bob)
-    await say(client, bob, room, "unrelated chatter")
+    await say(client, bob, room, "unrelated chatter about the surprise party")
     parent = await say(client, bob, room, "The recipe says 250g flour, 3 eggs")
+    await say(client, bob, room, "more chatter after it")
     q = await say(client, ann, room, "@promptly double this", reply_to_id=parent["id"])
+    reply_id = await answer(uuid.UUID(q["id"]))
+    [msg] = fake_model[0]["messages"]
+    assert msg["content"] == (
+        f"{ann.username} is replying to this message from {bob.username}:\n<quoted>\nThe recipe says 250g flour, 3 eggs\n</quoted>\n\n"
+        f"{ann.username}: @promptly double this"
+    )
+    everything = msg["content"] + fake_model[0]["system"]
+    assert "chatter" not in everything and "surprise party" not in everything
+    assert "the one message it was written in reply to" in fake_model[0]["system"]
+
+    # A follow-up: replying to its own answer gives it that answer, and only that.
+    q2 = await say(client, ann, room, "@promptly and in cups?", reply_to_id=str(reply_id))
+    await answer(uuid.UUID(q2["id"]))
+    [msg2] = fake_model[1]["messages"]
+    assert msg2["content"] == (
+        f"{ann.username} is replying to this message from you (Promptly), earlier:\n<quoted>\nBunnings closes at 9pm.\n</quoted>\n\n"
+        f"{ann.username}: @promptly and in cups?"
+    )
+    assert "250g flour" not in msg2["content"] + fake_model[1]["system"]
+
+
+async def test_a_replied_to_file_or_deleted_message_gives_promptly_no_content(client, db, people, fake_model):
+    from app.rooms.models import RoomMessage
+    from app.rooms.promptly import answer
+
+    ann, bob, *_ = people
+    _sid, room = await make_space(client, ann, bob)
+    # A message with a file: its words only, never the file.
+    att = (await client.post(f"/api/rooms/rooms/{room}/attachments", headers=H(bob), files={"file": ("secret-plans.txt", b"the launch codes", "text/plain")})).json()
+    withfile = await say(client, bob, room, "", attachment_ids=[att["id"]])
+    q = await say(client, ann, room, "@promptly what is this?", reply_to_id=withfile["id"])
     await answer(uuid.UUID(q["id"]))
-    seen = fake_model[0]["messages"][0]["content"]
-    assert seen == f"{ann.username}: @promptly double this"
-    assert "250g flour" not in fake_model[0]["system"]
+    seen = fake_model[0]["messages"][0]["content"] + fake_model[0]["system"]
+    assert "launch codes" not in seen and "secret-plans" not in seen
+    assert "a file or a picture, which you can't see" in seen
+
+    # A voice message: its transcript if there is one, else just that it's one.
+    voice = await say(client, bob, room, "placeholder")
+    row = await db.get(RoomMessage, uuid.UUID(voice["id"]))
+    row.meta = {**row.meta, "voice": {"att": att["id"], "duration_ms": 4000, "transcript": "running ten minutes late"}}
+    await db.commit()
+    q = await say(client, ann, room, "@promptly what did he say?", reply_to_id=voice["id"])
+    await answer(uuid.UUID(q["id"]))
+    assert "(a voice message) running ten minutes late" in fake_model[1]["messages"][0]["content"]
+    row = await db.get(RoomMessage, uuid.UUID(voice["id"]), populate_existing=True)
+    row.meta = {**row.meta, "voice": {"att": att["id"], "duration_ms": 4000}}
+    await db.commit()
+    q = await say(client, ann, room, "@promptly and now?", reply_to_id=voice["id"])
+    await answer(uuid.UUID(q["id"]))
+    assert "its words haven't been written out" in fake_model[2]["messages"][0]["content"]
+
+    # A deleted message is gone for it too.
+    gone = await say(client, bob, room, "the surprise is a puppy")
+    q = await say(client, ann, room, "@promptly what was that?", reply_to_id=gone["id"])
+    assert (await client.delete(f"/api/rooms/messages/{gone['id']}", headers=H(bob))).status_code == 204
+    await answer(uuid.UUID(q["id"]))
+    assert fake_model[3]["messages"][0]["content"] == f"{ann.username}: @promptly what was that?"
+    assert "puppy" not in fake_model[3]["system"]
 
 
 async def test_no_switch_lets_promptly_read_a_room(client, people, fake_model):

@@ -318,7 +318,7 @@ test.describe("Call history and missed calls", () => {
     await expect(status(bob)).toHaveText("Calling…", { timeout: 20_000 });
     await expect(incoming(alice)).toContainText(name("bob"), { timeout: 20_000 });
     await decline(alice);
-    await expect(bob.getByTestId("call-ended")).toContainText("No answer", { timeout: 15_000 });
+    await expect(bob.getByTestId("call-ended")).toContainText("Can't talk right now", { timeout: 15_000 });
     await expect(screen(bob)).toHaveCount(0, { timeout: 15_000 });
     // ...and the list has it on top.
     await expect(rows(bob).first()).toContainText("Outgoing call", { timeout: 15_000 });
