@@ -22,6 +22,8 @@ export interface StoreItem {
 
 export interface ItemSpecInfo extends Omit<StoreItem, "installed" | "disabled" | "files"> {
   ai_suggestions: string[];
+  /** What the assistant's box says when empty ("What did you eat?"). */
+  ai_placeholder?: string | null;
   ai_web: boolean;
   actions: { name: string; description: string; writes: boolean }[];
 }
@@ -70,6 +72,17 @@ export interface AiTurn {
   version_id?: string | null;
   undone?: boolean;
   at?: string;
+  /** Only in the panel: this reply failed with nothing changed; the message to send again. */
+  retry?: string;
+  /** The panel's id for the turn these two rows belong to. */
+  cid?: string;
+}
+
+/** A turn the server is still working on (the panel reconnects to it). */
+export interface AiRunning {
+  message: string;
+  started: string;
+  client_id: string | null;
 }
 
 export type AiEvent =
@@ -77,7 +90,58 @@ export type AiEvent =
   | { type: "action"; name: string; summary: string; ok: boolean }
   | { type: "status"; text: string }
   | { type: "done"; changed: boolean; revision: number; version_id: string | null; data?: Record<string, unknown> }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; retry?: boolean }
+  /** Only from this client: the stream stopped (or went silent) before the turn ended. */
+  | { type: "lost" }
+  /** Only from this client: the server is still on the previous message. */
+  | { type: "busy" };
+
+/** No bytes for this long (the server sends a keep-alive every 10 s) means the connection is gone. */
+const STREAM_SILENCE_MS = 35_000;
+
+/** Server-sent events off a fetch response, ending with ``lost`` when the
+ *  stream stops or goes silent before a ``done`` / ``error``. A phone that
+ *  slept, a dropped connection and a proxy timeout all look like that; the
+ *  turn itself carries on on the server. */
+async function* readAiEvents(res: Response): AsyncGenerator<AiEvent> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let ended = false;
+  try {
+    for (;;) {
+      let timer = 0;
+      const silent = new Promise<"silent">((resolve) => {
+        timer = window.setTimeout(() => resolve("silent"), STREAM_SILENCE_MS);
+      });
+      const got = await Promise.race([reader.read(), silent]);
+      window.clearTimeout(timer);
+      if (got === "silent" || got.done) break;
+      buf += decoder.decode(got.value, { stream: true });
+      let cut: number;
+      while ((cut = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, cut);
+        buf = buf.slice(cut + 2);
+        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue; // a keep-alive comment
+        try {
+          const ev = JSON.parse(line.slice(6)) as AiEvent;
+          if (ev.type === "done" || ev.type === "error") ended = true;
+          yield ev;
+        } catch {
+          /* a partial frame */
+        }
+      }
+      if (ended) return;
+    }
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    /* the connection dropped: lost, below */
+  } finally {
+    void reader.cancel().catch(() => undefined);
+  }
+  if (!ended) yield { type: "lost" };
+}
 
 /** The file, from the server — or, with no connection, the copy this
  *  device kept (``offline: true``). Successful reads refresh that copy. */
@@ -170,9 +234,21 @@ export const itemsApi = {
     const { data } = await apiClient.post(`/items/${fileId}/restore/${versionId}`);
     return data;
   },
-  async thread(fileId: string): Promise<AiTurn[]> {
+  async thread(fileId: string): Promise<{ turns: AiTurn[]; running: AiRunning | null }> {
     const { data } = await apiClient.get(`/items/${fileId}/ai`);
-    return data.turns;
+    return { turns: data.turns ?? [], running: data.running ?? null };
+  },
+  /** Stop the turn that's running (what it changed so far isn't saved). */
+  async stopTurn(fileId: string): Promise<void> {
+    await apiClient.post(`/items/${fileId}/ai/stop`);
+  },
+  /** The turn that's running on the server, from its first event. Yields
+   *  nothing when none is. */
+  async *followTurn(fileId: string, signal?: AbortSignal): AsyncGenerator<AiEvent> {
+    await apiClient.get(`/items/${fileId}/revision`);
+    const res = await fetch(`${API_BASE_URL}/items/${fileId}/ai/live`, { headers: authHeader(), credentials: "include", signal });
+    if (res.status === 204 || !res.ok || !res.body) return;
+    yield* readAiEvents(res);
   },
   async clearThread(fileId: string): Promise<void> {
     await apiClient.delete(`/items/${fileId}/ai`);
@@ -180,7 +256,7 @@ export const itemsApi = {
   /** One AI-panel turn, streamed. Yields events until ``done`` / ``error``. */
   async *ask(
     fileId: string,
-    body: { message: string; provider_id: string | null; model_id: string | null; attachment_ids?: string[] },
+    body: { message: string; provider_id: string | null; model_id: string | null; attachment_ids?: string[]; client_id?: string },
     signal?: AbortSignal,
   ): AsyncGenerator<AiEvent> {
     // A cheap authed call first, so an expired access token is refreshed
@@ -193,6 +269,10 @@ export const itemsApi = {
       body: JSON.stringify(body),
       signal,
     });
+    if (res.status === 409) {
+      yield { type: "busy" };
+      return;
+    }
     if (!res.ok || !res.body) {
       let detail = `The assistant isn't available (${res.status}).`;
       try {
@@ -204,25 +284,6 @@ export const itemsApi = {
       yield { type: "error", message: detail };
       return;
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let cut: number;
-      while ((cut = buf.indexOf("\n\n")) >= 0) {
-        const chunk = buf.slice(0, cut);
-        buf = buf.slice(cut + 2);
-        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-        if (!line) continue;
-        try {
-          yield JSON.parse(line.slice(6)) as AiEvent;
-        } catch {
-          /* a partial frame */
-        }
-      }
-    }
+    yield* readAiEvents(res);
   },
 };

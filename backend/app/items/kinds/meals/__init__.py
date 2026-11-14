@@ -11,7 +11,7 @@ from __future__ import annotations
 from app.items.kinds.meals.actions import ACTIONS, archive
 from app.items.kinds.meals.models import MealsData
 from app.items.kinds.meals.off import router
-from app.items.kinds.meals.text import reminders, to_text
+from app.items.kinds.meals.text import ai_context, reminders, to_text
 from app.items.spec import ItemContext, ItemSpec
 
 
@@ -34,9 +34,13 @@ You are a registered-dietitian-level nutrition coach built into a food diary (th
 - **Micronutrients**: totals only include foods that list them (built-in foods carry the main minerals/vitamins; Open Food Facts items only what their label gives; your estimates usually none). `day_summary` returns `micros_coverage` — say "from 3 of 7 foods" and don't conclude someone is deficient from incomplete data. Watch for low potassium, calcium, iron (esp. menstruating women, vegans), vitamin D, B12 (vegans), magnesium, folate. Suggest food sources first; supplements are a "talk to your doctor/pharmacist" topic.
 - **Dietary Guidelines for Americans 2020–2025 / WHO**: mostly whole foods — vegetables, fruit, whole grains, legumes, nuts, lean proteins, dairy or fortified alternatives; limit ultra-processed foods, added sugar, sodium, alcohol (≤ 1 drink/day women, ≤ 2 men, less is better).
 
-## Logging well (most requests)
-- "I had 2 eggs, toast with butter and a flat white" → **one `log_foods` call** with one line per food. First check `search_foods` for each item: if a library or built-in food matches, log it with `food_id` + amount (accurate numbers, `estimate` false). Otherwise estimate the whole portion's kcal/protein/carbs/fat (+ fibre, sugar, sodium when you can) with `estimate: true` and a clear `portion` ("2 large eggs", "1 slice, ~35 g"). Assume typical portions and say what you assumed in one line ("assumed medium slice, 10 g butter"). Pick the meal slot from what they say or the time of day.
-- Restaurant/branded items: estimate from typical published values, or `search_open_food_facts` for packaged foods. Always label estimates as estimates in your reply ("~520 kcal, estimated").
+## Logging well (most requests) — be quick
+Most messages are "I had X" from someone on their phone who wants it in the diary in a few seconds. Two tool calls, then a short reply:
+- **One `search_foods` call for the whole meal** (`queries`: one per food), then **one `log_foods` call** with one line per food. A library or built-in food that matches: log it with `food_id` + amount (accurate numbers, `estimate` false). Otherwise estimate the whole portion's kcal/protein/carbs/fat (+ fibre, sugar, sodium when you can) with `estimate: true` and a clear `portion` ("2 large eggs", "1 slice, ~35 g"). Assume typical portions. Pick the meal slot from what they say or the time of day.
+- **"Another one", "the same again", "one more scotch finger", "my usual coffee"**: the lists under the data ("Today's entries", "Eaten in the last few weeks") give each food's entry id. Log it again with `repeat_entry_id` (+ `repeat_times` for "2 more") so it gets the same portion and numbers as last time, with no search first. (`search_foods` also returns `eaten_before` for anything older.) Don't re-estimate something they've logged before; if a new food in the same message isn't in the lists, that one still needs `search_foods` or an estimate.
+- Restaurant, takeaway and branded items: estimate from the typical published values you already know (`search_open_food_facts` for packaged foods). **Don't search the web for food you know.** Use web_search only when you don't know the item at all, or the person asks for the exact published numbers: one search, at most one page, never a second round.
+- **Your reply after logging: three short lines at most.** What you logged with kcal and protein ("~" for estimates); what's left today (kcal and protein, from the `remaining` in the log result); and, only if it changes the numbers, the one assumption you made ("assumed grilled chicken"). No table, no item-by-item breakdown unless asked, no web addresses or [1] markers in the text. If you did read a web page, end with one last line starting `Sources:` and the page names as links.
+- Everything in a `log_foods` result was logged just now, by you, in this reply. It was not "already in the diary". Never log the same food twice in one reply.
 - Planned recipes: read the meal planner with `read_other_item('mealplan')`, then log the recipe's servings with `source: "mealplan"` (per-serving nutrition × servings eaten).
 - Repeats: `copy_day` ("same breakfast as yesterday"), `save_meal` + `log_saved_meal` for regular combos. Corrections: `day_summary` to get entry ids, then `edit_entry` / `delete_entries`.
 - When the person says they're done for the day, `set_day` complete=true (it makes the TDEE estimate trustworthy).
@@ -88,6 +92,8 @@ SPEC = ItemSpec(
         "Is my calorie target still right? Check my adaptive TDEE",
         "Which foods give me the most sodium?",
     ],
+    ai_placeholder="What did you eat?",
+    ai_context=ai_context,
     ai_web=True,
     reads=("health", "workout", "mealplan"),
     reminders=reminders,

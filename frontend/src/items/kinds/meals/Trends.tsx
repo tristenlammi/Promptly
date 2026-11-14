@@ -71,11 +71,17 @@ export function Trends({ item, isPhone, ask }: ItemViewProps<MealsData>) {
   }, [data.days, data.targets, days, today]);
 
   const logged = rows.filter((r) => r.logged && r.t);
+  // Today is still being eaten: a half-logged day would drag every average
+  // down, so it counts once it's marked complete (or it's all there is).
+  const todayDone = !!data.days[today]?.complete;
+  const settled = logged.filter((r) => r.d !== today || todayDone);
+  const averaged = settled.length ? settled : logged;
   const avg = useMemo(() => {
-    if (!logged.length) return null;
-    const sum = (k: "kcal" | "protein" | "carbs" | "fat" | "fibre") => logged.reduce((a, r) => a + (r.t ? r.t[k] : 0), 0) / logged.length;
-    return { kcal: sum("kcal"), protein: sum("protein"), carbs: sum("carbs"), fat: sum("fat"), fibre: sum("fibre"), target: logged.reduce((a, r) => a + r.tg.kcal, 0) / logged.length };
-  }, [logged]);
+    if (!averaged.length) return null;
+    const sum = (k: "kcal" | "protein" | "carbs" | "fat" | "fibre") => averaged.reduce((a, r) => a + (r.t ? r.t[k] : 0), 0) / averaged.length;
+    return { kcal: sum("kcal"), protein: sum("protein"), carbs: sum("carbs"), fat: sum("fat"), fibre: sum("fibre"), target: averaged.reduce((a, r) => a + r.tg.kcal, 0) / averaged.length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, todayDone]);
 
   const kcalBars = rows.map((r) => ({ d: r.d, v: r.t ? energy(r.t.kcal, s) : null, target: energy(r.tg.kcal, s) }));
   const proteinBars = rows.map((r) => ({ d: r.d, v: r.t ? r.t.protein : null, target: r.tg.protein }));
@@ -83,7 +89,9 @@ export function Trends({ item, isPhone, ask }: ItemViewProps<MealsData>) {
   const weeks = useMemo(() => {
     const m = new Map<string, { kcal: number; protein: number; n: number }>();
     for (const r of rows) {
-      if (!r.t) continue;
+      if (!r.t || !r.logged) continue;
+      // Not today's half-eaten day, unless the week has nothing else yet.
+      if (r.d === today && !todayDone && rows.some((x) => x.d !== today && x.logged && weekStart(x.d) === weekStart(today))) continue;
       const w = weekStart(r.d);
       const x = m.get(w) ?? { kcal: 0, protein: 0, n: 0 };
       x.kcal += r.t.kcal;
@@ -92,7 +100,7 @@ export function Trends({ item, isPhone, ask }: ItemViewProps<MealsData>) {
       m.set(w, x);
     }
     return [...m.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [rows]);
+  }, [rows, today, todayDone]);
 
   const top = useMemo(() => {
     const groups = new Map<string, { name: string; amount: number; times: number }>();
@@ -180,7 +188,7 @@ export function Trends({ item, isPhone, ask }: ItemViewProps<MealsData>) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Section title="Macro split" hint="Share of energy, average logged day">
+        <Section title="Macro split" hint="Share of energy on an average logged day. Today counts once you mark it complete.">
           <Card className="flex flex-col gap-3">
             {split && avg ? (
               <>

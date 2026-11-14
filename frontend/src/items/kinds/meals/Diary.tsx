@@ -522,11 +522,22 @@ function EntrySheet({ entry, onClose, item, day }: { entry: Entry | null; onClos
     onClose();
   };
   const remove = () => {
+    const was = dayOf(item.data, day).entries.findIndex((e) => e.id === entry.id);
     item.update((dd) => {
       const x = ensureDay(dd, day);
       x.entries = x.entries.filter((e) => e.id !== entry.id);
     });
-    toast.success(`Removed ${entry.name}`);
+    toast.success(`Removed ${entry.name}`, {
+      action: {
+        label: "Undo",
+        // Back where it was (unless it's already back).
+        onClick: () =>
+          item.update((dd) => {
+            const x = ensureDay(dd, day);
+            if (!x.entries.some((e) => e.id === entry.id)) x.entries.splice(Math.max(0, Math.min(was, x.entries.length)), 0, { ...entry });
+          }),
+      },
+    });
     onClose();
   };
   return (

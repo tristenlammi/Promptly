@@ -149,6 +149,12 @@ class FoodLine(BaseModel):
         default="serving", description="g / ml / oz, servings, or cup (240 ml) / tbsp / tsp / floz for drinks, milk, oils, honey…"
     )
     serving_id: str | None = Field(default=None, description="Which of the food's servings (with unit='serving')")
+    repeat_entry_id: str | None = Field(
+        default=None,
+        description="Log an earlier diary entry again, same portion and numbers ('another one', 'the same as before', "
+        "'my usual'): its id from search_foods' eaten_before or day_summary. Leave amount, unit and nutrition out.",
+    )
+    repeat_times: float = Field(default=1, gt=0, le=50, description="With repeat_entry_id: how many of it ('2 more' = 2, 'half' = 0.5)")
     portion: str | None = Field(default=None, max_length=60, description="Portion as words for free-text items: '2 large eggs', '1 slice'")
     grams: float | None = Field(default=None, ge=0, le=100_000, description="Estimated weight of the portion, if known")
     brand: str | None = Field(default=None, max_length=80)
@@ -168,6 +174,23 @@ class FoodLine(BaseModel):
 
 def _portion(data: dict, line: FoodLine) -> dict:
     """A portion dict (name, amount, n…) from a line."""
+    if line.repeat_entry_id:
+        was = next((e for day in data["days"].values() for e in day["entries"] if e["id"] == line.repeat_entry_id), None)
+        if was is None:
+            raise ActionError(f"No diary entry {line.repeat_entry_id!r} — use search_foods (eaten_before) or day_summary for its id.")
+        k = line.repeat_times
+        return {
+            "name": was["name"],
+            "brand": was.get("brand", ""),
+            "food_ref": was.get("food_ref"),
+            "amount": round(was["amount"] * k, 3),
+            "unit": was["unit"],
+            "serving_id": was.get("serving_id"),
+            "serving_label": was.get("serving_label", ""),
+            "grams": round(was["grams"] * k, 1) if was.get("grams") else None,
+            "n": science.scale_totals(was["n"], k),
+            "estimate": bool(was.get("estimate")),
+        }
     if line.food_id:
         food = science.resolve_food(data, line.food_id)
         if food is None:
@@ -1226,7 +1249,10 @@ def top_foods_by_nutrient(ctx: ItemContext, data: dict, p: TopFoods) -> ActionOu
 
 
 class SearchFoods(BaseModel):
-    query: str = Field(min_length=1, max_length=100)
+    query: str | None = Field(default=None, max_length=100, description="One food to look for")
+    queries: list[str] | None = Field(
+        default=None, max_length=12, description="Several foods at once (a whole meal): one call instead of one per food"
+    )
     limit: int = Field(default=12, ge=1, le=40)
 
 
@@ -1260,8 +1286,57 @@ def search_library(data: dict, q: str, limit: int) -> list[dict]:
     ]
 
 
+def _portion_words(e: dict) -> str:
+    """"1 biscuit", "2 × 1 slice", "150 g"."""
+    label = (e.get("serving_label") or "").strip()
+    if e["unit"] == "serving" and label:
+        return label if e["amount"] == 1 else f"{e['amount']:g} × {label}"
+    return f"{e['amount']:g} {label or e['unit']}".strip()
+
+
+def eaten_before(data: dict, ctx: ItemContext, q: str, limit: int = 4) -> list[dict]:
+    """What the diary has by this name from the last few weeks, newest first
+    and one of each: how "another scotch finger" finds the first one."""
+    since = (ctx.today - timedelta(days=45)).isoformat()
+    seen: set[tuple] = set()
+    out: list[dict] = []
+    for d in sorted((d for d in data["days"] if since <= d <= ctx.today.isoformat()), reverse=True):
+        for e in reversed(data["days"][d]["entries"]):
+            if _score(e["name"], e.get("brand", ""), q) <= 0:
+                continue
+            key = (e["name"].lower(), e["amount"], e["unit"], round(e["n"]["kcal"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "entry_id": e["id"],
+                    "date": d,
+                    "name": e["name"],
+                    "portion": _portion_words(e),
+                    **_brief_n(e["n"]),
+                    "estimate": bool(e.get("estimate")),
+                }
+            )
+            if len(out) >= limit:
+                return out
+    return out
+
+
 def search_foods(ctx: ItemContext, data: dict, p: SearchFoods) -> ActionOutcome:
-    return ActionOutcome(summary="", result={"query": p.query, "foods": search_library(data, p.query, p.limit)})
+    asked = [q.strip() for q in [p.query, *(p.queries or [])] if isinstance(q, str) and q.strip()]
+    asked = list(dict.fromkeys(asked))[:12]
+    if not asked:
+        raise ActionError("Give a food to look for (query, or queries for several).")
+    limit = p.limit if len(asked) == 1 else min(p.limit, 5)
+    found = [
+        {"query": q, "foods": search_library(data, q, limit), "eaten_before": eaten_before(data, ctx, q)}
+        for q in asked
+    ]
+    how = "A food here: log_foods with its food_id + amount. Something from eaten_before, again: log_foods with repeat_entry_id."
+    if len(found) == 1:
+        return ActionOutcome(summary="", result={**found[0], "how_to_use": how})
+    return ActionOutcome(summary="", result={"results": found, "how_to_use": how})
 
 
 class OffSearch(BaseModel):
