@@ -72,6 +72,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: choosing where to start, or adding a stop, lists Home, Work, your car and recent places to tap, above typing or choosing on the map.
 - P Maps: search results say how far each one is from you.
 - P Maps: the directions panel has a share button that tells someone when you'll arrive ("On my way to… I should get there about 5:40 pm") with a link to the place, through your phone's own share sheet.
+- Chat: after a web search, opening an address made only of your own words (a shop's search page for what you asked about) no longer waits for a yes. Anything else Promptly makes up itself still asks. The approval card is shorter: the site, the address once, and buttons that fit a phone.
+- Chat: when Promptly needs your OK to open a page (or look at your timeline), the reply now stops at the card and waits. Yes opens it and the answer carries on using what it found; No carries on without it. If nobody answers for a couple of minutes the reply finishes without it, and the card stays there to answer later, as before.
 
 ### Fixed
 

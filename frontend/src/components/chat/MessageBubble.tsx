@@ -90,7 +90,7 @@ import {
 import { MapChips } from "@/maps/MapChips";
 import { PhotoResultsCards } from "./PhotoResultsCard";
 import { FormDraftChips } from "./FormDraftChips";
-import { ToolApprovalCards } from "./ToolApprovalCard";
+import { LiveApprovalCards, ToolApprovalCards } from "./ToolApprovalCard";
 import { VisionRelayChip } from "./VisionRelayChip";
 
 interface MessageBubbleProps {
@@ -1223,6 +1223,9 @@ function MessageBubbleImpl({
         {hasToolInvocations && <FormDraftChips steps={activitySteps} />}
         {!streaming && messageId && toolCalls && toolCalls.length > 0 && (
           <ToolApprovalCards messageId={messageId} toolCalls={toolCalls} />
+        )}
+        {streaming && toolInvocations && toolInvocations.some((t) => t.ask) && (
+          <LiveApprovalCards toolInvocations={toolInvocations} />
         )}
         {hasAttachments && !editing && (
           <AttachmentChips

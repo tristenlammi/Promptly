@@ -22,6 +22,13 @@ Spoken turns (Talk, WP-T4) can't carry markers, so plain words do:
     "timer" + tools    call set_timer for 10 minutes (the phone, WP-T5)
     "alarm" + tools    call set_alarm for 6:30 (held for a yes)
     "phone" + tools    call send_to_phone for the latest thing (Talk phase 2)
+    "pausecheck" + tools
+             read something from outside (the person's files), then open
+             example.com at an address they never wrote: the reply stops
+             at an approval card (chat/holds.py)
+    "plaincheck" + tools
+             the same, but the address is made only of the message's own
+             words (example.com/search?q=plaincheck): no card
 
 Requests the backend makes on its own are recognised by their system
 prompt: the chat titler gets "E2E chat", memory capture gets "[]", and
@@ -88,10 +95,36 @@ LONG_STORY = [
 ]
 
 
+_OUTSIDE_READS = (("list_my_files", "{}"), ("search_past_chats", '{"query": "pineapple"}'))
+
+
+def _chain_for(body: dict) -> tuple[str, str] | None:
+    """Two calls, one after the other: an outside read, then a page-open."""
+    messages = body.get("messages") or []
+    last_user_at = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
+    if last_user_at < 0:
+        return None
+    text = _text_of(messages[last_user_at].get("content"))[0]
+    held, plain = "pausecheck" in text, "plaincheck" in text
+    if not (held or plain):
+        return None
+    offered = {(t.get("function") or {}).get("name") for t in body.get("tools") or []}
+    done = sum(1 for m in messages[last_user_at:] if m.get("role") == "tool")
+    if done == 0:
+        return next(((n, a) for n, a in _OUTSIDE_READS if n in offered), None)
+    if done == 1 and "fetch_url" in offered:
+        url = "https://example.com/search?q=plaincheck" if plain else "https://example.com/?ref=held-open"
+        return "fetch_url", json.dumps({"url": url})
+    return None
+
+
 def _tool_call_for(body: dict) -> tuple[str, str] | None:
     """(name, arguments) when the turn asks for a tool and hasn't had its
     result yet."""
     messages = body.get("messages") or []
+    chained = _chain_for(body)
+    if chained is not None:
+        return chained
     if messages and messages[-1].get("role") == "tool":
         return None
     last_user = next((m for m in reversed(messages) if m.get("role") == "user"), {})

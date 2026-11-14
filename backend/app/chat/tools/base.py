@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote_plus, urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -346,6 +346,91 @@ def url_allowed(turn: dict[str, Any] | None, url: str) -> bool:
     return bool(k and turn and k in (turn.get("allowed_urls") or ()))
 
 
+# An address made only of the person's own words can't be carrying anything
+# a page told the model to send: "eckersleys.com.au/search?q=canson+pastel+pad"
+# after they asked about Canson pads at Eckersley's. Such an address opens
+# without a yes. The words are what they typed this turn and what the turn
+# searched for *before* it had read anything from outside; every other part
+# of the address (host labels, path, parameter names and values) must be one
+# of those words or plain address furniture. Letters and digits a page could
+# spell data with ("/s/e/c/r/e/t", "?id=4471") are not furniture.
+_URL_FURNITURE = frozenset(
+    """
+    www com net org edu gov co au nz uk us ca ie io app shop store
+    search find results result query q s k kw keyword keywords term terms text
+    products product collections collection category categories catalog catalogue
+    items item pages page blog news article articles help support docs
+    index html htm php aspx en
+    """.split()
+)
+_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def words_in(text: str | None) -> set[str]:
+    """Lower-case words of a piece of text; "Eckersley's" also counts as
+    "eckersleys", the way a site spells it."""
+    low = (text or "").lower()
+    out = set(_WORD_RE.findall(low))
+    out.update(_WORD_RE.findall(re.sub(r"['\u2019\u2018`]", "", low)))
+    return out
+
+
+def allow_words(turn: dict[str, Any] | None, text: Any) -> None:
+    """Words the person typed (or the turn searched for before reading
+    anything): an address made only of them opens without a yes."""
+    if turn is None:
+        return
+    words = turn.get("allowed_words")
+    if not isinstance(words, set):
+        words = set()
+        dict.__setitem__(turn, "allowed_words", words)
+    if isinstance(text, (set, frozenset, list, tuple)):
+        words.update(str(w) for w in text)
+    else:
+        words.update(words_in(str(text or "")))
+
+
+def note_search_query(turn: dict[str, Any] | None, query: Any) -> None:
+    """A search the turn made before it had read outside content: the model
+    chose those words from the person's request alone."""
+    if turn is None or not isinstance(query, str):
+        return
+    before = turn.get("before_step")
+    if isinstance(before, dict) and not before.get("untrusted"):
+        allow_words(turn, query)
+
+
+def url_is_plain(turn: dict[str, Any] | None, url: str) -> bool:
+    """True when every word of the address is the person's own or address
+    furniture, so it can't carry anything else out."""
+    if not turn or len(url or "") > 300:
+        return False
+    words = turn.get("allowed_words")
+    if not isinstance(words, set) or not words:
+        return False
+    raw = (url or "").strip()
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.I):
+        raw = "http://" + raw
+    try:
+        parts = urlsplit(raw)
+        host = (parts.hostname or "").lower()
+        if not host or parts.username or parts.password:
+            return False
+        if parts.port and parts.port not in (80, 443):
+            return False
+    except ValueError:
+        return False
+    if re.fullmatch(r"[0-9.]+|\[.*\]", host):
+        return False  # a bare IP address is nobody's word
+    allowed_hosts = {k.split("/", 1)[0].split("?", 1)[0] for k in (turn.get("allowed_urls") or ())}
+    bare = host[4:] if host.startswith("www.") else host
+    ok = words | _URL_FURNITURE
+    if bare not in allowed_hosts and not all(lbl in ok for lbl in _WORD_RE.findall(host)):
+        return False
+    rest = unquote_plus(f"{parts.path} {parts.query} {parts.fragment}").lower()
+    return all(tok in ok for tok in _WORD_RE.findall(rest))
+
+
 def start_step(turn: dict[str, Any] | None, tool_names: Any) -> None:
     """Called once per step, before its calls run: remember what the turn
     had read so far (``before_step``), then mark it for what this step
@@ -360,13 +445,15 @@ def start_step(turn: dict[str, Any] | None, tool_names: Any) -> None:
 def guard_outbound(ctx: ToolContext, doing: str, *, url: str) -> None:
     """Hold an outbound call on a steered turn (see above). ``url`` is the
     page to open: fine when the person gave it or a search found it this
-    turn; any outside content read before this step counts."""
+    turn, or when it is made only of the person's own words
+    (:func:`url_is_plain`); any outside content read before this step
+    counts."""
     turn = ctx.turn
     if not turn or turn.get("user_approved"):
         return
     before = turn.get("before_step")
     if not isinstance(before, dict):
         before = {"untrusted": bool(turn.get("untrusted"))}
-    if not before.get("untrusted") or url_allowed(turn, url):
+    if not before.get("untrusted") or url_allowed(turn, url) or url_is_plain(turn, url):
         return
     raise HoldForApproval(doing)

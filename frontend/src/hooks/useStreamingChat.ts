@@ -431,7 +431,9 @@ export function useStreamingChat(): UseStreamingChatResult {
       // show *that* conversation, not this streaming one.
       useChatStore.setState({ streamingConversationId: conversationId });
 
-      const resp = await fetch(chatApi.streamUrl(streamId), {
+      // ``asks=1``: this page shows a card the reply stops at, and can
+      // answer it (``tool_ask`` below), so the server may wait for one.
+      const resp = await fetch(`${chatApi.streamUrl(streamId)}?asks=1`, {
         method: "GET",
         headers: {
           Accept: "text/event-stream",
@@ -565,6 +567,10 @@ export function useStreamingChat(): UseStreamingChatResult {
         }
         if (data.event === "tool_progress" && data.id && data.message) {
           store.updateToolProgress(data.id, data.message, data.data ?? null);
+          continue;
+        }
+        if (data.event === "tool_ask" && data.id && data.name && data.meta) {
+          store.askToolInvocation(data.id, data.name, data.meta as Record<string, unknown>);
           continue;
         }
         if (data.event === "tool_finished" && data.id) {

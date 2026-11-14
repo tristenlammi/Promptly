@@ -1035,6 +1035,9 @@ export interface ToolInvocation {
   /** Tool-specific structured data (e.g. an image-gen prompt + model)
    *  surfaced for richer UI affordances. Opaque to the chat layer. */
   meta?: Record<string, unknown> | null;
+  /** The reply has stopped at this call and is waiting for a yes or no
+   *  (``tool_ask``): the approval card's meta. Cleared when it finishes. */
+  ask?: Record<string, unknown> | null;
 }
 
 /** One sub-agent's live row in a run_agents fan-out (from the

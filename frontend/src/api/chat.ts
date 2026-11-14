@@ -440,6 +440,14 @@ export const chatApi = {
     );
     return data.updated;
   },
+  /** Answer a card the reply is waiting on right now (it isn't saved
+   *  yet, so there is no message to decide). 409 once it stopped waiting. */
+  async answerWaitingCall(conversationId: string, callId: string, approve: boolean): Promise<void> {
+    await apiClient.post(
+      `/chat/conversations/${conversationId}/tool-calls/${encodeURIComponent(callId)}/answer`,
+      { approve }
+    );
+  },
   streamUrl(streamId: string): string {
     // Used by useStreamingChat — must be absolute-ish since it flows through
     // nginx in prod and through vite proxy in dev.

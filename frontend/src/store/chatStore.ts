@@ -110,6 +110,8 @@ interface ChatState {
     message: string,
     data?: Record<string, unknown> | null
   ) => void;
+  /** The reply is waiting on this call for a yes or no (``tool_ask``). */
+  askToolInvocation: (id: string, name: string, meta: Record<string, unknown>) => void;
   /** Move an invocation from ``pending`` to ``ok`` / ``error`` and
    *  attach its result. Silently dropped if the id isn't tracked
    *  (would only happen if a ``tool_finished`` arrived without a
@@ -281,12 +283,21 @@ export const useChatStore = create<ChatState>((set) => ({
           : t
       ),
     })),
+  askToolInvocation: (id, name, meta) =>
+    set((state) => ({
+      // A reattach replays ``tool_ask`` without its ``tool_started`` only if
+      // the buffer was trimmed: add the call rather than lose the card.
+      toolInvocations: state.toolInvocations.some((t) => t.id === id)
+        ? state.toolInvocations.map((t) => (t.id === id ? { ...t, ask: meta } : t))
+        : [...state.toolInvocations, { id, name, status: "pending", ask: meta }],
+    })),
   finishToolInvocation: (id, update) =>
     set((state) => ({
       toolInvocations: state.toolInvocations.map((t) =>
         t.id === id
           ? {
               ...t,
+              ask: null,
               status: update.ok ? "ok" : "error",
               progressMessage: null,
               error: update.error ?? null,

@@ -54,3 +54,29 @@ async def decide_tool_call(
     except ApprovalError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from None
     return ApprovalResponse(tool_call=decision.call, content=decision.content)
+
+
+@router.post("/conversations/{conversation_id}/tool-calls/{call_id}/answer")
+async def answer_waiting_call(
+    conversation_id: uuid.UUID,
+    call_id: str,
+    payload: ApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, bool]:
+    """Answer a card the reply is waiting on right now (``holds.py``): the
+    reply isn't saved yet, so there's no message to decide. Only the person
+    whose chat it is can answer. 409 once it has stopped waiting; the card on
+    the finished reply still works."""
+    from app.chat import holds
+    from app.chat.models import Conversation
+
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None or conv.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not holds.answer(conversation_id, call_id, payload.approve):
+        raise HTTPException(
+            status_code=409,
+            detail="The reply has stopped waiting for this. You can still answer on the card when it finishes.",
+        )
+    return {"ok": True}
