@@ -21,6 +21,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Rooms: answer a message, or mark it read, from its notification. On Android "Reply" opens a box to type in right there; where a notification has no such box it opens the conversation. "Mark as read" clears the unread count on all your devices.
+- Rooms: share into a conversation from other apps on your phone. "Share → P Rooms" on a photo, a video, a file or a link asks which conversation, then opens it with everything attached and ready; nothing is sent until you press Send. (The Android side arrives with the next Promptly phone app.)
+- Rooms: "Remind me" on any message (long-press on a phone, the clock in the bar on a computer): in an hour, this evening, tomorrow morning, or just add it to Tasks. It becomes a task in your own Tasks that links back to the message; nobody else is told.
+- Rooms: "Plan an event" on a message (long-press on a phone) opens the event editor with the message as its title and everyone in the conversation invited.
+- Rooms: a street address in a message is a link that opens the place in Maps.
+
+### Fixed
+
+- Rooms: a message could arrive with no notification because Promptly still thought you were looking at that conversation. That lasted a minute after your phone locked, and for as long as a tab sat open on a computer. "Looking" is now per device, lapses within seconds, and needs you to have touched the page in the last two minutes. With the conversation open and focused on the device itself, there's still no notification.
+- Rooms: a message that didn't send on a bad connection is sent again by itself when the connection is back, and a message whose "sent" answer got lost is no longer posted twice when it's retried.
+- Rooms: reading a conversation on one device (or pressing "Mark as read") clears its notification on your other devices the next time they're open.
+
 ## [0.40.2] - 2026-11-13
 
 ### Fixed

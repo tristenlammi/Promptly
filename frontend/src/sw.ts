@@ -380,6 +380,19 @@ self.addEventListener("push", (event) => {
       let body = payload.body;
       let lines: string[] = [];
       let count = 1;
+      // The room is open, on screen and focused on this device: the message
+      // is already in front of you (the page may not have said "looking"
+      // lately, if you've been reading without touching it). No notification.
+      if (payload.category === "room_message" && payload.url) {
+        try {
+          const path = new URL(payload.url, self.location.origin).pathname;
+          const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+          const reading = wins.some((w) => (w as WindowClient).focused && (w as WindowClient).visibilityState === "visible" && new URL(w.url).pathname === path);
+          if (reading) return;
+        } catch {
+          // Can't tell: show it.
+        }
+      }
       // A room's messages stack in one notification, like a messaging app:
       // the newest few lines, and "+N more" for the rest. Tapping it (or
       // reading the room in the app) clears the stack.

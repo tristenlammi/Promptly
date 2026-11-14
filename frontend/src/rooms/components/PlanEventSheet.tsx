@@ -20,6 +20,8 @@ interface Props {
   room: { id: string; name: string };
   members: RoomUser[];
   meId: string;
+  /** Planned from a message: its words start the title. */
+  title?: string;
 }
 
 export function PlanEventSheet(props: Props) {
@@ -28,7 +30,7 @@ export function PlanEventSheet(props: Props) {
   return <PlanEvent {...props} />;
 }
 
-function PlanEvent({ open, onClose, room, members, meId }: Props) {
+function PlanEvent({ open, onClose, room, members, meId, title }: Props) {
   const qc = useQueryClient();
   const boot = useBootstrap();
 
@@ -47,7 +49,7 @@ function PlanEvent({ open, onClose, room, members, meId }: Props) {
     start.setHours(start.getHours() + 1);
     // Rooms' and Calendar's people are the same shape.
     const guests: CalUser[] = members.filter((u) => u.id !== meId).map((u) => ({ id: u.id, username: u.username, avatar_url: u.avatar_url, color: u.color }));
-    return { mode: "new", start, allDay: false, prefill: { room, guests } };
+    return { mode: "new", start, allDay: false, prefill: { room, guests, ...(title ? { title } : {}) } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

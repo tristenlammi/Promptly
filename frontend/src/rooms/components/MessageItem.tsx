@@ -1,12 +1,12 @@
-import { AlertCircle, Copy, CornerUpLeft, Loader2, MoreHorizontal, Pencil, Pin, RotateCw, SmilePlus, Trash2, Users } from "lucide-react";
+import { AlarmClock, AlertCircle, Copy, CornerUpLeft, Loader2, MoreHorizontal, Pencil, Pin, RotateCw, SmilePlus, Trash2, Users } from "lucide-react";
 import { memo, useRef, useState, type ReactNode } from "react";
 
 import type { ShareKind } from "@/api/crossapp";
-import type { Message, RoomUser } from "@/api/rooms";
+import { REMIND_CHOICES, type Message, type RoomUser } from "@/api/rooms";
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
-import { copyText, deleteMessage, togglePin, toggleReaction } from "../actions";
+import { copyText, deleteMessage, remindMe, togglePin, toggleReaction } from "../actions";
 import { QUICK_REACTIONS } from "../emoji";
 import { fullDate, plainSnippet, timeOf } from "../format";
 import type { PendingMessage } from "../store";
@@ -42,8 +42,8 @@ export interface MessageCtx {
   canCall?: boolean;
 }
 
-/** Room for the hover action bar beside a bubble (nine 32px buttons and their gaps). */
-const TOOLBAR_W = 316;
+/** Room for the hover action bar beside a bubble (ten 32px buttons and their gaps). */
+const TOOLBAR_W = 350;
 /** A message this recent, on arrival, eases in. */
 const FRESH_MS = 8000;
 
@@ -64,6 +64,7 @@ export const MessageItem = memo(function MessageItem({
   ctx: MessageCtx;
 }) {
   const [hoverPicker, setHoverPicker] = useState<HTMLElement | null>(null);
+  const [remindAnchor, setRemindAnchor] = useState<HTMLElement | null>(null);
   const press = useRef<{ t: number; x: number; y: number } | null>(null);
   const anchor = useRef<HTMLDivElement>(null);
   // The action bar sits beside a short bubble, and on the top corner of a wide one.
@@ -234,7 +235,7 @@ export const MessageItem = memo(function MessageItem({
             beside
               ? cn("top-0", own ? "right-full pr-1.5" : "left-full pl-1.5")
               : cn("-top-8 min-w-full", own ? "right-0 justify-start" : "left-0 justify-end"),
-            hoverPicker && "!flex",
+            (hoverPicker || remindAnchor) && "!flex",
           )}
         >
         <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-0.5 shadow-[var(--shadow-sm)]">
@@ -260,11 +261,32 @@ export const MessageItem = memo(function MessageItem({
           <ToolButton label="Copy text" onClick={() => void copyText(m)}>
             <Copy className="h-4 w-4" />
           </ToolButton>
+          <ToolButton label="Remind me" onClick={(el) => setRemindAnchor(remindAnchor ? null : el)}>
+            <AlarmClock className="h-4 w-4" />
+          </ToolButton>
           {(own || ctx.canModerate) && (
             <ToolButton label="Delete" onClick={() => deleteMessage(m)} danger>
               <Trash2 className="h-4 w-4" />
             </ToolButton>
           )}
+          <Popover anchor={remindAnchor} open={!!remindAnchor} onClose={() => setRemindAnchor(null)} width={208}>
+            <div className="flex flex-col p-1" role="menu" aria-label="Remind me">
+              {REMIND_CHOICES.map((c) => (
+                <button
+                  key={c.when}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setRemindAnchor(null);
+                    void remindMe(m, c.when);
+                  }}
+                  className="flex h-9 items-center rounded-lg px-3 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]"
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </Popover>
           <Popover anchor={hoverPicker} open={!!hoverPicker} onClose={() => setHoverPicker(null)} width={312}>
             <EmojiGrid
               onPick={(e) => {

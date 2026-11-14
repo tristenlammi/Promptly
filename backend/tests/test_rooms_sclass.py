@@ -182,3 +182,51 @@ async def test_the_buttons_stop_working_once_youve_left(client, db, people, push
     assert r.status_code == 204, r.text
     r = await client.post("/api/notifications/action", json={"token": reply, "text": "still here"})
     assert r.status_code == 410
+
+
+# ------------------------------------------------------------------ remind me
+
+
+def test_remind_me_times_are_never_in_the_past():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.rooms.service import remind_time
+
+    tz = ZoneInfo("Australia/Brisbane")
+    lunch = datetime(2026, 11, 13, 12, 30, tzinfo=tz)
+    late = datetime(2026, 11, 13, 21, 15, tzinfo=tz)
+    assert remind_time(lunch, "hour") == ("2026-11-13", "13:30")
+    assert remind_time(lunch, "evening") == ("2026-11-13", "18:00")
+    assert remind_time(late, "evening") == ("2026-11-14", "18:00")
+    assert remind_time(late, "hour") == ("2026-11-13", "22:15")
+    assert remind_time(datetime(2026, 11, 13, 23, 40, tzinfo=tz), "hour") == ("2026-11-14", "00:40")
+    assert remind_time(late, "tomorrow") == ("2026-11-14", "09:00")
+    assert remind_time(late, "none") == (None, None)
+
+
+async def test_remind_me_makes_your_own_task_that_links_back(client, db, people):  # noqa: F811
+    ann, bob, *_ = people
+    _sid, room = await make_space(client, ann, bob)
+    m = await say(client, ann, room, "can you **book** the vet for Tuesday?")
+    r = await client.post(f"/api/rooms/messages/{m['id']}/remind", headers=H(bob), json={"when": "tomorrow"})
+    assert r.status_code == 201, r.text
+    got = r.json()
+    assert got["title"].endswith("can you book the vet for Tuesday?") and got["time"] == "09:00" and got["due"]
+    # It's in bob's Tasks, not ann's, and points at the message.
+    from sqlalchemy import select
+
+    from app.items.models import ItemDocument as ItemDoc
+
+    docs = (await db.execute(select(ItemDoc).where(ItemDoc.kind == "tasks"))).scalars().all()
+    tasks = [t for d in docs for t in d.data.get("tasks", [])]
+    assert len(tasks) == 1
+    assert f"/rooms/r/{room}?m={m['seq']}" in tasks[0]["notes"] and tasks[0]["alerts"] == [0]
+
+
+async def test_you_cant_set_a_reminder_on_a_message_you_cant_see(client, db, people):  # noqa: F811
+    ann, bob, cat, _dan = people
+    _sid, room = await make_space(client, ann, bob)
+    m = await say(client, ann, room, "private plans")
+    r = await client.post(f"/api/rooms/messages/{m['id']}/remind", headers=H(cat), json={"when": "hour"})
+    assert r.status_code in (403, 404)

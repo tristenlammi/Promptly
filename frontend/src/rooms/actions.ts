@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { roomsApi, type Attachment, type Message } from "@/api/rooms";
+import { roomsApi, type Attachment, type Message, type RemindWhen } from "@/api/rooms";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -83,6 +83,19 @@ export async function editMessage(m: Message, body: string): Promise<boolean> {
     store.patchMessage(m.room_id, m.id, () => prev);
     toast.error(apiErrorMessage(err, "Couldn't save your edit."));
     return false;
+  }
+}
+
+/** "Remind me" on a message: it becomes a task in your Tasks (only you see it). */
+export async function remindMe(m: Message, when: RemindWhen) {
+  try {
+    const got = await roomsApi.remind(m.id, when);
+    const at = got.due ? (when === "hour" ? "in an hour" : when === "evening" ? "this evening" : "tomorrow morning") : null;
+    toast.success(at ? `I'll remind you ${at}.` : "Added to Tasks.", {
+      action: { label: "Open Tasks", onClick: () => window.location.assign(got.href) },
+    });
+  } catch (err) {
+    toast.error(apiErrorMessage(err, "Couldn't set that reminder."));
   }
 }
 

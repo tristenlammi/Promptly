@@ -692,6 +692,23 @@ class ReactionIn(BaseModel):
     emoji: str = Field(min_length=1, max_length=32)
 
 
+class RemindIn(BaseModel):
+    # "hour": in an hour · "evening": 6 pm today · "tomorrow": 9 am tomorrow ·
+    # "none": just add it to Tasks, no time.
+    when: Literal["hour", "evening", "tomorrow", "none"] = "hour"
+
+
+@router.post("/messages/{message_id}/remind", status_code=201)
+async def remind_me(message_id: uuid.UUID, body: RemindIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """"Remind me" on a message: a task in your own Tasks that links back to
+    the message. Only you see it; nobody in the room is told."""
+    msg, room, _sm = await _load_message(db, message_id, user)
+    if msg.deleted_at is not None:
+        raise core.not_found("Message")
+    author = await db.get(User, msg.author_id) if msg.author_id else None
+    return await service.remind_me(db, user, room, msg, author.username if author else None, body.when)
+
+
 @router.put("/messages/{message_id}/reactions")
 async def react(message_id: uuid.UUID, body: ReactionIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     msg, room, _sm = await _load_message(db, message_id, user)
