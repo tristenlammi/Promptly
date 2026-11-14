@@ -50,6 +50,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Rooms: `@promptly` only sees the one message that mentions it and, when that message is a reply, the one message you replied to (who wrote it and its words; a voice message's written-out words). So "@promptly double this" works as a reply to the recipe, and you can follow up by replying to its answer. It never sees earlier messages, anyone else's messages, files or pictures, and nothing can switch that on.
 - Porch search finds posts by their words, place and who posted them. It no longer uses the photo model to match other people's posts by what's in their pictures. Searching your own library in Photos is unchanged.
 - Rooms calls on Android (next Promptly for Android): during a voice call held to your ear the screen goes dark, as on a phone call, so your cheek can't press Mute or Hang up. It stays on with the loudspeaker, a headset, or video.
+- P Maps driving (phone and car, next Promptly for Android): the arrow that shows where you are is a quarter bigger.
 
 ### Fixed
 
