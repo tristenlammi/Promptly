@@ -2,7 +2,7 @@ import { AlarmClock, AlertCircle, Copy, CornerUpLeft, Loader2, MoreHorizontal, P
 import { memo, useRef, useState, type ReactNode } from "react";
 
 import type { ShareKind } from "@/api/crossapp";
-import { REMIND_CHOICES, placeOf, type Message, type RoomUser } from "@/api/rooms";
+import { REMIND_CHOICES, placeOf, pollOf, voiceOf, type Message, type RoomUser } from "@/api/rooms";
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
@@ -14,7 +14,9 @@ import { AttachmentList } from "./Attachments";
 import { EventCard } from "./EventCard";
 import { MessageBody } from "./MessageBody";
 import { PlaceCard } from "./PlaceCard";
+import { PollCard } from "./PollCard";
 import { ShareCard } from "./ShareCard";
+import { VoiceMessage, VoicePending } from "./VoiceMessage";
 import { CallLine, callMetaOf } from "@/rtc/call/ui/CallLine";
 import { EmojiGrid, Popover, PromptlyAvatar, UserAvatar } from "./ui";
 
@@ -198,6 +200,17 @@ export const MessageItem = memo(function MessageItem({
             >
             {typeof m.meta?.event_id === "string" ? (
               <EventCard eventId={m.meta.event_id} fallback={m.body} meId={ctx.meId} users={ctx.users} />
+            ) : voiceOf(m) ? (
+              <VoiceMessage
+                messageId={m.id}
+                voice={voiceOf(m)!}
+                attachment={m.attachments.find((a) => a.id === voiceOf(m)!.att)}
+                own={own}
+                meId={ctx.meId}
+                sentAt={m.created_at}
+              />
+            ) : pollOf(m) ? (
+              <PollCard m={m} poll={pollOf(m)!} own={own} meId={ctx.meId} users={ctx.users} canModerate={ctx.canModerate} />
             ) : shareOf(m) ? (
               <>
                 {shareOf(m)!.has_note && m.body && (
@@ -229,7 +242,7 @@ export const MessageItem = memo(function MessageItem({
                 <Pin className="h-3 w-3" /> pinned
               </span>
             )}
-            <AttachmentList attachments={m.attachments} />
+            <AttachmentList attachments={voiceOf(m) ? m.attachments.filter((a) => a.id !== voiceOf(m)!.att) : m.attachments} />
             {showTime && grouped && ctx.isPhone && (
               <time dateTime={m.created_at} className="mt-0.5 animate-[fadeIn_120ms_ease-out] text-xs text-[var(--text-muted)]">
                 {timeOf(m.created_at)}
@@ -260,7 +273,7 @@ export const MessageItem = memo(function MessageItem({
           <ToolButton label="Reply" onClick={() => ctx.onReply(m)}>
             <CornerUpLeft className="h-4 w-4" />
           </ToolButton>
-          {own && typeof m.meta?.event_id !== "string" && (!shareOf(m) || shareOf(m)!.has_note) && (!placeOf(m) || placeOf(m)!.has_note) && (
+          {own && typeof m.meta?.event_id !== "string" && !voiceOf(m) && !pollOf(m) && (!shareOf(m) || shareOf(m)!.has_note) && (!placeOf(m) || placeOf(m)!.has_note) && (
             <ToolButton label="Edit" onClick={() => ctx.onEdit(m)}>
               <Pencil className="h-4 w-4" />
             </ToolButton>
@@ -537,13 +550,17 @@ export function PendingItem({
     <div className={cn("rooms-msg-in flex flex-row-reverse gap-3 px-3 md:px-4", grouped ? "py-0.5" : "pt-2 pb-0.5", !failed && "opacity-60")}>
       <div className="flex min-w-0 flex-1 flex-col items-end pl-10 md:pl-24">
         {!grouped && <span className="mb-0.5 text-xs text-[var(--text-muted)]">{failed ? "Not sent" : "Sending…"}</span>}
-        {p.body && (
-          <Bubble own>
-            <MessageBody body={p.body} usernames={ctx.usernames} me={ctx.meName} />
-          </Bubble>
+        {p.voice ? (
+          <VoicePending duration_ms={p.voice.duration_ms} />
+        ) : (
+          p.body && (
+            <Bubble own>
+              <MessageBody body={p.body} usernames={ctx.usernames} me={ctx.meName} />
+            </Bubble>
+          )
         )}
         {p.place && <PlaceCard place={p.place} own />}
-        {p.attachments.length > 0 && <AttachmentList attachments={p.attachments} />}
+        {p.attachments.length > 0 && !p.voice && <AttachmentList attachments={p.attachments} />}
         {failed ? (
           <div className="mt-1 flex items-center gap-2 text-xs text-[var(--danger)]">
             <AlertCircle className="h-3.5 w-3.5" /> Didn't send.

@@ -120,14 +120,22 @@ export function applyRoomEvent(qc: QueryClient, ev: RoomEvent) {
       }
       return;
     }
-    case "message_edit":
-      store.upsertMessage(ev.message);
+    case "message_edit": {
+      // Sent to the whole room, so a poll in it carries nobody's own vote.
+      const had = ev.message.poll && !ev.message.poll.mine ? store.windows[ev.message.room_id]?.messages.find((x) => x.id === ev.message.id)?.poll?.mine : undefined;
+      store.upsertMessage(had ? { ...ev.message, poll: { ...ev.message.poll!, mine: had } } : ev.message);
       return;
+    }
     case "message_delete":
       store.patchMessage(ev.room_id, ev.id, (m) => ({ ...m, deleted: true, body: "", attachments: [], reactions: [] }));
       return;
     case "reaction":
       store.patchMessage(ev.room_id, ev.message_id, (m) => ({ ...m, reactions: ev.reactions }));
+      return;
+    case "poll":
+      // The count moved. Your own vote isn't in it (it's sent to the whole
+      // room): what this page knows of it stays.
+      store.patchMessage(ev.room_id, ev.message_id, (m) => ({ ...m, poll: { ...ev.poll, mine: m.poll?.mine } }));
       return;
     case "read":
       // Read on another of your devices (or from a notification's "Mark as

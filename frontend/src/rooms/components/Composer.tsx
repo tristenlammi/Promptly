@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, CalendarPlus, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
+import { AtSign, BarChart3, CalendarPlus, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { crossApi, type ShareKind } from "@/api/crossapp";
@@ -18,6 +18,10 @@ import { EmojiGrid, Popover, UserAvatar } from "./ui";
 import { clearDraft, getDraft, setDraft } from "../drafts";
 import { takeIncomingShare, useIncomingShare } from "../incomingShare";
 import { AttachedPlace } from "./PlaceCard";
+import { useRoomFeatures } from "../features";
+import { canRecord } from "../voiceRecorder";
+import { PollSheet } from "./PollSheet";
+import { VoiceButton } from "./VoiceButton";
 
 const MAX_FILE = 50 * 1024 * 1024;
 
@@ -89,6 +93,11 @@ export const Composer = forwardRef<
   const [mentionDismissed, setMentionDismissed] = useState<string | null>(null);
   const lastTyping = useRef(0);
   const savedDraft = useRef<string | null>(null);
+  // Voice messages and polls (what the admin has on for everyone).
+  const features = useRoomFeatures();
+  const [pollOpen, setPollOpen] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [micCapable] = useState(canRecord);
 
   // Switching rooms: keep each room's draft.
   const prevRoom = useRef(roomId);
@@ -253,6 +262,9 @@ export const Composer = forwardRef<
   const withPlace = !editing && !attached ? place : null;
   const canSend = !uploading && (text.trim().length > 0 || (!editing && ready.length > 0) || !!attached || !!withPlace);
   const [sharing, setSharing] = useState(false);
+  // With nothing to send, Send is the mic: hold (or tap) to record.
+  const showMic =
+    features.voice_messages && micCapable && !editing && (voiceActive || (!text.trim() && uploads.length === 0 && !attached && !withPlace));
 
   const submit = async () => {
     if (!canSend) return;
@@ -348,7 +360,7 @@ export const Composer = forwardRef<
       const mine = win?.messages
         .slice()
         .reverse()
-        .find((m) => m.kind === "user" && m.author_id === meId && !m.deleted && m.body && !m.meta?.event_id && !m.meta?.event_reminder && !m.meta?.share);
+        .find((m) => m.kind === "user" && m.author_id === meId && !m.deleted && m.body && !m.meta?.event_id && !m.meta?.event_reminder && !m.meta?.share && !m.meta?.voice && !m.meta?.poll);
       if (mine) {
         e.preventDefault();
         onEdit(mine);
@@ -485,14 +497,14 @@ export const Composer = forwardRef<
         </div>
       )}
 
-      <div className="flex items-end gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-1 transition-colors focus-within:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]">
+      <div className="relative flex items-end gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-1 transition-colors focus-within:border-[color-mix(in_srgb,var(--accent)_45%,var(--border))]">
         {!editing &&
           (onPlanEvent ? (
             <button
               ref={plusBtn}
               type="button"
-              aria-label="Add a file or event"
-              title="Add a file or event"
+              aria-label="Add a file, poll or event"
+              title="Add a file, poll or event"
               aria-haspopup="menu"
               aria-expanded={plusOpen}
               onClick={() => setPlusOpen((v) => !v)}
@@ -547,19 +559,31 @@ export const Composer = forwardRef<
             <AtSign className="h-5 w-5" />
           </button>
         )}
-        <button
-          type="button"
-          aria-label={editing ? "Save edit" : "Send"}
-          disabled={!canSend}
-          onClick={() => void submit()}
-          className={cn(
-            iconBtn,
-            canSend ? "!text-[var(--accent-text)]" : "opacity-40",
-          )}
-        >
-          {uploading || sharing ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizontal className="h-5 w-5" />}
-        </button>
+        {showMic ? (
+          <VoiceButton
+            roomId={roomId}
+            replyToId={replyTo?.id ?? null}
+            onSent={onCancelReply}
+            onActive={setVoiceActive}
+            maxSeconds={features.voice_max_seconds}
+            className={iconBtn}
+          />
+        ) : (
+          <button
+            type="button"
+            aria-label={editing ? "Save edit" : "Send"}
+            disabled={!canSend}
+            onClick={() => void submit()}
+            className={cn(
+              iconBtn,
+              canSend ? "!text-[var(--accent-text)]" : "opacity-40",
+            )}
+          >
+            {uploading || sharing ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizontal className="h-5 w-5" />}
+          </button>
+        )}
       </div>
+      <PollSheet open={pollOpen} onClose={() => setPollOpen(false)} roomId={roomId} />
 
       {onPlanEvent &&
         (() => {
@@ -574,6 +598,17 @@ export const Composer = forwardRef<
                   fileInput.current?.click();
                 }}
               />
+              {features.polls && (
+                <PlusRow
+                  icon={BarChart3}
+                  label="Ask a poll"
+                  hint="Everyone here can vote"
+                  onClick={() => {
+                    setPlusOpen(false);
+                    setPollOpen(true);
+                  }}
+                />
+              )}
               <PlusRow
                 icon={CalendarPlus}
                 label="Plan an event"

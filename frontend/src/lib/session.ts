@@ -32,6 +32,8 @@ const USER_SCOPED_PREFIXES = [
   // Rooms: what's typed but not sent, and messages still waiting to go.
   "promptly:rooms:drafts:",
   "promptly:rooms:outbox:",
+  // Rooms: which voice messages you've played.
+  "promptly:rooms:voice-played:",
 ];
 const LAST_USER_KEY = "promptly.last-user";
 
