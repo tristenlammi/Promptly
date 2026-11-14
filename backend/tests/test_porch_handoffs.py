@@ -258,47 +258,33 @@ async def test_search_by_words_obeys_who_can_see(client, db, people):
     assert (await client.get("/api/porch/search", headers=H(dan), params={"q": "bbq"})).status_code == 404
 
 
-async def test_search_photos_by_whats_in_them_obeys_who_can_see(client, db, people, fake_ml):
+async def test_search_never_matches_posts_by_what_a_model_sees(client, db, people, fake_ml, monkeypatch):
+    """Porch posts are found by their words only: no model is asked about
+    the search or the photos (owner rule: Porch is never read by AI)."""
+    from app.photos import ml
+
+    async def boom(*a, **kw):
+        raise AssertionError("Porch search asked a model")
+
+    monkeypatch.setattr(ml, "embed_texts", boom)
     ann, bob, cat, dan = people
     fam = await members_of(client, ann, "Family", [bob])
     beach = await photo(client, ann, "IMG_1.jpg")
-    city = await photo(client, ann, "IMG_2.jpg")
-    secret = await photo(client, cat, "IMG_3.jpg")
     await _looks(db, beach, 0)
-    await _looks(db, city, 5)
-    await _looks(db, secret, 0)
-    p1 = await post_photos(client, ann, [fam], [beach], "Sunday")
-    await post_photos(client, ann, [fam], [city], "Monday")
-    hidden = await post_photos(client, cat, [await members_of(client, cat, "Cats", [dan])], [secret], "Private beach day")
-
-    got = await ok(await client.get("/api/porch/search", headers=H(bob), params={"q": "the beach"}))
-    assert [r["id"] for r in got["results"]] == [p1["id"]] and got["photos_searched"] is True
-    assert got["results"][0]["thumb"]
-    # Sam's beach photo: the name and the look together.
-    assert await search(client, bob, f"beach {ann.username}") == [p1["id"]]
-    # dan sees cat's beach (by words and look), never ann's.
-    assert await search(client, dan, "beach") == [hidden["id"]]
-    # A photo trashed in Photos isn't found by its look any more.
-    r = await client.post("/api/files/bulk/trash", headers=H(ann), json={"file_ids": [beach], "folder_ids": []})
-    assert r.status_code in (200, 204), r.text
-    assert await search(client, bob, "beach") == []
+    await post_photos(client, ann, [fam], [beach], "Sunday")
+    worded = await post_photos(client, ann, [fam], [await photo(client, ann, "IMG_2.jpg")], "Beach day")
+    got = await ok(await client.get("/api/porch/search", headers=H(bob), params={"q": "beach"}))
+    # Only the post that says "beach"; the one that merely looks like it isn't matched.
+    assert [r["id"] for r in got["results"]] == [worded["id"]] and "photos_searched" not in got
 
 
-async def test_search_without_the_photo_service_uses_words(client, db, people, monkeypatch):
-    from app.photos import ml
-
-    async def down():
-        return "Photo search isn't set up"
-
-    monkeypatch.setattr(ml, "waiting", down)
+async def test_search_uses_words(client, db, people):
     ann, bob, cat, dan = people
     fam = await members_of(client, ann, "Family", [bob])
     p = await say(client, ann, [fam], "Beach day")
     got = await ok(await client.get("/api/porch/search", headers=H(bob), params={"q": "beach"}))
-    assert [r["id"] for r in got["results"]] == [p["id"]] and got["photos_searched"] is False
+    assert [r["id"] for r in got["results"]] == [p["id"]]
 
-
-# ------------------------------------------------------------------ uses
 
 
 async def test_uses_counts_your_own_photos_posts(client, db, people):

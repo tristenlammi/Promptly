@@ -44,8 +44,8 @@ READS = (
     "my_day", "calendar_events", "calendar_free_times", "search_apps", "find_person", "list_my_items",
     "read_item", "timeline_day", "timeline_visits", "web_search", "mail_search", "mail_read",
     "maps_search", "maps_directions", "search_my_files", "search_photos", "recall",
-    # Talk phase 2 (WP-T10): your notes and lists, and "any messages?".
-    "find_notes", "read_note", "rooms_unread",
+    # Talk phase 2 (WP-T10): your notes and lists.
+    "find_notes", "read_note",
 )
 # Changing anything waits for a yes.
 WRITES = (
@@ -81,7 +81,7 @@ DEVICE_HELD = frozenset({"set_alarm"})
 NOT_ON_VOICE = (
     "deep_research", "run_agents", "generate_image", "generate_pdf", "fetch_url",
     "propose_file_changes", "propose_photo_action", "propose_workspace_note", "propose_board_cards",
-    "propose_board_updates", "forget", "read_room", "mail_draft_reply",
+    "propose_board_updates", "forget", "mail_draft_reply",
 )
 # Writes whose tools hold on a turn that read outside content (R-019); the
 # gate asks first, out loud, like any change, and marks the card as held for
@@ -106,7 +106,7 @@ NEEDS_SCREEN = "That needs your phone's screen."
 # What a turn read, said before a change it led to: "From that email: add ...".
 SOURCES = {
     "mail_read": "that email", "mail_search": "that email", "web_search": "that web page",
-    "fetch_url": "that web page", "read_room": "that message", "rooms_unread": "that message",
+    "fetch_url": "that web page",
     "search_my_files": "that file", "read_file": "that file", "read_note": "that note", "find_notes": "that note",
 }
 
@@ -264,8 +264,6 @@ _CAR_NOTES = {
     "mail_search": "Say how many and who from (at most two names). Don't read them out.",
     "web_search": "Answer in one sentence. Never read out links or sources.",
     "search_my_files": "Answer in one sentence from these. Don't read the files out.",
-    "read_room": "Say who wrote and a one-sentence gist of the latest. Don't read the messages out.",
-    "rooms_unread": "Say who and how many, and the latest as a one-line gist. Don't read the messages out.",
     "calendar_events": "Say how many and the first one or two, with times the way people say them.",
     "maps_search": "Say the best one by name and how far, in one sentence.",
     "trip_status": "Answer what they asked from this, in one short sentence.",

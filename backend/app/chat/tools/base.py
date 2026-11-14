@@ -216,10 +216,6 @@ UNTRUSTED_CONTENT_TOOLS = frozenset(
         "read_workspace_item", "query_board_cards",
         # File text — including files other people shared (WP-5.2/5.3).
         "search_my_files", "read_file", "list_my_files",
-        # Other people's messages in Rooms.
-        "read_room",
-        # ...and the latest of them, by voice (Talk phase 2).
-        "rooms_unread",
         # An earlier reply may repeat a web page or a file.
         "search_past_chats",
         # Forms: answers are other people's words, even on a server form.

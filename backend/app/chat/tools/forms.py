@@ -9,7 +9,7 @@
   form the person can see the answers of. The answers are other people's
   words, so the tool is in ``UNTRUSTED_CONTENT_TOOLS`` (its output is
   framed as ``<untrusted_content>``, and the turn is marked untrusted —
-  even for a form for people on this server, like ``read_room``).
+  even for a form for people on this server, like any tool that reads other people's words).
 """
 from __future__ import annotations
 

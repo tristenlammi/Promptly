@@ -110,7 +110,7 @@ async def test_the_fetch_tool_itself_holds(monkeypatch):
 
     monkeypatch.setattr(mod, "safe_fetch", _boom)
     turn = TurnState(untrusted=False, own_attachments_only=False)
-    start_step(turn, ["read_room"])
+    start_step(turn, ["read_file"])
     start_step(turn, ["fetch_url"])
     with pytest.raises(HoldForApproval):
         await mod.FetchUrlTool().run(_ctx(turn), {"url": EVIL})
@@ -124,7 +124,7 @@ async def test_sub_agents_start_as_steered_as_their_parent(monkeypatch):
 
     parent = TurnState(untrusted=False, own_attachments_only=False)
     allow_urls(parent, urls_in("look at https://ok.example.com/a"))
-    start_step(parent, ["read_room"])
+    start_step(parent, ["read_file"])
     start_step(parent, ["run_agents"])
 
     seen: dict = {}

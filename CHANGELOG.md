@@ -21,6 +21,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Rooms: `@promptly` only ever sees the one message that mentions it. Not the message you replied to, not earlier messages, not attachments. If it needs something, put it in the message.
+- Porch search finds posts by their words, place and who posted them. It no longer uses the photo model to match other people's posts by what's in their pictures. Searching your own library in Photos is unchanged.
+
+### Removed
+
+- Rooms: the "Promptly can read this room" switch, and "Let Promptly read this conversation" in DMs, are gone, along with the "AI can read this room" badges. Nothing can turn room reading on any more. Rooms and Porch are never read or indexed by AI.
+- Chat and Talk can no longer read Rooms: the `read_room` tool and voice "any messages?" (`rooms_unread`) are removed. Today and "what's my day" still say who has written and how many, never what was said. Sending a Rooms message from chat or by voice, after your yes, still works.
+
 ## [0.41.0] - 2026-11-15
 
 ### Added

@@ -33,7 +33,6 @@ export interface Room {
   name: string;
   topic: string | null;
   position: number;
-  ai_context: boolean;
   last_seq: number;
   last_message_at: string | null;
   last_read_seq: number;
@@ -43,8 +42,6 @@ export interface Room {
   notify: NotifyLevel | null;
   /** DMs: the member ids (you included). */
   members?: string[];
-  /** DMs: each member's AI consent. */
-  ai_ok?: Record<string, boolean>;
   preview?: RoomPreview | null;
   /** 1:1 conversations: you blocked the other person. */
   blocked?: boolean;
@@ -229,7 +226,7 @@ export const roomsApi = {
   },
   async updateRoom(
     id: string,
-    body: { name?: string; topic?: string | null; position?: number; ai_context?: boolean },
+    body: { name?: string; topic?: string | null; position?: number },
   ): Promise<Room | null> {
     const { data } = await apiClient.patch<Room | null>(`/rooms/rooms/${id}`, body);
     return data ?? null;
@@ -239,7 +236,7 @@ export const roomsApi = {
   },
   async updateMyRoom(
     id: string,
-    body: { notify?: NotifyLevel | null; hidden?: boolean; ai_ok?: boolean },
+    body: { notify?: NotifyLevel | null; hidden?: boolean },
   ): Promise<Room | null> {
     const { data } = await apiClient.patch<Room | null>(`/rooms/rooms/${id}/me`, body);
     return data ?? null;

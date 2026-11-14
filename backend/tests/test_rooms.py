@@ -206,19 +206,10 @@ async def test_dms(client, people):
     g = (await client.post("/api/rooms/dms", headers=H(ann), json={"user_ids": [str(bob.id), str(cat.id)]})).json()
     assert g["kind"] == "group" and len(g["members"]) == 3
     assert (await client.patch(f"/api/rooms/rooms/{g['id']}", headers=H(cat), json={"name": "Weekend crew"})).json()["name"] == "Weekend crew"
-    assert (await client.patch(f"/api/rooms/rooms/{dm['id']}", headers=H(ann), json={"ai_context": True})).status_code == 403
     assert (await client.post("/api/rooms/dms", headers=H(ann), json={"user_ids": [str(ann.id)]})).status_code == 400
 
 
-async def test_dm_ai_needs_everyone(client, people):
-    ann, bob, *_ = people
-    dm = (await client.post("/api/rooms/dms", headers=H(ann), json={"user_ids": [str(bob.id)]})).json()
-    r = await client.patch(f"/api/rooms/rooms/{dm['id']}/me", headers=H(ann), json={"ai_ok": True})
-    assert r.json()["ai_context"] is False and r.json()["ai_ok"][str(ann.id)] is True
-    r = await client.patch(f"/api/rooms/rooms/{dm['id']}/me", headers=H(bob), json={"ai_ok": True})
-    assert r.json()["ai_context"] is True
-    msgs = (await client.get(f"/api/rooms/rooms/{dm['id']}/messages", headers=H(ann))).json()["messages"]
-    assert [m["kind"] for m in msgs] == ["system", "system"]
+
 
 
 # ------------------------------------------------------------------ attachments
@@ -400,7 +391,8 @@ async def test_promptly_sees_only_the_ask_by_default(client, people, fake_model)
     reply_id = await answer(uuid.UUID(q["id"]))
     seen = fake_model[0]["messages"][0]["content"]
     assert "Bunnings" in seen and "surprise party" not in seen
-    assert "can only see the message that mentions you" in fake_model[0]["system"]
+    assert "can only see the one message that mentions you" in fake_model[0]["system"]
+    assert seen == f"{ann.username}: @promptly when does Bunnings close?"
     msgs = (await client.get(f"/api/rooms/rooms/{room}/messages", headers=H(bob))).json()["messages"]
     last = msgs[-1]
     assert last["id"] == str(reply_id) and last["kind"] == "promptly" and last["body"] == "Bunnings closes at 9pm."
@@ -410,7 +402,8 @@ async def test_promptly_sees_only_the_ask_by_default(client, people, fake_model)
     assert (await client.delete(f"/api/rooms/messages/{reply_id}", headers=H(ann))).status_code == 204
 
 
-async def test_promptly_reply_includes_quoted_message(client, people, fake_model):
+async def test_promptly_never_sees_the_quoted_message(client, people, fake_model):
+    """A reply that mentions it: still only the mentioning message."""
     from app.rooms.promptly import answer
 
     ann, bob, *_ = people
@@ -420,29 +413,36 @@ async def test_promptly_reply_includes_quoted_message(client, people, fake_model
     q = await say(client, ann, room, "@promptly double this", reply_to_id=parent["id"])
     await answer(uuid.UUID(q["id"]))
     seen = fake_model[0]["messages"][0]["content"]
-    assert "250g flour" in seen and "unrelated" not in seen
+    assert seen == f"{ann.username}: @promptly double this"
+    assert "250g flour" not in fake_model[0]["system"]
 
 
-async def test_promptly_reads_history_in_ai_rooms_only(client, people, fake_model):
+async def test_no_switch_lets_promptly_read_a_room(client, people, fake_model):
     from app.rooms.promptly import answer
 
     ann, bob, *_ = people
     sid, room = await make_space(client, ann, bob)
-    # Only admins flip the switch; it's announced in the room.
-    assert (await client.patch(f"/api/rooms/rooms/{room}", headers=H(bob), json={"ai_context": True})).status_code == 403
+    # The old switches are gone: sending them changes nothing and nothing comes back.
     r = await client.patch(f"/api/rooms/rooms/{room}", headers=H(ann), json={"ai_context": True})
-    assert r.json()["ai_context"] is True
+    assert "ai_context" not in (r.json() or {})
+    dm = (await client.post("/api/rooms/dms", headers=H(ann), json={"user_ids": [str(bob.id)]})).json()
+    assert "ai_ok" not in dm and "ai_context" not in dm
+    for who in (ann, bob):
+        r = await client.patch(f"/api/rooms/rooms/{dm['id']}/me", headers=H(who), json={"ai_ok": True})
+        assert "ai_ok" not in r.json() and "ai_context" not in r.json()
     await say(client, bob, room, "Let's do the beach on Sunday")
-    q = await say(client, ann, room, "@promptly what did we decide?")
-    await answer(uuid.UUID(q["id"]))
-    seen = fake_model[0]["messages"][0]["content"]
-    assert "beach on Sunday" in seen and "can see this conversation's recent messages" in fake_model[0]["system"]
-    # …and never another room's.
-    other = (await client.post(f"/api/rooms/spaces/{sid}/rooms", headers=H(ann), json={"name": "private"})).json()["id"]
-    await say(client, bob, other, "gift idea: kayak")
-    q2 = await say(client, ann, room, "@promptly anything about gifts?")
-    await answer(uuid.UUID(q2["id"]))
-    assert "kayak" not in fake_model[1]["messages"][0]["content"]
+    await say(client, bob, dm["id"], "gift idea: kayak")
+    for where, ask in ((room, "@promptly what did we decide?"), (dm["id"], "@promptly anything about gifts?")):
+        q = await say(client, ann, where, ask)
+        await answer(uuid.UUID(q["id"]))
+    told = " ".join(c["system"] + " " + " ".join(m["content"] for m in c["messages"]) for c in fake_model)
+    assert "beach on Sunday" not in told and "kayak" not in told
+    assert [c["messages"][0]["content"] for c in fake_model] == [
+        f"{ann.username}: @promptly what did we decide?",
+        f"{ann.username}: @promptly anything about gifts?",
+    ]
+    # Promptly's own earlier answer isn't carried into the next ask either.
+    assert all(len(c["messages"]) == 1 for c in fake_model)
 
 
 async def test_promptly_without_a_model(client, people, monkeypatch):

@@ -29,7 +29,7 @@ test.describe("context", () => {
     // ~6.8k. Once the account has app files and rooms (other specs make
     // them, so it depends on the order they ran in) the item tools
     // (list_my_items, read_item, use_item, ~0.4k) and the room tools
-    // (read_room, post_to_room, ~0.3k) come too: ~7.6k at most.
+    // (post_to_room, ~0.2k) come too: ~7.6k at most.
     expect(size).toBeLessThan(8000);
 
     // The meter reads that request and breaks it down.

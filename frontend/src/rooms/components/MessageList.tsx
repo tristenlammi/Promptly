@@ -446,8 +446,7 @@ function RoomStart({ room, title, empty }: { room: Room; title: string; empty: R
         {dm
           ? `This is the start of your conversation with ${title}.`
           : room.topic || (voiceRoom ? `Messages for ${title}: links, notes, what's on. They stay after everyone leaves.` : `This is the start of #${title}.`)}{" "}
-        Type <b>@promptly</b> in a message to ask Promptly — it only reads{" "}
-        {room.ai_context ? "this room's recent messages" : "the message that mentions it"}.
+        Type <b>@promptly</b> in a message to ask Promptly. It only ever sees that one message, nothing else here.
       </p>
       {empty}
     </div>

@@ -56,7 +56,7 @@ def test_the_voice_allowlist():
         assert get_tool(name) is not None, name
     # What needs a screen and minutes, or deletes: never.
     assert not names & set(voice_tools.NOT_ON_VOICE)
-    for name in ("deep_research", "run_agents", "generate_image", "forget", "read_room"):
+    for name in ("deep_research", "run_agents", "generate_image", "forget", "read_room", "rooms_unread"):
         assert name not in names
     # A Rooms message waits for a yes like any change (phase 2).
     assert "post_to_room" in names and voice_tools.is_write("post_to_room")

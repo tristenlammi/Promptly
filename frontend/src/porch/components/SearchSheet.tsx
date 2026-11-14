@@ -11,8 +11,8 @@ import { PorchAvatar } from "./ui";
 
 /**
  * Porch's search (build §3.10): posts you can see, by their words, places
- * and photo descriptions, and photos by what's in them ("beach", "the cake
- * Sam posted"). Results are a grid with the poster's name. Nothing anyone
+ * and photo descriptions ("beach", "Sam"). Words only: no model looks at
+ * posts or their photos. Results are a grid with the poster's name. Nothing anyone
  * hasn't shared with you can turn up.
  */
 export function SearchSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -59,7 +59,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       <div aria-live="polite">
         {q.length < 2 ? (
           <p className="px-1 py-6 text-center text-sm text-[var(--text-muted)]">
-            Find posts you can see by their words or place, and photos by what's in them.
+            Find posts you can see by their words, place or who posted them.
           </p>
         ) : res.isPending ? (
           <p className="flex items-center justify-center gap-2 py-6 text-sm text-[var(--text-muted)]">
@@ -70,13 +70,11 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         ) : results.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-[var(--text-muted)]">
             Nothing you can see matches “{q}”.
-            {!res.data?.photos_searched && " Photos can only be found by their words right now."}
           </p>
         ) : (
           <>
             <p className="mb-2 px-1 text-xs text-[var(--text-muted)]">
               {results.length === 1 ? "1 post" : `${results.length} posts`}
-              {!res.data?.photos_searched && " · photos are searched by their words only right now"}
             </p>
             <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {results.map((r) => (

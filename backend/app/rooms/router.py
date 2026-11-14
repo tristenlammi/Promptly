@@ -333,7 +333,6 @@ class RoomPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     topic: str | None = Field(default=None, max_length=300)
     position: int | None = Field(default=None, ge=0, le=10_000)
-    ai_context: bool | None = None
 
 
 def _room_name(name: str) -> str:
@@ -394,9 +393,6 @@ async def update_room(room_id: uuid.UUID, body: RoomPatch, db: AsyncSession = De
             room.topic = data["topic"].strip()
         if data.get("position") is not None:
             room.position = data["position"]
-        if data.get("ai_context") is not None and data["ai_context"] != room.ai_context:
-            room.ai_context = data["ai_context"]
-            await _system(db, room, f"{user.username} {'let' if room.ai_context else 'stopped'} @promptly {'read' if room.ai_context else 'reading'} this room.")
     await db.commit()
     await _room_event(db, room)
     return await core.room_out(db, room, user)
@@ -458,7 +454,6 @@ async def open_dm(body: DmIn, db: AsyncSession = Depends(get_db), user: User = D
 class MeIn(BaseModel):
     notify: str | None = None
     hidden: bool | None = None
-    ai_ok: bool | None = None
 
     @field_validator("notify")
     @classmethod
@@ -479,19 +474,8 @@ async def room_me(room_id: uuid.UUID, body: MeIn, db: AsyncSession = Depends(get
         if room.space_id is not None:
             raise core.forbidden("Only conversations can be closed")
         st.hidden = data["hidden"]
-    ai_changed = False
-    if data.get("ai_ok") is not None:
-        if room.space_id is not None:
-            raise core.forbidden("A room's AI switch is the admins' (PATCH /rooms/{id})")
-        ai_changed = st.ai_ok != data["ai_ok"]
-        st.ai_ok = data["ai_ok"]
-        if ai_changed:
-            await _system(db, room, f"{user.username} {'is happy for' if st.ai_ok else 'no longer lets'} @promptly {'to read' if st.ai_ok else 'read'} this conversation.")
     await db.commit()
-    if ai_changed:
-        await _room_event(db, room)
-    else:
-        await core.publish([user.id], {"type": "room", "room": await core.room_out(db, room, user)})
+    await core.publish([user.id], {"type": "room", "room": await core.room_out(db, room, user)})
     return await core.room_out(db, room, user)
 
 
