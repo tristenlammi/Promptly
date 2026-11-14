@@ -670,6 +670,10 @@ app.include_router(items_ai_router, prefix="/api/items", tags=["items"])
 from app.rooms.router import router as rooms_router  # noqa: E402
 
 app.include_router(rooms_router, prefix="/api/rooms", tags=["rooms"])
+# Admin → Rooms: the server-wide Rooms settings (GIF search, link previews…).
+from app.rooms.admin_router import router as rooms_admin_router  # noqa: E402
+
+app.include_router(rooms_admin_router, prefix="/api/admin/rooms", tags=["admin"])
 # Today: the day across Promptly + the morning summary push (app/today).
 from app.today.router import router as today_router  # noqa: E402
 

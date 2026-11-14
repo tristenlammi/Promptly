@@ -69,6 +69,105 @@ export interface Space {
   rooms: Room[];
   /** Optional: per-member roles, if the server sends them. */
   member_roles?: Record<string, SpaceRole>;
+  /** The space's own emoji, written ``:name:`` in messages and reactions. */
+  emojis?: SpaceEmoji[];
+}
+
+export interface SpaceEmoji {
+  id: string;
+  name: string;
+  url: string;
+  animated: boolean;
+  created_by: string | null;
+}
+
+export type GifProvider = "giphy" | "klipy";
+
+/** A GIF from the GIF library, as a message carries it (``meta.gif``). A
+ *  reference: the picture is loaded from the library, never copied here. */
+export interface LibraryGif {
+  provider: GifProvider;
+  id: string;
+  url: string;
+  preview_url?: string | null;
+  page_url?: string | null;
+  width?: number | null;
+  height?: number | null;
+  title?: string | null;
+}
+
+/** What the page needs to search the GIF library (null: search is off). */
+export interface GifSearchConfig {
+  provider: GifProvider;
+  key: string;
+  rating: "family" | "teen" | "all";
+}
+
+/** One of your saved GIFs: your own file, or a library GIF. */
+export type SavedGif =
+  | { id: string; source: "own"; url: string; filename: string; mime: string; size: number; width: number | null; height: number | null }
+  | { id: string; source: "provider"; gif: LibraryGif; width: number | null; height: number | null };
+
+/** A link's preview card (``meta.preview``). */
+export interface LinkPreview {
+  url: string;
+  title: string;
+  description: string;
+  site: string;
+  image: boolean;
+  image_url?: string;
+  w?: number;
+  h?: number;
+}
+
+const GIF_HOSTS: Record<GifProvider, string> = { giphy: "giphy.com", klipy: "klipy.com" };
+
+/** True when ``url`` is an https address on that library's own hosts. The
+ *  server checks the same before a message is stored. */
+export function isLibraryUrl(provider: string, url: unknown): url is string {
+  const base = GIF_HOSTS[provider as GifProvider];
+  if (!base || typeof url !== "string") return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && (u.hostname === base || u.hostname.endsWith(`.${base}`));
+  } catch {
+    return false;
+  }
+}
+
+/** A message's library GIF, if it carries a well-formed one. */
+export function gifOf(m: { meta: Record<string, unknown> | null }): (LibraryGif & { has_note: boolean }) | null {
+  const g = m.meta?.gif as Record<string, unknown> | undefined;
+  if (!g || typeof g !== "object" || typeof g.provider !== "string" || !isLibraryUrl(g.provider, g.url)) return null;
+  const num = (v: unknown) => (typeof v === "number" && v > 0 ? v : null);
+  return {
+    provider: g.provider as GifProvider,
+    id: typeof g.id === "string" ? g.id : "",
+    url: g.url,
+    preview_url: isLibraryUrl(g.provider, g.preview_url) ? g.preview_url : null,
+    page_url: isLibraryUrl(g.provider, g.page_url) ? g.page_url : null,
+    width: num(g.width),
+    height: num(g.height),
+    title: typeof g.title === "string" ? g.title : "",
+    has_note: g.has_note === true,
+  };
+}
+
+/** A message's link preview, if it has one to show. */
+export function previewOf(m: { meta: Record<string, unknown> | null }): LinkPreview | null {
+  const p = m.meta?.preview as Record<string, unknown> | undefined;
+  if (!p || typeof p !== "object" || p.removed === true || typeof p.url !== "string" || typeof p.title !== "string" || !p.title) return null;
+  if (!/^https?:/i.test(p.url)) return null;
+  return {
+    url: p.url,
+    title: p.title,
+    description: typeof p.description === "string" ? p.description : "",
+    site: typeof p.site === "string" ? p.site : "",
+    image: p.image === true && typeof p.image_url === "string",
+    image_url: typeof p.image_url === "string" ? p.image_url : undefined,
+    w: typeof p.w === "number" ? p.w : undefined,
+    h: typeof p.h === "number" ? p.h : undefined,
+  };
 }
 
 export interface Bootstrap {
@@ -88,6 +187,8 @@ export interface Bootstrap {
   calls?: DmCall[];
   /** Calls: missed calls you haven't seen (the Calls tab's badge). */
   calls_missed?: number;
+  /** GIF search (null: off) and whether links get preview cards. */
+  media?: { gif_search: GifSearchConfig | null; link_previews: boolean };
 }
 
 export interface Attachment {
@@ -99,6 +200,8 @@ export interface Attachment {
   height: number | null;
   url: string;
   thumb_url: string | null;
+  /** A GIF or animated WebP: played in the chat. */
+  animated?: boolean;
 }
 
 export interface Reaction {
@@ -273,7 +376,7 @@ export const roomsApi = {
   },
   async send(
     roomId: string,
-    body: { body: string; reply_to_id?: string | null; attachment_ids?: string[]; client_id?: string; place?: SharedPlace | null },
+    body: { body: string; reply_to_id?: string | null; attachment_ids?: string[]; client_id?: string; place?: SharedPlace | null; gif?: LibraryGif | null },
   ): Promise<Message> {
     const { data } = await apiClient.post<Message>(`/rooms/rooms/${roomId}/messages`, body);
     return data;
@@ -347,6 +450,50 @@ export const roomsApi = {
         if (onProgress && e.total) onProgress(e.loaded / e.total);
       },
     });
+    return data;
+  },
+
+  // ---- GIFs ----
+  async savedGifs(): Promise<SavedGif[]> {
+    const { data } = await apiClient.get<SavedGif[]>("/rooms/saved-gifs");
+    return data;
+  },
+  /** Save a GIF someone sent (your own copy), or one from the library. */
+  async saveGif(body: { attachment_id: string } | { gif: LibraryGif }): Promise<SavedGif> {
+    const { data } = await apiClient.post<SavedGif>("/rooms/saved-gifs", body);
+    return data;
+  },
+  async unsaveGif(id: string): Promise<void> {
+    await apiClient.delete(`/rooms/saved-gifs/${id}`);
+  },
+  /** One of your saved GIFs as an attachment in this room, ready to send. */
+  async attachSaved(roomId: string, savedId: string): Promise<Attachment> {
+    const { data } = await apiClient.post<Attachment>(`/rooms/rooms/${roomId}/attachments/saved/${savedId}`);
+    return data;
+  },
+
+  // ---- a space's own emoji ----
+  async addEmoji(spaceId: string, name: string, file: File): Promise<SpaceEmoji> {
+    const form = new FormData();
+    form.append("name", name);
+    form.append("file", file, file.name);
+    const { data } = await apiClient.post<SpaceEmoji>(`/rooms/spaces/${spaceId}/emojis`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return data;
+  },
+  async renameEmoji(id: string, name: string): Promise<SpaceEmoji> {
+    const { data } = await apiClient.patch<SpaceEmoji>(`/rooms/emojis/${id}`, { name });
+    return data;
+  },
+  async deleteEmoji(id: string): Promise<void> {
+    await apiClient.delete(`/rooms/emojis/${id}`);
+  },
+
+  // ---- link previews ----
+  /** Take the preview card off your own message (it stays off). */
+  async removePreview(messageId: string): Promise<Message> {
+    const { data } = await apiClient.delete<Message>(`/rooms/messages/${messageId}/preview`);
     return data;
   },
 

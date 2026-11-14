@@ -2,16 +2,19 @@ import { AlarmClock, AlertCircle, Copy, CornerUpLeft, Loader2, MoreHorizontal, P
 import { memo, useRef, useState, type ReactNode } from "react";
 
 import type { ShareKind } from "@/api/crossapp";
-import { REMIND_CHOICES, placeOf, type Message, type RoomUser } from "@/api/rooms";
+import { REMIND_CHOICES, gifOf, placeOf, previewOf, type Message, type RoomUser } from "@/api/rooms";
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
 import { copyText, deleteMessage, remindMe, togglePin, toggleReaction } from "../actions";
+import { EmojiGlyph } from "../customEmoji";
 import { QUICK_REACTIONS } from "../emoji";
 import { fullDate, plainSnippet, timeOf } from "../format";
 import type { PendingMessage } from "../store";
 import { AttachmentList } from "./Attachments";
 import { EventCard } from "./EventCard";
+import { LibraryGifView } from "./GifViews";
+import { LinkPreviewCard } from "./LinkPreviewCard";
 import { MessageBody } from "./MessageBody";
 import { PlaceCard } from "./PlaceCard";
 import { ShareCard } from "./ShareCard";
@@ -216,6 +219,15 @@ export const MessageItem = memo(function MessageItem({
                 )}
                 <PlaceCard place={placeOf(m)!} own={own} />
               </>
+            ) : gifOf(m) ? (
+              <>
+                {gifOf(m)!.has_note && m.body && (
+                  <Bubble own={own}>
+                    <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />
+                  </Bubble>
+                )}
+                <LibraryGifView gif={gifOf(m)!} saveable />
+              </>
             ) : (
               m.body && (
                 <Bubble own={own}>
@@ -229,7 +241,8 @@ export const MessageItem = memo(function MessageItem({
                 <Pin className="h-3 w-3" /> pinned
               </span>
             )}
-            <AttachmentList attachments={m.attachments} />
+            <AttachmentList attachments={m.attachments} saveable />
+            {previewOf(m) && <LinkPreviewCard preview={previewOf(m)!} messageId={m.id} own={own} />}
             {showTime && grouped && ctx.isPhone && (
               <time dateTime={m.created_at} className="mt-0.5 animate-[fadeIn_120ms_ease-out] text-xs text-[var(--text-muted)]">
                 {timeOf(m.created_at)}
@@ -260,7 +273,7 @@ export const MessageItem = memo(function MessageItem({
           <ToolButton label="Reply" onClick={() => ctx.onReply(m)}>
             <CornerUpLeft className="h-4 w-4" />
           </ToolButton>
-          {own && typeof m.meta?.event_id !== "string" && (!shareOf(m) || shareOf(m)!.has_note) && (!placeOf(m) || placeOf(m)!.has_note) && (
+          {own && typeof m.meta?.event_id !== "string" && (!shareOf(m) || shareOf(m)!.has_note) && (!placeOf(m) || placeOf(m)!.has_note) && (!gifOf(m) || gifOf(m)!.has_note) && (
             <ToolButton label="Edit" onClick={() => ctx.onEdit(m)}>
               <Pencil className="h-4 w-4" />
             </ToolButton>
@@ -454,7 +467,7 @@ function Reactions({ m, ctx }: { m: Message; ctx: MessageCtx }) {
                 : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]",
             )}
           >
-            <span className="text-base leading-none">{r.emoji}</span>
+            <span className="text-base leading-none"><EmojiGlyph e={r.emoji} /></span>
             {r.user_ids.length}
           </button>
         );
@@ -496,7 +509,7 @@ function Reactions({ m, ctx }: { m: Message; ctx: MessageCtx }) {
                       : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]",
                   )}
                 >
-                  <span className="text-base leading-none">{r.emoji}</span>
+                  <span className="text-base leading-none"><EmojiGlyph e={r.emoji} /></span>
                   {r.user_ids.length}
                 </button>
               ))}
@@ -506,7 +519,7 @@ function Reactions({ m, ctx }: { m: Message; ctx: MessageCtx }) {
                 <li key={id} className="flex min-h-[44px] items-center gap-3 py-1">
                   <UserAvatar user={ctx.users[id]} size={32} />
                   <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{nameOf(id)}</span>
-                  <span className="text-lg leading-none">{shown.emoji}</span>
+                  <span className="text-lg leading-none"><EmojiGlyph e={shown.emoji} /></span>
                 </li>
               ))}
             </ul>
@@ -537,12 +550,13 @@ export function PendingItem({
     <div className={cn("rooms-msg-in flex flex-row-reverse gap-3 px-3 md:px-4", grouped ? "py-0.5" : "pt-2 pb-0.5", !failed && "opacity-60")}>
       <div className="flex min-w-0 flex-1 flex-col items-end pl-10 md:pl-24">
         {!grouped && <span className="mb-0.5 text-xs text-[var(--text-muted)]">{failed ? "Not sent" : "Sending…"}</span>}
-        {p.body && (
+        {p.body && !(p.gif && !p.body.trim()) && (
           <Bubble own>
             <MessageBody body={p.body} usernames={ctx.usernames} me={ctx.meName} />
           </Bubble>
         )}
         {p.place && <PlaceCard place={p.place} own />}
+        {p.gif && <LibraryGifView gif={p.gif} />}
         {p.attachments.length > 0 && <AttachmentList attachments={p.attachments} />}
         {failed ? (
           <div className="mt-1 flex items-center gap-2 text-xs text-[var(--danger)]">

@@ -100,6 +100,7 @@ async def post_message(
     attachment_ids: list[uuid.UUID] | None = None,
     client_id: str | None = None,
     place: dict | None = None,
+    gif: dict | None = None,
 ) -> RoomMessage:
     """Add a message to ``room`` (locked by the caller), attach uploads, and
     move your read point to it. The caller commits and publishes."""
@@ -118,6 +119,12 @@ async def post_message(
             "has_note": bool(body),
         }
         body = body or f"\U0001F4CD {name}"
+    if gif and not place:
+        # A GIF from the library (``meta.gif``, already checked by
+        # ``media.clean_gif``). With no words of your own, "GIF" and its
+        # title stand in for them in lists and notifications.
+        meta["gif"] = {**gif, "has_note": bool(body)}
+        body = body or ("GIF: " + gif["title"] if gif.get("title") else "GIF")
     attachment_ids = list(dict.fromkeys(attachment_ids or []))[:MAX_ATTACHMENTS]
     if not body and not attachment_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty message")
@@ -230,6 +237,9 @@ def _thumbnail(att: RoomAttachment, path) -> None:  # noqa: ANN001
         except Exception:  # noqa: BLE001
             pass
         with Image.open(path) as img:
+            # A GIF or animated WebP plays in the chat (the thumbnail below
+            # is its first frame, for people who've asked for less motion).
+            att.animated = bool(getattr(img, "is_animated", False)) and (getattr(img, "n_frames", 1) or 1) > 1
             img = ImageOps.exif_transpose(img)
             att.width, att.height = img.size
             if img.mode not in ("RGB", "RGBA"):
@@ -295,6 +305,10 @@ async def purge_deleted(db: AsyncSession, *, older_than: timedelta = PURGE_AFTER
     for a in atts:
         remove_attachment_files(a)
         await db.delete(a)
+    from . import media
+
+    for m in rows:
+        media.forget_preview(m)
     await db.execute(delete(RoomReaction).where(RoomReaction.message_id.in_(ids)))
     await purge_sources(db, "room_msg", ids)
     await db.commit()

@@ -6,6 +6,7 @@ import type { NotifyLevel, RoomUser, Space } from "@/api/rooms";
 import { Avatar, Segmented } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
+import { EmojiGlyph, customName, useCustomEmoji } from "../customEmoji";
 import { EMOJI_GROUPS } from "../emoji";
 import { emojiMatches } from "../emojiNames";
 import { initials } from "../format";
@@ -130,9 +131,26 @@ export function EmojiGrid({ onPick, className }: { onPick: (e: string) => void; 
     onPick(e);
   };
   const query = q.trim();
+  // The space's own emoji come first, under the space's name. One from
+  // another space (in "Recent") isn't offered here: it wouldn't draw.
+  const custom = useCustomEmoji();
+  const own = custom.list.map((e) => `:${e.name}:`);
+  const usable = (e: string) => !customName(e) || !!custom.byName[customName(e)!];
   const groups = query
-    ? [{ name: "Results", emoji: [...new Set(EMOJI_GROUPS.flatMap((g) => g.emoji))].filter((e) => emojiMatches(e, query)) }]
-    : [...(recent.length ? [{ name: "Recent", emoji: recent }] : []), ...EMOJI_GROUPS];
+    ? [
+        {
+          name: "Results",
+          emoji: [
+            ...own.filter((e) => e.includes(query.toLowerCase().replace(/\s+/g, "_"))),
+            ...[...new Set(EMOJI_GROUPS.flatMap((g) => g.emoji))].filter((e) => emojiMatches(e, query)),
+          ],
+        },
+      ]
+    : [
+        ...(recent.filter(usable).length ? [{ name: "Recent", emoji: recent.filter(usable) }] : []),
+        ...(own.length ? [{ name: custom.spaceName ?? "This space", emoji: own }] : []),
+        ...EMOJI_GROUPS,
+      ];
   const cell =
     "flex h-10 w-10 items-center justify-center rounded-lg text-xl hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] md:h-9 md:w-9";
   return (
@@ -165,8 +183,8 @@ export function EmojiGrid({ onPick, className }: { onPick: (e: string) => void; 
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-0.5">
                 {g.emoji.map((e) => (
-                  <button key={e} type="button" aria-label={e} onClick={() => pick(e)} className={cell}>
-                    {e}
+                  <button key={e} type="button" aria-label={e} title={customName(e) ? e : undefined} onClick={() => pick(e)} className={cell}>
+                    <EmojiGlyph e={e} className="h-6 w-6 object-contain" />
                   </button>
                 ))}
               </div>

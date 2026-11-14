@@ -11,7 +11,7 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2, MessageSquare, KeyRound, ClipboardList, PhoneCall, House } from "lucide-react";
+  Users2, MessageSquare, MessagesSquare, KeyRound, ClipboardList, PhoneCall, House } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
@@ -22,6 +22,7 @@ import { FormsAdminPanel } from "@/components/admin/FormsAdminPanel";
 import { CallsPanel } from "@/components/admin/CallsPanel";
 import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
 import { PorchPanel } from "@/components/admin/PorchPanel";
+import { RoomsPanel } from "@/components/admin/RoomsPanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
 import { TalkAdminPanel } from "@/components/admin/TalkAdminPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
@@ -50,6 +51,7 @@ type TabId =
   | "connectors"
   // Forms (WP-F1.3)
   | "forms"
+  | "rooms"
   | "calls";
 
 interface TabDef {
@@ -142,6 +144,12 @@ const TABS: TabDef[] = [
     subtitle: "Disk space, the nightly integrity check, and files to restore from a backup.",
   },
   {
+    id: "rooms",
+    label: "Rooms",
+    icon: <MessagesSquare className="h-3.5 w-3.5" />,
+    subtitle: "GIF search, link previews, custom emoji limits, and where the other Rooms settings are.",
+  },
+  {
     id: "calls",
     label: "Calls",
     icon: <PhoneCall className="h-3.5 w-3.5" />,
@@ -229,6 +237,7 @@ export function AdminPage() {
             {tab === "porch" && <PorchPanel />}
             {tab === "storage" && <StoragePanel />}
             {tab === "forms" && <FormsAdminPanel />}
+            {tab === "rooms" && <RoomsPanel />}
             {tab === "calls" && <CallsPanel />}
             {tab === "talk" && <TalkAdminPanel />}
             {tab === "settings" && <AppSettingsPanel />}

@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, CalendarPlus, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
+import { AtSign, CalendarPlus, Clapperboard, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { crossApi, type ShareKind } from "@/api/crossapp";
-import { roomsApi, type Attachment, type Message, type RoomUser, type SharedPlace } from "@/api/rooms";
+import { roomsApi, type Attachment, type GifSearchConfig, type LibraryGif, type Message, type RoomUser, type SavedGif, type SharedPlace } from "@/api/rooms";
 import { useThingMentions } from "@/components/links/useThingMentions";
 import { Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -17,6 +17,7 @@ import { SHARE_ICONS } from "./ShareCard";
 import { EmojiGrid, Popover, UserAvatar } from "./ui";
 import { clearDraft, getDraft, setDraft } from "../drafts";
 import { takeIncomingShare, useIncomingShare } from "../incomingShare";
+import { GifPicker } from "./GifPicker";
 import { AttachedPlace } from "./PlaceCard";
 
 const MAX_FILE = 50 * 1024 * 1024;
@@ -69,8 +70,10 @@ export const Composer = forwardRef<
      *  e.g. Porch's "Reply privately"). */
     attachment?: ComposerAttachment | null;
     onClearAttachment?: () => void;
+    /** GIF search, when an admin has turned it on (the picker's library tab). */
+    gifSearch?: GifSearchConfig | null;
   }
->(function Composer({ roomId, placeholder, members, meId, isPhone, replyTo, onCancelReply, editing, onEdit, users, onPlanEvent, attachment, onClearAttachment }, ref) {
+>(function Composer({ roomId, placeholder, members, meId, isPhone, replyTo, onCancelReply, editing, onEdit, users, onPlanEvent, attachment, onClearAttachment, gifSearch }, ref) {
   const qc = useQueryClient();
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -80,6 +83,8 @@ export const Composer = forwardRef<
   // A place from P Maps waiting to go with the next message (its card).
   const [place, setPlace] = useState<SharedPlace | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const gifBtn = useRef<HTMLButtonElement>(null);
+  const [gifOpen, setGifOpen] = useState(false);
   const plusBtn = useRef<HTMLButtonElement>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [caret, setCaret] = useState(0);
@@ -299,6 +304,27 @@ export const Composer = forwardRef<
     lastTyping.current = 0;
     setPlace(null);
     void sendMessage(qc, roomId, { body, reply_to_id: reply, attachments: ready, place: withPlace });
+  };
+
+  // A GIF goes as its own message the moment it's picked (as a reply, if
+  // you were replying). What you were typing stays in the box.
+  const sendGif = (gif: LibraryGif) => {
+    setGifOpen(false);
+    const reply = replyTo?.id ?? null;
+    onCancelReply();
+    void sendMessage(qc, roomId, { body: "", reply_to_id: reply, attachments: [], gif });
+  };
+  const sendSavedGif = async (g: SavedGif) => {
+    if (g.source === "provider") return sendGif(g.gif);
+    setGifOpen(false);
+    try {
+      const att = await roomsApi.attachSaved(roomId, g.id);
+      const reply = replyTo?.id ?? null;
+      onCancelReply();
+      void sendMessage(qc, roomId, { body: "", reply_to_id: reply, attachments: [att] });
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't send that GIF."));
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -532,6 +558,20 @@ export const Composer = forwardRef<
           className="max-h-[40vh] min-h-[44px] flex-1 resize-none bg-transparent px-1 py-[11px] text-base leading-[22px] text-[var(--text)] !outline-none placeholder:text-[var(--text-muted)] md:min-h-[40px] md:py-[9px] md:text-sm"
         />
         {thingMention.popup}
+        {!editing && !isPhone && (
+          <button
+            ref={gifBtn}
+            type="button"
+            aria-label="GIFs"
+            title="GIFs"
+            aria-haspopup="dialog"
+            aria-expanded={gifOpen}
+            onClick={() => setGifOpen((v) => !v)}
+            className={cn(iconBtn, gifOpen && "bg-[var(--hover)] !text-[var(--text)]")}
+          >
+            <span className="rounded-[5px] border-[1.5px] border-current px-1 text-[10px] font-bold leading-[15px] tracking-wide">GIF</span>
+          </button>
+        )}
         <button
           ref={emojiBtn}
           type="button"
@@ -574,6 +614,17 @@ export const Composer = forwardRef<
                   fileInput.current?.click();
                 }}
               />
+              {isPhone && (
+                <PlusRow
+                  icon={Clapperboard}
+                  label="Send a GIF"
+                  hint={gifSearch ? "Search, or pick one you saved" : "Pick one you saved"}
+                  onClick={() => {
+                    setPlusOpen(false);
+                    setGifOpen(true);
+                  }}
+                />
+              )}
               <PlusRow
                 icon={CalendarPlus}
                 label="Plan an event"
@@ -595,6 +646,18 @@ export const Composer = forwardRef<
             </Popover>
           );
         })()}
+
+      {isPhone ? (
+        <Sheet open={gifOpen} onClose={() => setGifOpen(false)} title="GIFs">
+          <div className="-mx-3 -mt-2">
+            <GifPicker config={gifSearch ?? null} onPickSaved={(g) => void sendSavedGif(g)} onPickLibrary={sendGif} className="h-[60dvh] max-h-none" />
+          </div>
+        </Sheet>
+      ) : (
+        <Popover anchor={gifBtn.current} open={gifOpen} onClose={() => setGifOpen(false)} width={400}>
+          <GifPicker config={gifSearch ?? null} onPickSaved={(g) => void sendSavedGif(g)} onPickLibrary={sendGif} />
+        </Popover>
+      )}
 
       {isPhone ? (
         <Sheet open={emojiOpen} onClose={() => setEmojiOpen(false)} title="Emoji">
