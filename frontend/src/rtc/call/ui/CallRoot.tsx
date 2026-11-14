@@ -70,9 +70,10 @@ function useNoCallApp() {
       onNoCallApp(() => {
         forgetAndroidCallsApp();
         const s = useCallStore.getState();
-        if (!s.callId || !s.phone) return;
+        const callId = s.handed?.callId ?? (s.phone ? s.callId : null);
+        if (!callId) return;
         toast.info("The Promptly app couldn't take the call, so this page holds it. Keep it open while you talk.");
-        void callEngine().then((e) => e.takeHere(s.callId as string));
+        void callEngine().then((e) => e.takeHere(callId));
       }),
     [],
   );

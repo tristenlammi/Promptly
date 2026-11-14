@@ -13,9 +13,12 @@
  * when you took the call elsewhere or joined another.
  *
  * On a phone with the Promptly app (Calls WP-D5), a call you start is
- * handed to the app (``startViaApp``), which holds its sound and camera; this
- * page then shows it over a listen-only connection (``viewCall``), as it does
- * a call the app answered. Tones: ringback, through, reconnecting /
+ * handed to the app (``startViaApp``), which holds its sound and camera and
+ * shows the one call screen: this page shows none of its own (two call
+ * screens in a row, and "Cancelled" here after hanging up there, is what
+ * that used to look like). "Show call" on the conversation's green bar
+ * (``watch``) still shows the app's call here over a listen-only connection
+ * (``viewCall``). Tones: ringback, through, reconnecting /
  * reconnected, the other side's hold, and the end. A weak connection or Data
  * saver lowers video (``link.ts``).
  */
@@ -143,9 +146,10 @@ export class CallEngine {
    * A call started on a phone with the Promptly app (Calls WP-D5): the
    * server starts it for the phone (``device: "android"``), the app takes it
    * (``promptly://call/start``: it asks first, rings back, holds the sound
-   * and the camera with the screen locked), and this page shows it like a
-   * call the app answered. If the app can't take it, Chrome comes back with
-   * ``#call-no-app`` and ``takeHere`` moves the call into this page.
+   * and the camera with the screen locked) and shows the call. This page
+   * shows nothing of its own: it only remembers the call (``handed``) in
+   * case the app can't take it, when Chrome comes back with ``#call-no-app``
+   * and ``takeHere`` moves the call into this page.
    */
   private async startViaApp(fetchJoin: () => Promise<CallJoin>, roomId: string | null, media: CallMedia): Promise<boolean> {
     if (useVoiceStore.getState().status !== "idle") {
@@ -156,8 +160,7 @@ export class CallEngine {
     const gen = ++this.gen;
     this.clearEndTimer();
     this.serverEnd = null;
-    this.ensureContext();
-    set({ ...initialCallConnection, ended: null, status: "connecting", outgoing: true, roomId, media, phone: true, phoneSpeaker: media === "video" });
+    set({ ...initialCallConnection, ended: null, handed: null });
     let join: CallJoin;
     try {
       join = await fetchJoin();
@@ -170,17 +173,20 @@ export class CallEngine {
       void dmCallsApi.leave(join.call.id, join.session_id).catch(() => undefined);
       return false;
     }
-    // First, while the tap still counts: Chrome only opens an app from one.
+    set({ handed: { callId: join.call.id, roomId: join.call.room_id ?? roomId, media, at: Date.now() } });
+    // While the tap still counts: Chrome only opens an app from one.
     openHandoff(callHandoffUrl(join));
-    return this.viewCall(join.call, { outgoing: true });
+    return true;
   }
 
   /** The app couldn't take the call you started here: hold it in this page. */
   async takeHere(callId: string): Promise<boolean> {
     const s = get();
-    const outgoing = s.callId === callId ? s.outgoing && !s.call?.answered_at : false;
-    const media = s.callId === callId ? s.media : "audio";
-    return this.enter(() => dmCallsApi.join(callId), { outgoing, video: media === "video", roomId: s.roomId, media });
+    const handed = s.handed?.callId === callId ? s.handed : null;
+    set({ handed: null });
+    const outgoing = handed ? true : s.callId === callId ? s.outgoing && !s.call?.answered_at : false;
+    const media = handed ? handed.media : s.callId === callId ? s.media : "audio";
+    return this.enter(() => dmCallsApi.join(callId), { outgoing, video: media === "video", roomId: handed?.roomId ?? s.roomId, media });
   }
 
   /** Answer a call ringing you, join a live group call, or move your call here. */
@@ -795,9 +801,12 @@ export class CallEngine {
     const peerIds = [...new Set([...Object.keys(s.peers), ...(s.call?.participants.map((p) => p.user_id) ?? [])])].filter((id) => id !== self);
     const roomId = s.roomId;
     await this.teardown();
-    if (!opts.quiet) this.sound("call-end");
+    // The app held it (this page only showed its picture): the app's own
+    // screen said it ended, with its own tone.
+    const appHeld = s.phone;
+    if (!opts.quiet && !appHeld) this.sound("call-end");
     // Moved to another device or call: no "ended" screen here.
-    const showEnded = kind !== "replaced" && kind !== "elsewhere";
+    const showEnded = kind !== "replaced" && kind !== "elsewhere" && !appHeld;
     set({ ...initialCallConnection, ended: showEnded ? { kind, seconds, at: Date.now(), roomId, peerIds } : null, status: showEnded ? "ended" : "idle" });
     if (showEnded) {
       this.clearEndTimer();
