@@ -529,11 +529,23 @@ async def list_messages(
     return {"messages": await core.messages_out(db, rows), "has_more_before": bool(more_before), "has_more_after": bool(more_after)}
 
 
+class PlaceIn(BaseModel):
+    """A place sent from P Maps: drawn as a card with a small map. It's only
+    what the sender chose to send (a name, an address, a point); it gives
+    nobody access to anything."""
+
+    name: str = Field(min_length=1, max_length=120)
+    address: str | None = Field(default=None, max_length=240)
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
 class MessageIn(BaseModel):
     body: str = Field(default="", max_length=core.MAX_BODY)
     reply_to_id: uuid.UUID | None = None
     attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=service.MAX_ATTACHMENTS)
     client_id: str | None = Field(default=None, max_length=64)
+    place: PlaceIn | None = None
 
 
 @router.post("/rooms/{room_id}/messages", status_code=201)
@@ -557,7 +569,7 @@ async def send(room_id: uuid.UUID, body: MessageIn, db: AsyncSession = Depends(g
         ).scalar_one_or_none()
         if already is not None:
             return await core.message_out(db, already)
-    msg = await service.post_message(db, room, user, body.body, reply_to_id=body.reply_to_id, attachment_ids=body.attachment_ids, client_id=body.client_id)
+    msg = await service.post_message(db, room, user, body.body, reply_to_id=body.reply_to_id, attachment_ids=body.attachment_ids, client_id=body.client_id, place=body.place.model_dump() if body.place else None)
     return await _sent(db, room, user, msg)
 
 
@@ -634,6 +646,9 @@ async def edit_message(message_id: uuid.UUID, body: MessagePatch, db: AsyncSessi
         text = data["body"].strip()
         if text != msg.body:
             msg.body = text
+            if isinstance((msg.meta or {}).get("place"), dict):
+                # A place card whose words you've now written yourself.
+                msg.meta = {**msg.meta, "place": {**msg.meta["place"], "has_note": True}}
             msg.mentions = await core.parse_mentions(db, text, await core.member_ids(db, room))
             msg.edited_at = _now()
             from app.links.service import sync_text

@@ -5,7 +5,10 @@ import {
   AlarmClock, Archive, ArrowLeft, CalendarPlus, Check, CheckCheck, CheckSquare, ChevronDown, ChevronUp, Download, Forward, Inbox, ListFilter, Loader2, Mail, MailOpen, Paperclip, Pen, Plus, Reply, ReplyAll, Search, Send, Settings, Share2, Sparkles, Star, Tag, Trash2, UserPlus, X, type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Link as RouterLink, useLocation } from "react-router-dom";
+import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
+
+import { ShareWaysSheet } from "@/components/share/ShareWaysSheet";
+import { sendInRooms } from "@/rooms/incomingShare";
 
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
@@ -1213,6 +1216,8 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   }, []);
   const [showAll, setShowAll] = useState(false);
   const [offerClosed, setOfferClosed] = useState(false);
+  const [shareWays, setShareWays] = useState(false);
+  const navigate = useNavigate();
   const qc = useQueryClient();
 
   if (isLoading) return <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" /></div>;
@@ -1256,6 +1261,24 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
     } catch {
       toast.error("Couldn't copy that.");
     }
+  };
+  // Into a Rooms conversation: the subject, who it's from and a short piece of
+  // it, as a draft you can trim before sending. The link is to your own
+  // mailbox, so it opens for you and nobody else.
+  const shareInRooms = () => {
+    const who = last.from.name || last.from.addr;
+    const on = new Date(last.at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+    const gist = (data.summary || last.text || "").replace(/\s*\n\s*/g, " ").replace(/\s+/g, " ").trim();
+    const excerpt = gist.length > 500 ? `${gist.slice(0, 500).replace(/\s+\S*$/, "")}…` : gist;
+    const link = `/mail?open=${open.account_id}/${encodeURIComponent(open.key)}`;
+    const text = [
+      `**${(data.subject || "(No subject)").replace(/\*/g, "")}**`,
+      `Email from ${who}, ${on}`,
+      ...(excerpt ? ["", `> ${excerpt}`] : []),
+      "",
+      `[Open the email](${link}) (opens only for me)`,
+    ].join("\n");
+    sendInRooms(navigate, { text });
   };
   const reSubject = data.subject.toLowerCase().startsWith("re:") ? data.subject : `Re: ${data.subject}`;
   const viaAlias = replyAlias(aliasInfo, data.messages.map((m) => m.id));
@@ -1306,7 +1329,15 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
         <button type="button" onClick={() => onAddEvent(data.subject)} className={action}><CalendarPlus className="h-3.5 w-3.5" />Add to calendar</button>
         <button type="button" onClick={() => onRemind(data.subject)} className={action}><CheckSquare className="h-3.5 w-3.5" />Remind me</button>
         {stranger && <button type="button" onClick={addSender} className={action}><UserPlus className="h-3.5 w-3.5" />Add to Contacts</button>}
-        <button type="button" onClick={() => void share()} className={action}><Share2 className="h-3.5 w-3.5" />Share</button>
+        <button type="button" onClick={() => setShareWays(true)} className={action}><Share2 className="h-3.5 w-3.5" />Share</button>
+        <ShareWaysSheet
+          open={shareWays}
+          onClose={() => setShareWays(false)}
+          title="Share this email"
+          what={data.subject || "(No subject)"}
+          onRooms={shareInRooms}
+          onOther={() => void share()}
+        />
       </div>
       <div className="promptly-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {showBack && <h2 className="line-clamp-3 text-lg font-semibold leading-snug text-[var(--text)]">{data.subject || "(No subject)"}</h2>}

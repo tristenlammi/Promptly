@@ -131,6 +131,22 @@ export interface Message {
   client_id?: string | null;
 }
 
+/** A place sent from P Maps (a message's ``meta.place``): drawn as a card. */
+export interface SharedPlace {
+  name: string;
+  address?: string | null;
+  lat: number;
+  lon: number;
+}
+
+/** A message's place, if it carries a well-formed one. */
+export function placeOf(m: { meta: Record<string, unknown> | null }): (SharedPlace & { has_note: boolean }) | null {
+  const p = m.meta?.place as Record<string, unknown> | undefined;
+  if (!p || typeof p !== "object" || typeof p.name !== "string" || typeof p.lat !== "number" || typeof p.lon !== "number") return null;
+  if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon) || Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180) return null;
+  return { name: p.name, address: typeof p.address === "string" && p.address ? p.address : null, lat: p.lat, lon: p.lon, has_note: p.has_note === true };
+}
+
 export interface MessagePage {
   messages: Message[];
   has_more_before: boolean;
@@ -247,7 +263,7 @@ export const roomsApi = {
   },
   async send(
     roomId: string,
-    body: { body: string; reply_to_id?: string | null; attachment_ids?: string[]; client_id?: string },
+    body: { body: string; reply_to_id?: string | null; attachment_ids?: string[]; client_id?: string; place?: SharedPlace | null },
   ): Promise<Message> {
     const { data } = await apiClient.post<Message>(`/rooms/rooms/${roomId}/messages`, body);
     return data;

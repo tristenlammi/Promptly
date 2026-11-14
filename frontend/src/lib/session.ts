@@ -29,6 +29,9 @@ const USER_SCOPED_PREFIXES = [
   // Forms: answers being written, and ones waiting to be sent (per person).
   "promptly.form-draft.",
   "promptly.form-pending.",
+  // Rooms: what's typed but not sent, and messages still waiting to go.
+  "promptly:rooms:drafts:",
+  "promptly:rooms:outbox:",
 ];
 const LAST_USER_KEY = "promptly.last-user";
 

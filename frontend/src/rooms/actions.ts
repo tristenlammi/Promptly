@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { roomsApi, type Attachment, type Message, type RemindWhen } from "@/api/rooms";
+import { roomsApi, type Attachment, type Message, type RemindWhen, type SharedPlace } from "@/api/rooms";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -113,8 +113,10 @@ export async function copyText(m: Message) {
 export async function sendMessage(
   qc: QueryClient,
   roomId: string,
-  input: { body: string; reply_to_id: string | null; attachments: Attachment[] },
+  input: { body: string; reply_to_id: string | null; attachments: Attachment[]; place?: SharedPlace | null },
   retryOf?: PendingMessage,
+  /** ``quiet``: no "didn't send" toast (a resend nobody asked for just now). */
+  opts?: { quiet?: boolean },
 ) {
   const store = useRoomsStore.getState();
   const pending: PendingMessage = retryOf
@@ -125,6 +127,7 @@ export async function sendMessage(
         body: input.body,
         reply_to_id: input.reply_to_id,
         attachments: input.attachments,
+        place: input.place ?? null,
         status: "sending",
         created_at: new Date().toISOString(),
       };
@@ -136,6 +139,7 @@ export async function sendMessage(
       reply_to_id: pending.reply_to_id,
       attachment_ids: pending.attachments.map((a) => a.id),
       client_id: pending.client_id,
+      ...(pending.place ? { place: pending.place } : {}),
     });
     store.removePending(roomId, pending.client_id);
     store.upsertMessage(msg);
@@ -150,6 +154,6 @@ export async function sendMessage(
     }));
   } catch (err) {
     store.setPendingStatus(roomId, pending.client_id, "failed");
-    toast.error(apiErrorMessage(err, "Your message didn't send. Tap it to retry."));
+    if (!opts?.quiet) toast.error(apiErrorMessage(err, "Your message didn't send. Tap it to retry."));
   }
 }
