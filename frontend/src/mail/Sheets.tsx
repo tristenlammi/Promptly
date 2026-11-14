@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Loader2, MapPin } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { ModelSelector } from "@/components/chat/ModelSelector";
@@ -8,6 +8,7 @@ import { Sheet as SharedSheet } from "@/items/ui";
 import { useSelectedModel } from "@/store/modelStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
+import { mapsSearchLink } from "@/maps/links";
 
 import { mailApi, type MailAccount } from "./api";
 
@@ -60,10 +61,61 @@ export function EventSheet({ accountId, threadKey, subject, onClose }: { account
         <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} disabled={!time} aria-label="Ends" className={`${FIELD} disabled:opacity-50`} />
       </div>
       <LocationInput value={place} onChange={setPlace} maxLength={500} placeholder="Where" aria-label="Where" unstyled inlineList className={FIELD} />
+      {place.trim().length > 3 && (
+        <a href={mapsSearchLink(place.trim())} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1.5 self-start px-1 text-xs font-medium text-[var(--accent-text)] md:min-h-0">
+          <MapPin className="h-3.5 w-3.5" />See it in Maps
+        </a>
+      )}
       <p className="px-1 text-xs text-[var(--text-muted)]">{time ? "" : "With no time, it's added as an all-day event. "}Check the details: AI can get them wrong.</p>
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]">Cancel</button>
         <button type="button" onClick={() => add.mutate()} disabled={add.isPending || !title.trim() || !day} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">{add.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Add</button>
+      </div>
+    </Sheet>
+  );
+}
+
+/** A reminder in Tasks from an email: a bill to pay, something to follow up.
+ *  The AI has a go at the title, the day it's due and the amount, and you check it. */
+export function ReminderSheet({ accountId, threadKey, subject, onClose }: { accountId: string; threadKey: string; subject: string; onClose: () => void }) {
+  const selected = useSelectedModel();
+  const [title, setTitle] = useState(subject.replace(/^((re|fwd?):\s*)+/i, ""));
+  const [due, setDue] = useState("");
+  const [note, setNote] = useState("");
+  const { isFetching } = useQuery({
+    queryKey: ["mail-task-draft", accountId, threadKey, selected?.model_id],
+    enabled: !!selected,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      const got = await mailApi.taskDraft(accountId, threadKey, { provider_id: selected!.provider_id, model_id: selected!.model_id, today: localDay() });
+      if (got.title) setTitle(got.title);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(got.due)) setDue(got.due);
+      const kept = [got.amount, got.note].filter(Boolean).join(" · ");
+      if (kept) setNote(kept);
+      return got;
+    },
+  });
+  const add = useMutation({
+    mutationFn: () => mailApi.addTask(accountId, threadKey, { title: title.trim(), due: due || undefined, note: note.trim() }),
+    onSuccess: () => {
+      toast.success(due ? `Added to Tasks, due ${new Date(`${due}T12:00:00`).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}.` : "Added to Tasks.");
+      onClose();
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Couldn't add that task.")),
+  });
+  return (
+    <Sheet title="Remind me" onClose={onClose}>
+      {isFetching && <p className="flex items-center gap-2 px-1 text-xs text-[var(--text-muted)]"><Loader2 className="h-3.5 w-3.5 animate-spin" />Reading the email for the details…</p>}
+      <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={500} placeholder="What to do" aria-label="What to do" className={FIELD} />
+      <label className="block px-1 text-xs text-[var(--text-muted)]">Due
+        <input type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Due" className={`${FIELD} mt-1`} />
+      </label>
+      <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="Amount, reference…" aria-label="Note" className={FIELD} />
+      <p className="px-1 text-xs text-[var(--text-muted)]">{due ? "It shows in Tasks on that day, with a link back to this email. " : "With no day, it goes to your Tasks inbox, with a link back to this email. "}{selected ? "Check the details: AI can get them wrong." : ""}</p>
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]">Cancel</button>
+        <button type="button" onClick={() => add.mutate()} disabled={add.isPending || !title.trim()} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">{add.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Add</button>
       </div>
     </Sheet>
   );

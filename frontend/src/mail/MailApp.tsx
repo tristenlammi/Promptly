@@ -2,7 +2,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import {
-  AlarmClock, Archive, ArrowLeft, CalendarPlus, Check, CheckCheck, CheckSquare, ChevronDown, ChevronUp, Download, Forward, Inbox, ListFilter, Loader2, Mail, MailOpen, Paperclip, Pen, Plus, Reply, ReplyAll, Search, Send, Settings, Sparkles, Star, Tag, Trash2, UserPlus, X, type LucideIcon,
+  AlarmClock, Archive, ArrowLeft, CalendarPlus, Check, CheckCheck, CheckSquare, ChevronDown, ChevronUp, Download, Forward, Inbox, ListFilter, Loader2, Mail, MailOpen, Paperclip, Pen, Plus, Reply, ReplyAll, Search, Send, Settings, Share2, Sparkles, Star, Tag, Trash2, UserPlus, X, type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link as RouterLink, useLocation } from "react-router-dom";
@@ -30,7 +30,7 @@ import { useThreadDrag } from "./DragMove";
 import { LabelPicker, LabelPill, LabelsSheet, NewLabelSheet, RuleSheet, type LabelTarget } from "./Labels";
 import { labelRows, labelsInside, readFolded, saveFolded, unfolded } from "./labelTree";
 import { MessageBody } from "./MessageBody";
-import { EditMailboxSheet, EventSheet, MailSettingsSheet, SnoozeSheet } from "./Sheets";
+import { EditMailboxSheet, EventSheet, MailSettingsSheet, ReminderSheet, SnoozeSheet } from "./Sheets";
 
 const ROLES: { role: string; label: string; icon: LucideIcon }[] = [
   { role: "inbox", label: "Inbox", icon: Inbox },
@@ -161,6 +161,7 @@ export function MailApp() {
   const waiting = useRef(new Map<string, (closing?: boolean) => void>());
   const [prefill, setPrefill] = useState<string | null>(null);
   const [eventFor, setEventFor] = useState<(Open & { subject: string }) | null>(null);
+  const [remindFor, setRemindFor] = useState<(Open & { subject: string }) | null>(null);
   const labels = useMemo(() => overview?.labels ?? [], [overview]);
 
   /** Start writing, or go back to what you'd started: one draft per email you're answering. */
@@ -712,7 +713,7 @@ export function MailApp() {
         ? { label: "Back to Inbox now", icon: <Inbox className={icon} />, onClick: () => void mailApi.unsnooze(at.account_id, at.key).then(refresh) }
         : { label: "Snooze…", icon: <AlarmClock className={icon} />, onClick: () => setSnoozing([at]) },
       { label: "Add to calendar…", icon: <CalendarPlus className={icon} />, onClick: () => setEventFor({ ...at, subject: row.subject }) },
-      { label: "Turn into a task", icon: <CheckSquare className={icon} />, onClick: () => void mailApi.addTask(at.account_id, at.key).then(() => toast.success("Added to Tasks.")).catch((e) => toast.error(apiErrorMessage(e, "Couldn't add that task."))) },
+      { label: "Remind me…", icon: <CheckSquare className={icon} />, onClick: () => setRemindFor({ ...at, subject: row.subject }) },
       ...(people[row.from.addr.toLowerCase()] ? [] : [{ label: "Add to Contacts", icon: <UserPlus className={icon} />, onClick: () => void mailApi.addContact(row.from.name, row.from.addr).then(() => { toast.success("Added to Contacts."); void qc.invalidateQueries({ queryKey: ["mail-known-people"] }); }).catch((e) => toast.error(apiErrorMessage(e, "Couldn't add that contact."))) }]),
       { label: "Move to label…", icon: <Tag className={icon} />, onClick: () => setLabelling([target]) },
       { label: "Make a rule from this…", icon: <ListFilter className={icon} />, onClick: () => setRuleFor(target) },
@@ -890,7 +891,7 @@ export function MailApp() {
           <button type="button" onClick={() => showRole("inbox")} aria-label="Back to Inbox" className="-my-2 flex h-10 w-10 shrink-0 items-center justify-center text-[var(--text-muted)] md:my-0 md:h-6 md:w-6"><X className="h-4 w-4" /></button>
         </div>
       )}
-      <div onContextMenu={(e) => { if (!e.defaultPrevented && markAllHere.length) openPlaceMenu(e, markAllHere); }} ref={scroller} aria-busy={list.isLoading || undefined} className="promptly-scroll min-h-0 flex-1 overflow-y-auto">
+      <div onContextMenu={(e) => { if (!e.defaultPrevented && markAllHere.length) openPlaceMenu(e, markAllHere); }} ref={scroller} aria-busy={list.isLoading || undefined} className={`promptly-scroll min-h-0 flex-1 overflow-y-auto ${isMobile ? "pb-24" : ""}`}>
         {list.isLoading && (
           <div>
             <p className="sr-only" role="status">Getting your mail…</p>
@@ -928,7 +929,7 @@ export function MailApp() {
         )}
       </div>
       {isMobile && (
-        <button type="button" onClick={() => write(newMessage())} aria-label="Compose" className="absolute bottom-[7.5rem] right-4 z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent-strong)] text-white shadow-lg"><Pen className="h-5 w-5" /></button>
+        <button type="button" onClick={() => write(newMessage())} aria-label="Compose" className="absolute bottom-4 right-4 z-10 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent-strong)] text-white shadow-lg"><Pen className="h-5 w-5" /></button>
       )}
     </section>
   );
@@ -943,6 +944,7 @@ export function MailApp() {
       prefill={prefill}
       onPrefilled={() => setPrefill(null)}
       onAddEvent={(subject) => setEventFor({ ...open, subject })}
+      onRemind={(subject) => setRemindFor({ ...open, subject })}
       onLabel={(t) => setLabelling([t])}
       onSnooze={() => setSnoozing([open])}
       onUnsnooze={() => void mailApi.unsnooze(open.account_id, open.key).then(refresh)}
@@ -1012,6 +1014,7 @@ export function MailApp() {
         </dl>
       </SharedSheet>
       {eventFor && <EventSheet accountId={eventFor.account_id} threadKey={eventFor.key} subject={eventFor.subject} onClose={() => setEventFor(null)} />}
+      {remindFor && <ReminderSheet accountId={remindFor.account_id} threadKey={remindFor.key} subject={remindFor.subject} onClose={() => setRemindFor(null)} />}
       {snoozing && <SnoozeSheet onPick={(when) => void snooze(snoozing, when)} onClose={() => setSnoozing(null)} />}
       {settingsOpen && <MailSettingsSheet onClose={() => setSettingsOpen(false)} />}
       {editing && <EditMailboxSheet account={editing} onClose={() => setEditing(null)} />}
@@ -1145,7 +1148,7 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
   );
 }
 
-function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, onAddEvent, onLabel, onSnooze, onUnsnooze, onBack, onAct, onMove, onWrite, markRead }: {
+function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, onAddEvent, onRemind, onLabel, onSnooze, onUnsnooze, onBack, onAct, onMove, onWrite, markRead }: {
   open: Open;
   showBack: boolean;
   labels: MailLabel[];
@@ -1153,6 +1156,7 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   prefill: string | null;
   onPrefilled: () => void;
   onAddEvent: (subject: string) => void;
+  onRemind: (subject: string) => void;
   onLabel: (t: LabelTarget) => void;
   onSnooze: () => void;
   onUnsnooze: () => void;
@@ -1208,6 +1212,8 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const [showAll, setShowAll] = useState(false);
+  const [offerClosed, setOfferClosed] = useState(false);
+  const qc = useQueryClient();
 
   if (isLoading) return <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" /></div>;
   if (isError || !data) return <p className="p-6 text-sm text-[var(--text-muted)]">Couldn't open this conversation.</p>;
@@ -1222,6 +1228,35 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
     return { to, rest: [...new Set([...others(m.to), ...others(m.cc)])].filter((a) => !to.includes(a)) };
   };
   const everyoneElse = whoTo(last).rest;
+  // Someone who isn't you and isn't in your Contacts yet.
+  const sender = data.messages.findLast((m) => !m.outgoing && !isMine(m.from.addr))?.from;
+  const stranger = !!sender && !people[sender.addr.toLowerCase()];
+  const addSender = () => {
+    if (!sender) return;
+    void mailApi.addContact(sender.name, sender.addr)
+      .then(() => { toast.success(`${sender.name || sender.addr} is in your Contacts.`); void qc.invalidateQueries({ queryKey: ["mail-known-people"] }); })
+      .catch((e) => toast.error(apiErrorMessage(e, "Couldn't add that contact.")));
+  };
+  // The gist as words anyone can read (a link to your mailbox would open for nobody else).
+  const share = async () => {
+    const who = last.from.name || last.from.addr;
+    const gist = (data.summary || last.text || "").replace(/\s+\n/g, "\n").trim().slice(0, 1200);
+    const words = `${data.subject || "(No subject)"}\nFrom ${who}, ${new Date(last.at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}\n\n${gist}`;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: data.subject, text: words });
+        return;
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(words);
+      toast.success("Copied. Paste it into a message.");
+    } catch {
+      toast.error("Couldn't copy that.");
+    }
+  };
   const reSubject = data.subject.toLowerCase().startsWith("re:") ? data.subject : `Re: ${data.subject}`;
   const viaAlias = replyAlias(aliasInfo, data.messages.map((m) => m.id));
   const reply = (m: Message, all: boolean) => {
@@ -1256,7 +1291,8 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
     <>
       <header className="flex items-center gap-1 border-b border-[var(--border)] px-3 py-2">
         {showBack && <button type="button" onClick={onBack} aria-label="Back" className={iconButton}><ArrowLeft className="h-5 w-5" /></button>}
-        <h2 className="min-w-0 flex-1 truncate px-1 text-[15px] font-semibold text-[var(--text)]">{data.subject || "(No subject)"}</h2>
+        {/* On a phone the buttons leave the subject a few letters: it gets its own lines below. */}
+        {showBack ? <span className="flex-1" /> : <h2 className="min-w-0 flex-1 truncate px-1 text-[15px] font-semibold text-[var(--text)]">{data.subject || "(No subject)"}</h2>}
         <button type="button" onClick={() => onAct(starred ? "unstar" : "star")} aria-label={starred ? "Remove star" : "Star"} title={starred ? "Remove star (s)" : "Star (s)"} className={iconButton}><Star className={`h-[18px] w-[18px] ${starred ? "fill-[var(--accent)] text-[var(--accent-text)]" : ""}`} /></button>
         <button type="button" onClick={() => onLabel({ account_id: open.account_id, key: open.key, from: data.messages[0].from, subject: data.subject, labels: data.labels })} aria-label="Label" title="Label" className={iconButton}><Tag className="h-[18px] w-[18px]" /></button>
         <button type="button" onClick={onSnooze} aria-label="Snooze" title="Snooze" className={iconButton}><AlarmClock className="h-[18px] w-[18px]" /></button>
@@ -1268,9 +1304,22 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
         {everyoneElse.length > 0 && <button type="button" onClick={() => reply(last, true)} className={action}><ReplyAll className="h-3.5 w-3.5" />Reply all</button>}
         <button type="button" onClick={() => forward(last)} className={action}><Forward className="h-3.5 w-3.5" />Forward</button>
         <button type="button" onClick={() => onAddEvent(data.subject)} className={action}><CalendarPlus className="h-3.5 w-3.5" />Add to calendar</button>
-        <button type="button" onClick={() => void mailApi.addTask(open.account_id, open.key).then(() => toast.success("Added to Tasks.")).catch((e) => toast.error(apiErrorMessage(e, "Couldn't add that task.")))} className={action}><CheckSquare className="h-3.5 w-3.5" />Make a task</button>
+        <button type="button" onClick={() => onRemind(data.subject)} className={action}><CheckSquare className="h-3.5 w-3.5" />Remind me</button>
+        {stranger && <button type="button" onClick={addSender} className={action}><UserPlus className="h-3.5 w-3.5" />Add to Contacts</button>}
+        <button type="button" onClick={() => void share()} className={action}><Share2 className="h-3.5 w-3.5" />Share</button>
       </div>
       <div className="promptly-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+        {showBack && <h2 className="line-clamp-3 text-lg font-semibold leading-snug text-[var(--text)]">{data.subject || "(No subject)"}</h2>}
+        {data.suggest && !offerClosed && (
+          <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--text)]">
+            {data.suggest === "bill" ? <CheckSquare className="h-4 w-4 shrink-0 text-[var(--accent-text)]" /> : <CalendarPlus className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />}
+            <span className="min-w-0 flex-1">{data.suggest === "bill" ? "This looks like a bill." : "This looks like a booking or a date to keep."}</span>
+            <button type="button" onClick={() => (data.suggest === "bill" ? onRemind(data.subject) : onAddEvent(data.subject))} className="inline-flex min-h-10 shrink-0 items-center rounded-lg bg-[var(--accent)]/15 px-3 text-xs font-medium text-[var(--accent-text)] md:min-h-8">
+              {data.suggest === "bill" ? "Remind me to pay it" : "Add to calendar"}
+            </button>
+            <button type="button" onClick={() => setOfferClosed(true)} aria-label="Not now" className="flex h-10 w-8 shrink-0 items-center justify-center text-[var(--text-muted)] md:h-8"><X className="h-4 w-4" /></button>
+          </div>
+        )}
         {data.summary && (
           <p className="flex gap-2 rounded-xl bg-[var(--accent)]/10 px-3 py-2.5 text-sm text-[var(--text)]">
             <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-text)]" /><span className="min-w-0">{data.summary}</span>

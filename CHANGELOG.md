@@ -21,6 +21,22 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Mail: an email that looks like a bill offers "Remind me to pay it", and one that looks like a booking or a date to keep offers "Add to calendar", in a line at the top of the conversation. Nothing is added until you tap and check the details.
+- Mail: "Remind me" (it replaces "Make a task") opens a short sheet: what to do, the day it's due and a note such as the amount. The AI has a go at filling it in from the email, and the task in Tasks links back to the email.
+- Mail: "Add to Contacts" and "Share" are on the row of buttons under a conversation's subject. Share sends the gist as words (subject, who from, summary) through your phone's share sheet, or copies it on a computer.
+- Mail: the Add to calendar sheet has "See it in Maps" once a place is filled in.
+
+### Changed
+
+- Mail on a phone: a conversation's subject has its own lines under the buttons, instead of a few letters squeezed beside them.
+- Ask about your mail, with a conversation open, also looks through the rest of your mail (the sender's other emails first), so "when is this stay?" finds the dates in the host's earlier email.
+
+### Fixed
+
+- Mail on a phone: the Compose button floated in the middle of the list, over senders and subjects. It now sits in the bottom corner, and the list scrolls clear of it.
+
 ## [0.40.2] - 2026-11-13
 
 ### Fixed
