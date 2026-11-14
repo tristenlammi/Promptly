@@ -76,6 +76,7 @@ from app.rooms.models import (  # noqa: F401
     RoomAttachment,
     RoomMember,
     RoomMessage,
+    RoomPollVote,
     RoomReaction,
     RoomSpace,
     RoomSpaceMember,

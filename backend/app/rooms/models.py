@@ -112,3 +112,16 @@ class RoomAttachment(UUIDPKMixin, CreatedAtMixin, Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     has_thumb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+
+class RoomPollVote(Base):
+    """One person's tick on one option of a poll (the poll itself is the
+    message's ``meta.poll``). Kept by person even for an anonymous poll, so a
+    vote can be changed and counted once; who voted is never sent out then."""
+
+    __tablename__ = "room_poll_votes"
+
+    message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("room_messages.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    option: Mapped[str] = mapped_column(String(8), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

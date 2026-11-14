@@ -180,11 +180,16 @@ def _snippet(m: RoomMessage) -> str:
     return "" if m.deleted_at else (m.body or "")[:200]
 
 
-async def messages_out(db: AsyncSession, msgs: list[RoomMessage]) -> list[dict]:
-    """Messages with their reactions, attachments and quoted replies."""
+async def messages_out(db: AsyncSession, msgs: list[RoomMessage], viewer_id: uuid.UUID | None = None) -> list[dict]:
+    """Messages with their reactions, attachments and quoted replies, and a
+    poll's live count (with ``viewer_id``'s own vote, when one is given: a
+    message sent out to a whole room is given none)."""
     if not msgs:
         return []
     ids = [m.id for m in msgs]
+    from . import polls
+
+    poll_states = await polls.states(db, msgs, viewer_id)
     reacts: dict[uuid.UUID, dict[str, list[str]]] = {}
     for r in (await db.execute(select(RoomReaction).where(RoomReaction.message_id.in_(ids)).order_by(RoomReaction.created_at))).scalars():
         reacts.setdefault(r.message_id, {}).setdefault(r.emoji, []).append(str(r.user_id))
@@ -222,11 +227,13 @@ async def messages_out(db: AsyncSession, msgs: list[RoomMessage]) -> list[dict]:
                 "meta": {} if deleted else (m.meta or {}),
             }
         )
+        if m.id in poll_states:
+            out[-1]["poll"] = poll_states[m.id]
     return out
 
 
-async def message_out(db: AsyncSession, m: RoomMessage) -> dict:
-    return (await messages_out(db, [m]))[0]
+async def message_out(db: AsyncSession, m: RoomMessage, viewer_id: uuid.UUID | None = None) -> dict:
+    return (await messages_out(db, [m], viewer_id))[0]
 
 
 async def reactions_of(db: AsyncSession, message_id: uuid.UUID) -> list[dict]:
