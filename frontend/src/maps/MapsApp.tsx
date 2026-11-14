@@ -22,6 +22,7 @@ import { NEARBY, mapsApi, decodeShape, formatDuration, formatKm, routeSeconds, t
 import { MAP_THEMES, saveMapTheme, savedMapTheme, useMapColours, type MapTheme } from "./daylight";
 import { mapsPinLink, mapsRouteLink } from "./links";
 import { MapView, placeLook, type MapViewHandle } from "./MapView";
+import type { PinHold } from "./pinView";
 import { OFFLINE_KEY, OfflinePanel, saveRouteForOffline, useOffline } from "./Offline";
 import { PeoplePanel, useShares } from "./People";
 import { PLACE_COLOURS, PLACE_ICON_SVG, PLACE_ICONS } from "./placeIcons";
@@ -104,6 +105,8 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     lastPanel.current = panel;
   }, [panel]);
   const [place, setPlace] = useState<SearchResult | null>(null);
+  /** Whether the map keeps the chosen pin in sight as the panel changes size. */
+  const pinHold = useRef<PinHold>("off");
   const [charger, setCharger] = useState<Charger | null>(null);
 
   // Where you are, while the map is open.
@@ -220,6 +223,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     raise();
     setQuery("");
     setFollowing(false);
+    pinHold.current = "centre";
     // Into the middle of the map you can still see, above the panel (once the
     // panel has slid up, so its height is the real one).
     window.setTimeout(() => map.current?.flyTo(s.lat, s.lon, undefined, coveredNow()), 260);
@@ -227,6 +231,8 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
 
   const hold = useCallback(async (lat: number, lon: number) => {
     setPlace({ kind: "pin", name: "Dropped pin", lat, lon });
+    // Your own spot on your own view: the map only moves if the panel would cover it.
+    pinHold.current = "visible";
     setPanel("place");
     raise();
     try {
@@ -710,6 +716,35 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
   // In the empty search box: where you've been lately.
   const showRecents = panel !== "route" && searchFocused && !query.trim() && recents.length > 0;
   const dropdown = showResults || showRecents;
+  // The panel grew or shrank (More opened, an address arrived, you dragged it):
+  // the pin goes back to the middle of the map that's left, once the panel's
+  // stopped moving. Not after you've moved the map yourself.
+  const pinned = panel === "place" ? place : panel === "charger" ? charger : null;
+  const pinAt = useRef<{ lat: number; lon: number } | null>(null);
+  pinAt.current = pinned ? { lat: pinned.lat, lon: pinned.lon } : null;
+  const sheetUp = isMobile && !!pinned;
+  useEffect(() => {
+    const sheet = sheetRef.current;
+    if (!sheetUp || !sheet || typeof ResizeObserver === "undefined") return;
+    let timer: number | undefined;
+    let settled = -1;
+    const seen = new ResizeObserver(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const at = pinAt.current;
+        const height = sheet.offsetHeight;
+        if (!at || Math.abs(height - settled) < 8) return;
+        settled = height;
+        map.current?.settlePin(at.lat, at.lon, coveredNow(), pinHold.current);
+      }, 280);
+    });
+    seen.observe(sheet);
+    return () => {
+      window.clearTimeout(timer);
+      seen.disconnect();
+    };
+    // The sheet is a new element whenever the search list has been over it.
+  }, [sheetUp, dropdown]); // eslint-disable-line react-hooks/exhaustive-deps
   const options: SearchResult[] = showResults ? (searchError ? [] : results ?? []) : showRecents ? recents.slice(0, 6).map((r) => ({ kind: "recent" as const, ...r })) : [];
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -948,13 +983,17 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
           onPick={(s) => showPlace({ kind: "place", ...s })}
           onPickCharger={(c) => {
             setCharger(c);
+            pinHold.current = "visible";
             setPanel("charger");
             raise();
           }}
           onPickRoute={setSelected}
           onPickParked={() => parked && showPlace({ kind: "place", lat: parked.lat, lon: parked.lon, name: "Your car", address: parked.note })}
           onMoved={onMoved}
-          onDragged={() => setFollowing(false)}
+          onDragged={() => {
+            setFollowing(false);
+            pinHold.current = "off";
+          }}
         />
 
         {/* Search, and the panel beneath it on a big screen. */}

@@ -69,6 +69,9 @@ class RouteRuler(points: List<Pair<Double, Double>>) {
         return nearest(lat, lon, 0.0, length, stopWithin = best + slack).first
     }
 
+    /** How far [lat],[lon] is from the route, in metres. */
+    fun offBy(lat: Double, lon: Double): Double = nearest(lat, lon, 0.0, length).second
+
     /** The nearest point between [from] and [to] metres along: how far along it is, and
      *  how far from the position (metres). [stopWithin]: take the first that near. */
     private fun nearest(lat: Double, lon: Double, from: Double, to: Double, stopWithin: Double? = null): Pair<Double, Double> {
@@ -159,7 +162,7 @@ private val DoubleToVector = TwoWayConverter<Double, AnimationVector1D>(
  * a second, never backwards. It is exactly what the navigation library's camera follows,
  * so the arrow drawn here stays put on the screen while the map turns and slides under
  * it (the arrow used to jump from fix to fix while the camera glided, and the library's
- * own dot trailed behind it). Off the route, the fix itself.
+ * own dot trailed behind it). Off the route, or far from it, the fix itself.
  */
 @Composable
 fun rememberTripShown(state: NavigationUiState): Shown? {
@@ -169,6 +172,11 @@ fun rememberTripShown(state: NavigationUiState): Shown? {
         state.routeGeometry?.takeIf { it.size >= 2 }?.let { line -> RouteRuler(line.map { it.lat to it.lng }) }
     }
     if (!state.isNavigating() || state.routeDeviation !is RouteDeviation.NoDeviation || ruler == null) return raw
+    // A good fix a long way from the route (it was planned from an old position, and
+    // the new one from here is on its way): you're drawn where you are, not parked
+    // at the route's start.
+    val away = remember(ruler, fix.coordinates.lat, fix.coordinates.lng) { ruler.offBy(fix.coordinates.lat, fix.coordinates.lng) }
+    if (!StartWatch.arrowOnRoute(away, fix.horizontalAccuracy)) return raw
     val progress = remember(ruler) { Animatable(ruler.projectFirst(fix.coordinates.lat, fix.coordinates.lng), DoubleToVector) }
     // Near where you already are on it: a road the route uses twice isn't mixed up.
     val target = remember(ruler, fix.coordinates.lat, fix.coordinates.lng) { ruler.project(fix.coordinates.lat, fix.coordinates.lng, near = progress.value) }

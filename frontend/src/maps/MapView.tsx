@@ -5,6 +5,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { loadMapLibre, serverMapStyle, signTrafficRequest } from "@/components/maps/mapStyle";
 import { useThemeStore } from "@/store/themeStore";
 
+import { pinTarget, type Covered, type PinHold } from "./pinView";
 import { PLACE_ICON_SVG } from "./placeIcons";
 import { decodeShape, type Charger, type Parked, type Route, type RouteIncident, type SavedPlace, type Spot } from "./api";
 
@@ -19,6 +20,11 @@ export interface MapViewHandle {
   visibleBounds(inset: { top: number; bottom: number; left: number; right: number }): [number, number, number, number] | null;
   /** Slide to a spot without changing how far in you are. */
   panTo(lat: number, lon: number): void;
+  /**
+   * The panel over the map changed size: keep this pin in the map that's still
+   * showing. Does nothing while you have a finger (or the mouse) on the map.
+   */
+  settlePin(lat: number, lon: number, covered: Covered, hold: PinHold): void;
   zoomIn(): void;
   zoomOut(): void;
   /** Turn the map back so north is up and it lies flat. */
@@ -171,6 +177,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
   const view = useRef<{ center: [number, number]; zoom: number }>((rememberView && storedView()) || WHOLE_COUNTRY);
   // Still on the whole-country view nobody chose: Home (or the last place) is a better start.
   const untouched = useRef(view.current === WHOLE_COUNTRY);
+  // You're moving the map yourself right now (a drag, a pinch, the wheel).
+  const gesture = useRef(false);
 
   useImperativeHandle(ref, () => ({
     flyTo(lat, lon, zoom, covered) {
@@ -211,6 +219,13 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
     },
     panTo(lat, lon) {
       mapRef.current?.easeTo({ center: [lon, lat], duration: 400 });
+    },
+    settlePin(lat, lon, covered, hold) {
+      const map = mapRef.current;
+      if (!map || gesture.current) return;
+      const { clientWidth: w, clientHeight: h } = map.getContainer();
+      const to = pinTarget(map.project([lon, lat]), { w, h }, covered, hold);
+      if (to) map.easeTo({ center: [lon, lat], offset: [to.x - w / 2, to.y - h / 2], duration: 350 });
     },
     zoomIn() {
       mapRef.current?.zoomIn({ duration: 250 });
@@ -269,7 +284,11 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
         map.addLayer({ id: "you", type: "circle", source: "you", paint: { "circle-color": "#4F7FE0", "circle-radius": 7, "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
         setReady(true);
       });
+      map.on("movestart", (e) => {
+        if ((e as { originalEvent?: unknown }).originalEvent) gesture.current = true;
+      });
       map.on("moveend", () => {
+        gesture.current = false;
         if (!map) return;
         const c = map.getCenter();
         view.current = { center: [c.lng, c.lat], zoom: map.getZoom() };
@@ -284,6 +303,10 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
         calls.current.onMoved();
       });
       map.on("dragstart", () => calls.current.onDragged?.());
+      // A pinch or the wheel is you moving the map too.
+      map.on("zoomstart", (e) => {
+        if ((e as { originalEvent?: unknown }).originalEvent) calls.current.onDragged?.();
+      });
       map.on("contextmenu", (e) => calls.current.onHold(e.lngLat.lat, e.lngLat.lng));
       let timer: number | undefined;
       map.on("touchstart", (e) => {

@@ -188,6 +188,9 @@ object Nav {
     private var camerasFor: Triple<Int, GeographicCoordinate, GeographicCoordinate>? = null
     private var cameraJob: Job? = null
     private var lastFix: UserLocation? = null
+    // Was this trip planned from somewhere you aren't (an old or rough position)?
+    private val startWatch = StartWatch()
+    private var startLine: Pair<List<GeographicCoordinate>, List<Pair<Double, Double>>>? = null
 
     val locationProvider: NavigationLocationProvider by lazy {
         NavigationLocationProvider(
@@ -344,6 +347,7 @@ object Nav {
                 offRouteSaid = false
             }
             if (navigating) {
+                checkStart(state.location, state.routeGeometry)
                 state.location?.let { at -> noteReached(at.coordinates.lat, at.coordinates.lng) }
                 state.routeGeometry?.let(::routeIs)
                 state.location?.let { onLocation(it.coordinates.lat, it.coordinates.lng) }
@@ -353,6 +357,37 @@ object Nav {
                 )
             }
         }.launchIn(watching)
+    }
+
+    /** The first good fixes of a trip: if they say the route was planned from
+     *  somewhere you aren't, it's asked for again from where you are. */
+    private fun checkStart(at: UserLocation?, line: List<GeographicCoordinate>?) {
+        if (at == null || line == null || line.size < 2) return
+        val points = startLine?.takeIf { it.first === line }?.second
+            ?: line.map { it.lat to it.lng }.also { startLine = line to it }
+        val now = System.currentTimeMillis()
+        val fix = OffRouteWatch.Fix(at.coordinates.lat, at.coordinates.lng, at.horizontalAccuracy)
+        if (startWatch.check(fix, now - at.timestamp.toEpochMilli(), now, points) != StartWatch.Verdict.REPLAN) return
+        val c = core ?: return
+        val vm = model ?: return
+        val rest = tripStops.filterIndexed { i, _ -> i !in reached }.ifEmpty { tripStops.takeLast(1) }
+        if (rest.isEmpty()) return
+        // Never where: just that it happened, for "Recent problems" after a drive.
+        Log.i(TAG, "The route was planned from somewhere else (fix good to ${at.horizontalAccuracy.toInt()} m): asking again from here")
+        vm.viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                fun stopAt(s: Stop) = Waypoint(coordinate = GeographicCoordinate(s.lat, s.lon), kind = WaypointKind.BREAK)
+                val waypoints = rest.dropLast(1).map(::stopAt) + pinned.map(::viaPoint) + rest.takeLast(1).map(::stopAt)
+                val route = provider().fetch(at, waypoints).first()
+                withContext(Dispatchers.Main) {
+                    oneAtATime.withLock { if (vm.navigationUiState.value.isNavigating()) c.replaceRoute(route) }
+                }
+                startWatch.replanned(at.coordinates.lat, at.coordinates.lng)
+            }.onFailure {
+                // The route you have still stands, and leaving it is still noticed.
+                Log.w(TAG, "Couldn't ask for the route again from here", it)
+            }
+        }
     }
 
     /** A new route, from you or from Ferrostar after a wrong turn: its own cameras. */
@@ -474,6 +509,7 @@ object Nav {
                 val waypoints = rest.dropLast(1).map(::stopAt) + through.map(::viaPoint) + rest.takeLast(1).map(::stopAt)
                 val route = provider().fetch(here.toUserLocation(), waypoints).first()
                 pinned = through
+                startWatch.begin(here.latitude, here.longitude, System.currentTimeMillis())
                 vm.setDestination(rest.lastOrNull()?.name)
                 withContext(Dispatchers.Main) {
                     if (vm.navigationUiState.value.isNavigating()) oneAtATime.withLock { c.replaceRoute(route) } else c.startNavigation(route)
