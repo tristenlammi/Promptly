@@ -48,6 +48,9 @@ LABELS = {
     "porch_decline": "Not now",
     "porch_tag_yes": "Show it",
     "porch_tag_no": "Not me",
+    # Rooms: answer a message, or mark its room read, from the notification.
+    "room_reply": "Reply",
+    "room_read": "Mark as read",
 }
 
 
@@ -115,9 +118,10 @@ def task_buttons(user: User, file_id: uuid.UUID, key: str) -> dict[str, Any] | N
 # ------------------------------------------------------------------ doing it
 
 
-async def perform(db: AsyncSession, token: str) -> str:
+async def perform(db: AsyncSession, token: str, text: str | None = None) -> str:
     """Do what the token says, as its person. Returns a short line for the
-    worker to show ("You're going to Dinner"). Commits."""
+    worker to show ("You're going to Dinner"). Commits. ``text``: what was
+    typed into the notification (a Rooms reply)."""
     claims = verify(token)
     try:
         uid = uuid.UUID(str(claims["u"]))
@@ -137,6 +141,8 @@ async def perform(db: AsyncSession, token: str) -> str:
         return await _task_snooze(db, user, target)
     if action == "call_decline":
         return await _call_decline(db, user, target)
+    if action in ("room_reply", "room_read"):
+        return await _room(db, user, action, target, text)
     if action.startswith("porch_"):
         from app.porch import push as porch_push
 
@@ -260,6 +266,28 @@ async def _task_snooze(db: AsyncSession, user: User, target: str) -> str:
     )
     await db.commit()
     return f"I'll remind you about {sent.title} in an hour"
+
+
+async def _room(db: AsyncSession, user: User, action: str, target: str, text: str | None) -> str:
+    """A Rooms message's notification: reply to it, or mark the room read up
+    to it. Membership is checked again now (you may have left since)."""
+    from fastapi import HTTPException
+
+    from app.rooms import router as rooms
+
+    room_s, _, seq_s = target.partition("|")
+    room_id = _uuid(room_s)
+    try:
+        if action == "room_read":
+            await rooms.read_from_notification(db, user, room_id, int(seq_s) if seq_s.isdigit() else 0)
+            return "Marked as read"
+        words = (text or "").strip()
+        if not words:
+            raise ActionRefused("gone")
+        await rooms.reply_from_notification(db, user, room_id, words[:4000])
+        return "Sent"
+    except HTTPException as exc:
+        raise ActionRefused("gone") from exc
 
 
 async def _call_decline(db: AsyncSession, user: User, target: str) -> str:

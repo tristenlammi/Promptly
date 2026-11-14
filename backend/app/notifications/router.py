@@ -484,6 +484,8 @@ async def unsubscribe_all(
 
 class _ActionIn(BaseModel):
     token: str = Field(min_length=10, max_length=2000)
+    # What was typed into the notification (a Rooms reply).
+    text: str | None = Field(default=None, max_length=4000)
 
 
 async def _action_limit(request: Request) -> None:
@@ -502,7 +504,7 @@ async def notification_action(body: _ActionIn, db: AsyncSession = Depends(get_db
     from app.notifications.actions import ActionRefused, perform
 
     try:
-        message = await perform(db, body.token)
+        message = await perform(db, body.token, body.text)
     except ActionRefused as exc:
         await db.rollback()
         raise HTTPException(

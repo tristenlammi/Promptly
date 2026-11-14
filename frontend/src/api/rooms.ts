@@ -1,4 +1,4 @@
-import { apiClient } from "@/api/client";
+import { API_BASE_URL, apiClient } from "@/api/client";
 import type { CallServerEvent, DmCall } from "@/api/dmCalls";
 import type { VoiceChannelSettings, VoiceMember, VoiceServerEvent, VoiceWhere } from "@/api/voiceChannels";
 
@@ -273,8 +273,22 @@ export const roomsApi = {
   async typing(roomId: string): Promise<void> {
     await apiClient.post(`/rooms/rooms/${roomId}/typing`);
   },
-  async presence(roomId: string | null): Promise<void> {
-    await apiClient.post("/rooms/presence", { room_id: roomId });
+  async presence(roomId: string | null, device: string): Promise<void> {
+    await apiClient.post("/rooms/presence", { room_id: roomId, device });
+  },
+  /** "Not looking any more", in a way that still goes out as the page is
+   *  hidden or closed (a phone locking): a plain request can be dropped. */
+  presenceGone(device: string, token: string | null): void {
+    try {
+      void fetch(`${API_BASE_URL}/rooms/presence`, {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ room_id: null, device }),
+      }).catch(() => undefined);
+    } catch {
+      /* it lapses by itself in a few seconds */
+    }
   },
 
   // ---- attachments ----

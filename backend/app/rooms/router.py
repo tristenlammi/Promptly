@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
@@ -539,15 +539,41 @@ class MessageIn(BaseModel):
 @router.post("/rooms/{room_id}/messages", status_code=201)
 async def send(room_id: uuid.UUID, body: MessageIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     room, _sm = await core.load_room(db, room_id, user, lock=True)
+    # The same send again (its answer was lost on a bad connection and the
+    # page retried): it's already here, so hand it back rather than post twice.
+    if body.client_id:
+        already = (
+            await db.execute(
+                select(RoomMessage)
+                .where(
+                    RoomMessage.room_id == room.id,
+                    RoomMessage.author_id == user.id,
+                    RoomMessage.created_at >= datetime.now(timezone.utc) - timedelta(days=2),
+                    RoomMessage.meta["client_id"].astext == body.client_id[:64],
+                )
+                .order_by(RoomMessage.seq.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if already is not None:
+            return await core.message_out(db, already)
     msg = await service.post_message(db, room, user, body.body, reply_to_id=body.reply_to_id, attachment_ids=body.attachment_ids, client_id=body.client_id)
+    return await _sent(db, room, user, msg)
+
+
+async def _sent(db: AsyncSession, room: Room, user: User, msg: RoomMessage) -> dict:
+    """A message just added: save it, tell everyone's open pages, send the
+    pushes, and wake @promptly if it was asked."""
+    me = user.id
     await db.commit()
     await db.refresh(msg)
+    await db.refresh(room)
     out = await core.message_out(db, msg)
     await core.publish(await core.member_ids(db, room), {"type": "message", "message": out})
     if room.space_id is None:
         # A re-opened conversation shows up in the others' lists.
         for uid in await core.member_ids(db, room):
-            if uid != user.id:
+            if uid != me:
                 u = await db.get(User, uid)
                 if u is not None:
                     await core.publish([uid], {"type": "room", "room": await core.room_out(db, room, u)})
@@ -557,6 +583,30 @@ async def send(room_id: uuid.UUID, body: MessageIn, db: AsyncSession = Depends(g
 
         spawn(answer(msg.id), name=f"rooms-promptly-{msg.id}")
     return out
+
+
+async def reply_from_notification(db: AsyncSession, user: User, room_id: uuid.UUID, text: str) -> str:
+    """"Reply" typed into a message's notification: sent as a normal message
+    (which also marks the room read). Returns the room's name for the worker."""
+    room, _sm = await core.load_room(db, room_id, user, lock=True)
+    name = room.name or ""
+    msg = await service.post_message(db, room, user, text)
+    await _sent(db, room, user, msg)
+    return name
+
+
+async def read_from_notification(db: AsyncSession, user: User, room_id: uuid.UUID, seq: int) -> None:
+    """"Mark as read" on a message's notification: read up to that message,
+    on every device (their open pages hear it)."""
+    me = user.id
+    room, _sm = await core.load_room(db, room_id, user)
+    rid = room.id
+    st = await core.my_state(db, rid, me)
+    upto = min(max(seq, 0), room.last_seq)
+    if upto > st.last_read_seq:
+        st.last_read_seq = upto
+        await db.commit()
+        await core.publish([me], {"type": "read", "room_id": str(rid), "seq": upto})
 
 
 class MessagePatch(BaseModel):
@@ -711,13 +761,16 @@ async def typing(room_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: U
 
 class PresenceIn(BaseModel):
     room_id: uuid.UUID | None = None
+    # Which of your devices is saying so (a tab, the phone app): one going
+    # away doesn't speak for the others.
+    device: str | None = Field(default=None, max_length=64)
 
 
 @router.post("/presence", status_code=204)
 async def presence(body: PresenceIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
     if body.room_id is not None:
         await core.load_room(db, body.room_id, user)
-    await core.set_presence(user.id, body.room_id)
+    await core.set_presence(user.id, body.room_id, body.device)
 
 
 # ================================================================== attachments

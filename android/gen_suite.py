@@ -64,6 +64,8 @@ NATIVE = [
 # server in front of it at launch. key -> (action path, MIME types, file field)
 SHARE_TARGETS = {
     "porch": ("/porch/share-target", ("image/*", "video/*", "text/plain"), "media"),
+    # Rooms: "Share → P Rooms" sends a photo, a file or a link into a conversation.
+    "rooms": ("/rooms/share-target", ("image/*", "video/*", "audio/*", "application/pdf", "text/plain"), "media"),
 }
 
 

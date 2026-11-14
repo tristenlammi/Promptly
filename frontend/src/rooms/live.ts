@@ -11,6 +11,7 @@ import { useEffect, useRef } from "react";
 import { type Bootstrap, type RoomEvent } from "@/api/rooms";
 
 import { BOOTSTRAP_KEY, findRoom, patchRoom, refreshTail, removeRoom, updateBootstrap, upsertRoom } from "./cache";
+import { sendMessage } from "./actions";
 import { useRoomsStore } from "./store";
 import { subscribeRoomsStream } from "./stream";
 
@@ -30,7 +31,22 @@ export function useRoomsEvents(openRoomId: string | null) {
       if (open) void refreshTail(open).catch(() => undefined);
     };
 
-    const unsubscribe = subscribeRoomsStream({ onEvent: (ev) => applyRoomEvent(qc, ev), onReconnect: resync });
+    // Back on the network: what didn't send goes again by itself (the server
+    // knows each message by its client id, so nothing is sent twice).
+    const resend = () => {
+      const { pending } = useRoomsStore.getState();
+      for (const [roomId, list] of Object.entries(pending)) {
+        for (const p of list) if (p.status === "failed") void sendMessage(qc, roomId, p, p);
+      }
+    };
+    const unsubscribe = subscribeRoomsStream({
+      onEvent: (ev) => applyRoomEvent(qc, ev),
+      onReconnect: () => {
+        resync();
+        resend();
+      },
+    });
+    window.addEventListener("online", resend);
 
     // Coming back to the window: catch up even if the stream looked alive.
     let lastFocus = 0;
@@ -46,6 +62,7 @@ export function useRoomsEvents(openRoomId: string | null) {
 
     return () => {
       unsubscribe();
+      window.removeEventListener("online", resend);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
@@ -113,6 +130,9 @@ export function applyRoomEvent(qc: QueryClient, ev: RoomEvent) {
       store.patchMessage(ev.room_id, ev.message_id, (m) => ({ ...m, reactions: ev.reactions }));
       return;
     case "read":
+      // Read on another of your devices (or from a notification's "Mark as
+      // read"): this device's notification for the room goes too.
+      if (ev.seq >= (findRoom(b, ev.room_id)?.room.last_seq ?? Infinity)) clearRoomNotifications(ev.room_id);
       patchRoom(qc, ev.room_id, (r) =>
         ev.seq >= r.last_seq
           ? { ...r, last_read_seq: ev.seq, unread: 0, mentions: 0 }

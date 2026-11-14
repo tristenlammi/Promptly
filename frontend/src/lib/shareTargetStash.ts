@@ -14,7 +14,7 @@ const DB_NAME = "promptly-share-target";
 const STORE = "files";
 
 /** The installed apps that take shares. Rows from before the key existed are Files'. */
-export type ShareApp = "files" | "porch";
+export type ShareApp = "files" | "porch" | "rooms";
 
 interface Row {
   app?: ShareApp;

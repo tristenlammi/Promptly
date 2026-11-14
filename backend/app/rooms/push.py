@@ -39,6 +39,7 @@ def wants(level: str, uid: str, msg: RoomMessage, reply_author: str | None) -> b
 async def fan_out(message_id: uuid.UUID) -> int:
     """Send the pushes for one new message; returns how many people got one."""
     from app.auth.models import User
+    from app.notifications.actions import LABELS, sign
     from app.notifications.dispatch import notify_user
 
     async with SessionLocal() as db:
@@ -94,14 +95,21 @@ async def fan_out(message_id: uuid.UUID) -> int:
         # (``line`` each), shows the sender's picture, and sets the app
         # icon's badge to ``app_badge``.
         icon = (author.avatar_url if author is not None else None) or "/item-icons/rooms-192.png"
+        people = {u.id: u for u in (await db.execute(select(User).where(User.id.in_(recipients)))).scalars()}
         sent = 0
         for uid in recipients:
-            if looking.get(str(uid)) == str(room.id):
+            if str(room.id) in looking.get(str(uid), ()):
                 continue
             o = overrides.get(uid)
             level = (o.notify if o and o.notify else None) or space_levels.get(uid) or "all"
             if not wants(level, str(uid), msg, reply_author):
                 continue
+            # Answer, or mark it read, without opening the app.
+            to = people.get(uid)
+            buttons = [] if to is None or to.disabled else [
+                {"action": "room_reply", "title": LABELS["room_reply"], "token": sign(to, "room_reply", str(room.id)), "type": "text", "placeholder": "Message"},
+                {"action": "room_read", "title": LABELS["room_read"], "token": sign(to, "room_read", f"{room.id}|{msg.seq}")},
+            ]
             await notify_user(
                 user_id=uid,
                 category="room_message",
@@ -116,6 +124,7 @@ async def fan_out(message_id: uuid.UUID) -> int:
                     "line": body[:200],
                     "stack": True,
                     "app_badge": await core.unread_total(db, uid),
+                    "actions": buttons,
                 },
             )
             sent += 1

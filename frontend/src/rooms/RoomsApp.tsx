@@ -15,10 +15,14 @@ import { EmptyState, ItemButton, Segmented, Sheet } from "@/items/ui";
 import "@/items/ui/items.css";
 import "./rooms.css";
 import { useInstallPrompt } from "@/lib/installPrompt";
+import { useAuthStore } from "@/store/authStore";
+
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { BOOTSTRAP_KEY, findRoom, totals } from "./cache";
+import { ShareInSheet } from "./components/ShareInSheet";
+import { setIncomingShare, useIncomingShare } from "./incomingShare";
 import { useRoomsEvents } from "./live";
 import { useRoomsStore } from "./store";
 import { CallDetail, CallsHome, CallsList, NewCallSheet } from "./components/Calls";
@@ -92,6 +96,23 @@ function useVisualViewport(enabled: boolean) {
  * a big screen, or full screen with Promptly's menu button (``promptlyNav``)
  * on a phone.
  */
+/** How long without a touch, key or scroll before "looking at this room" lapses. */
+const PRESENCE_IDLE_MS = 2 * 60_000;
+
+/** This tab's name for presence: each tab and the phone app speak for themselves. */
+function presenceDevice(): string {
+  const make = () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+  try {
+    const have = sessionStorage.getItem("promptly:rooms:device");
+    if (have) return have;
+    const id = make();
+    sessionStorage.setItem("promptly:rooms:device", id);
+    return id;
+  } catch {
+    return make();
+  }
+}
+
 export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?: boolean; promptlyNav?: boolean } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -167,25 +188,58 @@ export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?:
     }
   }, [t.total]);
 
-  // Presence: the room you're looking at (no pushes for it).
+  // "Share → P Rooms" from another app: the service worker left it for us
+  // (``?shared=1``). Take it, then ask which conversation it's for.
+  const incoming = useIncomingShare();
   useEffect(() => {
+    const here = new URLSearchParams(window.location.search);
+    if (here.get("shared") !== "1") return;
+    here.delete("shared");
+    const rest = here.toString();
+    window.history.replaceState(window.history.state, "", window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash);
+    void import("@/lib/shareTargetStash")
+      .then(({ takeShared }) => takeShared("rooms"))
+      .then((got) => setIncomingShare(got.files, got.text))
+      .catch(() => undefined);
+  }, []);
+
+  // Presence: the room you're looking at (no pushes for it). Only while this
+  // window is on screen, focused and you've touched it lately: a tab left
+  // open on a desk, or a phone that locked, must not hold your notifications
+  // back. Said every 10 seconds; the server forgets it after 25.
+  useEffect(() => {
+    const device = presenceDevice();
+    let lastActive = Date.now();
+    let said: string | null = null;
+    const looking = () => document.visibilityState === "visible" && document.hasFocus() && Date.now() - lastActive < PRESENCE_IDLE_MS;
     const send = () => {
-      const visible = document.visibilityState === "visible" && document.hasFocus();
-      void roomsApi.presence(visible ? roomId : null).catch(() => undefined);
+      const now = looking() ? roomId : null;
+      if (now === null && said === null) return;
+      said = now;
+      if (now === null) roomsApi.presenceGone(device, useAuthStore.getState().accessToken);
+      else void roomsApi.presence(now, device).catch(() => undefined);
+    };
+    const active = () => {
+      const was = looking();
+      lastActive = Date.now();
+      if (!was) send();
     };
     send();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") send();
-    }, 30_000);
-    window.addEventListener("focus", send);
+    const timer = window.setInterval(send, 10_000);
+    const moves = ["pointerdown", "keydown", "wheel", "touchstart"] as const;
+    for (const m of moves) window.addEventListener(m, active, { passive: true });
+    window.addEventListener("focus", active);
     window.addEventListener("blur", send);
+    window.addEventListener("pagehide", send);
     document.addEventListener("visibilitychange", send);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("focus", send);
+      for (const m of moves) window.removeEventListener(m, active);
+      window.removeEventListener("focus", active);
       window.removeEventListener("blur", send);
+      window.removeEventListener("pagehide", send);
       document.removeEventListener("visibilitychange", send);
-      void roomsApi.presence(null).catch(() => undefined);
+      if (said !== null) roomsApi.presenceGone(device, useAuthStore.getState().accessToken);
     };
   }, [roomId]);
 
@@ -391,6 +445,7 @@ export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?:
       )}
     >
       {body}
+      {b && incoming && incoming.roomId === null && <ShareInSheet share={incoming} b={b} />}
       <ConfirmSheetHost />
       <CreateSpaceSheet open={createSpace} onClose={() => setCreateSpace(false)} />
       {b && <NewDmSheet open={newDm} onClose={() => setNewDm(false)} b={b} />}
