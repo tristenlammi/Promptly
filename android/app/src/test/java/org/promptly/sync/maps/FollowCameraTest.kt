@@ -94,4 +94,34 @@ class FollowCameraTest {
         assertEquals(16.0, FollowZoom.forSpeed(60 / 3.6), 0.0)
         assertEquals(15.0, FollowZoom.forSpeed(110 / 3.6), 0.0)
     }
+
+    // Out along a road for about 1.1 km, then back along it (5 m to the east).
+    private val outAndBack = listOf(-27.4000 to 153.03000, -27.3900 to 153.03000, -27.3900 to 153.03005, -27.4000 to 153.03005)
+
+    @Test
+    fun onARoadTheRouteUsesTwiceYouStayOnThePassYouAreOn() {
+        val ruler = RouteRuler(outAndBack)
+        // 300 m out, drifting 4 m east: nearer the way back than the way out.
+        val lat = -27.4000 + 300.0 / 111_320.0
+        val lon = 153.03004
+        assertTrue("the plain nearest is the way back", ruler.project(lat, lon) > ruler.length / 2)
+        assertEquals(300.0, ruler.project(lat, lon, near = 290.0), 2.0)
+    }
+
+    @Test
+    fun farFromWhereYouWereItLooksAtTheWholeRoute() {
+        // A dog-leg: north 1.1 km, east 1 km, north again. The hint says the start,
+        // the position is on the last piece, far beyond the stretch searched.
+        val ruler = RouteRuler(listOf(-27.4000 to 153.0300, -27.3900 to 153.0300, -27.3900 to 153.0400, -27.3800 to 153.0400))
+        val along = ruler.project(-27.3850, 153.0400, near = 0.0)
+        assertTrue("on the last piece: $along", along > ruler.length * 0.7)
+    }
+
+    @Test
+    fun aRoundTripStartsAtItsBeginningNotItsEnd() {
+        val ruler = RouteRuler(outAndBack)
+        // At the start, a touch nearer the end of the route (which is 5 m away).
+        assertTrue("the plain nearest is the end", ruler.project(-27.4000, 153.03004) > ruler.length / 2)
+        assertEquals(0.0, ruler.projectFirst(-27.4000, 153.03004), 1.0)
+    }
 }

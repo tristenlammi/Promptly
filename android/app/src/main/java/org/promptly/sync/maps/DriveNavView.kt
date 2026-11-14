@@ -65,7 +65,11 @@ fun rememberRouteAhead(ui: NavigationUiState): List<GeographicCoordinate> {
     }
     val onRoute = ui.isNavigating() && ui.routeDeviation is uniffi.ferrostar.RouteDeviation.NoDeviation
     if (line == null || shown == null || !onRoute) return remember(ui.remainingSteps, ui.location) { ui.aheadLine() }
-    val along = line.project(shown.lat, shown.lon)
+    // Near where it was last cut (a road the route uses twice isn't cut at the later pass),
+    // and never a scan of the whole route every frame.
+    val last = remember(line) { doubleArrayOf(-1.0) }
+    val along = if (last[0] < 0) line.projectFirst(shown.lat, shown.lon) else line.project(shown.lat, shown.lon, near = last[0])
+    last[0] = along
     val step = (along / 4.0).toLong()
     return remember(line, step) { line.from(along).map { GeographicCoordinate(it.first, it.second) } }
 }

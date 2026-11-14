@@ -9,8 +9,9 @@ import android.content.Context
  * or in front of you. What has to stay is made silent and tucked away:
  *
  * - a trip's own "navigating" notification (Android needs one while a trip uses the
- *   location in the background): the lowest importance, no sound, no pop-up and no icon
- *   in the status bar, just a line at the bottom of the shade;
+ *   location in the background): the lowest importance, no sound and no pop-up. Android
+ *   itself shows a foreground service's notification one step up from the lowest (seen
+ *   as importance 2 on Android 16), so its small icon can still sit in the status bar;
  * - the next-turn alert, which only goes out while another app is in front on the car's
  *   screen, so the car can show the turn over it: still shown on the car (the car decides
  *   that from the alert itself), but low and silent on the phone.

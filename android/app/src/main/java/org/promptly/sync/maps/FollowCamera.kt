@@ -45,10 +45,38 @@ class RouteRuler(points: List<Pair<Double, Double>>) {
     val length: Double get() = along.last()
 
     /** How far along the route the nearest point to [lat],[lon] is, in metres. */
-    fun project(lat: Double, lon: Double): Double {
+    fun project(lat: Double, lon: Double): Double = nearest(lat, lon, 0.0, length).first
+
+    /**
+     * The same, for a route that passes the same spot more than once (out and back
+     * along one road, a round trip that ends where it started): looks first from
+     * [back] metres behind [near] to [ahead] metres in front of it, and only if
+     * that stretch is further than [give] metres from the position looks at the
+     * whole route. Without this the arrow could jump to the return leg of the road.
+     */
+    fun project(lat: Double, lon: Double, near: Double, back: Double = 60.0, ahead: Double = 400.0, give: Double = 50.0): Double {
+        val (along, off) = nearest(lat, lon, near - back, near + ahead)
+        return if (off <= give) along else project(lat, lon)
+    }
+
+    /**
+     * Where a trip begins: the earliest place on the route about as near as the
+     * nearest. A round trip starts and ends at the same spot, and the plain nearest
+     * could be the end, leaving the arrow parked at the destination.
+     */
+    fun projectFirst(lat: Double, lon: Double, slack: Double = 15.0): Double {
+        val best = nearest(lat, lon, 0.0, length).second
+        return nearest(lat, lon, 0.0, length, stopWithin = best + slack).first
+    }
+
+    /** The nearest point between [from] and [to] metres along: how far along it is, and
+     *  how far from the position (metres). [stopWithin]: take the first that near. */
+    private fun nearest(lat: Double, lon: Double, from: Double, to: Double, stopWithin: Double? = null): Pair<Double, Double> {
         var best = Double.POSITIVE_INFINITY
-        var bestAlong = 0.0
+        var bestAlong = from.coerceIn(0.0, length)
         for (i in 0 until pts.size - 1) {
+            if (along[i + 1] < from) continue
+            if (along[i] > to) break
             val a = pts[i]
             val b = pts[i + 1]
             val mean = Math.toRadians((a.first + b.first + lat) / 3.0)
@@ -65,9 +93,10 @@ class RouteRuler(points: List<Pair<Double, Double>>) {
             if (d2 < best) {
                 best = d2
                 bestAlong = along[i] + sqrt(len2) * t
+                if (stopWithin != null && sqrt(d2) <= stopWithin) break
             }
         }
-        return bestAlong
+        return bestAlong to sqrt(best)
     }
 
     /** The point [progress] metres along the route. */
@@ -140,8 +169,9 @@ fun rememberTripShown(state: NavigationUiState): Shown? {
         state.routeGeometry?.takeIf { it.size >= 2 }?.let { line -> RouteRuler(line.map { it.lat to it.lng }) }
     }
     if (!state.isNavigating() || state.routeDeviation !is RouteDeviation.NoDeviation || ruler == null) return raw
-    val target = remember(ruler, fix.coordinates.lat, fix.coordinates.lng) { ruler.project(fix.coordinates.lat, fix.coordinates.lng) }
-    val progress = remember(ruler) { Animatable(target, DoubleToVector) }
+    val progress = remember(ruler) { Animatable(ruler.projectFirst(fix.coordinates.lat, fix.coordinates.lng), DoubleToVector) }
+    // Near where you already are on it: a road the route uses twice isn't mixed up.
+    val target = remember(ruler, fix.coordinates.lat, fix.coordinates.lng) { ruler.project(fix.coordinates.lat, fix.coordinates.lng, near = progress.value) }
     val shown by progress.asState()
     LaunchedEffect(ruler, target) {
         val goal = max(progress.value, target)
@@ -193,9 +223,13 @@ fun KeepTripCamera(
                 NavigationCameraMode.FOLLOW_USER -> mapState.cameraMode = NavigationCameraMode.FOLLOW_USER_WITH_BEARING
                 // The car's no-trip camera parks the library in OVERVIEW; a trip takes over.
                 NavigationCameraMode.OVERVIEW -> if (overviewIsOurs) mapState.cameraMode = NavigationCameraMode.FOLLOW_USER_WITH_BEARING
+                // Left alone while you're still moving it: the wait starts again with
+                // every pan or pinch, and it comes back once the map has been still.
                 NavigationCameraMode.FREE -> if (leaveAloneMs != null) {
-                    delay(leaveAloneMs)
-                    mapState.recenter(true)
+                    snapshotFlow { mapState.cameraState.position }.collectLatest {
+                        delay(leaveAloneMs)
+                        mapState.recenter(true)
+                    }
                 }
                 else -> Unit
             }

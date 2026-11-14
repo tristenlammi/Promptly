@@ -54,6 +54,10 @@ interface Props {
   squares?: string[];
   /** Frame these once the map's ready, and whenever they change. */
   fitTo?: [number, number][];
+  /** Where to open when this device has no saved view and no location yet (Home, or the last place). */
+  startAt?: { lat: number; lon: number } | null;
+  /** Remember where the map was left on this device, and open there next time. */
+  rememberView?: boolean;
   /** Choosing a point on the map: a tap goes here and nothing else happens. */
   onPickPoint?: (lat: number, lon: number) => void;
   /** A long-press, or a right-click: what's here? */
@@ -102,6 +106,48 @@ function savedMarker(place: SavedPlace, onPick: () => void): HTMLButtonElement {
   return el;
 }
 
+const VIEW_KEY = "promptly.maps.view";
+const WHOLE_COUNTRY = { center: [134, -27] as [number, number], zoom: 3.4 };
+
+/** Where the map was left on this device, if it's a sane view. */
+function storedView(): { center: [number, number]; zoom: number } | null {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(VIEW_KEY) ?? "null") as { center?: unknown; zoom?: unknown } | null;
+    const c = v?.center;
+    if (Array.isArray(c) && c.length === 2 && c.every((n) => typeof n === "number" && Number.isFinite(n)) && typeof v?.zoom === "number" && v.zoom >= 2 && v.zoom <= 20 && Math.abs(c[1] as number) <= 85 && Math.abs(c[0] as number) <= 180) {
+      return { center: [c[0] as number, c[1] as number], zoom: v.zoom };
+    }
+  } catch {
+    // Private mode, or nothing saved.
+  }
+  return null;
+}
+
+/** Markers closer than this on screen are fanned out side by side. */
+const CROWD_PX = 30;
+
+/** Offsets (px) that put markers sitting on top of each other in a row instead:
+ *  each group of near neighbours is centred on where they were. */
+export function spreadOffsets(points: { x: number; y: number }[], gap = CROWD_PX): [number, number][] {
+  const out: [number, number][] = points.map(() => [0, 0]);
+  const taken = new Set<number>();
+  points.forEach((p, i) => {
+    if (taken.has(i)) return;
+    const group = [i];
+    points.forEach((q, j) => {
+      if (j > i && !taken.has(j) && Math.hypot(p.x - q.x, p.y - q.y) < gap) group.push(j);
+    });
+    if (group.length < 2) return;
+    const cx = group.reduce((sum, k) => sum + points[k].x, 0) / group.length;
+    const cy = group.reduce((sum, k) => sum + points[k].y, 0) / group.length;
+    group.forEach((k, n) => {
+      taken.add(k);
+      out[k] = [cx + (n - (group.length - 1) / 2) * gap - points[k].x, cy - points[k].y];
+    });
+  });
+  return out;
+}
+
 const sameSpot = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) =>
   Math.abs(a.lat - b.lat) < 0.0001 && Math.abs(a.lon - b.lon) < 0.0001;
 
@@ -113,7 +159,7 @@ function dot(html: string, className: string): HTMLDivElement {
 }
 
 export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, ref) {
-  const { basemap, routes, selected, pin, stops, chargers, parked, you, saved, friends, marks, trail, fitTo, showTraffic, squares } = props;
+  const { basemap, routes, selected, pin, stops, chargers, parked, you, saved, friends, marks, trail, fitTo, showTraffic, squares, startAt, rememberView } = props;
   const appTheme = useThemeStore((s) => s.resolved());
   const theme = props.colours ?? appTheme;
   const box = useRef<HTMLDivElement>(null);
@@ -122,7 +168,9 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
   const [ready, setReady] = useState(false);
   const calls = useRef(props);
   calls.current = props;
-  const view = useRef<{ center: [number, number]; zoom: number }>({ center: [134, -27], zoom: 3.4 });
+  const view = useRef<{ center: [number, number]; zoom: number }>((rememberView && storedView()) || WHOLE_COUNTRY);
+  // Still on the whole-country view nobody chose: Home (or the last place) is a better start.
+  const untouched = useRef(view.current === WHOLE_COUNTRY);
 
   useImperativeHandle(ref, () => ({
     flyTo(lat, lon, zoom, covered) {
@@ -225,6 +273,14 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
         if (!map) return;
         const c = map.getCenter();
         view.current = { center: [c.lng, c.lat], zoom: map.getZoom() };
+        untouched.current = false;
+        if (calls.current.rememberView) {
+          try {
+            window.localStorage.setItem(VIEW_KEY, JSON.stringify(view.current));
+          } catch {
+            // Private mode: it just opens on Home next time.
+          }
+        }
         calls.current.onMoved();
       });
       map.on("dragstart", () => calls.current.onDragged?.());
@@ -404,19 +460,34 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
     map.fitBounds(b as LngLatBoundsLike, { padding: 50, maxZoom: 15, duration: 0 });
   }, [ready, fitTo]);
 
+  // No saved view and no location yet: open on Home (or the last place), not the whole country.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !startAt || !untouched.current) return;
+    untouched.current = false;
+    // On a phone the panel covers the bottom half: put it in the middle of what's left.
+    const { clientWidth: w, clientHeight: h } = map.getContainer();
+    map.easeTo({ center: [startAt.lon, startAt.lat], zoom: 12, offset: w < 768 ? [0, -Math.round(h * 0.2)] : [200, 0], duration: 0 });
+  }, [ready, startAt]);
+
   // Pins: the place you're looking at, the stops, the car.
   useEffect(() => {
     const map = mapRef.current;
     const lib = libRef.current;
     if (!ready || !map || !lib) return;
     const markers: Marker[] = [];
-    const add = (el: HTMLElement, lat: number, lon: number, anchor: "center" | "bottom" = "center") => {
-      markers.push(new lib.Marker({ element: el, anchor }).setLngLat([lon, lat]).addTo(map));
+    // Round markers that can land on top of each other when zoomed out (Home,
+    // a favourite, the car, someone sharing): fanned out so each can be seen and tapped.
+    const crowd: { marker: Marker; lat: number; lon: number }[] = [];
+    const add = (el: HTMLElement, lat: number, lon: number, anchor: "center" | "bottom" = "center", spread = false) => {
+      const marker = new lib.Marker({ element: el, anchor }).setLngLat([lon, lat]).addTo(map);
+      markers.push(marker);
+      if (spread) crowd.push({ marker, lat, lon });
     };
     // Under everything else; a route's stop letter takes the spot if it's there.
     for (const place of saved) {
       if (stops.some((s) => sameSpot(s, place))) continue;
-      add(savedMarker(place, () => calls.current.onPickSaved(place)), place.lat, place.lon);
+      add(savedMarker(place, () => calls.current.onPickSaved(place)), place.lat, place.lon, "center", true);
     }
     (routes[selected]?.incidents ?? []).forEach((incident) => {
       const el = dot("!", `flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow ${incident.closed || incident.category === 1 ? "bg-[#C62828]" : "bg-[#EF8A1A]"}`);
@@ -452,16 +523,25 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
         e.stopPropagation();
         calls.current.onPickParked();
       });
-      add(el, parked.lat, parked.lon);
+      add(el, parked.lat, parked.lon, "center", true);
     }
     for (const f of friends) {
       if (!f.live) continue;
       const el = dot("", "flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#7C5CCB] text-sm font-semibold text-white shadow");
       el.textContent = f.name.slice(0, 1).toUpperCase();
       el.title = f.name;
-      add(el, f.live.lat, f.live.lon);
+      add(el, f.live.lat, f.live.lon, "center", true);
     }
-    return () => markers.forEach((m) => m.remove());
+    const uncrowd = () => {
+      const at = crowd.map((c) => map.project([c.lon, c.lat]));
+      spreadOffsets(at).forEach((offset, i) => crowd[i].marker.setOffset(offset));
+    };
+    uncrowd();
+    map.on("zoom", uncrowd);
+    return () => {
+      map.off("zoom", uncrowd);
+      markers.forEach((m) => m.remove());
+    };
   }, [ready, pin, stops, parked, saved, friends, marks, routes, selected]);
 
   return <div ref={box} role="region" aria-label="Map" className="h-full w-full" />;
