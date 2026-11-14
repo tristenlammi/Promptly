@@ -96,6 +96,11 @@ class StreamSession:
     # over: a reload mustn't reattach to it as if the answer were still
     # being written.
     reply_done: bool = False
+    # The sender's page said it can show a card mid-reply and answer it
+    # (``GET /stream?asks=1``): a held look may pause the reply for a yes
+    # (``chat/holds.py``). Pages that can't (the side chat) never set it, so
+    # their replies don't sit waiting on a card nobody can see.
+    can_ask: bool = False
     # Recreated every push so previously-waiting subscribers can be
     # released without missing the new chunk. ``asyncio.Event`` is the
     # right primitive here over Condition because we don't need a lock —

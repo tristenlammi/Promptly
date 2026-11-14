@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Check, Loader2, Mic, ShieldAlert, X } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
-import type { PersistedToolCall } from "@/api/types";
+import type { PersistedToolCall, ToolInvocation } from "@/api/types";
 import { extractError } from "@/components/files/helpers";
 import { useChatStore } from "@/store/chatStore";
 import { cn } from "@/utils/cn";
@@ -44,11 +44,51 @@ export function ToolApprovalCards({
   );
 }
 
-function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedToolCall }) {
+/**
+ * Cards the reply being written has stopped at (``tool_ask``): a page it
+ * wants to open, or a look at the timeline, after reading something from
+ * outside. The reply waits here. Yes runs it and the answer carries on with
+ * what it found; no carries on without it. If nobody answers, the same card
+ * is on the finished reply.
+ */
+export function LiveApprovalCards({ toolInvocations }: { toolInvocations: ToolInvocation[] }) {
+  const conversationId = useChatStore((s) => s.streamingConversationId);
+  const asks = toolInvocations.filter((t) => t.ask);
+  if (asks.length === 0 || !conversationId) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      {asks.map((t) => (
+        <ApprovalCard
+          key={t.id}
+          messageId=""
+          liveConversationId={conversationId}
+          call={{ id: t.id, name: t.name, ok: true, meta: t.ask }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ApprovalCard({
+  messageId,
+  call,
+  liveConversationId,
+}: {
+  messageId: string;
+  call: PersistedToolCall;
+  /** Set while the reply is waiting on this card. */
+  liveConversationId?: string;
+}) {
   const meta = call.meta ?? {};
   const state = meta.approval as Approval;
   const [busy, setBusy] = useState<"approve" | "decline" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Answered while the reply waits: it's carrying on, the card just says so
+  // until the call's outcome arrives and replaces it.
+  const [answered, setAnswered] = useState<boolean | null>(null);
+  const live = !!liveConversationId;
+  const answeredLive = meta.answered === "live";
+  const opens = (meta.tool ?? call.name) === "fetch_url";
   const native = meta.native === true;
   const spoken = native && meta.spoken === true;
   const why = native && meta.held === "outside_content" && typeof meta.why === "string" ? meta.why : null;
@@ -71,6 +111,17 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
   const decide = async (approve: boolean) => {
     setBusy(approve ? "approve" : "decline");
     setError(null);
+    if (liveConversationId) {
+      try {
+        await chatApi.answerWaitingCall(liveConversationId, call.id, approve);
+        setAnswered(approve);
+      } catch (e) {
+        setError(extractError(e));
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
     try {
       const { tool_call, content } = await chatApi.decideToolCall(messageId, call.id, approve);
       const store = useChatStore.getState();
@@ -138,7 +189,11 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
               ))}
             </dl>
           )}
-          {shown === "pending" ? (
+          {live && answered !== null ? (
+            <div className="mt-1 text-xs text-[var(--text-muted)]" role="status">
+              {answered ? (opens ? "Opening it…" : "Looking…") : "Okay, carrying on without it."}
+            </div>
+          ) : shown === "pending" ? (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -159,7 +214,11 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
                 {native ? "No" : "Don't run it"}
               </button>
               <span className="w-full text-xs text-[var(--text-muted)] sm:w-auto">
-                {spoken ? "Or say yes. Nothing has happened yet." : "Nothing has happened yet."}
+                {spoken
+                  ? "Or say yes. Nothing has happened yet."
+                  : live
+                    ? "The reply is waiting for your answer."
+                    : "Nothing has happened yet."}
               </span>
             </div>
           ) : (
@@ -170,8 +229,10 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
               )}
             >
               {shown === "running" && "Doing it now…"}
-              {shown === "approved" && (native ? "Done." : "Approved and done.")}
-              {shown === "declined" && (native ? "Left alone: nothing was changed." : "Not run.")}
+              {shown === "approved" &&
+                (answeredLive ? (opens ? "Opened." : "Done: it's in the reply.") : native ? "Done." : "Approved and done.")}
+              {shown === "declined" &&
+                (answeredLive && opens ? "Not opened." : native ? "Left alone: nothing was changed." : "Not run.")}
               {shown === "expired" && "Not done: nobody said yes in time. Ask again if you still want it."}
               {shown === "failed" && `Approved, but it failed: ${call.error ?? "unknown error"}`}
             </div>

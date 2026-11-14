@@ -17,6 +17,7 @@ for anything else stays a refusal.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -58,6 +59,54 @@ WHY_OPEN = (
 
 def holdable(name: str) -> bool:
     return name in HOLDABLE
+
+
+# ------------------------------------------------- waiting for the answer
+# A held look (a page to open, the timeline) is something the reply needs in
+# order to answer. In a typed chat whose page is listening for it, the reply
+# stops at the card and waits: a yes runs the call and the model carries on
+# with what it found, a no tells the model so. If nobody answers in time (or
+# the reply is stopped, or the server goes down) it falls back to the card on
+# the saved reply, decided through ``approvals.py`` as before.
+#
+# The reply isn't saved while it's being written, so there is no message to
+# decide yet: the answer comes in by conversation and call id
+# (``approvals_router.answer_waiting_call``) and wakes the waiting dispatcher.
+# In-process, like the stream itself (one uvicorn worker).
+PAUSE_SECONDS = 150
+# A second card shown late in the same step still gets this long.
+PAUSE_MIN_SECONDS = 45
+
+DECLINED_NOTE = (
+    "The user was asked and said no, so this was not opened. Don't try it again or ask again in this reply. "
+    "Answer with what you already have, and say in a few words what you couldn't check."
+)
+
+_WAITING: dict[tuple[str, str], asyncio.Future[bool]] = {}
+
+
+def pausable(name: str) -> bool:
+    return name in SHOWS_RESULT
+
+
+def open_wait(conversation_id: Any, call_id: str) -> asyncio.Future[bool]:
+    fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+    _WAITING[(str(conversation_id), call_id)] = fut
+    return fut
+
+
+def close_wait(conversation_id: Any, call_id: str) -> None:
+    _WAITING.pop((str(conversation_id), call_id), None)
+
+
+def answer(conversation_id: Any, call_id: str, approve: bool) -> bool:
+    """The person's tap. False when nothing is waiting on it any more (it
+    timed out, or was already answered): the first answer is the only one."""
+    fut = _WAITING.pop((str(conversation_id), call_id), None)
+    if fut is None or fut.done():
+        return False
+    fut.set_result(bool(approve))
+    return True
 
 
 def _t(value: Any, limit: int = 80) -> str:

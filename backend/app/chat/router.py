@@ -3733,6 +3733,11 @@ async def _dispatch_tools(
     # the reply's ``tool_calls`` are saved for the person to see (the chat's
     # own loop); sub-agents and headless runs keep the refusal.
     can_hold: bool = False,
+    # ...and a held *look* (a page to open, the timeline) can stop the reply
+    # at that card and wait for the answer, so the model carries on with what
+    # it found. Called when the hold happens: true only while the sender's
+    # page is listening for the card. Typed chat only.
+    can_pause=None,  # noqa: ANN001 - Callable[[], bool] | None
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
 ]:
@@ -4005,6 +4010,13 @@ async def _dispatch_tools(
             rec["elapsed_ms"] = elapsed_ms
         if isinstance(meta, dict) and meta:
             rec["meta"] = meta
+        shown = live_recs.pop(rec["id"], None)
+        if shown is not None:
+            # Its card went into the log when the reply started waiting on
+            # it: this is the same call's outcome, not a second one.
+            shown.clear()
+            shown.update(rec)
+            return
         on_tool_event(rec)
 
     async def _drain_progress():
@@ -4012,8 +4024,35 @@ async def _dispatch_tools(
         while not progress_q.empty():
             yield sse_yield(progress_q.get_nowait()), None
 
+    # Cards this step's reply is waiting on (chat/holds.py), by call id, and
+    # their entries in the saved log. The pending card is logged *before* the
+    # wait, so a reply that's stopped, or cut off by a restart, is saved with
+    # it and can still be answered there.
+    live_asks: dict[str, dict[str, Any]] = {}
+    live_recs: dict[str, dict[str, Any]] = {}
+    pause_deadline = 0.0
+
+    def _show_card(cid: str, tname: str, asked_q: str, meta: dict[str, Any]) -> list[str]:
+        from app.chat import holds
+
+        live_asks[cid] = {
+            "fut": holds.open_wait(ctx.conversation_id, cid),
+            "asked": asked_q,
+            "meta": meta,
+            "at": time.monotonic(),
+        }
+        if on_tool_event is not None:
+            rec = {"id": cid, "name": tname, "ok": True, "elapsed_ms": 0, "meta": meta}
+            on_tool_event(rec)
+            live_recs[cid] = rec
+        wait_s = max(int(pause_deadline - time.monotonic()), holds.PAUSE_MIN_SECONDS)
+        return [
+            sse_yield({"event": "tool_ask", "id": cid, "name": tname, "meta": {**meta, "live": True, "wait_seconds": wait_s}}),
+            sse_yield({"event": "tool_progress", "id": cid, "name": tname, "message": "Waiting for your OK"}),
+        ]
+
     try:
-        for call_id, name, kind, payload in plan:
+        for pos, (call_id, name, kind, payload) in enumerate(plan):
             if kind == "fail":
                 err_msg, audit_code, extra_sse = payload
                 if audit_code is not None:
@@ -4227,6 +4266,8 @@ async def _dispatch_tools(
             async for prog in _drain_progress():
                 yield prog
             outcome, out, elapsed_ms = await task
+            # Set when the person said yes to this call on its card mid-reply.
+            live_meta: dict[str, Any] | None = None
 
             if outcome == "held":
                 # Approve instead of refuse (app/chat/holds.py): the tool's
@@ -4237,7 +4278,10 @@ async def _dispatch_tools(
 
                 asked: str | None = None
                 problem: str | None = None
-                if can_hold and holds.holdable(name):
+                if call_id in live_asks:
+                    # Its card went up with an earlier one in this step.
+                    asked = live_asks[call_id]["asked"]
+                elif can_hold and holds.holdable(name):
                     try:
                         # Its own short session, like Talk's gate: the
                         # lookups mustn't hold locks the approval waits on.
@@ -4261,26 +4305,109 @@ async def _dispatch_tools(
                         # Talk: say where it came from ("From that email: ...").
                         asked = voice_gate.from_where(asked)
                     hold_meta = holds.meta_for(name, call_args, asked, spoken=voice_gate is not None)
-                    event = {
-                        "event": "tool_finished",
-                        "id": call_id,
-                        "name": name,
-                        "ok": True,
-                        "elapsed_ms": elapsed_ms,
-                        "meta": hold_meta,
-                    }
-                    _record_tool_event(event, elapsed_ms=elapsed_ms, meta=hold_meta)
+                    said: bool | None = None
+                    if (
+                        voice_gate is None
+                        and holds.pausable(name)
+                        and (call_id in live_asks or (can_pause is not None and can_pause()))
+                    ):
+                        # The reply needs this to answer: stop at the card
+                        # and wait for the tap (chat/holds.py).
+                        if call_id not in live_asks:
+                            if not live_asks:
+                                pause_deadline = time.monotonic() + holds.PAUSE_SECONDS
+                                # Hand the pooled connection back while a
+                                # person thinks (the hop's model call does
+                                # the same): nothing here needs the database.
+                                await db.commit()
+                            for line in _show_card(call_id, name, asked, hold_meta):
+                                yield line, None
+                            # Other looks this step held the same way: show
+                            # their cards now too, so they can all be
+                            # answered at once.
+                            await asyncio.sleep(0.05)
+                            for o_id, o_name, o_kind, o_payload in plan[pos + 1 :]:
+                                if o_kind != "task" or o_id in live_asks or not holds.pausable(o_name):
+                                    continue
+                                o_task = o_payload[1]
+                                if not o_task.done() or o_task.cancelled() or o_task.result()[0] != "held":
+                                    continue
+                                try:
+                                    async with SessionLocal() as hdb:
+                                        o_asked, o_problem = await holds.ask(hdb, user, o_name, o_payload[3])
+                                except Exception:  # noqa: BLE001 - asked on its own turn instead
+                                    logger.exception("holding %s for approval failed", o_name)
+                                    continue
+                                if o_asked and not o_problem:
+                                    for line in _show_card(
+                                        o_id, o_name, o_asked, holds.meta_for(o_name, o_payload[3], o_asked, spoken=False)
+                                    ):
+                                        yield line, None
+                        waiting = live_asks[call_id]
+                        hold_meta = waiting["meta"]
+                        until = max(pause_deadline, waiting["at"] + holds.PAUSE_MIN_SECONDS)
+                        while not waiting["fut"].done() and time.monotonic() < until:
+                            await asyncio.sleep(0.2)
+                        said = waiting["fut"].result() if waiting["fut"].done() else None
+                        holds.close_wait(ctx.conversation_id, call_id)
+                    if said is None:
+                        event = {
+                            "event": "tool_finished",
+                            "id": call_id,
+                            "name": name,
+                            "ok": True,
+                            "elapsed_ms": elapsed_ms,
+                            "meta": hold_meta,
+                        }
+                        _record_tool_event(event, elapsed_ms=elapsed_ms, meta=hold_meta)
+                        yield (
+                            sse_yield(event),
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": holds.note_for_model(asked),
+                            },
+                        )
+                        continue
+                    if said is False:
+                        no_meta = {**hold_meta, "approval": "declined", "answered": "live"}
+                        event = {
+                            "event": "tool_finished",
+                            "id": call_id,
+                            "name": name,
+                            "ok": True,
+                            "elapsed_ms": elapsed_ms,
+                            "meta": no_meta,
+                        }
+                        _record_tool_event(event, elapsed_ms=elapsed_ms, meta=no_meta)
+                        yield (
+                            sse_yield(event),
+                            {"role": "tool", "tool_call_id": call_id, "content": holds.DECLINED_NOTE},
+                        )
+                        continue
+                    # Yes: run exactly this call, as approvals.py would (a
+                    # fresh turn marked as the person's yes). The rest of the
+                    # reply stays as steered as it was, and what this reads
+                    # is outside content like any other page.
+                    live_meta = {**hold_meta, "approval": "approved", "answered": "live"}
                     yield (
-                        sse_yield(event),
-                        {
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": holds.note_for_model(asked),
-                        },
+                        sse_yield({"event": "tool_progress", "id": call_id, "name": name, "message": "On it"}),
+                        None,
                     )
-                    continue
-                outcome = "tool_error"
-                out = f"That can't be done: {problem}" if problem else out
+                    outcome, out, elapsed_ms = await _run_native_tool(
+                        tool=tool,
+                        args=call_args,
+                        user_id=user.id,
+                        conversation_id=ctx.conversation_id,
+                        user_message_id=ctx.user_message_id,
+                        sem=sem,
+                        turn=TurnState(user_approved=True),
+                    )
+                    if outcome == "held":
+                        outcome, out = "tool_error", "That can't be done."
+                else:
+                    outcome = "tool_error"
+                    out = f"That can't be done: {problem}" if problem else out
 
             if outcome in ("tool_error", "timeout"):
                 err_msg = str(out)
@@ -4302,7 +4429,9 @@ async def _dispatch_tools(
                 }
                 if outcome == "timeout":
                     event["error_kind"] = "timeout"
-                _record_tool_event(event, elapsed_ms=elapsed_ms)
+                if live_meta is not None:
+                    event["meta"] = {**live_meta, "approval": "failed"}
+                _record_tool_event(event, elapsed_ms=elapsed_ms, meta=event.get("meta"))
                 yield (
                     sse_yield(event),
                     {
@@ -4334,7 +4463,9 @@ async def _dispatch_tools(
                     "error": err_msg,
                     "elapsed_ms": elapsed_ms,
                 }
-                _record_tool_event(event, elapsed_ms=elapsed_ms)
+                if live_meta is not None:
+                    event["meta"] = {**live_meta, "approval": "failed"}
+                _record_tool_event(event, elapsed_ms=elapsed_ms, meta=event.get("meta"))
                 yield (
                     sse_yield(event),
                     {
@@ -4428,6 +4559,8 @@ async def _dispatch_tools(
             if dedup_cache is not None and not attachment_snaps:
                 dedup_cache[cache_key] = content
 
+            # Opened after a yes on its card: the card stays, as answered.
+            done_meta = {**(result.meta or {}), **live_meta} if live_meta is not None else result.meta
             event = {
                 "event": "tool_finished",
                 "id": call_id,
@@ -4435,11 +4568,11 @@ async def _dispatch_tools(
                 "ok": True,
                 "attachments": attachment_snaps or None,
                 "sources": result.sources or None,
-                "meta": result.meta or None,
+                "meta": done_meta or None,
                 "elapsed_ms": elapsed_ms,
             }
             _record_tool_event(
-                event, elapsed_ms=elapsed_ms, meta=result.meta
+                event, elapsed_ms=elapsed_ms, meta=done_meta
             )
             yield (
                 sse_yield(event),
@@ -4453,6 +4586,11 @@ async def _dispatch_tools(
         # The stream died mid-drain (client abort, provider error, or
         # the consumer closed us): cancel whatever is still running and
         # reap the tasks so no session or coroutine leaks.
+        if live_asks:
+            from app.chat import holds as _holds
+
+            for _cid in live_asks:
+                _holds.close_wait(ctx.conversation_id, _cid)
         still_running = [t for t in tasks if not t.done()]
         for t in still_running:
             t.cancel()
@@ -6591,6 +6729,7 @@ async def _stream_generator(
                     on_cost=_record_tool_cost,
                     on_tool_event=_log_visible if voice_gate is None else _log_voice,
                     can_hold=True,
+                    can_pause=(lambda: session is not None and session.can_ask) if voice_gate is None else None,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,
@@ -7400,6 +7539,7 @@ async def _subscribe_session_to_response(
 async def stream_response(
     stream_id: uuid.UUID,
     request: Request,
+    asks: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
@@ -7440,6 +7580,9 @@ async def stream_response(
         conversation_id=conversation_id,
         runner=lambda s: _bridge_generator_to_session(stream_id, user, request, s),
     )
+    if asks and session.user_id == user.id:
+        # This page can show and answer a card mid-reply (chat/holds.py).
+        session.can_ask = True
 
     return StreamingResponse(
         _subscribe_session_to_response(session, request),
