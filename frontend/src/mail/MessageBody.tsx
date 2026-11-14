@@ -1,4 +1,9 @@
+import { MapPin } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+import { PlacePreviewSheet } from "@/components/PlacePreviewSheet";
+import { findAddresses, splitAddresses } from "@/lib/addresses";
+import { useMapsReady } from "@/maps/useMapsReady";
 
 import { mailApi } from "./api";
 
@@ -14,6 +19,12 @@ export function MessageBody({ html, text, remoteImages, clipped }: { html: strin
   const [height, setHeight] = useState(120);
   const [pictures, setPictures] = useState<Record<string, string> | null>(null);
   const [loading, setLoading] = useState(false);
+  // Street addresses in the email open a small map first. Found in the
+  // email's plain words, out here: the sandboxed page itself is never touched.
+  const [place, setPlace] = useState<string | null>(null);
+  const addresses = useMemo(() => findAddresses(text), [text]);
+  const mapsReady = useMapsReady(addresses.length > 0);
+  const places = mapsReady ? addresses : [];
 
   const page = useMemo(() => {
     let body = html;
@@ -41,7 +52,20 @@ export function MessageBody({ html, text, remoteImages, clipped }: { html: strin
     return (
       <div>
         {clipped && <p className="mb-2 text-xs text-[var(--text-muted)]">This email couldn't be shown safely with its formatting, so it's shown as plain text.</p>}
-        <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-[var(--text)]">{text}</div>
+        <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-[var(--text)]">
+          {places.length === 0
+            ? text
+            : splitAddresses(text).map((part, i) =>
+                part.address ? (
+                  <button key={i} type="button" onClick={() => setPlace(part.text.replace(/\s+/g, " ").trim())} title="See it on a map" className="inline rounded text-left text-[var(--accent-text)] underline decoration-dotted underline-offset-2 hover:decoration-solid">
+                    {part.text}
+                  </button>
+                ) : (
+                  part.text
+                ),
+              )}
+        </div>
+        <PlacePreviewSheet address={place} onClose={() => setPlace(null)} />
       </div>
     );
   }
@@ -67,6 +91,16 @@ export function MessageBody({ html, text, remoteImages, clipped }: { html: strin
         {/* Scripts stay off, so same-origin only lets us read its height. */}
         <iframe ref={frame} title="Email" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={page} onLoad={measure} style={{ height }} className="w-full border-0" />
       </div>
+      {places.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2" aria-label="Places in this email">
+          {places.map((address) => (
+            <button key={address} type="button" onClick={() => setPlace(address)} title="See it on a map" className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-[var(--hover)] px-2.5 py-1.5 text-xs text-[var(--text)] hover:text-[var(--accent-text)]">
+              <MapPin className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{address}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <PlacePreviewSheet address={place} onClose={() => setPlace(null)} />
     </div>
   );
 }

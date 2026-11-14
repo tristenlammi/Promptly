@@ -76,8 +76,12 @@ def health_section(file_id: uuid.UUID, data: dict, now: datetime) -> dict | None
         numbers.append({"metric": mid, "label": label, "value": value})
     weights = sorted((r for r in data.get("readings", []) if r["metric"] == "weight" and r.get("value") is not None), key=lambda r: r["at"])
     goals = []
+    # A new Health app comes with water, sleep and steps goals. One for
+    # something this person has never logged isn't theirs yet: "Sleep 0 h"
+    # under someone who only weighs in says nothing.
+    logged = {r.get("metric") for r in data.get("readings", [])}
     for g in data.get("goals", []):
-        if g.get("direction") == "daily" and g.get("target"):
+        if g.get("direction") == "daily" and g.get("target") and g["metric"] in logged:
             v = S.daily(data, g["metric"], day, day).get(day, 0)
             info = S.metric_info(data, g["metric"])
             goals.append(
@@ -627,6 +631,15 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
             sec["mail"] = mail
     except Exception:  # noqa: BLE001
         logger.exception("today mail section failed")
+    # A stay or booked day in your mail that isn't on your calendar yet. Shown
+    # as "from an email" and added only when you tap (app/mail/bookings.py).
+    try:
+        from app.mail.bookings import find as mail_bookings
+
+        out["bookings"] = await mail_bookings(db, user, today, tz)
+    except Exception:  # noqa: BLE001
+        logger.exception("today bookings section failed")
+        out["bookings"] = []
     try:
         from app.passwords.models import PwHealth
 

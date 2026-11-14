@@ -85,7 +85,7 @@ async def test_today_sections_and_privacy(client, db, pushes):  # noqa: F811
     r = await client.get("/api/today", headers=H(ann))
     assert r.status_code == 200, r.text
     got = r.json()
-    assert got["date"] == today.isoformat() and got["greeting"].startswith("Good ")
+    assert got["date"] == today.isoformat() and got["greeting"].startswith(("Good ", "Up late"))
     sec = got["sections"]
     assert [e["title"] for e in sec["events"]["events"]] == ["Standup"]
     assert sec["events"]["events"][0]["url"].startswith("/calendar?event=")

@@ -32,13 +32,15 @@ import {
   UtensilsCrossed,
   Wallet,
   Workflow,
+  X,
   type LucideIcon,
   Volume2,
 } from "lucide-react";
 import { joinVoice } from "@/rtc/ui/uiStore";
 import { namesList } from "@/rtc/ui/words";
 
-import type { TodayAttention, TodayComing, TodayData, TodayScheduleItem } from "@/api/today";
+import type { TodayAttention, TodayBooking, TodayComing, TodayData, TodayScheduleItem } from "@/api/today";
+import { mailApi } from "@/mail/api";
 import { timeLabel } from "@/calendar/dates";
 import { itemsApi } from "@/items/api";
 import { toast } from "@/store/toastStore";
@@ -966,7 +968,60 @@ const COMING_ICON: Record<string, LucideIcon> = {
   workout: Dumbbell,
 };
 
-export function ComingCard({ coming, today }: { coming: TodayComing[]; today: string }) {
+/** Stays and booked days read from your email, not yet on your calendar. Each
+ *  says where it came from; nothing is added until you tap, and the cross
+ *  puts it away for good. */
+function FromEmail({ bookings, today }: { bookings: TodayBooking[]; today: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [gone, setGone] = useState<string[]>([]);
+  const shown = bookings.filter((b) => !gone.includes(b.id));
+  if (shown.length === 0) return null;
+  const act = async (b: TodayBooking, what: "add" | "dismiss") => {
+    setBusy(b.id);
+    try {
+      if (what === "add") {
+        await mailApi.bookingToCalendar(b.id);
+        toast.success(`Added ${b.title} to your calendar.`);
+      } else {
+        await mailApi.dismissBooking(b.id);
+      }
+      setGone((g) => [...g, b.id]);
+      void qc.invalidateQueries({ queryKey: ["today"] });
+    } catch (err) {
+      toast.error(apiErrorMessage(err, what === "add" ? "Couldn't add that to your calendar." : "Couldn't put that away."));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <ul className="mb-2 space-y-1.5" aria-label="From your email">
+      {shown.map((b) => (
+        <li key={b.id} className="rounded-lg border border-dashed border-[var(--border)] px-2 py-1.5">
+          <div className="flex items-start gap-2">
+            <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+            <Link to={b.url} className="min-w-0 flex-1 hover:underline" title="Open the email">
+              <span className="block truncate text-sm text-[var(--text)]">{b.title}</span>
+              <span className="block truncate text-xs text-[var(--text-muted)]">
+                {dayName(b.start, today)}
+                {b.nights > 0 ? ` · ${b.nights} night${b.nights === 1 ? "" : "s"}` : ""}
+                {" · from an email"}
+              </span>
+            </Link>
+            <button type="button" onClick={() => void act(b, "dismiss")} disabled={busy === b.id} aria-label={`Don't show ${b.title}`} title="Don't show this" className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-50">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <button type="button" onClick={() => void act(b, "add")} disabled={busy === b.id} className="ml-5 mt-1 inline-flex items-center gap-1 rounded-md bg-[var(--hover)] px-2 py-1 text-xs font-medium text-[var(--text)] hover:text-[var(--accent-text)] disabled:opacity-50">
+            {busy === b.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}Add to calendar
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function ComingCard({ coming, today, bookings = [] }: { coming: TodayComing[]; today: string; bookings?: TodayBooking[] }) {
   const days: [string, TodayComing[]][] = [];
   for (const c of coming) {
     const last = days[days.length - 1];
@@ -975,8 +1030,9 @@ export function ComingCard({ coming, today }: { coming: TodayComing[]; today: st
   }
   return (
     <HubCard icon={CalendarClock} title="Coming up" to="/calendar" open="Calendar">
+      <FromEmail bookings={bookings} today={today} />
       {days.length === 0 ? (
-        <p className="px-1 py-1 text-sm text-[var(--text-muted)]">Nothing in the next seven days.</p>
+        bookings.length === 0 && <p className="px-1 py-1 text-sm text-[var(--text-muted)]">Nothing in the next seven days.</p>
       ) : (
         <div className="space-y-2">
           {days.map(([day, rows]) => (

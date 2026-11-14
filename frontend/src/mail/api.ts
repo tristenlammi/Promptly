@@ -289,6 +289,14 @@ export const mailApi = {
   async removeCancelled(messageId: string) {
     await apiClient.post(`/mail/messages/${messageId}/remove-cancelled`);
   },
+  /** Today's one tap on a booking found in your mail: an all-day event for its days. */
+  async bookingToCalendar(messageId: string) {
+    return (await apiClient.post<{ url: string }>(`/mail/bookings/${messageId}/calendar`)).data;
+  },
+  /** Not shown on Today again. */
+  async dismissBooking(messageId: string) {
+    await apiClient.post(`/mail/bookings/${messageId}/dismiss`);
+  },
   async eventDraft(accountId: string, key: string, body: { provider_id: string; model_id: string; today: string }) {
     return (await apiClient.post<{ title: string; date: string; time: string; end_time: string; location: string }>(`/mail/threads/${accountId}/${key}/event-draft`, body)).data;
   },

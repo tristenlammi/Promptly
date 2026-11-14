@@ -1,8 +1,9 @@
 """Keeps the local copy in step with each mailbox, and sends what's due.
 
 ``python -m app.mail.worker``: its own container, so slow mail servers never get
-in the way of the app. One task per account. New mail is looked for every 20
-seconds, other folders every 5 minutes, and changes you make go out within seconds.
+in the way of the app. One task per account. New mail is looked for the moment the
+server says it's there (IDLE, on a second connection) and every 20 seconds
+regardless, other folders every 5 minutes, and changes you make go out within seconds.
 A failure is shown on the account and retried, and never stops other accounts.
 """
 from __future__ import annotations
@@ -12,6 +13,7 @@ import imaplib
 import logging
 import os
 import secrets
+import threading
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -592,7 +594,79 @@ async def _settle_interrupted_sends(account_id: uuid.UUID) -> None:
         await db.commit()
 
 
+WATCH_RETRY_S = 10
+WATCH_RETRY_MAX_S = 300
+# A server without IDLE might gain it (an upgrade, a new host): look again now and then.
+WATCH_RECHECK_S = 3600
+
+
+async def _watch_once(account_id: uuid.UUID, wake: asyncio.Event) -> str:
+    """One connection's worth of watching the Inbox. Returns why it ended:
+    ``"gone"`` (no such account), ``"no-idle"`` (the server can't), or
+    ``"no-inbox"`` (not listed yet). A lost connection raises."""
+    async with SessionLocal() as db:
+        account = await db.get(MailAccount, account_id)
+        if account is None:
+            return "gone"
+        owner = await db.get(User, account.user_id)
+        server = _server(account, may_reach_private_network(owner))
+        path = await db.scalar(select(MailFolder.path).where(MailFolder.account_id == account_id, MailFolder.role == "inbox").limit(1))
+    if not path:
+        return "no-inbox"
+    client = await asyncio.to_thread(imap.connect, server)
+    stop = threading.Event()
+    waiting: asyncio.Future | None = None
+    try:
+        if not await asyncio.to_thread(imap.can_idle, client):
+            return "no-idle"
+        await asyncio.to_thread(imap.select, client, path, True)
+        while True:
+            waiting = asyncio.ensure_future(asyncio.to_thread(imap.wait_for_mail, client, stop))
+            if await asyncio.shield(waiting):
+                wake.set()
+            waiting = None
+    finally:
+        # The thread sitting in IDLE has the connection: let it finish before logging out.
+        stop.set()
+        if waiting is not None and not waiting.done():
+            await asyncio.wait([waiting], timeout=imap.IDLE_CHECK_S + imap.TIMEOUT_S)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(client.logout), timeout=imap.TIMEOUT_S)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def watch_inbox(account_id: uuid.UUID, wake: asyncio.Event) -> None:
+    """Sets ``wake`` the moment new mail reaches the Inbox, for as long as the
+    account exists. One connection, kept in IDLE; a lost one is retried with a
+    growing wait, and a server without IDLE is left to the 20-second look.
+    It never reports on the account: the main connection does that."""
+    retry = WATCH_RETRY_S
+    while True:
+        try:
+            ended = await _watch_once(account_id, wake)
+            if ended == "gone":
+                return
+            pause = WATCH_RECHECK_S if ended == "no-idle" else 30
+            retry = WATCH_RETRY_S
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — the timer still finds new mail
+            logger.info("Stopped being told about new mail for a while: %s", type(e).__name__)
+            pause, retry = retry, min(retry * 2, WATCH_RETRY_MAX_S)
+        await asyncio.sleep(pause)
+
+
 async def run_account(account_id: uuid.UUID) -> None:
+    wake = asyncio.Event()
+    watcher = asyncio.create_task(watch_inbox(account_id, wake))
+    try:
+        await _run_account(account_id, wake)
+    finally:
+        watcher.cancel()
+
+
+async def _run_account(account_id: uuid.UUID, wake: asyncio.Event) -> None:
     await _settle_interrupted_sends(account_id)
     backoff = 10
     while True:
@@ -615,7 +689,10 @@ async def run_account(account_id: uuid.UUID) -> None:
                 went = await _send_due(client, account, allow_private)
                 now = loop.time()
                 # What you sent is in Sent on the server now: pick up its number soon.
-                if went or now - last_inbox >= INBOX_EVERY_S:
+                # And the server just said new mail is in (``watch_inbox``).
+                told = wake.is_set()
+                wake.clear()
+                if went or told or now - last_inbox >= INBOX_EVERY_S:
                     every = now - last_all >= FOLDERS_EVERY_S
                     if every:
                         await _refresh_folders(client, account_id)
@@ -625,7 +702,11 @@ async def run_account(account_id: uuid.UUID) -> None:
                     last_inbox = now
                     last_all = now if every else last_all
                 await asyncio.to_thread(client.noop)
-                await asyncio.sleep(TICK_S)
+                # The next look comes early if mail arrives meanwhile.
+                try:
+                    await asyncio.wait_for(wake.wait(), timeout=TICK_S)
+                except asyncio.TimeoutError:
+                    pass
         except asyncio.CancelledError:
             raise
         except imap.MailError as e:

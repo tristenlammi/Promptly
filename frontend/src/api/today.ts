@@ -129,6 +129,21 @@ export interface TodayComing {
   directions?: string | null;
 }
 
+/** A stay or booked day found in your mail that isn't on your calendar yet. */
+export interface TodayBooking {
+  /** The email it was read from. */
+  id: string;
+  title: string;
+  /** ISO days; ``end`` is the last day (the same day when it's one day). */
+  start: string;
+  end: string;
+  nights: number;
+  location: string;
+  /** Opens the email. */
+  url: string;
+  from: string;
+}
+
 export interface TodayNoteCard {
   id: string;
   title: string;
@@ -273,6 +288,7 @@ export interface TodayData {
   schedule: { items: TodayScheduleItem[]; all_day: { kind: string; title: string; url: string; color?: string | null; done?: boolean; directions?: string | null }[] };
   attention: TodayAttention[];
   coming: TodayComing[];
+  bookings?: TodayBooking[];
   progress: { done: number; total: number; pct: number } | null;
   discover: { kind: string; name: string; why: string }[];
 }

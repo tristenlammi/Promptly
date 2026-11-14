@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -216,3 +216,17 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username={self.username!r} role={self.role}>"
+
+
+# Today cards a new account starts without: most people never use these
+# three, and Customise brings any of them back. Only at creation, so
+# everyone already here keeps the Today they have.
+NEW_ACCOUNT_TODAY_HIDDEN = ("passwords", "forms", "automations")
+
+
+@event.listens_for(User, "before_insert")
+def _new_account_today(_mapper: Any, _connection: Any, user: User) -> None:
+    settings = dict(user.settings or {})
+    if "today_hidden" not in settings:
+        settings["today_hidden"] = list(NEW_ACCOUNT_TODAY_HIDDEN)
+        user.settings = settings

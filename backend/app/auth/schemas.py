@@ -189,6 +189,7 @@ NEW_MEMBER_HIDDEN_NAV = ("places", "workspaces", "tasks")
 TODAY_SECTIONS = (
     "attention", "glance", "recent", "events", "meds", "tasks", "habits", "health", "nutrition", "workout", "meals", "coming",
     "budget", "trip", "study", "journal", "people", "work", "rooms", "automations", "photos", "discover", "morning", "maps",
+    "voice", "mail", "passwords", "forms", "notes", "porch",
 )
 
 
