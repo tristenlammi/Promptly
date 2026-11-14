@@ -120,4 +120,21 @@ class PushPayloadTest {
         assertNull(PushLinkActivity.parse(Uri.parse("promptly://notifications?server=${Uri.encode(mine)}&code=abcdefgh12345678"), null))
         assertNull(PushLinkActivity.parse(Uri.parse("promptly://voice?server=${Uri.encode(mine)}&code=abcdefgh12345678"), mine))
     }
+
+    @Test
+    fun aMissedCallCarriesWhatCallBackNeeds() {
+        val p = PushPayload.parse(
+            """{"title":"Missed video call","body":"Ann tried to call you","url":"/rooms/calls/$call","tag":"call:$call",
+               "category":"call","kind":"call_missed","call_id":"$call","media":"video",
+               "caller":{"id":"1","username":"Ann"},"callback_token":"abc.def"}""",
+        )
+        assertEquals("call_missed", p.kind)
+        assertEquals("abc.def", p.callbackToken)
+        assertEquals("Ann", p.caller)
+        assertTrue(p.video)
+        // An older server sends neither: no button, nothing else changes.
+        val old = PushPayload.parse("""{"title":"Missed call","body":"Ann tried to call you","category":"call","kind":"call_missed","call_id":"$call"}""")
+        assertNull(old.callbackToken)
+        assertNull(old.caller)
+    }
 }

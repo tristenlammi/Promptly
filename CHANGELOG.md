@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Rooms calls on Android (next Promptly for Android): a missed call's notification has a **Call back** button. One tap rings them from the phone, with no page to open first, and the "Missed call" notification goes.
+
+### Changed
+
+- Rooms calls on Android (next Promptly for Android): during a voice call held to your ear the screen goes dark, as on a phone call, so your cheek can't press Mute or Hang up. It stays on with the loudspeaker, a headset, or video.
+
+### Fixed
+
+- Rooms calls on a phone with the Promptly app: calling someone showed two call screens, one after the other (the page's, then the app's), and after hanging up you landed on the page's again saying the call was cancelled or ended. There is now one call screen, the app's, from the tap to hanging up, and you come straight back to the conversation. The conversation shows a green bar while the app holds the call.
+
 ## [0.41.0] - 2026-11-15
 
 ### Added

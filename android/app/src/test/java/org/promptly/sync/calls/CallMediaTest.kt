@@ -362,4 +362,20 @@ class CallMediaTest {
         assertNull(HoldSignal.decode(HoldSignal.encode(true), "call.hold", fromPerson = false))
         assertNull(HoldSignal.decode("junk".toByteArray(), "call.hold", fromPerson = true))
     }
+
+    @Test
+    fun aCallTheAppStartedItselfIsTheSameHandOff() {
+        fun join(s: String = session(), id: String = call, title: String? = "Ann") =
+            CallJoin(url = "/livekit", token = "t", roomId = "r", lkRoom = "lk", session = s, sessionId = "abc", callId = id, video = true, group = false, answeredAt = null, title = title)
+        val h = CallHandoffs.fromJoin("https://Promptly.example.com/", join(), "Call", now)!!
+        assertEquals(server, h.server)
+        assertEquals(call, h.callId)
+        assertEquals(user, h.user)
+        assertTrue(h.video)
+        assertEquals("Ann", h.title)
+        assertEquals("Bob", CallHandoffs.fromJoin(server, join(title = null), "Bob", now)!!.title)
+        assertNull("a session for another call", CallHandoffs.fromJoin(server, join(id = other), "Call", now))
+        assertNull("a web session", CallHandoffs.fromJoin(server, join(s = session(dev = "web")), "Call", now))
+        assertNull("expired", CallHandoffs.fromJoin(server, join(s = session(exp = now - 1000)), "Call", now))
+    }
 }

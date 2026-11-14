@@ -324,4 +324,16 @@ class CallLogicTest {
         assertTrue(Routing.startsOnSpeaker(video = true))
         assertFalse(Routing.startsOnSpeaker(video = false))
     }
+    @Test
+    fun `the screen goes dark at your ear only on an earpiece call with no picture`() {
+        assertTrue(Routing.screenOffAtEar(inCall = true, route = Routing.Kind.EARPIECE, speaker = false, picture = false))
+        assertFalse(Routing.screenOffAtEar(inCall = true, route = Routing.Kind.SPEAKER, speaker = true, picture = false))
+        assertFalse(Routing.screenOffAtEar(inCall = true, route = Routing.Kind.BLUETOOTH, speaker = false, picture = false))
+        assertFalse(Routing.screenOffAtEar(inCall = true, route = Routing.Kind.WIRED, speaker = false, picture = false))
+        assertFalse(Routing.screenOffAtEar(inCall = true, route = Routing.Kind.EARPIECE, speaker = false, picture = true))
+        assertFalse(Routing.screenOffAtEar(inCall = false, route = Routing.Kind.EARPIECE, speaker = false, picture = false))
+        // Android isn't routing the call (no Telecom): go by the loudspeaker.
+        assertTrue(Routing.screenOffAtEar(inCall = true, route = null, speaker = false, picture = false))
+        assertFalse(Routing.screenOffAtEar(inCall = true, route = null, speaker = true, picture = false))
+    }
 }

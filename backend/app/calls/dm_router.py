@@ -121,6 +121,22 @@ class RingTokenIn(BaseModel):
     token: str = Field(min_length=10, max_length=2000)
 
 
+class CallBackIn(BaseModel):
+    token: str = Field(min_length=10, max_length=2000)
+    media: Literal["audio", "video"] = "audio"
+
+
+@router.post("/callback", dependencies=[Depends(_start_limit)])
+async def call_back(body: CallBackIn, db: AsyncSession = Depends(get_db)) -> dict:
+    """"Call back" on the Promptly Android app's missed-call notification.
+    No bearer: the missed call's push carried the token to that person's
+    phone. Starts the call for the phone, like Call on the page does."""
+    try:
+        return await dm.call_back_with_token(db, body.token, body.media)
+    except dm.CallError as e:
+        raise _err(e) from None
+
+
 @router.post("/answer/decline")
 async def decline_with_token(body: RingTokenIn, db: AsyncSession = Depends(get_db)) -> dict:
     """Decline with the ringing push's answer token (the Android

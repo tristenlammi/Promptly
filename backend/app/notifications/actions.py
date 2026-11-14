@@ -43,6 +43,9 @@ LABELS = {
     # Android incoming-call screen at /api/calls/answer (never here).
     "call_decline": "Decline",
     "call_answer": "Answer",
+    # A missed call: the Android app's "Call back" starts a call with it at
+    # /api/calls/callback (never here; a browser's notification has no such button).
+    "call_back": "Call back",
     # Porch (WP-P1.7): a group invite, a tag waiting for your yes.
     "porch_join": "Join",
     "porch_decline": "Not now",

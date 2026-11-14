@@ -943,6 +943,37 @@ async def _ring_token(db: AsyncSession, token: str) -> tuple[User, uuid.UUID, ac
     return user, cid, cs
 
 
+async def call_back_with_token(db: AsyncSession, token: str, media: str) -> dict:
+    """"Call back" on the Android app's missed-call notification: the
+    token's person calls the token's conversation from that phone. No
+    bearer; the token came to their own phone in the missed call's push.
+    Everything a call started from the page checks still applies (calls on
+    for them, still in the conversation, blocks)."""
+    from app.calls import ring
+    from app.notifications import actions
+
+    try:
+        claims = actions.verify(token)
+    except actions.ActionRefused as exc:
+        raise not_found() from exc
+    if claims.get("a") != ring.CALLBACK_ACTION:
+        raise not_found()
+    try:
+        user = await db.get(User, uuid.UUID(str(claims["u"])))
+        room_id = uuid.UUID(str(claims.get("t")))
+    except (KeyError, ValueError) as exc:
+        raise not_found() from exc
+    if user is None or user.disabled or int(user.token_version or 0) != int(claims.get("v") or 0):
+        raise not_found()
+    cs = await access.load_settings(db)
+    if not await access.voice_allowed(db, user, cs):
+        raise not_found()
+    room, _sm = await rooms_core.load_room(db, room_id, user)
+    if not is_dm_room(room):
+        raise not_found()
+    return await start(db, user, room, cs, media, "android")
+
+
 async def answer_with_token(db: AsyncSession, token: str, device: str) -> dict:
     """Answer from the ringing push's own token (the Android incoming-call
     screen, or a page opened from the push), with no bearer."""

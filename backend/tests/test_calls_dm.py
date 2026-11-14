@@ -1469,3 +1469,30 @@ async def test_preferences_have_the_quiet_hold_switch(client, db):
     assert r.status_code == 200 and r.json()["call_quiet_hold"] is False
     r = await client.patch("/api/notifications/preferences", headers=H(w.ann), json={"call_quiet_hold": True})
     assert r.status_code == 200 and r.json()["call_quiet_hold"] is True
+
+
+async def test_call_back_from_the_missed_calls_push(client, db, lk, jobs, pushes):
+    """The Android app's "Call back": the missed call's push carries a token
+    that starts a call from that phone, for that person and conversation only."""
+    w = await world(client, db)
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    pushes.clear()
+    assert await run_timeout(jobs, cid) == "missed"
+    [p] = pushes
+    token = p["extra"]["callback_token"]
+    pushes.clear()
+    r = await client.post("/api/calls/callback", json={"token": token})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["device"] == "android" and out["identity"] == ident(w.ben) and out["session"]
+    back = await call_row(db, out["call"]["id"])
+    assert back.started_by == w.ben.id and back.room_id == uuid.UUID(str(w.dm)) and back.id != uuid.UUID(cid)
+    # It rings Ann.
+    assert any(x["user_id"] == str(w.ann.id) and x["extra"]["kind"] == "call_ring" for x in pushes)
+    # An answer token isn't a call-back token; nor is junk.
+    assert (await client.post("/api/calls/callback", json={"token": pushes[0]["extra"]["answer_token"]})).status_code == 404
+    assert (await client.post("/api/calls/callback", json={"token": "junk.junk.junk"})).status_code == 404
+    # Signed out everywhere: the token dies.
+    w.ben.token_version = (w.ben.token_version or 0) + 1
+    await db.commit()
+    assert (await client.post("/api/calls/callback", json={"token": token})).status_code == 404

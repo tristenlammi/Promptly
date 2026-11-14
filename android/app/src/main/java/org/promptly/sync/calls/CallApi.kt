@@ -14,7 +14,8 @@ import java.util.concurrent.TimeUnit
  * and no app password: a ring is answered, declined and checked with the
  * push's own answer token (one person, one call, two minutes); once
  * answered, the call session from the answer is the key (one person, one
- * call, this device, 12 hours).
+ * call, this device, 12 hours). "Call back" uses the token in a missed
+ * call's push (one person, one conversation, a day).
  */
 class CallApi(private val server: String) {
     /** 404 / 409: the call isn't there for you any more (ended, not ringing
@@ -23,6 +24,11 @@ class CallApi(private val server: String) {
 
     suspend fun answer(token: String): CallJoin =
         CallProtocol.parseJoin(post("/api/calls/answer", CallProtocol.answerBody(token)))
+
+    /** "Call back" on a missed call's notification: its push carried the
+     *  token. Starts the call for this phone, as Call on the page does. */
+    suspend fun callBack(token: String, video: Boolean): CallJoin =
+        CallProtocol.parseJoin(post("/api/calls/callback", CallProtocol.callBackBody(token, video)))
 
     suspend fun decline(token: String) {
         post("/api/calls/answer/decline", CallProtocol.tokenBody(token))
