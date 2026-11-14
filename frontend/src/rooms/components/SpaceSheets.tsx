@@ -13,6 +13,7 @@ import { BOOTSTRAP_KEY, updateBootstrap } from "../cache";
 import { SPACE_COLORS } from "../format";
 import { askInSheet } from "./ConfirmSheet";
 import { PeoplePicker } from "./PeoplePicker";
+import { MuteControl } from "./Receipts";
 import { NotifyControl, SpaceIcon, UserAvatar } from "./ui";
 
 const SPACE_EMOJI = ["", "🏠", "👨‍👩‍👧", "🍻", "🎮", "⚽", "🎵", "📚", "💼", "✈️", "🍕", "🐶", "🌱", "🎉", "❤️", "⭐"];
@@ -277,8 +278,19 @@ export function SpaceSettingsSheet({
                 value={space.notify}
                 onChange={(v) => {
                   const notify = v ?? "all";
-                  updateBootstrap(qc, (cur) => ({ ...cur, spaces: cur.spaces.map((s) => (s.id === space.id ? { ...s, notify } : s)) }));
+                  updateBootstrap(qc, (cur) => ({ ...cur, spaces: cur.spaces.map((s) => (s.id === space.id ? { ...s, notify, muted_until: null } : s)) }));
                   void roomsApi.setSpaceNotify(space.id, notify).catch((err) => {
+                    toast.error(apiErrorMessage(err, "Couldn't change notifications."));
+                    void refresh();
+                  });
+                }}
+              />
+              <MuteControl
+                until={space.muted_until}
+                className="mt-1"
+                onChange={(muted_until) => {
+                  updateBootstrap(qc, (cur) => ({ ...cur, spaces: cur.spaces.map((s) => (s.id === space.id ? { ...s, muted_until } : s)) }));
+                  void roomsApi.setSpaceMute(space.id, muted_until).catch((err) => {
                     toast.error(apiErrorMessage(err, "Couldn't change notifications."));
                     void refresh();
                   });

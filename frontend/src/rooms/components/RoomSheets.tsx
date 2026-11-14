@@ -13,6 +13,7 @@ import { askInSheet } from "./ConfirmSheet";
 import { PeoplePicker } from "./PeoplePicker";
 import { ChannelVoiceSettings } from "@/rtc/ui/ChannelVoiceSettings";
 import { cn } from "@/utils/cn";
+import { MuteControl } from "./Receipts";
 import { NotifyControl, UserAvatar } from "./ui";
 
 export const AI_CONTEXT_EXPLAINER =
@@ -147,9 +148,18 @@ function NotifyRow({ room, space }: { room: Room; space: Space | null }) {
   const qc = useQueryClient();
   const change = (notify: NotifyLevel | null) => {
     const before = room.notify;
-    patchRoom(qc, room.id, (r) => ({ ...r, notify }));
+    // Choosing a level ends a "mute for a while" (the server does the same).
+    patchRoom(qc, room.id, (r) => ({ ...r, notify, muted_until: null }));
     roomsApi.updateMyRoom(room.id, { notify }).catch((err) => {
       patchRoom(qc, room.id, (r) => ({ ...r, notify: before }));
+      toast.error(apiErrorMessage(err, "Couldn't change notifications."));
+    });
+  };
+  const mute = (muted_until: string | null) => {
+    const before = room.muted_until ?? null;
+    patchRoom(qc, room.id, (r) => ({ ...r, muted_until }));
+    roomsApi.updateMyRoom(room.id, { muted_until }).catch((err) => {
+      patchRoom(qc, room.id, (r) => ({ ...r, muted_until: before }));
       toast.error(apiErrorMessage(err, "Couldn't change notifications."));
     });
   };
@@ -162,6 +172,7 @@ function NotifyRow({ room, space }: { room: Room; space: Space | null }) {
         allowInherit={!!space}
         inheritLabel={space ? `Space (${space.notify})` : undefined}
       />
+      <MuteControl until={room.muted_until} onChange={mute} className="mt-1" />
     </div>
   );
 }

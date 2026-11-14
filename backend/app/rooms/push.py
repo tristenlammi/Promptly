@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 
-from . import core
+from . import core, receipts
 from .models import Room, RoomAttachment, RoomMember, RoomMessage, RoomSpace, RoomSpaceMember
 
 logger = logging.getLogger("promptly.rooms.push")
@@ -34,6 +34,14 @@ def wants(level: str, uid: str, msg: RoomMessage, reply_author: str | None) -> b
         ms = msg.mentions or []
         return uid in ms or "everyone" in ms or reply_author == uid
     return True
+
+
+def _delivered(room_id: uuid.UUID, user_id: uuid.UUID, seq: int):  # noqa: ANN202
+    async def done(outcome: dict[str, int]) -> None:
+        if outcome.get("delivered", 0) > 0:
+            await receipts.delivered_by_push(room_id, user_id, seq)
+
+    return done
 
 
 async def fan_out(message_id: uuid.UUID) -> int:
@@ -58,12 +66,12 @@ async def fan_out(message_id: uuid.UUID) -> int:
             m.user_id: m
             for m in (await db.execute(select(RoomMember).where(RoomMember.room_id == room.id, RoomMember.user_id.in_(recipients)))).scalars()
         }
-        space_levels: dict[uuid.UUID, str] = {}
+        space_levels: dict[uuid.UUID, RoomSpaceMember] = {}
         space = None
         if room.space_id is not None:
             space = await db.get(RoomSpace, room.space_id)
             space_levels = {
-                m.user_id: m.notify
+                m.user_id: m
                 for m in (await db.execute(select(RoomSpaceMember).where(RoomSpaceMember.space_id == room.space_id))).scalars()
             }
         reply_author = None
@@ -96,12 +104,14 @@ async def fan_out(message_id: uuid.UUID) -> int:
         # icon's badge to ``app_badge``.
         icon = (author.avatar_url if author is not None else None) or "/item-icons/rooms-192.png"
         people = {u.id: u for u in (await db.execute(select(User).where(User.id.in_(recipients)))).scalars()}
+        dm = receipts.shows_receipts(room)
         sent = 0
         for uid in recipients:
             if str(room.id) in looking.get(str(uid), ()):
                 continue
-            o = overrides.get(uid)
-            level = (o.notify if o and o.notify else None) or space_levels.get(uid) or "all"
+            # Your level for the room, or "none" while it (or its space) is
+            # muted for a while (``receipts.level``).
+            level = receipts.level(overrides.get(uid), space_levels.get(uid))
             if not wants(level, str(uid), msg, reply_author):
                 continue
             # Answer, or mark it read, without opening the app.
@@ -125,7 +135,12 @@ async def fan_out(message_id: uuid.UUID) -> int:
                     "stack": True,
                     "app_badge": await core.unread_total(db, uid),
                     "actions": buttons,
+                    # Which message this is: a phone that was told the room
+                    # is read up to here doesn't show it late.
+                    "seq": msg.seq,
                 },
+                # A push service took it for one of their devices: "Delivered".
+                done=_delivered(room.id, uid, msg.seq) if dm else None,
             )
             sent += 1
         return sent

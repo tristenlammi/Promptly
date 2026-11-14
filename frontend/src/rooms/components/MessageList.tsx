@@ -13,6 +13,8 @@ import { dayLabel, sameDay } from "../format";
 import { clearRoomNotifications, readingNow } from "../live";
 import { useRoomsStore, type PendingMessage } from "../store";
 import { MessageItem, PendingItem, type MessageCtx } from "./MessageItem";
+import { ReceiptLine } from "./Receipts";
+import { receiptMarks } from "../receipts";
 import { SrOnly } from "./ui";
 
 const EMPTY_PENDING: PendingMessage[] = [];
@@ -51,6 +53,12 @@ export function MessageList({
   const w = useRoomsStore((s) => s.windows[roomId]);
   const pending = useRoomsStore((s) => s.pending[roomId]) ?? EMPTY_PENDING;
   const jump = useRoomsStore((s) => s.jump);
+  // Conversations: Sent / Delivered / Seen under your messages (only at the
+  // live end: scrolled-back history says nothing about the latest).
+  const marks = useMemo(
+    () => (w && room.receipts && !w.hasMoreAfter ? receiptMarks(w.messages, room.receipts, ctx.meId) : {}),
+    [w, room.receipts, ctx.meId],
+  );
 
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -361,6 +369,7 @@ export function MessageList({
                       </div>
                     )}
                     <MessageItem m={m} grouped={!newDay && !newLine && groupsWith(prev, m)} highlight={highlightId === m.id} ctx={listCtx} />
+                    {marks[m.id] && <ReceiptLine mark={marks[m.id]} users={ctx.users} solo={room.kind === "dm"} />}
                   </Fragment>
                 );
               })}

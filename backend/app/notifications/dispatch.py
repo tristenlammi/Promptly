@@ -29,6 +29,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 from uuid import UUID
 
@@ -263,6 +264,9 @@ class PushPayload:
     # ``urgency`` (``high`` wakes a dozing phone at once). Not in the body.
     ttl: int | None = None
     urgency: str | None = None
+    # Web Push ``Topic``: a later push with the same one replaces an earlier
+    # one still waiting at the push service.
+    topic: str | None = None
 
     def to_json(self) -> str:
         payload: dict[str, Any] = {**(self.extra or {}), "title": self.title, "body": self.body}
@@ -290,6 +294,7 @@ async def notify_user(
     summary: bool = False,
     ttl: int | None = None,
     urgency: str | None = None,
+    done: Callable[[dict[str, int]], Awaitable[None]] | None = None,
 ) -> None:
     """Schedule a push for every active subscription on ``user_id`` and
     write the durable inbox row.
@@ -306,7 +311,8 @@ async def notify_user(
     is dropped. ``summary=True`` holds it for the daily summary whatever
     the category's setting (an app's own per-kind "Daily summary" switch);
     quiet hours may also hold it (see :data:`RULES`). ``ttl`` / ``urgency``:
-    see :class:`PushPayload` (a ringing call: 45 s, high)."""
+    see :class:`PushPayload` (a ringing call: 45 s, high). ``done`` is told
+    what happened to the pushes (``_dispatch``'s outcome) once they're sent."""
     payload = PushPayload(
         title=title, body=body, url=url, tag=tag, category=category, extra=extra,
         ttl=ttl, urgency=urgency,
@@ -320,6 +326,8 @@ async def notify_user(
         inbox=inbox,
         summary=summary,
     )
+    if done is not None:
+        coro = _then(coro, done)
     # Check for a loop up front rather than letting ``spawn`` report it:
     # ``spawn`` closes the coroutine when there's none, and this path wants
     # to still run it synchronously.
@@ -339,6 +347,15 @@ async def notify_user(
         # Held until done — a dropped task here means a notification the
         # user simply never receives, with nothing logged.
         spawn(coro, name=f"notify-{category}-{user_id}")
+
+
+async def _then(coro: Awaitable[dict[str, int]], done: Callable[[dict[str, int]], Awaitable[None]]) -> dict[str, int]:
+    outcome = await coro
+    try:
+        await done(outcome)
+    except Exception:  # noqa: BLE001 - the caller's follow-up never fails a push
+        logger.exception("notify_user: done callback failed")
+    return outcome
 
 
 # Per-user inbox cap — enough scroll-back to catch up after a holiday
@@ -502,8 +519,10 @@ async def deliver(
     payload: PushPayload,
     *,
     vapid: tuple[str, str] | None = None,
+    only: Callable[[PushSubscription], bool] | None = None,
 ) -> dict[str, int]:
-    """Push ``payload`` to every device ``user_id`` has, now — no
+    """Push ``payload`` to every device ``user_id`` has (``only``: just the
+    ones it picks), now — no
     preference, block or quiet-hours checks (the callers made them).
     Prunes dead subscriptions and commits. Used by :func:`_dispatch` and by
     the release of held pushes (``notifications/loops.py``)."""
@@ -527,7 +546,7 @@ async def deliver(
     from app.notifications import devices
 
     quiet = devices.covered(subs)
-    subs = [s for s in subs if s.enabled and s.id not in quiet]
+    subs = [s for s in subs if s.enabled and s.id not in quiet and (only is None or only(s))]
     if not subs:
         return outcome
 
@@ -546,6 +565,7 @@ async def deliver(
             vapid_contact=vapid_contact,
             ttl=payload.ttl if payload.ttl is not None else DEFAULT_TTL,
             urgency=payload.urgency or default_urgency(payload.category),
+            topic=payload.topic,
         )
         for sub in subs
     ]
@@ -641,6 +661,7 @@ def _send_one(
     vapid_contact: str,
     ttl: int | None = None,
     urgency: str | None = None,
+    topic: str | None = None,
 ) -> None:
     """Single sync send via ``pywebpush``. Translates the HTTP status
     into our internal ``_PushGone`` on endpoint-invalid responses so
@@ -656,6 +677,8 @@ def _send_one(
         extra["ttl"] = int(ttl)
     if urgency:
         extra["headers"] = {"Urgency": urgency}
+    if topic:
+        extra.setdefault("headers", {})["Topic"] = topic[:32]
     try:
         webpush(
             subscription_info={

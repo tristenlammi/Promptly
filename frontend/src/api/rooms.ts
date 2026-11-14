@@ -41,6 +41,11 @@ export interface Room {
   mentions: number;
   /** Your override for this room (null = inherit the space / "all"). */
   notify: NotifyLevel | null;
+  /** Quiet until then, whatever the level ("mute for a while"). */
+  muted_until?: string | null;
+  /** Conversations: how far each other person has got (Delivered / Seen).
+   *  Absent in space rooms, and when the server has receipts off. */
+  receipts?: Record<string, { read: number; delivered: number }>;
   /** DMs: the member ids (you included). */
   members?: string[];
   /** DMs: each member's AI consent. */
@@ -61,6 +66,8 @@ export interface Space {
   color: string | null;
   role: SpaceRole;
   notify: NotifyLevel;
+  /** The whole space is quiet until then. */
+  muted_until?: string | null;
   member_ids: string[];
   rooms: Room[];
   /** Optional: per-member roles, if the server sends them. */
@@ -169,6 +176,8 @@ export type RoomEvent =
   | { type: "message_delete"; room_id: string; id: string }
   | { type: "reaction"; room_id: string; message_id: string; reactions: Reaction[] }
   | { type: "read"; room_id: string; seq: number }
+  /** Someone else in a conversation got / read further. */
+  | { type: "receipt"; room_id: string; user_id: string; read: number; delivered: number }
   | { type: "typing"; room_id: string; user_id: string }
   | { type: "promptly_thinking"; room_id: string; on: boolean }
   /** ``users``: the names in it, when a call opened it for you (Calls). */
@@ -221,6 +230,10 @@ export const roomsApi = {
   async setSpaceNotify(id: string, notify: NotifyLevel): Promise<void> {
     await apiClient.patch(`/rooms/spaces/${id}/me`, { notify });
   },
+  /** Mute the whole space until then (null: unmute). */
+  async setSpaceMute(id: string, muted_until: string | null): Promise<void> {
+    await apiClient.patch(`/rooms/spaces/${id}/me`, { muted_until });
+  },
 
   // ---- rooms ----
   async createRoom(spaceId: string, body: { name: string; topic?: string | null; kind?: "text" | "voice" }): Promise<Room> {
@@ -239,7 +252,7 @@ export const roomsApi = {
   },
   async updateMyRoom(
     id: string,
-    body: { notify?: NotifyLevel | null; hidden?: boolean; ai_ok?: boolean },
+    body: { notify?: NotifyLevel | null; muted_until?: string | null; hidden?: boolean; ai_ok?: boolean },
   ): Promise<Room | null> {
     const { data } = await apiClient.patch<Room | null>(`/rooms/rooms/${id}/me`, body);
     return data ?? null;
@@ -299,6 +312,10 @@ export const roomsApi = {
   // ---- read state / typing / presence ----
   async markRead(roomId: string, seq: number): Promise<void> {
     await apiClient.post(`/rooms/rooms/${roomId}/read`, { seq });
+  },
+  /** This device has the conversation's messages up to `seq` ("Delivered"). */
+  async markDelivered(roomId: string, seq: number): Promise<void> {
+    await apiClient.post(`/rooms/rooms/${roomId}/delivered`, { seq });
   },
   async typing(roomId: string): Promise<void> {
     await apiClient.post(`/rooms/rooms/${roomId}/typing`);

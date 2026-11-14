@@ -291,6 +291,9 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
         from app.calls.voice import settings_map
 
         voice_settings = await settings_map(db, voice_ids)
+    from . import receipts
+
+    show_receipts = bool(dm_ids) and (await receipts.server(db))[0]
     out = []
     for r in rooms:
         st = mine.get(r.id)
@@ -309,6 +312,8 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
             "unread": max(0, r.last_seq - read),
             "mentions": int(mentions.get(r.id, 0)),
             "notify": st.notify if st else None,
+            # Quiet until then (None: not muted for a while).
+            "muted_until": receipts.iso(st.muted_until) if st else None,
         }
         if r.kind == "voice":
             d["voice"] = voice_settings.get(r.id)
@@ -318,6 +323,9 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
             d["ai_ok"] = {str(m.user_id): m.ai_ok for m in members}
             d["ai_context"] = bool(members) and all(m.ai_ok for m in members)
             d["hidden"] = st.hidden if st else False
+            if show_receipts:
+                # How far the others have got: Delivered / Seen under your messages.
+                d["receipts"] = receipts.receipts_out(members, user.id)
             if r.kind == "dm":
                 others = {m.user_id for m in members} - {user.id}
                 d["blocked"] = bool(others & i_blocked)
@@ -435,8 +443,10 @@ async def unread_total(db: AsyncSession, user_id: uuid.UUID) -> int:
     set to mentions counts only its unread mentions of you, muted ones
     count nothing; a DM (not hidden, not muted) counts its unread messages.
     Keep the two in step."""
+    from . import receipts
+
     levels = {
-        sm.space_id: sm.notify
+        sm.space_id: sm
         for sm in (await db.execute(select(RoomSpaceMember).where(RoomSpaceMember.user_id == user_id))).scalars()
     }
     states = {m.room_id: m for m in (await db.execute(select(RoomMember).where(RoomMember.user_id == user_id))).scalars()}
@@ -447,7 +457,7 @@ async def unread_total(db: AsyncSession, user_id: uuid.UUID) -> int:
     mentions_only: list[uuid.UUID] = []
     for rid, sid, last in (await db.execute(q)).all():
         st = states.get(rid)
-        level = (st.notify if st and st.notify else None) or (levels.get(sid) if sid else None) or "all"
+        level = receipts.level(st, levels.get(sid) if sid else None)
         if level == "none":
             continue
         unread = max(0, last - (st.last_read_seq if st else 0))

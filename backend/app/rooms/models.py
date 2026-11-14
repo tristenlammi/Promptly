@@ -33,6 +33,8 @@ class RoomSpaceMember(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
     role: Mapped[str] = mapped_column(String(8), nullable=False, default="member", server_default="member")  # owner/admin/member
     notify: Mapped[str] = mapped_column(String(8), nullable=False, default="all", server_default="all")  # all/mentions/none
+    # The whole space is quiet until then (0470, ``receipts.level``).
+    muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -65,6 +67,11 @@ class RoomMember(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
     last_read_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     notify: Mapped[str | None] = mapped_column(String(8), nullable=True)  # override: all/mentions/none
+    # Quiet until then, whatever the level (0470).
+    muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # How far the messages are known to have reached one of their devices
+    # (0470, ``receipts.py``): "Delivered" in a conversation.
+    delivered_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     ai_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

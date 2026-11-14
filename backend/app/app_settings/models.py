@@ -377,6 +377,12 @@ class AppSettings(Base):
     porch_video_max_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300, server_default="300")
     porch_video_max_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=1024, server_default="1024")
 
+    # ----- Rooms (0470, app/rooms/receipts.py) -----
+    # Sent / Delivered / Seen in conversations, for the whole server; and the
+    # notification level a person starts with in a space they join.
+    rooms_read_receipts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    rooms_default_notify: Mapped[str] = mapped_column(String(8), nullable=False, default="all", server_default="all")
+
     # ----- Bookkeeping -----
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

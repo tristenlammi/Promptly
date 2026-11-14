@@ -47,6 +47,10 @@ data class PushPayload(
     val busy: Boolean,
     val group: Boolean,
     val answerToken: String?,
+    /** A silent "this was read somewhere else": take [tag]'s notification down, show nothing. */
+    val clear: Boolean = false,
+    /** Rooms: which message this is, or how far a [clear] says was read. */
+    val seq: Long? = null,
 ) {
     /** A call push as the tag the calls code reads (`CallTag`, the same shape the web app builds). */
     fun callTag(): String? {
@@ -94,6 +98,8 @@ data class PushPayload(
                 busy = o.optBoolean("busy", false),
                 group = o.optBoolean("group", false),
                 answerToken = str("answer_token"),
+                clear = o.optBoolean("clear", false),
+                seq = if (o.has("seq") && !o.isNull("seq")) o.optLong("seq", -1).takeIf { it >= 0 } else null,
             )
         }
     }
@@ -116,6 +122,31 @@ enum class PushChannel(val id: String, val label: String, val about: String, val
             "porch", "notes", "shared_message", "invite" -> SOCIAL
             else -> OTHER
         }
+    }
+}
+
+/** A conversation read somewhere else: its notification comes down, and a
+ *  message from before that which turns up late (pushes can overtake each
+ *  other) isn't shown. */
+object PushClears {
+    /** Whether a message push is still news, given how far its room was cleared. */
+    fun stillNews(clearedUpTo: Long?, seq: Long?): Boolean = clearedUpTo == null || seq == null || seq > clearedUpTo
+
+    private const val PREFS = "push_clears"
+    private const val KEPT = 60
+
+    fun clearedUpTo(context: Context, tag: String): Long? {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return if (p.contains(tag)) p.getLong(tag, 0) else null
+    }
+
+    fun remember(context: Context, tag: String, seq: Long) {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (seq <= (clearedUpTo(context, tag) ?: -1)) return
+        val e = p.edit()
+        // A handful of rooms at most: don't let it grow for ever.
+        if (p.all.size >= KEPT) e.clear()
+        e.putLong(tag, seq).apply()
     }
 }
 
@@ -162,6 +193,17 @@ object PushNotes {
     fun show(context: Context, p: PushPayload) {
         val app = context.applicationContext
         tellWidgets(app)
+        if (p.clear) {
+            // Read on another device (or in the page on this one): nothing to show.
+            val tag = p.tag ?: return
+            p.seq?.let { PushClears.remember(app, tag, it) }
+            cancel(app, tag)
+            return
+        }
+        if (p.tag != null && !PushClears.stillNews(PushClears.clearedUpTo(app, p.tag), p.seq)) {
+            Log.i(NativePush.TAG, "a message that was already read elsewhere: not shown")
+            return
+        }
         if (p.category == "call" && p.callId != null) {
             val tag = p.callTag()
             val shown = tag != null && try {

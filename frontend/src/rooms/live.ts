@@ -8,7 +8,7 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
-import { type Bootstrap, type RoomEvent } from "@/api/rooms";
+import { roomsApi, type Bootstrap, type RoomEvent } from "@/api/rooms";
 
 import { BOOTSTRAP_KEY, findRoom, patchRoom, refreshTail, removeRoom, updateBootstrap, upsertRoom } from "./cache";
 import { sendMessage } from "./actions";
@@ -95,6 +95,9 @@ export function applyRoomEvent(qc: QueryClient, ev: RoomEvent) {
       if (m.author_id && b && !b.users[m.author_id]) refetchBootstrapSoon(qc);
       const mine = !!b && m.author_id === b.me.id && m.kind === "user";
       const reading = readingNow.roomId === m.room_id;
+      // A conversation's message has reached this device: "Delivered" for
+      // whoever sent it.
+      if (!found.space && !mine && m.kind === "user") deliveredSoon(m.room_id, m.seq);
       patchRoom(qc, m.room_id, (r) => {
         const fresh = m.seq > r.last_seq;
         const next = {
@@ -139,6 +142,18 @@ export function applyRoomEvent(qc: QueryClient, ev: RoomEvent) {
           : { ...r, last_read_seq: Math.max(r.last_read_seq, ev.seq), unread: Math.max(0, r.last_seq - ev.seq) },
       );
       return;
+    case "receipt":
+      patchRoom(qc, ev.room_id, (r) => {
+        const was = r.receipts?.[ev.user_id];
+        return {
+          ...r,
+          receipts: {
+            ...(r.receipts ?? {}),
+            [ev.user_id]: { read: Math.max(was?.read ?? 0, ev.read), delivered: Math.max(was?.delivered ?? 0, ev.delivered) },
+          },
+        };
+      });
+      return;
     case "typing":
       if (b && ev.user_id === b.me.id) return;
       store.setTyping(ev.room_id, ev.user_id);
@@ -161,6 +176,24 @@ export function applyRoomEvent(qc: QueryClient, ev: RoomEvent) {
       updateBootstrap(qc, (cur) => ({ ...cur, spaces: cur.spaces.filter((s) => s.id !== ev.space_id) }));
       return;
   }
+}
+
+// One "it's here" per conversation for a burst of messages.
+const deliveredTimers = new Map<string, { seq: number; timer: ReturnType<typeof setTimeout> }>();
+function deliveredSoon(roomId: string, seq: number) {
+  const cur = deliveredTimers.get(roomId);
+  if (cur) {
+    cur.seq = Math.max(cur.seq, seq);
+    return;
+  }
+  const entry = {
+    seq,
+    timer: setTimeout(() => {
+      deliveredTimers.delete(roomId);
+      void roomsApi.markDelivered(roomId, entry.seq).catch(() => undefined);
+    }, 400),
+  };
+  deliveredTimers.set(roomId, entry);
 }
 
 /** Clear a room's stacked push notification from the tray (it's been read). */
