@@ -154,9 +154,13 @@ async def _run_app_action(db: AsyncSession, user: User, kind: str, action: str, 
     await db.commit()
 
 
-async def make_task(db: AsyncSession, user: User, account_id: uuid.UUID, key: str, title: str, summary: str, sender: str) -> None:
+async def make_task(db: AsyncSession, user: User, account_id: uuid.UUID, key: str, title: str, summary: str, sender: str, *, due: Any = None) -> None:
     notes = "\n".join(x for x in (f"From {sender}." if sender else "", summary, f"/mail?open={account_id}/{key}") if x)
-    await _run_app_action(db, user, "tasks", "add_tasks", {"tasks": [{"title": title[:500] or "Follow up on an email", "notes": notes}]})
+    task: dict[str, Any] = {"title": title[:500] or "Follow up on an email", "notes": notes}
+    if due is not None:
+        # An all-day task on the day it's due; the morning summary covers it.
+        task["due"] = due.isoformat() if hasattr(due, "isoformat") else str(due)
+    await _run_app_action(db, user, "tasks", "add_tasks", {"tasks": [task]})
 
 
 async def add_contact(db: AsyncSession, user: User, name: str, addr: str) -> None:

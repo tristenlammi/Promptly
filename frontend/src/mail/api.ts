@@ -135,6 +135,8 @@ export interface Conversation {
   labels: string[];
   snoozed_until: string | null;
   summary: string;
+  /** What the newest email looks like: a bill to pay or something for the calendar. */
+  suggest?: "bill" | "event" | null;
 }
 
 export interface ServerSettings {
@@ -293,8 +295,12 @@ export const mailApi = {
   async addEvent(accountId: string, key: string, body: { title: string; start: string; end?: string; all_day: boolean; location: string }) {
     return (await apiClient.post<{ url: string }>(`/mail/threads/${accountId}/${key}/event`, body)).data;
   },
-  async addTask(accountId: string, key: string) {
-    return (await apiClient.post<{ title: string }>(`/mail/threads/${accountId}/${key}/task`)).data;
+  /** The AI's reading of what there is to do (a bill: who, how much, by when). */
+  async taskDraft(accountId: string, key: string, body: { provider_id: string; model_id: string; today: string }) {
+    return (await apiClient.post<{ title: string; due: string; amount: string; note: string }>(`/mail/threads/${accountId}/${key}/task-draft`, body)).data;
+  },
+  async addTask(accountId: string, key: string, body?: { title: string; due?: string; note?: string }) {
+    return (await apiClient.post<{ title: string }>(`/mail/threads/${accountId}/${key}/task`, body)).data;
   },
   async addContact(name: string, addr: string) {
     await apiClient.post("/mail/contacts", { name, addr });

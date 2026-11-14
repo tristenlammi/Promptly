@@ -26,6 +26,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Today: someone sharing their trip with you shows under "Needs you" and on the Getting there card ("Sam arrives in 12 min"). When they arrive, never where they are.
 - Today: a trip or stay on your calendar is called out a day or two before it starts ("Nelly starts tomorrow · 2 nights"), and email waiting for a reply is under "Needs you" with who it's from.
 - Today: an event with a place has a Directions button on the schedule, and Coming up includes your next planned workouts.
+- Mail: an email that looks like a bill offers "Remind me to pay it", and one that looks like a booking or a date to keep offers "Add to calendar", in a line at the top of the conversation. Nothing is added until you tap and check the details.
+- Mail: "Remind me" (it replaces "Make a task") opens a short sheet: what to do, the day it's due and a note such as the amount. The AI has a go at filling it in from the email, and the task in Tasks links back to the email.
+- Mail: "Add to Contacts" and "Share" are on the row of buttons under a conversation's subject. Share sends the gist as words (subject, who from, summary) through your phone's share sheet, or copies it on a computer.
+- Mail: the Add to calendar sheet has "See it in Maps" once a place is filled in.
 
 ### Changed
 
@@ -33,10 +37,13 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Today: an event that runs over several days is one line in Coming up ("Nelly · until Tuesday") instead of a line for every day, and while you're there it sits at the top of the schedule as "until Tuesday" rather than repeating its start time.
 - Today: a bill under "Needs you" says which day it's due ("due tomorrow", "due Monday") instead of "due soon"; messages from several people name them.
 - Today on a phone: "Needs you" shows the first three, with a button for the rest, so the day isn't pushed off the screen. The loading outline now matches the page, so it doesn't jump when your day arrives.
+- Mail on a phone: a conversation's subject has its own lines under the buttons, instead of a few letters squeezed beside them.
+- Ask about your mail, with a conversation open, also looks through the rest of your mail (the sender's other emails first), so "when is this stay?" finds the dates in the host's earlier email.
 
 ### Fixed
 
 - Today, the Today widget, "Read me my day" and the Journal's day strip: an all-day event showed on two days if you live far from UTC (in Brisbane, on its own day and again the next morning). All-day events are now on their own day wherever you are.
+- Mail on a phone: the Compose button floated in the middle of the list, over senders and subjects. It now sits in the bottom corner, and the list scrolls clear of it.
 
 ## [0.40.2] - 2026-11-13
 

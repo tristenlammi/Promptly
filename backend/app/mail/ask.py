@@ -186,7 +186,12 @@ def fuse(lists: list[list[uuid.UUID]]) -> list[uuid.UUID]:
     return sorted(score, key=lambda m: -score[m])
 
 
-async def find(db: AsyncSession, accounts: list[uuid.UUID], question: str, plan: Plan, history: list[tuple[str, str]]) -> Found:
+async def find(
+    db: AsyncSession, accounts: list[uuid.UUID], question: str, plan: Plan, history: list[tuple[str, str]],
+    *, seeds: list[MailMessage] | None = None,
+) -> Found:
+    """``seeds``: emails already being read (the open conversation). Their
+    sender's other recent mail comes along, as it does for the best matches."""
     lists: list[list[uuid.UUID]] = []
     # By meaning, when the admin has AI search on (else this is empty).
     about = " ".join([*(q for q, _ in history[-2:]), question])
@@ -206,6 +211,8 @@ async def find(db: AsyncSession, accounts: list[uuid.UUID], question: str, plan:
         got = {m.id: m for m in (await db.execute(select(MailMessage).where(MailMessage.id.in_(ids)))).scalars()}
         messages = [got[i] for i in ids if i in got]
         messages += await _related(db, accounts, messages[:RELATED_FROM], {m.id for m in messages})
+    if seeds:
+        messages += await _related(db, accounts, seeds, {m.id for m in messages} | {s.id for s in seeds})
     recent = list((await db.execute(
         select(MailMessage).join(MailFolder, MailFolder.id == MailMessage.folder_id)
         .where(MailMessage.account_id.in_(accounts), MailFolder.role == "inbox")
