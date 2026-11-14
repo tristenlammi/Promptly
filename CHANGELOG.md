@@ -40,6 +40,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Changed
 
+- Chat: after a web search, opening an address made only of your own words (a shop's search page for what you asked about) no longer waits for a yes. Anything else Promptly makes up itself still asks. The approval card is shorter: the site, the address once, and buttons that fit a phone.
 - Today: tasks open the task itself, not just the list, from the Tasks card, the schedule and Coming up.
 - Today: an event that runs over several days is one line in Coming up ("Nelly · until Tuesday") instead of a line for every day, and while you're there it sits at the top of the schedule as "until Tuesday" rather than repeating its start time.
 - Today: a bill under "Needs you" says which day it's due ("due tomorrow", "due Monday") instead of "due soon"; messages from several people name them.

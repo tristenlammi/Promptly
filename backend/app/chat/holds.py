@@ -49,6 +49,11 @@ WHY = (
     "This chat read something from outside (a web page, an email, a file or a workspace note), "
     "so Promptly checks with you first."
 )
+# Opening a page: say what the worry actually is.
+WHY_OPEN = (
+    "Promptly made this address itself after reading a web page, an email or a file. "
+    "It checks with you first, so nothing you've told it can be sent to a site without you seeing."
+)
 
 
 def holdable(name: str) -> bool:
@@ -103,7 +108,7 @@ def question(name: str, args: dict[str, Any]) -> str:
             site = (urlsplit(url).hostname or "").removeprefix("www.") or "a website"
         except ValueError:
             site = "a website"
-        return f"Promptly wants to open {site}: {url[:300]}. Open it?"
+        return f"Open {site}?\n{url[:300]}"
     from app.talk.readback import question as read_back_question
 
     return read_back_question(name, args)
@@ -127,7 +132,7 @@ def meta_for(name: str, args: dict[str, Any], asked: str, *, spoken: bool) -> di
         "approval": "pending",
         "native": True,
         "held": "outside_content",
-        "why": WHY,
+        "why": WHY_OPEN if name == "fetch_url" else WHY,
         "tool": name,
         "title": HOLDABLE.get(name, name.replace("_", " ")),
         "question": asked,

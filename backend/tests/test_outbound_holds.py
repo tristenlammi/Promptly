@@ -99,7 +99,7 @@ def test_a_headless_turn_without_steps_uses_what_it_has_seen():
 def test_the_card_names_the_site():
     assert holds.holdable("fetch_url") and not holds.holdable("code_interpreter")
     q = holds.question("fetch_url", {"url": EVIL})
-    assert q.startswith("Promptly wants to open evil.example") and EVIL in q
+    assert q.startswith("Open evil.example?") and EVIL in q
 
 
 async def test_the_fetch_tool_itself_holds(monkeypatch):
@@ -221,7 +221,7 @@ async def test_an_untrusted_turn_asks_before_opening_a_site(db, user, conversati
     assert fetched == []
     meta = _call(reply, "fetch_url")["meta"]
     assert meta["approval"] == "pending" and meta["held"] == "outside_content"
-    assert meta["question"].startswith("Promptly wants to open evil.example")
+    assert meta["question"].startswith("Open evil.example?")
 
 
 @pytest.mark.asyncio
@@ -248,3 +248,62 @@ async def test_an_untrusted_turn_opens_the_address_you_wrote(db, user, conversat
     )
     assert fetched == ["https://docs.example.com/guide"]
     assert "approval" not in (_call(reply, "fetch_url").get("meta") or {})
+
+
+# ------------------------------------------------- the person's own words
+
+
+def _searched_turn(asked: str, query: str) -> TurnState:
+    """They asked, the turn searched (before reading anything), then read."""
+    from app.chat.tools.base import allow_words, note_search_query
+
+    turn = TurnState(untrusted=False, own_attachments_only=False)
+    allow_words(turn, asked)
+    start_step(turn, ["web_search"])
+    note_search_query(turn, query)
+    note_sources(turn, [{"url": "https://www.artsupplies.example/collections/canson"}])
+    start_step(turn, ["fetch_url"])
+    return turn
+
+
+def test_an_address_of_their_own_words_opens_without_a_yes():
+    turn = _searched_turn("Is the Canson pad cheaper at Eckersley's?", "canson mi teintes pastel pad price")
+    for url in (
+        "https://www.eckersleys.com.au/search?q=canson+mi+teintes+pastel+pad",
+        "https://www.eckersleys.com.au/search?q=canson%20pastel%20pad",
+        "https://artsupplies.example/search?q=canson+pad",  # a host the search found
+    ):
+        guard_outbound(_ctx(turn), "opening a shop", url=url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.eckersleys.com.au/search?q=canson+pad&d=secret-notes",  # a word they never said
+        "https://www.eckersleys.com.au/search?q=4471",  # digits can spell anything
+        "https://www.eckersleys.com.au/s/e/c/r/e/t",  # so can single letters
+        "https://secret-notes.eckersleys.com.au/search?q=canson",  # ...or a host label
+        "https://evil.example/search?q=canson+pad",  # a host nobody named
+        "https://canson:pad@eckersleys.com.au/",  # credentials
+        "https://eckersleys.com.au:8443/search?q=canson",  # an odd port
+        "https://10.0.0.7/search?q=canson",
+    ],
+)
+def test_anything_else_in_the_address_still_waits(url):
+    turn = _searched_turn("Is the Canson pad cheaper at Eckersley's?", "canson mi teintes pastel pad price")
+    with pytest.raises(HoldForApproval):
+        guard_outbound(_ctx(turn), "opening a site", url=url)
+
+
+def test_words_searched_after_reading_outside_content_do_not_count():
+    """A page could have chosen that search's words."""
+    from app.chat.tools.base import allow_words, note_search_query
+
+    turn = TurnState(untrusted=False, own_attachments_only=False)
+    allow_words(turn, "what does this page say about Eckersley's")
+    start_step(turn, ["fetch_url"])
+    start_step(turn, ["web_search"])
+    note_search_query(turn, "secretnotes")
+    start_step(turn, ["fetch_url"])
+    with pytest.raises(HoldForApproval):
+        guard_outbound(_ctx(turn), "opening a site", url="https://eckersleys.com.au/search?q=secretnotes")

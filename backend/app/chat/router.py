@@ -4396,6 +4396,12 @@ async def _dispatch_tools(
             # This turn's search results can be opened without a yes (H2).
             if result.sources and name in _SOURCE_TOOLS:
                 note_sources(ctx.turn, result.sources)
+            # ...and so can an address made only of what it searched for
+            # before it had read anything (base.url_is_plain).
+            if name == "web_search":
+                from app.chat.tools.base import note_search_query
+
+                note_search_query(ctx.turn, call_args.get("query"))
 
             # Sum any tool-reported USD spend into the per-message total
             # so the assistant message bubble can show "this turn cost
@@ -4822,9 +4828,10 @@ async def _stream_generator(
         turn_state = TurnState(untrusted=False, own_attachments_only=False)
         # Addresses the person wrote themselves: opening them never waits for
         # a yes, however much outside content the turn reads (H2).
-        from app.chat.tools.base import allow_urls, urls_in
+        from app.chat.tools.base import allow_urls, allow_words, urls_in
 
         allow_urls(turn_state, urls_in(triggering_text))
+        allow_words(turn_state, triggering_text)
         turn_state.saw_files(triggering_files, user_id=user.id, in_workspace=in_workspace)
         # Chunks retrieved from files attached on earlier turns: the same files.
         turn_state.saw_files(attachment_rag_files, user_id=user.id, in_workspace=in_workspace)

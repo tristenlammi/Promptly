@@ -54,6 +54,10 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
   const why = native && meta.held === "outside_content" && typeof meta.why === "string" ? meta.why : null;
   const result = meta.show_result === true && typeof meta.result === "string" && meta.result.trim() ? meta.result : null;
   const question = native && typeof meta.question === "string" ? meta.question : null;
+  // "Open eckersleys.com.au?" then the full address on its own lines.
+  const cut = question ? question.indexOf("\n") : -1;
+  const questionHead = question && cut >= 0 ? question.slice(0, cut) : question;
+  const questionRest = question && cut >= 0 ? question.slice(cut + 1).trim() : "";
   const connector = spoken ? "Asked out loud" : native ? "Checking with you" : String(meta.connector ?? "Connector");
   const title = String(meta.title ?? meta.tool ?? call.name);
   const target = typeof meta.target === "string" ? meta.target : null;
@@ -105,7 +109,16 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
         )}
         <div className="min-w-0 flex-1">
           {question ? (
-            <div className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">{question}</div>
+            <>
+              <div className="whitespace-pre-wrap break-words text-sm font-medium text-[var(--text)]">
+                {questionHead}
+              </div>
+              {questionRest && (
+                <div className="mt-0.5 whitespace-pre-wrap break-all text-xs text-[var(--text-muted)]">
+                  {questionRest}
+                </div>
+              )}
+            </>
           ) : (
             <div className="text-sm text-[var(--text)]">
               <span className="font-medium">{connector}</span> · {title}
@@ -113,7 +126,7 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
             </div>
           )}
           {why && <div className="mt-0.5 text-xs text-[var(--text-muted)]">{why}</div>}
-          {!spoken && Object.keys(args).length > 0 && (
+          {!question && Object.keys(args).length > 0 && (
             <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-xs text-[var(--text-muted)]">
               {Object.entries(args).map(([k, v]) => (
                 <div key={k} className="contents">
@@ -126,12 +139,12 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
             </dl>
           )}
           {shown === "pending" ? (
-            <div className="mt-2 flex items-center gap-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => void decide(true)}
                 disabled={busy !== null}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-3 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--accent-strong)] px-3.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-60"
               >
                 {busy === "approve" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
                 {native ? "Yes, do it" : "Approve"}
@@ -140,12 +153,12 @@ function ApprovalCard({ messageId, call }: { messageId: string; call: PersistedT
                 type="button"
                 onClick={() => void decide(false)}
                 disabled={busy !== null}
-                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text)] disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text)] disabled:opacity-60"
               >
                 {busy === "decline" ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
-                Don't run it
+                {native ? "No" : "Don't run it"}
               </button>
-              <span className="text-xs text-[var(--text-muted)]">
+              <span className="w-full text-xs text-[var(--text-muted)] sm:w-auto">
                 {spoken ? "Or say yes. Nothing has happened yet." : "Nothing has happened yet."}
               </span>
             </div>
