@@ -51,6 +51,10 @@ data class PushPayload(
     val clear: Boolean = false,
     /** Rooms: which message this is, or how far a [clear] says was read. */
     val seq: Long? = null,
+    /** A missed call's push: lets "Call back" start the call from this phone. */
+    val callbackToken: String? = null,
+    /** Who called (a missed call), for the call screen. */
+    val caller: String? = null,
 ) {
     /** A call push as the tag the calls code reads (`CallTag`, the same shape the web app builds). */
     fun callTag(): String? {
@@ -100,6 +104,8 @@ data class PushPayload(
                 answerToken = str("answer_token"),
                 clear = o.optBoolean("clear", false),
                 seq = if (o.has("seq") && !o.isNull("seq")) o.optLong("seq", -1).takeIf { it >= 0 } else null,
+                callbackToken = str("callback_token"),
+                caller = o.optJSONObject("caller")?.optString("username")?.ifBlank { null },
             )
         }
     }
@@ -262,6 +268,15 @@ object PushNotes {
         b.extras.putInt(EXTRA_COUNT, count)
         picture(app, p.icon)?.let { b.setLargeIcon(Icon.createWithBitmap(it)) }
         for ((i, a) in p.actions.take(3).withIndex()) b.addAction(button(app, a, tag, path, i))
+        // A missed call: call them back from the notification, like a phone's.
+        if (p.kind == "call_missed" && p.callbackToken != null && !p.group) {
+            val back = PendingIntent.getActivity(
+                app, tag.hashCode() * 31 + 7,
+                org.promptly.sync.calls.CallStartActivity.callBack(app, p.callbackToken, p.video, p.caller ?: "Call", tag),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            b.addAction(Notification.Action.Builder(Icon.createWithResource(app, R.drawable.ic_promptly_status), "Call back", back).build())
+        }
         nm.notify(tag, ID, b.build())
     }
 

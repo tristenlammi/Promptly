@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,9 +28,17 @@ import kotlinx.coroutines.launch
  * ([CallHandoffs.parse]), and the first time (or when a different account
  * hands over) it asks before using the microphone, so no web page can
  * quietly start a call from your phone. "Not now" cancels the call.
+ *
+ * "Call back" on a missed call's notification comes here too ([callBack]):
+ * the app asks the server to start the call with the token the missed
+ * call's push carried, then carries on the same way. It's the app's own
+ * button, so there's nothing to confirm.
  */
 class CallStartActivity : ComponentActivity() {
     private var handoff: CallHandoff? = null
+    private var back: Back? = null
+
+    private class Back(val server: String, val token: String, val video: Boolean, val title: String)
 
     private val ask = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { got ->
         val mic = got[Manifest.permission.RECORD_AUDIO] ?: has(Manifest.permission.RECORD_AUDIO)
@@ -40,6 +49,16 @@ class CallStartActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState != null) return // a permission prompt in flight across a rotation
+        if (intent?.action == ACTION_CALL_BACK) {
+            val token = intent.getStringExtra(EXTRA_TOKEN)
+            val server = CallCenter.server(this)
+            if (token.isNullOrBlank() || server == null) return finish()
+            back = Back(server, token, intent.getBooleanExtra(EXTRA_VIDEO, false), intent.getStringExtra(EXTRA_TITLE) ?: "Call")
+            // You're dealing with it: the "Missed call" notification goes.
+            intent.getStringExtra(EXTRA_TAG)?.let { org.promptly.sync.push.PushNotes.cancel(this, it) }
+            permissionsThenGo()
+            return
+        }
         val uri = intent?.data
         val params = uri?.queryParameterNames?.associateWith { uri.getQueryParameter(it) } ?: emptyMap()
         val saved = CallCenter.server(this)
@@ -76,10 +95,10 @@ class CallStartActivity : ComponentActivity() {
     }
 
     private fun permissionsThenGo() {
-        val h = handoff ?: return finish()
+        val video = handoff?.video ?: back?.video ?: return finish()
         val want = buildList {
             if (!has(Manifest.permission.RECORD_AUDIO)) add(Manifest.permission.RECORD_AUDIO)
-            if (h.video && !has(Manifest.permission.CAMERA)) add(Manifest.permission.CAMERA)
+            if (video && !has(Manifest.permission.CAMERA)) add(Manifest.permission.CAMERA)
             if (Build.VERSION.SDK_INT >= 33 && !has(Manifest.permission.POST_NOTIFICATIONS)) add(Manifest.permission.POST_NOTIFICATIONS)
             // Bluetooth headsets and the car.
             if (Build.VERSION.SDK_INT >= 31 && !has(Manifest.permission.BLUETOOTH_CONNECT)) add(Manifest.permission.BLUETOOTH_CONNECT)
@@ -88,6 +107,8 @@ class CallStartActivity : ComponentActivity() {
     }
 
     private fun go() {
+        val b = back
+        if (b != null && handoff == null) return callBack(b)
         val h = handoff ?: return finish()
         try {
             // From the front (Android 14 starts a microphone service only then).
@@ -101,6 +122,29 @@ class CallStartActivity : ComponentActivity() {
         finish()
     }
 
+    /** Ask the server to start the call, then hold it like one the page handed over.
+     *  This screen stays in front meanwhile: Android starts a microphone service only from there. */
+    private fun callBack(b: Back) {
+        lifecycleScope.launch {
+            val h = try {
+                CallHandoffs.fromJoin(b.server, CallApi(b.server).callBack(b.token, b.video), b.title, System.currentTimeMillis())
+            } catch (e: CallApi.Over) {
+                null
+            } catch (e: java.io.IOException) {
+                Toast.makeText(this@CallStartActivity, "Couldn't call back: no connection to your server.", Toast.LENGTH_LONG).show()
+                return@launch finish()
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+            if (h == null) {
+                Toast.makeText(this@CallStartActivity, "Couldn't call back from here. Open the conversation and call from there.", Toast.LENGTH_LONG).show()
+                return@launch finish()
+            }
+            handoff = h
+            go()
+        }
+    }
+
     /** "Not now": cancel the call the page started, so it stops ringing them. */
     private fun declined(h: CallHandoff) {
         CoroutineScope(Dispatchers.IO).launch { runCatching { CallApi(h.server).leave(h.session) } }
@@ -112,5 +156,20 @@ class CallStartActivity : ComponentActivity() {
     companion object {
         private const val PREFS = "calls"
         private const val KEY_USER = "handoff_user"
+        private const val ACTION_CALL_BACK = "org.promptly.sync.calls.CALL_BACK"
+        private const val EXTRA_TOKEN = "token"
+        private const val EXTRA_VIDEO = "video"
+        private const val EXTRA_TITLE = "title"
+        private const val EXTRA_TAG = "tag"
+
+        /** "Call back" on a missed call's notification. */
+        fun callBack(context: Context, token: String, video: Boolean, title: String, tag: String): android.content.Intent =
+            android.content.Intent(context, CallStartActivity::class.java)
+                .setAction(ACTION_CALL_BACK)
+                .putExtra(EXTRA_TOKEN, token)
+                .putExtra(EXTRA_VIDEO, video)
+                .putExtra(EXTRA_TITLE, title)
+                .putExtra(EXTRA_TAG, tag)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }

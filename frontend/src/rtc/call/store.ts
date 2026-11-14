@@ -102,6 +102,9 @@ export interface CallStoreState {
   phone: boolean;
   /** The app's loudspeaker (as asked from here; the app's notification has the truth). */
   phoneSpeaker: boolean;
+  /** A call just started here and handed to the Promptly app, which shows
+   *  it; kept only so the page can take it if the app can't (``takeHere``). */
+  handed: { callId: string; roomId: string | null; media: CallMedia; at: number } | null;
   muted: boolean;
   camera: boolean;
   cameraTrack: LocalVideoTrack | null;
@@ -165,6 +168,7 @@ export const useCallStore = create<CallStoreState>(() => ({
   users: {},
   missed: 0,
   ended: null,
+  handed: null,
   ...initialCallConnection,
 }));
 

@@ -117,6 +117,8 @@ class CallService : Service() {
     private var connectedAt = 0L
     private var others = 0
     private var wake: PowerManager.WakeLock? = null
+    /** Screen off while the phone is at your ear ([Routing.screenOffAtEar]). */
+    private var ear: PowerManager.WakeLock? = null
     private var wifi: WifiManager.WifiLock? = null
     private var foreground = false
     private var foregroundTypes = -1
@@ -399,6 +401,8 @@ class CallService : Service() {
                     if (room !== r) return@collectLatest
                     if (system != null && a.muted != system) setMuted(a.muted)
                     system = a.muted
+                    // A headset connecting or leaving changes whether it's at your ear.
+                    syncEar()
                     // Where Telecom put the sound (a headset that just connected wins).
                     a.current?.let { k ->
                         val on = k == Routing.Kind.SPEAKER
@@ -992,6 +996,34 @@ class CallService : Service() {
             ),
         )
         tones()
+        syncEar()
+    }
+
+    /** Dark screen at your ear, like a phone call; the screen is as usual otherwise. */
+    private fun syncEar() {
+        val picture = camera.state.live || _video.value.remotes.any { it.camera != null || it.screen != null }
+        val want = Routing.screenOffAtEar(
+            inCall = callId != null && !held,
+            route = CallCenter.audio.value.current,
+            speaker = speaker,
+            picture = picture,
+        )
+        if (want == (ear?.isHeld == true)) return
+        try {
+            if (want) {
+                val pm = getSystemService(POWER_SERVICE) as PowerManager
+                if (!pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) return
+                val lock = ear ?: pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "promptly:call-ear")
+                    .apply { setReferenceCounted(false) }
+                ear = lock
+                lock.acquire(12 * 60 * 60 * 1000L)
+            } else {
+                // Not until the phone leaves your ear: the screen wakes then.
+                ear?.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY)
+            }
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "proximity lock", e)
+        }
     }
 
     private fun notifications() = getSystemService(NotificationManager::class.java)
@@ -1073,6 +1105,8 @@ class CallService : Service() {
     }
 
     private fun releaseLocks() {
+        runCatching { if (ear?.isHeld == true) ear?.release() }
+        ear = null
         runCatching { wake?.release() }
         wake = null
         runCatching { wifi?.release() }

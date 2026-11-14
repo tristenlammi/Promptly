@@ -44,6 +44,8 @@ logger = logging.getLogger("promptly.calls.ring")
 RING_TTL = 45  # seconds: Web Push TTL of a ring, and how long it rings
 ANSWER_TOKEN_TTL = 2 * 60
 MISSED_TTL = 24 * 3600
+# The signed action in a missed call's push that lets the phone app call back.
+CALLBACK_ACTION = "call_back"
 ICON = "/item-icons/rooms-192.png"
 
 
@@ -179,7 +181,10 @@ async def missed(db: AsyncSession, call: Call, room: Room, user_ids: list[uuid.U
     who = caller.username if caller is not None else "Someone"
     group = room.kind == "group"
     title = "Missed video call" if call.media == "video" else "Missed call"
+    from app.notifications import actions
+
     for uid in user_ids:
+        target = await db.get(User, uid)
         if group:
             body = f"{who} called {await conversation_name(db, room, uid)}"
         else:
@@ -202,6 +207,11 @@ async def missed(db: AsyncSession, call: Call, room: Room, user_ids: list[uuid.U
                 "media": call.media or "audio",
                 "caller": rooms_core.user_out(caller) if caller is not None else None,
                 "icon": (caller.avatar_url if caller is not None else None) or ICON,
+                # "Call back" on the Promptly Android app's notification: this
+                # person calling this conversation, for as long as the
+                # notification lasts (``POST /api/calls/callback``). The
+                # browser's notification has no use for it and never shows it.
+                "callback_token": actions.sign(target, CALLBACK_ACTION, str(room.id), ttl_s=MISSED_TTL) if target is not None else None,
             },
             "ttl": MISSED_TTL,
         }

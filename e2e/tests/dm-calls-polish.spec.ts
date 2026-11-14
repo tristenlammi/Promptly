@@ -249,10 +249,11 @@ test.describe("DM calls polish (WP-D5)", () => {
     expect(me.device).toBe("android");
     await expect(incoming(alice)).toBeVisible({ timeout: 20_000 });
 
-    // The page shows it as the app's call (no ringback here: the app plays it).
-    await expect(screen(bob)).toBeVisible();
-    await expect(status(bob)).toHaveText("Calling…", { timeout: 20_000 });
-    await expect(bob.getByTestId("call-in-app")).toBeVisible();
+    // The app shows the call: the page shows no call screen of its own (two
+    // in a row is what that looked like), only the conversation's green bar,
+    // and plays no ringback (the app does).
+    await expect(bob.getByTestId("call-in-progress")).toContainText("in the Promptly app", { timeout: 20_000 });
+    await expect(screen(bob)).toHaveCount(0);
     expect(await sounds(bob)).not.toContain("ringback");
 
     // No app to take it after all: Chrome comes back to the page.

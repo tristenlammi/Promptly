@@ -70,6 +70,25 @@ object CallHandoffs {
         )
     }
 
+    /**
+     * A call this app started itself ("Call back" on a missed call): the
+     * server's answer as the same hand-off a page's call is, or null when the
+     * session isn't one for this phone.
+     */
+    fun fromJoin(server: String, join: CallJoin, fallbackTitle: String, now: Long): CallHandoff? {
+        val origin = VoiceProtocol.origin(server) ?: return null
+        val claims = claims(join.session) ?: return null
+        if (claims.callId != join.callId.lowercase() || claims.device != "android" || claims.expiresAt <= now) return null
+        return CallHandoff(
+            server = origin,
+            session = join.session,
+            callId = join.callId.lowercase(),
+            user = claims.user,
+            video = join.video,
+            title = (join.title ?: fallbackTitle).trim().take(80).ifBlank { "Call" },
+        )
+    }
+
     /** A call session's claims (a JWT, `typ: "call"`), unverified; null for anything else. */
     fun claims(token: String): Claims? {
         val parts = token.split('.')

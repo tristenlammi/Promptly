@@ -27,17 +27,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Rooms: mute a room, a conversation or a whole space for 1 hour, 8 hours or until tomorrow morning (room settings, space settings). It's quiet until then, mentions included, and then goes back to the level it had. Calls still ring. A muted room shows the crossed bell in the list and doesn't count towards the Rooms number.
 - Rooms on Android: reading a conversation anywhere (another device, the page, or replying) takes its notification off your phone, even with the app closed. A message you'd already read that turns up late isn't shown. Needs the next Promptly for Android; browsers aren't sent these, because a push that shows nothing makes Chrome put up its own notice.
 - Rooms, for admins (no screen yet): `rooms_read_receipts` turns Sent / Delivered / Seen off for the whole server, and `rooms_default_notify` sets the notification level people start with in a space they join.
+- Rooms calls on Android (next Promptly for Android): a missed call's notification has a **Call back** button. One tap rings them from the phone, with no page to open first, and the "Missed call" notification goes.
 
 ### Changed
 
 - Mail on a phone: swiping an email follows your finger, springs back if you let go early, and slides off with the gap closing up when you go far enough, with a tick as it crosses the mark.
 - Rooms: `@promptly` only ever sees the one message that mentions it. Not the message you replied to, not earlier messages, not attachments. If it needs something, put it in the message.
 - Porch search finds posts by their words, place and who posted them. It no longer uses the photo model to match other people's posts by what's in their pictures. Searching your own library in Photos is unchanged.
+- Rooms calls on Android (next Promptly for Android): during a voice call held to your ear the screen goes dark, as on a phone call, so your cheek can't press Mute or Hang up. It stays on with the loudspeaker, a headset, or video.
 
 ### Fixed
 
 - Mail on a phone: the notice after archiving or deleting is one slim line that sits above the folders bar, where it used to be a tall card over it. Several in a row share one notice ("Archived 3 conversations") with one Undo for all of them, where each used to add another card.
 - Short notices with an action ("Archived · Undo") are one line everywhere, with the action at the end.
+- Rooms calls on a phone with the Promptly app: calling someone showed two call screens, one after the other (the page's, then the app's), and after hanging up you landed on the page's again saying the call was cancelled or ended. There is now one call screen, the app's, from the tap to hanging up, and you come straight back to the conversation. The conversation shows a green bar while the app holds the call.
 
 ### Removed
 

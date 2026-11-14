@@ -451,6 +451,12 @@ object CallProtocol {
     /** `answer/decline`, `answer/state`. */
     fun tokenBody(token: String): String = buildJsonObject { put("token", token) }.toString()
 
+    /** `callback`: "Call back" on a missed call's notification. */
+    fun callBackBody(token: String, video: Boolean): String = buildJsonObject {
+        put("token", token)
+        put("media", if (video) "video" else "audio")
+    }.toString()
+
     /** `session/refresh`, `session/leave`. */
     fun sessionBody(session: String): String = buildJsonObject { put("session", session) }.toString()
 
@@ -614,4 +620,16 @@ object Routing {
     }
 
     fun startsOnSpeaker(video: Boolean): Boolean = video
+
+    /**
+     * Held to your ear: the screen should go dark when your face is near it,
+     * as it does on a phone call, so your cheek can't press Mute or Hang up.
+     * Only while the sound is in the earpiece ([route], or with no route
+     * known, the loudspeaker being off), the call is on, and there's no
+     * picture to look at.
+     */
+    fun screenOffAtEar(inCall: Boolean, route: Kind?, speaker: Boolean, picture: Boolean): Boolean {
+        if (!inCall || picture) return false
+        return if (route != null) route == Kind.EARPIECE else !speaker
+    }
 }
