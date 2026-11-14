@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-15
+
 ### Added
 
 - Rooms: a message that hasn't gone yet (still sending, or it failed) is kept on your device. Reload the page or close the app and it's back under the conversation, and it sends by itself; a message that had in fact arrived isn't posted twice. Kept per person and cleared when you sign out, along with what you'd typed but not sent.
