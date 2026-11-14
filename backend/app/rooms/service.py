@@ -17,7 +17,7 @@ from app.auth.models import User
 from app.files.storage import absolute_path
 
 from . import core
-from .models import Room, RoomAttachment, RoomMember, RoomMessage, RoomReaction
+from .models import Room, RoomAttachment, RoomMember, RoomMessage, RoomPollVote, RoomReaction
 
 logger = logging.getLogger("promptly.rooms.service")
 
@@ -101,11 +101,27 @@ async def post_message(
     client_id: str | None = None,
     place: dict | None = None,
     gif: dict | None = None,
+    voice: dict | None = None,
+    poll: dict | None = None,
 ) -> RoomMessage:
     """Add a message to ``room`` (locked by the caller), attach uploads, and
-    move your read point to it. The caller commits and publishes."""
+    move your read point to it. The caller commits and publishes.
+
+    ``voice`` (``voice.prepare``) makes it a voice message: its recording is
+    its one attachment. ``poll`` (``polls.make``) makes it a poll. Either
+    stands alone: no words, files or place of its own."""
     body = (body or "").strip()
     meta: dict = {"client_id": client_id[:64]} if client_id else {}
+    if poll:
+        from . import polls
+
+        meta["poll"] = poll
+        body, attachment_ids, place, voice = polls.body_for(poll), [], None, None
+    elif voice:
+        from . import voice as voices
+
+        meta["voice"] = voice
+        body, attachment_ids, place = voices.body_for(int(voice["duration_ms"])), [uuid.UUID(str(voice["att"]))], None
     if place:
         # A place from P Maps (``meta.place``), drawn as a card. With no words
         # of your own, its name stands in for them in lists and notifications.
@@ -254,9 +270,10 @@ def _thumbnail(att: RoomAttachment, path) -> None:  # noqa: ANN001
 
 
 def remove_attachment_files(a: RoomAttachment) -> None:
-    for thumb in (False, True):
+    # The file, its thumbnail, and a voice message's playback copy.
+    for rel in (att_path(a), att_path(a, thumb=True), f"{att_path(a)}.play.m4a"):
         try:
-            absolute_path(att_path(a, thumb)).unlink(missing_ok=True)
+            absolute_path(rel).unlink(missing_ok=True)
         except (OSError, ValueError):
             pass
 
@@ -284,6 +301,8 @@ async def purge_deleted(db: AsyncSession, *, older_than: timedelta = PURGE_AFTER
                     or_(
                         RoomMessage.body != "",
                         RoomMessage.pinned_at.is_not(None),
+                        RoomMessage.meta.has_key("voice"),  # noqa: W601 - JSONB ? operator
+                        RoomMessage.meta.has_key("poll"),  # noqa: W601
                         exists().where(RoomAttachment.message_id == RoomMessage.id),
                         exists().where(RoomReaction.message_id == RoomMessage.id),
                     ),
@@ -301,6 +320,9 @@ async def purge_deleted(db: AsyncSession, *, older_than: timedelta = PURGE_AFTER
         m.body = ""
         m.pinned_at = None
         m.mentions = []
+        if "voice" in (m.meta or {}) or "poll" in (m.meta or {}):
+            # A voice message's words and a poll's question go too.
+            m.meta = {k: v for k, v in m.meta.items() if k not in ("voice", "poll")}
     atts = (await db.execute(select(RoomAttachment).where(RoomAttachment.message_id.in_(ids)))).scalars().all()
     for a in atts:
         remove_attachment_files(a)
@@ -310,6 +332,7 @@ async def purge_deleted(db: AsyncSession, *, older_than: timedelta = PURGE_AFTER
     for m in rows:
         media.forget_preview(m)
     await db.execute(delete(RoomReaction).where(RoomReaction.message_id.in_(ids)))
+    await db.execute(delete(RoomPollVote).where(RoomPollVote.message_id.in_(ids)))
     await purge_sources(db, "room_msg", ids)
     await db.commit()
     return len(rows)

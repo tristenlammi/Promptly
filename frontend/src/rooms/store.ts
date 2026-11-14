@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Attachment, LibraryGif, Message, SharedPlace } from "@/api/rooms";
+import type { Attachment, LibraryGif, Message, SharedPlace, VoiceSend } from "@/api/rooms";
 
 /**
  * Client state for Rooms that isn't a plain server read:
@@ -37,6 +37,8 @@ export interface PendingMessage {
   place?: SharedPlace | null;
   /** A GIF from the GIF library going with it. */
   gif?: LibraryGif | null;
+  /** A voice message: its recording is already uploaded (``attachments``). */
+  voice?: VoiceSend | null;
   status: "sending" | "failed";
   created_at: string;
 }

@@ -87,7 +87,7 @@ export function MessageActionSheet({
           </div>
           <div className="flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
             <Row icon={CornerUpLeft} label="Reply" onClick={act(() => onReply(m))} />
-            {own && typeof m.meta?.event_id !== "string" && !m.meta?.event_reminder && (!m.meta?.share || (m.meta.share as { has_note?: boolean }).has_note) && (!libraryGif || libraryGif.has_note) && <Row icon={Pencil} label="Edit" onClick={act(() => onEdit(m))} />}
+            {own && typeof m.meta?.event_id !== "string" && !m.meta?.event_reminder && !m.meta?.voice && !m.meta?.poll && (!m.meta?.share || (m.meta.share as { has_note?: boolean }).has_note) && (!libraryGif || libraryGif.has_note) && <Row icon={Pencil} label="Edit" onClick={act(() => onEdit(m))} />}
             <Row icon={Pin} label={m.pinned ? "Unpin" : "Pin"} onClick={act(() => void togglePin(m))} />
             {m.body && <Row icon={Copy} label="Copy text" onClick={act(() => void copyText(m))} />}
             {(libraryGif || ownGif) && (

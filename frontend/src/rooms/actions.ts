@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { roomsApi, type Attachment, type LibraryGif, type Message, type RemindWhen, type SharedPlace } from "@/api/rooms";
+import { roomsApi, type Attachment, type LibraryGif, type Message, type RemindWhen, type SharedPlace, type VoiceSend } from "@/api/rooms";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -113,7 +113,7 @@ export async function copyText(m: Message) {
 export async function sendMessage(
   qc: QueryClient,
   roomId: string,
-  input: { body: string; reply_to_id: string | null; attachments: Attachment[]; place?: SharedPlace | null; gif?: LibraryGif | null },
+  input: { body: string; reply_to_id: string | null; attachments: Attachment[]; place?: SharedPlace | null; gif?: LibraryGif | null; voice?: VoiceSend | null },
   retryOf?: PendingMessage,
   /** ``quiet``: no "didn't send" toast (a resend nobody asked for just now). */
   opts?: { quiet?: boolean },
@@ -129,6 +129,7 @@ export async function sendMessage(
         attachments: input.attachments,
         place: input.place ?? null,
         gif: input.gif ?? null,
+        voice: input.voice ?? null,
         status: "sending",
         created_at: new Date().toISOString(),
       };
@@ -142,6 +143,7 @@ export async function sendMessage(
       client_id: pending.client_id,
       ...(pending.place ? { place: pending.place } : {}),
       ...(pending.gif ? { gif: pending.gif } : {}),
+      ...(pending.voice ? { voice: pending.voice } : {}),
     });
     store.removePending(roomId, pending.client_id);
     store.upsertMessage(msg);

@@ -34,6 +34,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Rooms: a link gets a preview card with the page's name, a line about it and a picture. This server fetches the page once and keeps its own small copy of the picture, so nobody's device contacts the site unless they tap the link. The sender can take the card off (the × on it, or long-press → Remove link preview). Links into this Promptly, and messages that are already a place or other card, get none. An admin can turn previews off.
 - Rooms: a space can have its own emoji. Its owner and admins add a picture with a name (Space settings → Emoji); everyone in the space types `:name:` or picks it from the emoji button, in messages and as reactions.
 - Admin → Rooms: one place for the server-wide Rooms settings (GIF search and its key, link previews, emoji limits), with pointers to Calls and Storage and the fixed limits listed.
+- Rooms: voice messages, in conversations and in a space's text rooms. With nothing typed, Send is a mic: hold it to record and let go to send, slide left to cancel, or slide up to lock it and keep talking hands-free. A tap (or Enter on a keyboard) records hands-free until you press Send; Escape cancels. The message has a waveform you can tap or drag through, its length, 1× / 1.5× / 2× speed and a dot until you've played it, and it keeps playing while you scroll.
+- Rooms: a voice message's words appear underneath it once the server has written them out (with its own speech-to-text; nothing if that isn't set up). They're what the notification and the conversation list show, and search finds them.
+- Rooms: polls. "Ask a poll" in the composer's + menu: a question, two to ten answers, pick one or pick any, optionally hide who voted, optionally a closing time. Everyone's card shows the counts as they change; tap to vote, tap again to change your mind or take it back. "See votes" shows who picked what (never for a hidden-voters poll). Whoever asked, or an admin of the space, can close it.
+- Server settings for Rooms (no admin screen yet): voice messages on or off, how long one may be, whether they're written out, and polls on or off.
 
 ### Changed
 

@@ -189,6 +189,15 @@ export interface Bootstrap {
   calls_missed?: number;
   /** GIF search (null: off) and whether links get preview cards. */
   media?: { gif_search: GifSearchConfig | null; link_previews: boolean };
+  /** What the admin has on for everyone (absent on an older server: all on). */
+  features?: RoomFeatures;
+}
+
+export interface RoomFeatures {
+  voice_messages: boolean;
+  /** How long one voice message may be. */
+  voice_max_seconds: number;
+  polls: boolean;
 }
 
 export interface Attachment {
@@ -236,6 +245,86 @@ export interface Message {
   meta: Record<string, unknown> | null;
   /** Echo of the sender's ``client_id`` (top level or ``meta.client_id``). */
   client_id?: string | null;
+  /** A poll's live count (the poll itself is ``meta.poll``). */
+  poll?: PollState;
+}
+
+/** A voice message (``meta.voice``): its recording is the one attachment. */
+export interface VoiceMeta {
+  att: string;
+  duration_ms: number;
+  /** The waveform: levels 0–1. */
+  peaks: number[];
+  /** There's a copy every browser can play (``url + "&play=1"``). */
+  play: boolean;
+  /** Its words: on their way, here, not made on this server, or failed. */
+  state: "pending" | "done" | "off" | "failed";
+  transcript?: string;
+}
+
+export function voiceOf(m: { meta: Record<string, unknown> | null }): VoiceMeta | null {
+  const v = m.meta?.voice as Partial<VoiceMeta> | undefined;
+  if (!v || typeof v !== "object" || typeof v.att !== "string") return null;
+  return {
+    att: v.att,
+    duration_ms: typeof v.duration_ms === "number" && Number.isFinite(v.duration_ms) ? v.duration_ms : 0,
+    peaks: Array.isArray(v.peaks) ? v.peaks.filter((x): x is number => typeof x === "number" && Number.isFinite(x)) : [],
+    play: v.play === true,
+    state: v.state === "done" || v.state === "off" || v.state === "failed" ? v.state : "pending",
+    transcript: typeof v.transcript === "string" ? v.transcript : undefined,
+  };
+}
+
+/** What's sent with a voice message: the uploaded recording and what the
+ *  page measured (the server reads the audio itself and corrects both). */
+export interface VoiceSend {
+  attachment_id: string;
+  duration_ms: number;
+  peaks: number[];
+}
+
+/** A poll (``meta.poll``). */
+export interface PollMeta {
+  question: string;
+  options: { id: string; text: string }[];
+  multiple: boolean;
+  anonymous: boolean;
+  closes_at: string | null;
+  closed_at: string | null;
+}
+
+export interface PollState {
+  counts: Record<string, number>;
+  /** How many people have voted. */
+  voters_total: number;
+  closed: boolean;
+  /** Who picked each answer (never sent for an anonymous poll). */
+  voters?: Record<string, string[]>;
+  /** Your own answers, when the server was answering you. */
+  mine?: string[];
+}
+
+export function pollOf(m: { meta: Record<string, unknown> | null }): PollMeta | null {
+  const p = m.meta?.poll as Partial<PollMeta> | undefined;
+  if (!p || typeof p !== "object" || typeof p.question !== "string" || !Array.isArray(p.options)) return null;
+  const options = p.options.filter((o): o is { id: string; text: string } => !!o && typeof o.id === "string" && typeof o.text === "string");
+  if (options.length < 2) return null;
+  return {
+    question: p.question,
+    options,
+    multiple: p.multiple === true,
+    anonymous: p.anonymous === true,
+    closes_at: typeof p.closes_at === "string" ? p.closes_at : null,
+    closed_at: typeof p.closed_at === "string" ? p.closed_at : null,
+  };
+}
+
+export interface PollDraft {
+  question: string;
+  options: string[];
+  multiple: boolean;
+  anonymous: boolean;
+  closes_at: string | null;
 }
 
 /** A place sent from P Maps (a message's ``meta.place``): drawn as a card. */
@@ -275,6 +364,7 @@ export type RoomEvent =
   | { type: "message_edit"; message: Message }
   | { type: "message_delete"; room_id: string; id: string }
   | { type: "reaction"; room_id: string; message_id: string; reactions: Reaction[] }
+  | { type: "poll"; room_id: string; message_id: string; poll: PollState }
   | { type: "read"; room_id: string; seq: number }
   /** Someone else in a conversation got / read further. */
   | { type: "receipt"; room_id: string; user_id: string; read: number; delivered: number }
@@ -376,7 +466,16 @@ export const roomsApi = {
   },
   async send(
     roomId: string,
-    body: { body: string; reply_to_id?: string | null; attachment_ids?: string[]; client_id?: string; place?: SharedPlace | null; gif?: LibraryGif | null },
+    body: {
+      body: string;
+      reply_to_id?: string | null;
+      attachment_ids?: string[];
+      client_id?: string;
+      place?: SharedPlace | null;
+      gif?: LibraryGif | null;
+      voice?: VoiceSend | null;
+      poll?: PollDraft | null;
+    },
   ): Promise<Message> {
     const { data } = await apiClient.post<Message>(`/rooms/rooms/${roomId}/messages`, body);
     return data;
@@ -402,6 +501,15 @@ export const roomsApi = {
   /** "Remind me": a task in your own Tasks that links back to the message. */
   async remind(messageId: string, when: RemindWhen): Promise<{ title: string; due: string | null; time: string | null; href: string }> {
     const { data } = await apiClient.post(`/rooms/messages/${messageId}/remind`, { when });
+    return data;
+  },
+  /** Vote, change your vote, or (with none) take it back. */
+  async votePoll(messageId: string, options: string[]): Promise<PollState> {
+    const { data } = await apiClient.put<{ poll: PollState }>(`/rooms/messages/${messageId}/poll/vote`, { options });
+    return data.poll;
+  },
+  async closePoll(messageId: string): Promise<Message> {
+    const { data } = await apiClient.post<Message>(`/rooms/messages/${messageId}/poll/close`);
     return data;
   },
   async pins(roomId: string): Promise<Message[]> {

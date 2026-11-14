@@ -20,8 +20,9 @@ from app.background import spawn
 from app.database import get_db
 from app.files.storage import absolute_path
 
-from . import core, media, receipts, service
+from . import core, features, media, polls, receipts, service
 from . import settings as rooms_settings
+from . import voice as voices
 from .media_router import GifIn, gif_for_message
 from .media_router import router as media_router
 from .models import Room, RoomAttachment, RoomMember, RoomMessage, RoomReaction, RoomSpace, RoomSpaceMember
@@ -141,6 +142,9 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
             "gif_search": await rooms_settings.gif_search(db),
             "link_previews": (await rooms_settings.load(db))["link_previews"],
         },
+        # What the admin has on for everyone: voice messages (and how long
+        # one may be) and polls.
+        "features": (await features.load(db)).out(),
     }
 
 
@@ -547,7 +551,7 @@ async def list_messages(
     more_after = last is not None and last < room.last_seq
     if not rows and after is not None:
         more_after = False
-    return {"messages": await core.messages_out(db, rows), "has_more_before": bool(more_before), "has_more_after": bool(more_after)}
+    return {"messages": await core.messages_out(db, rows, user.id), "has_more_before": bool(more_before), "has_more_after": bool(more_after)}
 
 
 class PlaceIn(BaseModel):
@@ -561,6 +565,24 @@ class PlaceIn(BaseModel):
     lon: float = Field(ge=-180, le=180)
 
 
+class VoiceIn(BaseModel):
+    """A voice message: the recording (already uploaded as an attachment),
+    how long the phone says it is, and the levels it measured (the waveform,
+    until the server has read the audio itself)."""
+
+    attachment_id: uuid.UUID
+    duration_ms: int = Field(ge=0, le=4 * 3600 * 1000)
+    peaks: list[float] = Field(default_factory=list, max_length=400)
+
+
+class PollIn(BaseModel):
+    question: str = Field(min_length=1, max_length=polls.MAX_QUESTION)
+    options: list[str] = Field(min_length=polls.MIN_OPTIONS, max_length=polls.MAX_OPTIONS * 2)
+    multiple: bool = False
+    anonymous: bool = False
+    closes_at: datetime | None = None
+
+
 class MessageIn(BaseModel):
     body: str = Field(default="", max_length=core.MAX_BODY)
     reply_to_id: uuid.UUID | None = None
@@ -569,6 +591,8 @@ class MessageIn(BaseModel):
     place: PlaceIn | None = None
     # A GIF from the GIF library (a reference; see ``media.clean_gif``).
     gif: GifIn | None = None
+    voice: VoiceIn | None = None
+    poll: PollIn | None = None
 
 
 @router.post("/rooms/{room_id}/messages", status_code=201)
@@ -591,9 +615,31 @@ async def send(room_id: uuid.UUID, body: MessageIn, db: AsyncSession = Depends(g
             )
         ).scalar_one_or_none()
         if already is not None:
-            return await core.message_out(db, already)
-    gif = await gif_for_message(db, body.gif)
-    msg = await service.post_message(db, room, user, body.body, reply_to_id=body.reply_to_id, attachment_ids=body.attachment_ids, client_id=body.client_id, place=body.place.model_dump() if body.place else None, gif=gif)
+            return await core.message_out(db, already, user.id)
+    poll = voice = gif = None
+    if body.poll is not None:
+        if not (await features.load(db)).polls:
+            raise core.forbidden("Polls are turned off on this server")
+        if room.kind == "voice":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Polls go in a text room")
+        poll = polls.make(body.poll.question, body.poll.options, multiple=body.poll.multiple, anonymous=body.poll.anonymous, closes_at=body.poll.closes_at)
+    elif body.voice is not None:
+        voice = await voices.prepare(db, room, user.id, body.voice.attachment_id, body.voice.duration_ms, body.voice.peaks)
+    else:
+        gif = await gif_for_message(db, body.gif)
+    msg = await service.post_message(
+        db,
+        room,
+        user,
+        body.body,
+        reply_to_id=body.reply_to_id,
+        attachment_ids=body.attachment_ids,
+        client_id=body.client_id,
+        place=body.place.model_dump() if body.place else None,
+        gif=gif,
+        voice=voice,
+        poll=poll,
+    )
     return await _sent(db, room, user, msg)
 
 
@@ -613,7 +659,11 @@ async def _sent(db: AsyncSession, room: Room, user: User, msg: RoomMessage) -> d
                 u = await db.get(User, uid)
                 if u is not None:
                     await core.publish([uid], {"type": "room", "room": await core.room_out(db, room, u)})
-    spawn(fan_out(msg.id), name=f"rooms-push-{msg.id}")
+    if voices.of(msg) is not None:
+        # Its playback copy and its words; the push waits a moment for them.
+        spawn(voices.after_send(msg.id), name=f"rooms-voice-{msg.id}")
+    else:
+        spawn(fan_out(msg.id), name=f"rooms-push-{msg.id}")
     # Writing in it is reading it: the others see you've seen theirs, and its
     # notification comes off your phone.
     await receipts.after_read(db, room, me, msg.seq)
@@ -674,6 +724,8 @@ async def edit_message(message_id: uuid.UUID, body: MessagePatch, db: AsyncSessi
     if data.get("body") is not None:
         if msg.author_id != user.id or msg.kind != "user":
             raise core.forbidden("You can only edit your own messages")
+        if voices.of(msg) is not None or polls.of(msg) is not None:
+            raise core.forbidden("A voice message or a poll can't be edited")
         text = data["body"].strip()
         if text != msg.body:
             msg.body = text
@@ -699,7 +751,7 @@ async def edit_message(message_id: uuid.UUID, body: MessagePatch, db: AsyncSessi
     if relink:
         # The link may have changed: the preview follows it (or goes).
         spawn(media.build_preview(msg.id), name=f"rooms-preview-{msg.id}")
-    return out
+    return await core.message_out(db, msg, user.id) if "poll" in out else out
 
 
 @router.delete("/messages/{message_id}", status_code=204)
@@ -737,7 +789,7 @@ async def restore_message(message_id: uuid.UUID, db: AsyncSession = Depends(get_
         await db.commit()
     out = await core.message_out(db, msg)
     await core.publish(await core.member_ids(db, room), {"type": "message_edit", "message": out})
-    return out
+    return await core.message_out(db, msg, user.id) if "poll" in out else out
 
 
 class ReactionIn(BaseModel):
@@ -803,7 +855,52 @@ async def pins(room_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: Use
             .limit(100)
         )
     ).scalars().all()
-    return await core.messages_out(db, list(rows))
+    return await core.messages_out(db, list(rows), user.id)
+
+
+# ================================================================== polls
+
+
+class VoteIn(BaseModel):
+    # The answers you're ticking; none takes your vote back.
+    options: list[str] = Field(default_factory=list, max_length=polls.MAX_OPTIONS)
+
+
+async def _poll_event(db: AsyncSession, msg: RoomMessage, room: Room, user: User) -> dict:
+    """Tell the room the new count (never whose vote it was, in an anonymous
+    poll), and hand the caller the same with their own vote."""
+    await core.publish(
+        await core.member_ids(db, room),
+        {"type": "poll", "room_id": str(room.id), "message_id": str(msg.id), "poll": await polls.state(db, msg)},
+    )
+    return {"poll": await polls.state(db, msg, user.id)}
+
+
+@router.put("/messages/{message_id}/poll/vote")
+async def poll_vote(message_id: uuid.UUID, body: VoteIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Vote, change your vote, or take it back. One vote each, kept on the
+    server; anyone in the room can."""
+    msg, room, _sm = await _load_message(db, message_id, user)
+    # One vote at a time per poll, so two quick taps can't both count.
+    msg = (await db.execute(select(RoomMessage).where(RoomMessage.id == msg.id).with_for_update().execution_options(populate_existing=True))).scalar_one()
+    await polls.vote(db, msg, user.id, body.options)
+    await db.commit()
+    return await _poll_event(db, msg, room, user)
+
+
+@router.post("/messages/{message_id}/poll/close")
+async def poll_close(message_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Close a poll now: whoever asked it, or an admin of the space."""
+    msg, room, sm = await _load_message(db, message_id, user)
+    if polls.of(msg) is None or msg.deleted_at is not None:
+        raise core.not_found("Poll")
+    if msg.author_id != user.id and not core.is_admin(sm):
+        raise core.forbidden("Only the person who asked can close this poll")
+    msg = (await db.execute(select(RoomMessage).where(RoomMessage.id == msg.id).with_for_update().execution_options(populate_existing=True))).scalar_one()
+    if polls.close(msg):
+        await db.commit()
+        await core.publish(await core.member_ids(db, room), {"type": "message_edit", "message": await core.message_out(db, msg)})
+    return await core.message_out(db, msg, user.id)
 
 
 class ReadIn(BaseModel):
@@ -867,8 +964,9 @@ _INLINE = ("image/", "video/", "audio/")
 
 
 @router.get("/attachments/{att_id}")
-async def get_attachment(att_id: uuid.UUID, exp: int, sig: str, thumb: int = 0, db: AsyncSession = Depends(get_db)) -> FileResponse:
-    """Signed (for ``<img src>``), no bearer: the signature is the credential."""
+async def get_attachment(att_id: uuid.UUID, exp: int, sig: str, thumb: int = 0, play: int = 0, db: AsyncSession = Depends(get_db)) -> FileResponse:
+    """Signed (for ``<img src>``), no bearer: the signature is the credential.
+    ``play=1``: a voice message's playback copy, when there is one."""
     if not core.verify_attachment_sig(att_id, exp, sig):
         raise core.not_found("File")
     att = await db.get(RoomAttachment, att_id)
@@ -884,6 +982,10 @@ async def get_attachment(att_id: uuid.UUID, exp: int, sig: str, thumb: int = 0, 
     if not path.exists():
         raise core.not_found("File")
     mime = "image/webp" if want_thumb else att.mime
+    if play and not want_thumb:
+        copy = absolute_path(voices.play_path(att))
+        if copy.exists():
+            path, mime = copy, "audio/mp4"
     inline = (mime.startswith(_INLINE) and mime != "image/svg+xml") or mime == "application/pdf"
     headers = {
         "X-Content-Type-Options": "nosniff",
@@ -921,7 +1023,7 @@ async def search(q: str = Query(..., min_length=1, max_length=200), room_id: uui
             select(RoomMessage).where(cond, RoomMessage.deleted_at.is_(None), RoomMessage.kind != "system").order_by(RoomMessage.created_at.desc()).limit(50)
         )
     ).scalars().all()
-    return [{"message": m, "room_id": m["room_id"]} for m in await core.messages_out(db, list(rows))]
+    return [{"message": m, "room_id": m["room_id"]} for m in await core.messages_out(db, list(rows), user.id)]
 
 
 # ================================================================== live
