@@ -1,12 +1,14 @@
-"""Rooms: delivered ticks, muting for a while, and two server settings.
+"""Rooms: delivered ticks and muting for a while.
 
 ``room_members.delivered_seq``: how far a conversation's messages are known
 to have reached one of that person's devices (``app/rooms/receipts.py``).
 ``room_members.muted_until`` / ``room_space_members.muted_until``: "mute for
 an hour / 8 hours / until tomorrow" on a room or a whole space.
-``app_settings.rooms_read_receipts``: Sent / Delivered / Seen in
-conversations, for the server (on). ``app_settings.rooms_default_notify``:
-the level a person starts with in a space they join ("all").
+
+The two server-wide switches that go with these (read receipts on or off, the
+level a person starts a space with) are Admin → Rooms settings
+(``app/rooms/settings.py``, in ``app_settings.rooms_settings`` from 0460), not
+columns.
 
 Revision ID: 0470_rooms_receipts
 """
