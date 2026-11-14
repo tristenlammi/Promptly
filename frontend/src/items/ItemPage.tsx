@@ -142,9 +142,16 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabsReady]);
 
-  // On desktop "Ask" isn't a tab — fall back to the first one.
+  // Arrived by a link that asks for the assistant (the widget's "Log food"):
+  // the box is ready to type in.
+  const [cameToAsk] = useState(() => tabParam === "ask");
+
+  // On desktop "Ask" isn't a tab — open the side panel, and fall back to the first tab.
   useEffect(() => {
-    if (!isPhone && tab === "ask" && tabs[0]) setTabState(tabs[0].id);
+    if (!isPhone && tab === "ask" && tabs[0]) {
+      setTabState(tabs[0].id);
+      setAiOpen(true);
+    }
   }, [isPhone, tab, tabs]);
 
   const toggleAi = (open: boolean) => {
@@ -407,6 +414,7 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
               pendingPrompt={pending}
               onPendingTaken={() => setPending(null)}
               variant="tab"
+              focusOnOpen={cameToAsk}
               // During first-run setup there's no tab bar to get back with.
               onClose={onboarding ? () => setTab(tabs[0]?.id ?? "ask") : undefined}
             />
@@ -427,6 +435,7 @@ function ItemShell({ doc, module, standalone }: { doc: ItemDoc<any>; module: Ite
               onPendingTaken={() => setPending(null)}
               onClose={() => toggleAi(false)}
               variant="side"
+              focusOnOpen={cameToAsk}
             />
           </aside>
         )}

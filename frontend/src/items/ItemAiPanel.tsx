@@ -10,11 +10,52 @@ import { NO_MODEL_MESSAGE, useEditorModel } from "@/lib/editorModel";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
-import { itemsApi, type AiTurn, type ItemSpecInfo } from "./api";
+import { itemsApi, type AiEvent, type AiTurn, type ItemSpecInfo } from "./api";
 import type { ItemHandle } from "./useItem";
 
 const MAX_ATTACHED = 5;
 const ATTACHED_ONLY = "Here's a file for this.";
+
+const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+const newTurnId = () => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+
+/** An answer's last "Sources: …" block, apart from the answer: web addresses
+ *  are worth keeping but not worth half a phone screen. */
+function splitSources(text: string): [string, string | null] {
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i > 0; i--) {
+    const m = /^\s*(?:\*\*|__)?sources?(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.*)$/i.exec(lines[i]);
+    if (m) {
+      const sources = [m[1], ...lines.slice(i + 1)].join("\n").trim();
+      return sources ? [lines.slice(0, i).join("\n").trimEnd(), sources] : [text, null];
+    }
+  }
+  return [text, null];
+}
+
+const PROSE =
+  "prose prose-sm max-w-none text-[var(--text)] dark:prose-invert prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5 prose-headings:mb-1 prose-headings:mt-3 prose-table:text-xs [overflow-wrap:anywhere] prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-a:break-all";
+
+function Answer({ content }: { content: string }) {
+  const [body, sources] = splitSources(content);
+  return (
+    <>
+      <div className={PROSE}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+      </div>
+      {sources && (
+        <details className="text-xs text-[var(--text-muted)]">
+          <summary className="inline-flex min-h-7 cursor-pointer select-none items-center">Sources</summary>
+          <div className={cn(PROSE, "text-xs text-[var(--text-muted)]")}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _node, ...p }) => <a {...p} target="_blank" rel="noopener noreferrer" /> }}>
+              {sources}
+            </ReactMarkdown>
+          </div>
+        </details>
+      )}
+    </>
+  );
+}
 
 /**
  * The assistant inside an item: ask it to do things *in* the app ("plan my
@@ -30,6 +71,7 @@ export function ItemAiPanel({
   onPendingTaken,
   onClose,
   variant,
+  focusOnOpen,
 }: {
   item: ItemHandle<any>;
   spec: ItemSpecInfo;
@@ -37,6 +79,8 @@ export function ItemAiPanel({
   onPendingTaken?: () => void;
   onClose?: () => void;
   variant: "side" | "tab";
+  /** Arrived to type something (the widget's "Log food"): put the cursor in the box. */
+  focusOnOpen?: boolean;
 }) {
   // An item opened straight from a link hasn't been to Chat, where the
   // model list is usually loaded.
@@ -45,7 +89,10 @@ export function ItemAiPanel({
   const { data: saved, isLoading } = useQuery({
     queryKey: ["item-thread", item.fileId],
     queryFn: () => itemsApi.thread(item.fileId),
-    staleTime: 60_000,
+    // Always asked again on opening: a turn may have finished, or still be
+    // running, since this panel was last on screen.
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const [turns, setTurns] = useState<AiTurn[]>([]);
   const [draft, setDraft] = useState("");
@@ -84,16 +131,146 @@ export function ItemAiPanel({
     }
   }, []);
 
+  const busyNow = useRef(false);
+  const fileId = item.fileId;
+  // The handle is a new object on every change to the file; a turn in flight
+  // talks to the newest one.
+  const itemNow = useRef(item);
+  itemNow.current = item;
+  const alive = useRef(true);
   useEffect(() => {
-    if (saved) {
-      setTurns(saved);
-      setUndone(new Set(saved.filter((t) => t.undone && t.version_id).map((t) => t.version_id!)));
-    }
-  }, [saved]);
+    alive.current = true;
+    return () => {
+      // Leaving the panel stops the reading, never the turn: it finishes on
+      // the server and is here when the panel opens again.
+      alive.current = false;
+      abort.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (focusOnOpen) window.setTimeout(() => input.current?.focus(), 150);
+    // Once, on opening.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight, behavior: "smooth" });
   }, [turns, busy, status]);
+
+  /** One turn on screen, from sending it (or finding it already running) to
+   *  its end. The turn itself runs on the server whatever happens to this
+   *  connection, so a stream that stops is picked up again, and a turn that
+   *  finished while nobody was reading is shown from the saved thread. Every
+   *  path ends with an answer or a plain error with "Try again". */
+  const run = useCallback(
+    async (message: string, shown: string, cid: string, start: (signal: AbortSignal) => AsyncGenerator<AiEvent>) => {
+      busyNow.current = true;
+      setBusy(true);
+      setStatus(null);
+      const ctrl = new AbortController();
+      abort.current = ctrl;
+      setTurns((t) => {
+        // A failed try being sent again goes, question and all.
+        const failed = new Set(t.filter((x) => x.retry && x.cid).map((x) => x.cid));
+        return [...t.filter((x) => !(x.cid && failed.has(x.cid))), { role: "user", content: shown, cid }, { role: "assistant", content: "", actions: [], cid }];
+      });
+      const patch = (fn: (r: AiTurn) => void) =>
+        setTurns((t) => {
+          const copy = t.slice();
+          const last = { ...copy[copy.length - 1], actions: [...(copy[copy.length - 1].actions ?? [])] };
+          fn(last);
+          copy[copy.length - 1] = last;
+          return copy;
+        });
+      const fail = (text: string, again: boolean) =>
+        patch((r) => {
+          r.content = (r.content ? r.content + "\n\n" : "") + `⚠️ ${text}`;
+          if (again) r.retry = message;
+        });
+      const take = async (events: AsyncGenerator<AiEvent>): Promise<"ended" | "lost" | "busy"> => {
+        for await (const ev of events) {
+          if (ev.type === "text") {
+            setStatus(null);
+            patch((r) => (r.content += ev.text));
+          } else if (ev.type === "action") {
+            setStatus(null);
+            patch((r) => r.actions!.push({ name: ev.name, summary: ev.summary, ok: ev.ok }));
+          } else if (ev.type === "status") {
+            setStatus(ev.text);
+          } else if (ev.type === "done") {
+            if (ev.changed && ev.data) itemNow.current.accept(ev.data, ev.revision);
+            patch((r) => (r.version_id = ev.version_id));
+            return "ended";
+          } else if (ev.type === "error") {
+            fail(ev.message, !!ev.retry);
+            return "ended";
+          } else if (ev.type === "busy") {
+            return "busy";
+          } else if (ev.type === "lost") {
+            return "lost";
+          }
+        }
+        return "lost";
+      };
+      try {
+        let state = await take(start(ctrl.signal));
+        for (let tries = 0; state !== "ended"; tries++) {
+          setStatus(state === "busy" ? "Finishing your last message…" : "Reconnecting…");
+          if (tries > 60) {
+            fail("The assistant couldn't be reached. Check your connection.", true);
+            break;
+          }
+          if (tries) await wait(Math.min(6000, 1000 * tries));
+          if (ctrl.signal.aborted) return;
+          let now: Awaited<ReturnType<typeof itemsApi.thread>>;
+          try {
+            now = await itemsApi.thread(fileId);
+          } catch {
+            state = "lost";
+            continue;
+          }
+          if (now.running) {
+            if (now.running.client_id && now.running.client_id !== cid) {
+              // Another message of yours (another device, an earlier tap) is still going.
+              state = "busy";
+              continue;
+            }
+            // Ours, still going: follow it again from its first event.
+            patch((r) => {
+              r.content = "";
+              r.actions = [];
+            });
+            state = await take(itemsApi.followTurn(fileId, ctrl.signal));
+            continue;
+          }
+          if (now.turns.some((t) => t.cid === cid)) {
+            // It finished while nobody was reading.
+            setTurns(now.turns);
+            setUndone(new Set(now.turns.filter((t) => t.undone && t.version_id).map((t) => t.version_id!)));
+            void itemNow.current.refresh();
+            break;
+          }
+          if (state === "busy") {
+            // The earlier turn is over and ours never started: send it now.
+            state = await take(start(ctrl.signal));
+            continue;
+          }
+          fail("The connection dropped before the assistant finished. Nothing was changed.", true);
+          break;
+        }
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") fail("The assistant couldn't be reached.", true);
+      } finally {
+        busyNow.current = false;
+        if (alive.current) {
+          setBusy(false);
+          setStatus(null);
+        }
+        if (abort.current === ctrl) abort.current = null;
+      }
+    },
+    [fileId],
+  );
 
   const send = useCallback(
     async (text: string) => {
@@ -104,56 +281,36 @@ export function ItemAiPanel({
         return;
       }
       setDraft("");
-      setBusy(true);
-      setStatus(null);
-      const ctrl = new AbortController();
-      abort.current = ctrl;
-      const reply: AiTurn = { role: "assistant", content: "", actions: [] };
       const sending = attached;
       setAttached([]);
       const shown = sending.length ? `${message}\n\n[Attached: ${sending.map((a) => a.name).join(", ")}]` : message;
-      setTurns((t) => [...t, { role: "user", content: shown }, reply]);
-      const patch = (fn: (r: AiTurn) => void) =>
-        setTurns((t) => {
-          const copy = t.slice();
-          const last = { ...copy[copy.length - 1], actions: [...(copy[copy.length - 1].actions ?? [])] };
-          fn(last);
-          copy[copy.length - 1] = last;
-          return copy;
-        });
-      try {
-        for await (const ev of itemsApi.ask(
+      const cid = newTurnId();
+      await run(message, shown, cid, (signal) =>
+        itemsApi.ask(
           item.fileId,
-          { message, provider_id: providerId, model_id: modelId, attachment_ids: sending.map((a) => a.id) },
-          ctrl.signal,
-        )) {
-          if (ev.type === "text") {
-            setStatus(null);
-            patch((r) => (r.content += ev.text));
-          } else if (ev.type === "action") {
-            setStatus(null);
-            patch((r) => r.actions!.push({ name: ev.name, summary: ev.summary, ok: ev.ok }));
-          } else if (ev.type === "status") {
-            setStatus(ev.text);
-          } else if (ev.type === "done") {
-            if (ev.changed && ev.data) item.accept(ev.data, ev.revision);
-            patch((r) => (r.version_id = ev.version_id));
-          } else if (ev.type === "error") {
-            patch((r) => (r.content = (r.content ? r.content + "\n\n" : "") + `⚠️ ${ev.message}`));
-          }
-        }
-      } catch (e) {
-        if ((e as Error).name !== "AbortError") {
-          patch((r) => (r.content = (r.content ? r.content + "\n\n" : "") + "⚠️ The assistant couldn't be reached."));
-        }
-      } finally {
-        setBusy(false);
-        setStatus(null);
-        abort.current = null;
-      }
+          { message, provider_id: providerId, model_id: modelId, attachment_ids: sending.map((a) => a.id), client_id: cid },
+          signal,
+        ),
+      );
     },
-    [attached, busy, item, modelId, models.isLoading, providerId],
+    [attached, busy, item, modelId, models.isLoading, providerId, run],
   );
+
+  // The saved thread, and a turn still running from before this panel opened
+  // (the phone slept, another tab was looked at): carry on showing it.
+  useEffect(() => {
+    if (!saved || busyNow.current) return;
+    // A try that failed here isn't in the saved thread: keep it, with its "Try again".
+    setTurns((t) => {
+      const failed = new Set(t.filter((x) => x.retry && x.cid).map((x) => x.cid));
+      return [...saved.turns, ...t.filter((x) => x.cid && failed.has(x.cid))];
+    });
+    setUndone(new Set(saved.turns.filter((t) => t.undone && t.version_id).map((t) => t.version_id!)));
+    const going = saved.running;
+    if (going) {
+      void run(going.message, going.message, going.client_id ?? newTurnId(), (signal) => itemsApi.followTurn(fileId, signal));
+    }
+  }, [saved, run, fileId]);
 
   // A prompt from elsewhere in the item ("Ask AI to plan this week").
   useEffect(() => {
@@ -185,7 +342,12 @@ export function ItemAiPanel({
 
   const clear = async () => {
     if (busy) return;
-    await itemsApi.clearThread(item.fileId).catch(() => undefined);
+    try {
+      await itemsApi.clearThread(item.fileId);
+    } catch {
+      toast.error("Couldn't start a new conversation just now.");
+      return;
+    }
     setTurns([]);
     setUndone(new Set());
   };
@@ -285,9 +447,7 @@ export function ItemAiPanel({
                   </ul>
                 )}
                 {t.content ? (
-                  <div className="prose prose-sm max-w-none text-[var(--text)] dark:prose-invert prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5 prose-headings:mb-1 prose-headings:mt-3 prose-table:text-xs [overflow-wrap:anywhere] prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-a:break-all">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{t.content}</ReactMarkdown>
-                  </div>
+                  <Answer content={t.content} />
                 ) : busy && i === turns.length - 1 ? (
                   <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -300,6 +460,17 @@ export function ItemAiPanel({
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     {status}
                     {since}
+                  </div>
+                )}
+                {t.retry && !busy && i === turns.length - 1 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => void send(t.retry!)}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs font-medium text-[var(--text)] hover:border-[var(--item-accent)]"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" /> Try again
+                    </button>
                   </div>
                 )}
                 {t.version_id && item.canEdit && (
@@ -407,7 +578,12 @@ export function ItemAiPanel({
           {busy ? (
             <button
               type="button"
-              onClick={() => abort.current?.abort()}
+              onClick={() => {
+                // Stops the turn on the server; its "Stopped" comes back down
+                // the stream. With no stream to hear it, stop reading too.
+                setStatus("Stopping…");
+                void itemsApi.stopTurn(item.fileId).catch(() => abort.current?.abort());
+              }}
               aria-label="Stop"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-2)] text-[var(--text)]"
             >

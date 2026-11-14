@@ -11,16 +11,25 @@ the newer state (actions are deterministic), never blindly overwritten.
 ``GET`` returns the thread (kept per person, per file, in ``item_state``);
 ``DELETE`` clears it.
 
+A turn runs on its own, not inside the request that started it: a phone
+that locks, a tab that sleeps or a proxy that drops the stream doesn't lose
+the work. ``GET …/ai`` says whether one is ``running``; ``GET …/ai/live``
+follows it from the start; ``POST …/ai/stop`` stops it. One turn at a time
+per person per file (a second ``POST`` gets 409). The stream sends a
+``: keep-alive`` comment every few seconds, so a quiet model isn't mistaken
+for a dead connection.
+
 Events (``data: {json}``):
   ``{"type": "text", "text"}``            answer text, as it streams
   ``{"type": "action", "name", "summary", "ok"}``   a tool it ran
   ``{"type": "status", "text"}``          "Searching the web…"
   ``{"type": "done", "changed", "revision", "version_id", "data"?}``
-  ``{"type": "error", "message"}``
+  ``{"type": "error", "message", "retry"?}``   ``retry``: nothing was changed, ask again
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import logging
@@ -51,6 +60,13 @@ MAX_TOOL_RESULT_CHARS = 16_000
 THREAD_TURNS = 40  # kept
 HISTORY_TURNS = 12  # sent to the model
 TURN_TIMEOUT_S = 240.0
+# The model-and-tools part of a turn (what's left of the timeout saves the changes).
+TURN_BUDGET_S = 200.0
+# A model stream that sends nothing for this long has stalled.
+STREAM_IDLE_S = 75.0
+# A comment on the event stream this often, so proxies (Cloudflare drops a
+# silent response at 100 s) and the panel's own watchdog see it's alive.
+KEEPALIVE_S = 10.0
 
 GENERIC_TOOLS = (
     "read_data", "update_data", "read_other_item", "web_search", "fetch_page", "find_my_files", "read_my_file",
@@ -371,7 +387,13 @@ async def get_thread(file_id: uuid.UUID, db: AsyncSession = Depends(get_db), use
         await service.load(db, user, file_id)
     except service.ItemNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
-    return {"turns": await load_thread(db, file_id, user)}
+    live = _LIVE.get((file_id, user.id))
+    running = (
+        {"message": live.message, "started": live.started, "client_id": live.client_id}
+        if live is not None and not live.done
+        else None
+    )
+    return {"turns": await load_thread(db, file_id, user), "running": running}
 
 
 @router.delete("/{file_id}/ai")
@@ -380,6 +402,8 @@ async def clear_thread(file_id: uuid.UUID, db: AsyncSession = Depends(get_db), u
         await service.load(db, user, file_id)
     except service.ItemNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    if _running(file_id, user.id) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Still working on your last message.")
     await service.set_state(db, file_id, _thread_key(user), None)
     await db.commit()
     return {"ok": True}
@@ -393,6 +417,9 @@ class AskItem(BaseModel):
     provider_id: uuid.UUID | None = None
     model_id: str | None = Field(default=None, max_length=300)
     attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
+    # The panel's own id for this turn: kept on the thread's two rows, so a
+    # panel that lost the stream can tell "my turn finished" from "it never ran".
+    client_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 def _sse(event: dict) -> str:
@@ -456,24 +483,174 @@ async def ask(
     # Unknown or someone else's files fail here, before anything starts.
     attachment_ids = [f.id for f in await resolve_attachments(db, payload.attachment_ids, user)]
     user_id = user.id
+    key = (file_id, user_id)
     await db.commit()
+    # The stream outlives this request's session (reference_sse_db_pool).
+    await db.close()
+    # No await between this check and taking the slot.
+    if _running(file_id, user_id) is not None:
+        # A second tap, a retry while the first is still going, or another
+        # device: never two turns at once (that's how a meal gets logged twice).
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Still working on your last message.")
+    live = _Live(payload.message, payload.client_id)
+    _LIVE[key] = live
 
-    async def gen() -> AsyncIterator[str]:
-        async with SessionLocal() as s:
-            u = await s.get(User, user_id)
-            try:
-                async with asyncio.timeout(TURN_TIMEOUT_S):
-                    async for ev in run_turn(s, u, file_id, payload.message, provider, model_id, can_edit=access == "edit", attachment_ids=attachment_ids):
-                        yield _sse(ev)
-            except TimeoutError:
-                yield _sse({"type": "error", "message": "That took too long — try a smaller ask."})
-            except Exception:  # noqa: BLE001
-                logger.exception("item AI turn failed for %s", file_id)
-                yield _sse({"type": "error", "message": "Something went wrong — nothing was changed."})
+    async def drive() -> None:
+        try:
+            async with SessionLocal() as s:
+                u = await s.get(User, user_id)
+                try:
+                    async with asyncio.timeout(TURN_TIMEOUT_S):
+                        async for ev in run_turn(
+                            s, u, file_id, payload.message, provider, model_id,
+                            can_edit=access == "edit", attachment_ids=attachment_ids, client_id=payload.client_id,
+                        ):
+                            await live.add(ev)
+                except TimeoutError:
+                    await live.add({"type": "error", "message": "That took too long. Nothing was changed — try again, or ask for less at once.", "retry": True})
+                except asyncio.CancelledError:
+                    await live.add({"type": "error", "message": "Stopped. Nothing was changed."})
+                except Exception:  # noqa: BLE001
+                    logger.exception("item AI turn failed for %s", file_id)
+                    await live.add({"type": "error", "message": "Something went wrong. Nothing was changed — try again.", "retry": True})
+        finally:
+            await live.finish()
+            if _LIVE.get(key) is live:
+                _LIVE.pop(key, None)
 
+    from app.background import spawn
+
+    live.task = spawn(drive(), name=f"item-ai-{file_id}")
+    if live.task is None:  # pragma: no cover — no loop: can't happen in a request
+        _LIVE.pop(key, None)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The assistant isn't available right now.")
+    return _stream(live)
+
+
+def _stream(live: "_Live") -> StreamingResponse:
     return StreamingResponse(
-        gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        live.follow(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
+
+
+@router.get("/{file_id}/ai/live")
+async def follow_turn(file_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """The turn that's running for you in this file, from its first event
+    (the panel reconnecting after the connection dropped). 204 when none is."""
+    from fastapi import Response
+
+    try:
+        await service.load(db, user, file_id)
+    except service.ItemNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    live = _running(file_id, user.id)
+    await db.commit()
+    await db.close()
+    if live is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return _stream(live)
+
+
+@router.post("/{file_id}/ai/stop")
+async def stop_turn(file_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Stop your running turn. What it had changed so far isn't saved."""
+    try:
+        await service.load(db, user, file_id)
+    except service.ItemNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    live = _running(file_id, user.id)
+    if live is not None and live.task is not None:
+        live.task.cancel()
+    return {"ok": True, "stopped": live is not None}
+
+
+class _Live:
+    """A running turn: its events so far, for whoever is following it."""
+
+    def __init__(self, message: str, client_id: str | None = None) -> None:
+        self.message = message[:8000]
+        self.client_id = client_id
+        self.started = datetime.now(timezone.utc).isoformat()
+        self.events: list[dict] = []
+        self.done = False
+        self.changed = asyncio.Condition()
+        self.task: asyncio.Task | None = None
+
+    async def add(self, ev: dict) -> None:
+        async with self.changed:
+            self.events.append(ev)
+            self.changed.notify_all()
+
+    async def finish(self) -> None:
+        async with self.changed:
+            self.done = True
+            self.changed.notify_all()
+
+    async def follow(self) -> AsyncIterator[str]:
+        """Every event from the first, then the new ones as they come. Whoever
+        is following going away changes nothing for the turn."""
+        sent = 0
+        while True:
+            async with self.changed:
+                if sent >= len(self.events) and not self.done:
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(self.changed.wait(), KEEPALIVE_S)
+                batch = self.events[sent:]
+                finished = self.done
+            if not batch and not finished:
+                yield ": keep-alive\n\n"
+                continue
+            for ev in batch:
+                yield _sse(ev)
+            sent += len(batch)
+            if finished and sent >= len(self.events):
+                return
+
+
+# One uvicorn worker (see CLAUDE.md), so this process sees every running turn.
+_LIVE: dict[tuple[uuid.UUID, uuid.UUID], _Live] = {}
+
+
+def _running(file_id: uuid.UUID, user_id: uuid.UUID) -> _Live | None:
+    live = _LIVE.get((file_id, user_id))
+    return live if live is not None and not live.done else None
+
+
+def _done_note(actions_log: list[dict]) -> str:
+    """What this reply has already changed, said to the model on every later
+    step. The data in the prompt is rebuilt after each change, so without this
+    a model reads its own minute-old entry as one that "was already there",
+    and either says so or logs it again."""
+    done = [str(a["summary"]) for a in actions_log if a.get("ok") and a.get("summary")]
+    if not done:
+        return ""
+    return (
+        "\n\n[Already done in THIS reply. The data above already includes these changes: they are yours from a moment ago, "
+        "not earlier entries. Don't do them again, and don't tell the person they were \"already there\":\n"
+        + "\n".join(f"- {s[:200]}" for s in done[-12:])
+        + "]"
+    )
+
+
+async def _events(stream: Any, deadline: float) -> AsyncIterator[Any]:
+    """The model's events, giving up on a stream that goes quiet for
+    ``STREAM_IDLE_S`` or runs past the turn's budget (``TimeoutError``)."""
+    it = stream.__aiter__()
+    try:
+        while True:
+            left = deadline - asyncio.get_running_loop().time()
+            if left <= 0:
+                raise TimeoutError
+            try:
+                ev = await asyncio.wait_for(it.__anext__(), min(STREAM_IDLE_S, left))
+            except StopAsyncIteration:
+                return
+            yield ev
+    finally:
+        close = getattr(it, "aclose", None)
+        if close is not None:
+            with contextlib.suppress(Exception):
+                await close()
 
 
 async def run_turn(
@@ -486,6 +663,7 @@ async def run_turn(
     *,
     can_edit: bool,
     attachment_ids: list[uuid.UUID] | None = None,
+    client_id: str | None = None,
 ) -> AsyncIterator[dict]:
     """One AI-panel turn (also used by tests with a fake provider)."""
     from app.chat.router import _build_tool_calls_payload
@@ -519,26 +697,31 @@ async def run_turn(
 
     text_parts: list[str] = []
     sep_pending = False
+    failure: str | None = None
+    deadline = asyncio.get_running_loop().time() + TURN_BUDGET_S
     try:
         for hop in range(MAX_HOPS):
             final = hop == MAX_HOPS - 1
             if hop:
-                yield {"type": "status", "text": "Thinking…"}
-            system = build_system(spec, user, title, working, ctx)
+                yield {"type": "status", "text": "Writing it up…" if writes else "Thinking…"}
+            system = build_system(spec, user, title, working, ctx) + _done_note(actions_log)
             if final:
                 system += "\n\n[No more tool calls are available — reply now with what you did.]"
             pending: dict[int, dict[str, str]] = {}
             finish: str | None = None
             hop_text: list[str] = []
-            async for ev in model_router.stream_chat_events(
-                provider=provider,
-                model_id=model_id,
-                messages=history,
-                system=system,
-                temperature=0.4,
-                max_tokens=4096,
-                tools=None if final else tools,
-                tool_choice=None,
+            async for ev in _events(
+                model_router.stream_chat_events(
+                    provider=provider,
+                    model_id=model_id,
+                    messages=history,
+                    system=system,
+                    temperature=0.4,
+                    max_tokens=4096,
+                    tools=None if final else tools,
+                    tool_choice=None,
+                ),
+                deadline,
             ):
                 if isinstance(ev, TextDelta):
                     if ev.text:
@@ -576,7 +759,7 @@ async def run_turn(
                 except ValueError:
                     result, ok, summary = "Error: the arguments weren't valid JSON.", False, None
                 else:
-                    yield {"type": "status", "text": _doing(name)}
+                    yield {"type": "status", "text": _doing(name, args)}
                     result, ok, summary, working = await _run_tool(ctx, spec, working, name, args, writes, can_edit, attached=bool(attachment_ids))
                 if summary or not ok:
                     entry = {"name": name, "summary": summary or result[:200], "ok": ok}
@@ -584,8 +767,33 @@ async def run_turn(
                     yield {"type": "action", **entry}
                 history.append({"role": "tool", "tool_call_id": call["id"], "content": result[:MAX_TOOL_RESULT_CHARS]})
     except ProviderError as e:
-        yield {"type": "error", "message": f"The model failed: {e}"}
+        failure = f"The model failed: {e}"
+    except TimeoutError:
+        failure = "The model stopped answering."
+    if failure and not writes:
+        yield {"type": "error", "message": f"{failure} Nothing was changed — try again.", "retry": True}
         return
+
+    # What it changed is kept even when the model died before saying so: the
+    # person asked once and shouldn't have to ask (and risk logging) twice.
+    answer = "\n\n".join(p.strip() for p in text_parts if p.strip())
+    if not answer or failure:
+        did = [str(a["summary"]) for a in actions_log if a.get("ok") and a.get("summary")]
+        if not answer and not writes:
+            # Nothing said and nothing done (a model that spent its whole
+            # answer thinking): say so, rather than an empty bubble.
+            yield {"type": "error", "message": "The assistant didn't answer. Nothing was changed — try again.", "retry": True}
+            return
+        extra = ""
+        if not answer and did:
+            extra = "Done:\n" + "\n".join(f"- {s}" for s in did)
+        if failure:
+            extra += ("\n\n" if extra or answer else "") + f"({failure} What's listed above is saved.)"
+        if extra:
+            if answer:
+                yield {"type": "text", "text": "\n\n"}
+            yield {"type": "text", "text": extra.lstrip("\n")}
+            answer = (answer + "\n\n" + extra.lstrip("\n")).strip() if answer else extra
 
     # ---- commit what it changed (once), replaying on a newer state if needed
     changed = bool(writes)
@@ -609,12 +817,12 @@ async def run_turn(
             yield {"type": "error", "message": f"Couldn't save the changes: {e}"}
             changed = False
 
-    answer = "\n\n".join(p.strip() for p in text_parts if p.strip())
     now = datetime.now(timezone.utc).isoformat()
     thread = await load_thread(db, file_id, user)
-    thread.append({"role": "user", "content": said, "at": now})
+    mark = {"cid": client_id} if client_id else {}
+    thread.append({"role": "user", "content": said, "at": now, **mark})
     thread.append(
-        {"role": "assistant", "content": answer, "actions": actions_log, "version_id": version_id, "at": now}
+        {"role": "assistant", "content": answer, "actions": actions_log, "version_id": version_id, "at": now, **mark}
     )
     await service.set_state(db, file_id, _thread_key(user), thread[-THREAD_TURNS:])
     await db.commit()
@@ -697,12 +905,23 @@ _VERBS = {
 }
 
 
-def _doing(name: str) -> str:
-    """What the panel says while a tool runs — "find_transactions" → "Finding transactions…"."""
+def _doing(name: str, args: dict | None = None) -> str:
+    """What the panel says while a tool runs — "find_transactions" → "Finding
+    transactions…", and what it's looking for when the call says."""
+    args = args or {}
+    q = args.get("query")
+    if not (isinstance(q, str) and q.strip()) and isinstance(args.get("queries"), list):
+        q = ", ".join(str(x) for x in args["queries"][:3] if isinstance(x, str))
+    q = " ".join(q.split())[:60] if isinstance(q, str) and q.strip() else ""
     if name == "web_search":
-        return "Searching the web…"
+        return f"Searching the web for “{q}”…" if q else "Searching the web…"
     if name == "fetch_page":
-        return "Reading a page…"
+        from urllib.parse import urlparse
+
+        host = urlparse(str(args.get("url") or "")).hostname or ""
+        return f"Reading {host.removeprefix('www.')}…" if host else "Reading a page…"
+    if q and name.startswith(("search_", "find_")):
+        return f"Looking up “{q}”…"
     if name in ("read_data", "read_other_item", "read_my_file", "find_my_files"):
         return "Reading your data…"
     if name == "update_data":
