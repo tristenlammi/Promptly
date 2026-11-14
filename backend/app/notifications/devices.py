@@ -28,3 +28,23 @@ def endpoint_hash(endpoint: str) -> str:
     """Lets a page find its own row in the device list without the server
     handing push endpoints back (they're the address to push to)."""
     return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
+
+
+# The Android app showing notifications itself (no browser): what its row's
+# ``user_agent`` starts with. It says "Android", so it starts switched on.
+NATIVE_PREFIX = "PromptlyAndroid/"
+
+
+def native_user_agent(version: str, device: str) -> str:
+    safe = re.sub(r"[^\w .\-]", "", device)[:80]
+    v = re.sub(r"[^\w.\-]", "", version)[:20] or "0"
+    return f"{NATIVE_PREFIX}{v} (Android; {safe})"
+
+
+def is_native(user_agent: str | None) -> bool:
+    return bool(user_agent) and user_agent.startswith(NATIVE_PREFIX)
+
+
+def is_push_service(endpoint: str) -> bool:
+    """The app registers with Google's push service, the one Chrome uses."""
+    return endpoint.startswith("https://fcm.googleapis.com/")

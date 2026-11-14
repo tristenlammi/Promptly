@@ -88,6 +88,15 @@
             </intent-filter>
         </activity>
 
+        <!-- The app's own notifications (push package): what Google's push service
+             delivers comes here, decrypted, and is shown as Promptly's. -->
+        <service android:name=".push.PromptlyPushService" android:exported="false">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+            </intent-filter>
+        </service>
+        <receiver android:name=".push.PushButtonReceiver" android:exported="false" />
+
         <!-- P Maps. The web app opens these for what a web page can't do. -->
         <activity
             android:name=".maps.NavigationActivity"

@@ -224,22 +224,40 @@ async def create_subscription(
     duplicate — otherwise a user who clicks "Enable" twice ends up
     receiving every notification twice.
     """
-    p256dh = payload.keys.get("p256dh")
-    auth = payload.keys.get("auth")
+    return await _upsert_subscription(
+        db,
+        user,
+        endpoint=payload.endpoint,
+        keys=payload.keys,
+        user_agent=payload.user_agent or request.headers.get("user-agent"),
+        label=payload.label,
+    )
+
+
+async def _upsert_subscription(
+    db: AsyncSession,
+    user: User,
+    *,
+    endpoint: str,
+    keys: dict[str, str],
+    user_agent: str | None,
+    label: str | None,
+) -> SubscriptionSummary:
+    """One row per (person, endpoint): a repeat updates it in place."""
+    p256dh = keys.get("p256dh")
+    auth = keys.get("auth")
     if not p256dh or not auth:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Subscription payload is missing p256dh / auth keys.",
         )
 
-    user_agent = payload.user_agent or request.headers.get("user-agent")
-
     # Fast upsert — look first, update if found, else insert.
     existing = (
         await db.execute(
             select(PushSubscription).where(
                 PushSubscription.user_id == user.id,
-                PushSubscription.endpoint == payload.endpoint,
+                PushSubscription.endpoint == endpoint,
             )
         )
     ).scalar_one_or_none()
@@ -249,8 +267,8 @@ async def create_subscription(
         existing.auth = auth
         if user_agent:
             existing.user_agent = user_agent
-        if payload.label:
-            existing.label = payload.label
+        if label:
+            existing.label = label
         existing.last_used_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(existing)
@@ -258,11 +276,11 @@ async def create_subscription(
 
     row = PushSubscription(
         user_id=user.id,
-        endpoint=payload.endpoint,
+        endpoint=endpoint,
         p256dh=p256dh,
         auth=auth,
         user_agent=user_agent,
-        label=payload.label,
+        label=label,
         # Phones and tablets start on; a computer stays off until its
         # switch is turned on (Account → Notifications).
         enabled=starts_on(user_agent),
@@ -278,12 +296,86 @@ async def create_subscription(
             await db.execute(
                 select(PushSubscription).where(
                     PushSubscription.user_id == user.id,
-                    PushSubscription.endpoint == payload.endpoint,
+                    PushSubscription.endpoint == endpoint,
                 )
             )
         ).scalar_one()
     await db.refresh(row)
     return _summary(row)
+
+
+
+# ---------------------------------------------------------------------
+# The Android app's own notifications
+# ---------------------------------------------------------------------
+
+
+class NativeSubscribe(BaseModel):
+    """What the Android app sends once Google's push service gave it an
+    address: the same three values a browser sends, plus the phone's name
+    and the address this one replaces (Google changes them now and then)."""
+
+    endpoint: str = Field(max_length=2000)
+    keys: dict[str, str]
+    device: str = Field(default="", max_length=80)
+    version: str = Field(default="", max_length=20)
+    replaces: str | None = Field(default=None, max_length=2000)
+
+
+async def _phone_user(request: Request, db: AsyncSession) -> User:
+    """The paired phone, by its app password (every pairing has ``upload``)."""
+    from app.auth.basic import client_ip, user_from_basic
+
+    return await user_from_basic(db, request.headers.get("authorization"), scope="upload", ip=client_ip(request))
+
+
+@router.post("/native", response_model=SubscriptionSummary, status_code=status.HTTP_201_CREATED)
+async def register_native(
+    payload: NativeSubscribe,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionSummary:
+    """The Promptly Android app registers to show notifications itself
+    (its name, its icon, no browser in between). It is a push subscription
+    like any other: same encryption, same device switch."""
+    from app.notifications import devices
+
+    user = await _phone_user(request, db)
+    if not devices.is_push_service(payload.endpoint):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That isn't a push service address.")
+    if payload.replaces and payload.replaces != payload.endpoint:
+        await db.execute(
+            delete(PushSubscription).where(
+                PushSubscription.user_id == user.id, PushSubscription.endpoint == payload.replaces
+            )
+        )
+    name = payload.device.strip() or "Android phone"
+    return await _upsert_subscription(
+        db,
+        user,
+        endpoint=payload.endpoint,
+        keys=payload.keys,
+        user_agent=devices.native_user_agent(payload.version, name),
+        label=name,
+    )
+
+
+class NativeGone(BaseModel):
+    endpoint: str = Field(max_length=2000)
+
+
+@router.post("/native/gone", status_code=status.HTTP_204_NO_CONTENT)
+async def unregister_native(
+    payload: NativeGone,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    user = await _phone_user(request, db)
+    await db.execute(
+        delete(PushSubscription).where(PushSubscription.user_id == user.id, PushSubscription.endpoint == payload.endpoint)
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/subscriptions/{sub_id}", response_model=SubscriptionSummary)

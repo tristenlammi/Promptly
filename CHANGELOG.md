@@ -23,6 +23,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 
+- Android app: notifications are shown by the Promptly app itself, with its name and icon, in place of Chrome's. A linked phone registers with Google's push service using your server's own key and receives the same encrypted pushes a browser does; nothing new to set up on the server, and no Google project. Reply and Mark as read work from the notification, and each kind (messages, reminders, mail…) has its own Android channel.
 - Today: someone sharing their trip with you shows under "Needs you" and on the Getting there card ("Sam arrives in 12 min"). When they arrive, never where they are.
 - Today: a trip or stay on your calendar is called out a day or two before it starts ("Nelly starts tomorrow · 2 nights"), and email waiting for a reply is under "Needs you" with who it's from.
 - Today: an event with a place has a Directions button on the schedule, and Coming up includes your next planned workouts.

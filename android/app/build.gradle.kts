@@ -146,6 +146,15 @@ tasks.matching { it.name == "connectedServerDebugAndroidTest" || it.name == "con
     dependsOn(":pwtestapp:installPlainDebug", ":pwtestapp:installBrowserDebug")
 }
 
+// The push library's encryption (Tink) comes as the desktop build, which brings the
+// full protobuf and clashes with the lite one already here (LiveKit). Tink's Android
+// build is the same code on protobuf-lite; the library's own docs say to swap it.
+configurations.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("com.google.crypto.tink:tink")).using(module("com.google.crypto.tink:tink-android:1.23.0"))
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
@@ -159,6 +168,12 @@ dependencies {
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation(project(":suite"))
+
+    // The app's own notifications (push package): the server's Web Push, received
+    // through Google's push service without a Firebase project. UnifiedPush's
+    // connector (decrypts) and its embedded FCM distributor; both Apache-2.0.
+    implementation("org.unifiedpush.android:connector:3.3.5")
+    implementation("org.unifiedpush.android:embedded-fcm-distributor:3.1.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     // Passwords: see passwords/ANDROID_NOTES.md. BouncyCastle for X25519, Ed25519,
