@@ -13,6 +13,7 @@ import { BOOTSTRAP_KEY, updateBootstrap } from "../cache";
 import { SPACE_COLORS } from "../format";
 import { askInSheet } from "./ConfirmSheet";
 import { PeoplePicker } from "./PeoplePicker";
+import { SpaceEmojiTab } from "./SpaceEmojiTab";
 import { NotifyControl, SpaceIcon, UserAvatar } from "./ui";
 
 const SPACE_EMOJI = ["", "🏠", "👨‍👩‍👧", "🍻", "🎮", "⚽", "🎵", "📚", "💼", "✈️", "🍕", "🐶", "🌱", "🎉", "❤️", "⭐"];
@@ -165,7 +166,7 @@ export function SpaceSettingsSheet({
   const qc = useQueryClient();
   const navigate = useNavigate();
   const isAdmin = space.role === "owner" || space.role === "admin";
-  const [tab, setTab] = useState<"general" | "members">("general");
+  const [tab, setTab] = useState<"general" | "members" | "emoji">("general");
   const [name, setName] = useState(space.name);
   const [emoji, setEmoji] = useState(space.emoji ?? "");
   const [color, setColor] = useState(space.color ?? SPACE_COLORS[0]);
@@ -251,9 +252,12 @@ export function SpaceSettingsSheet({
           options={[
             { value: "general", label: "General" },
             { value: "members", label: `Members (${space.member_ids.length})` },
+            { value: "emoji", label: "Emoji" },
           ]}
         />
-        {tab === "general" ? (
+        {tab === "emoji" ? (
+          <SpaceEmojiTab space={space} />
+        ) : tab === "general" ? (
           <>
             {isAdmin ? (
               <>

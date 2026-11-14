@@ -20,7 +20,10 @@ from app.background import spawn
 from app.database import get_db
 from app.files.storage import absolute_path
 
-from . import core, service
+from . import core, media, service
+from . import settings as rooms_settings
+from .media_router import GifIn, gif_for_message
+from .media_router import router as media_router
 from .models import Room, RoomAttachment, RoomMember, RoomMessage, RoomReaction, RoomSpace, RoomSpaceMember
 from .push import fan_out
 
@@ -70,6 +73,7 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
     for r in room_json:
         for uid in r.get("members", []):
             people.add(uuid.UUID(uid))
+    emojis = await media.emojis_for(db, space_ids)
     out_spaces = []
     for m in sorted(mine, key=lambda x: x.joined_at):
         s = spaces.get(m.space_id)
@@ -86,6 +90,8 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
                 "member_ids": members_by_space.get(s.id, []),
                 "member_roles": roles_by_space.get(s.id, {}),
                 "rooms": [by_id[str(r.id)] for r in rooms if r.space_id == s.id],
+                # The space's own emoji (``:name:`` in messages and reactions).
+                "emojis": emojis.get(s.id, []),
             }
         )
     # Voice channels (Calls): who's in each right now, and where you are.
@@ -121,6 +127,13 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
         "calls": calls_live,
         # The Calls tab's badge: missed calls you haven't seen (Calls WP-D4).
         "calls_missed": await calls_dm.missed_count(db, user.id) if voice_on else 0,
+        # GIF search (None: off, the picker shows saved GIFs only) and
+        # whether links get previews. See ``settings.gif_search`` for why
+        # the page is given the library's key.
+        "media": {
+            "gif_search": await rooms_settings.gif_search(db),
+            "link_previews": (await rooms_settings.load(db))["link_previews"],
+        },
     }
 
 
@@ -220,6 +233,7 @@ async def delete_space(space_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
     await db.commit()
     for rid in room_ids:
         service.remove_room_files(rid)
+    media.remove_space_emoji_files(space_id)
     await core.publish(members, {"type": "space_delete", "space_id": str(space_id)})
 
 
@@ -546,6 +560,8 @@ class MessageIn(BaseModel):
     attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=service.MAX_ATTACHMENTS)
     client_id: str | None = Field(default=None, max_length=64)
     place: PlaceIn | None = None
+    # A GIF from the GIF library (a reference; see ``media.clean_gif``).
+    gif: GifIn | None = None
 
 
 @router.post("/rooms/{room_id}/messages", status_code=201)
@@ -569,7 +585,8 @@ async def send(room_id: uuid.UUID, body: MessageIn, db: AsyncSession = Depends(g
         ).scalar_one_or_none()
         if already is not None:
             return await core.message_out(db, already)
-    msg = await service.post_message(db, room, user, body.body, reply_to_id=body.reply_to_id, attachment_ids=body.attachment_ids, client_id=body.client_id, place=body.place.model_dump() if body.place else None)
+    gif = await gif_for_message(db, body.gif)
+    msg = await service.post_message(db, room, user, body.body, reply_to_id=body.reply_to_id, attachment_ids=body.attachment_ids, client_id=body.client_id, place=body.place.model_dump() if body.place else None, gif=gif)
     return await _sent(db, room, user, msg)
 
 
@@ -590,6 +607,8 @@ async def _sent(db: AsyncSession, room: Room, user: User, msg: RoomMessage) -> d
                 if u is not None:
                     await core.publish([uid], {"type": "room", "room": await core.room_out(db, room, u)})
     spawn(fan_out(msg.id), name=f"rooms-push-{msg.id}")
+    if media.wants_preview(msg):
+        spawn(media.build_preview(msg.id), name=f"rooms-preview-{msg.id}")
     if "promptly" in (msg.mentions or []):
         from .promptly import answer
 
@@ -640,6 +659,7 @@ async def edit_message(message_id: uuid.UUID, body: MessagePatch, db: AsyncSessi
     if msg.deleted_at is not None:
         raise core.not_found("Message")
     data = body.model_dump(exclude_unset=True)
+    relink = False
     if data.get("body") is not None:
         if msg.author_id != user.id or msg.kind != "user":
             raise core.forbidden("You can only edit your own messages")
@@ -649,6 +669,9 @@ async def edit_message(message_id: uuid.UUID, body: MessagePatch, db: AsyncSessi
             if isinstance((msg.meta or {}).get("place"), dict):
                 # A place card whose words you've now written yourself.
                 msg.meta = {**msg.meta, "place": {**msg.meta["place"], "has_note": True}}
+            if isinstance((msg.meta or {}).get("gif"), dict):
+                msg.meta = {**msg.meta, "gif": {**msg.meta["gif"], "has_note": True}}
+            relink = True
             msg.mentions = await core.parse_mentions(db, text, await core.member_ids(db, room))
             msg.edited_at = _now()
             from app.links.service import sync_text
@@ -662,6 +685,9 @@ async def edit_message(message_id: uuid.UUID, body: MessagePatch, db: AsyncSessi
     await db.commit()
     out = await core.message_out(db, msg)
     await core.publish(await core.member_ids(db, room), {"type": "message_edit", "message": out})
+    if relink:
+        # The link may have changed: the preview follows it (or goes).
+        spawn(media.build_preview(msg.id), name=f"rooms-preview-{msg.id}")
     return out
 
 
@@ -730,6 +756,7 @@ async def react(message_id: uuid.UUID, body: ReactionIn, db: AsyncSession = Depe
     if msg.deleted_at is not None:
         raise core.not_found("Message")
     emoji = body.emoji.strip()
+    await media.check_reaction(db, room, emoji)
     if await db.get(RoomReaction, (msg.id, user.id, emoji)) is None:
         kinds = (await db.execute(select(func.count(func.distinct(RoomReaction.emoji))).where(RoomReaction.message_id == msg.id))).scalar() or 0
         known = (await db.execute(select(RoomReaction).where(RoomReaction.message_id == msg.id, RoomReaction.emoji == emoji).limit(1))).first()
@@ -922,3 +949,7 @@ async def _stream(user_id: uuid.UUID, request: Request) -> AsyncGenerator[str, N
             await closer()
         except Exception:  # noqa: BLE001
             pass
+
+
+# Saved GIFs, custom emoji and link-preview pictures (``media_router.py``).
+router.include_router(media_router)

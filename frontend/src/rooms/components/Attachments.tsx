@@ -6,14 +6,18 @@ import type { Attachment } from "@/api/rooms";
 import { cn } from "@/utils/cn";
 
 import { fileSize } from "../format";
+import { AnimatedAttachment, isAnimated } from "./GifViews";
 
 export function isImage(a: Pick<Attachment, "mime">) {
   return a.mime.startsWith("image/");
 }
 
-export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
+export function AttachmentList({ attachments, saveable }: { attachments: Attachment[]; /** GIFs get a "Save" button (sent messages only). */ saveable?: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
-  const images = attachments.filter(isImage);
+  const all = attachments.filter(isImage);
+  // GIFs play on their own, one each; stills share the grid.
+  const moving = all.filter(isAnimated);
+  const images = all.filter((a) => !isAnimated(a));
   const files = attachments.filter((a) => !isImage(a));
   if (!attachments.length) return null;
   return (
@@ -25,11 +29,11 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
             images.length === 1 ? "grid-cols-1" : images.length === 2 || images.length === 4 ? "grid-cols-2" : "grid-cols-3",
           )}
         >
-          {images.map((a, i) => (
+          {images.map((a) => (
             <button
               key={a.id}
               type="button"
-              onClick={() => setOpen(i)}
+              onClick={() => setOpen(all.indexOf(a))}
               aria-label={`Open ${a.filename}`}
               className="group relative block overflow-hidden bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               style={
@@ -48,6 +52,9 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
           ))}
         </div>
       )}
+      {moving.map((a) => (
+        <AnimatedAttachment key={a.id} a={a} saveable={saveable} onOpen={() => setOpen(all.indexOf(a))} />
+      ))}
       {files.map((a) => (
         <a
           key={a.id}
@@ -65,7 +72,7 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
           <Download className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
         </a>
       ))}
-      {open !== null && <Lightbox images={images} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
+      {open !== null && <Lightbox images={all} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
     </div>
   );
 }

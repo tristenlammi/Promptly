@@ -51,6 +51,13 @@ class AppSettings(Base):
     smtp_password_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     # P Maps' live traffic key (TomTom), Fernet-encrypted. NULL: no traffic.
     maps_traffic_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Rooms' server-wide switches (``app/rooms/settings.py``): one JSON
+    # object, so a new switch is a new key and needs no migration.
+    rooms_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    # The GIF library's key (GIPHY or KLIPY), Fernet-encrypted. NULL: none.
+    rooms_gif_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     smtp_use_tls: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )

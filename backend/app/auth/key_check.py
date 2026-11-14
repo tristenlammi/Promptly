@@ -38,6 +38,7 @@ def _columns():
         # Also moved onto a new key at boot, so a rotation after a leak
         # doesn't leave these readable only with the old one.
         (AppSettings, "maps_traffic_key_encrypted"),
+        (AppSettings, "rooms_gif_key_encrypted"),
         (MailAccount, "secret_encrypted"),
         (UserSecret, "value_encrypted"),
         (BreachConfig, "api_key_encrypted"),

@@ -5,9 +5,11 @@ import remarkGfm from "remark-gfm";
 
 import { addressPattern } from "@/lib/addresses";
 
+import { markCustomEmoji, useCustomEmoji } from "../customEmoji";
+
 const REMARK = [remarkGfm];
 
-const urlTransform = (url: string) => (url.startsWith("mention:") ? url : defaultUrlTransform(url));
+const urlTransform = (url: string) => (url.startsWith("mention:") || url.startsWith("emoji:") ? url : defaultUrlTransform(url));
 
 /** Addresses become links that open the place in Maps. Code, links already
  *  written and web addresses are left exactly as they are. */
@@ -37,6 +39,8 @@ export const MessageBody = memo(function MessageBody({
   usernames: string[];
   me: string | undefined;
 }) {
+  // The space's own emoji: ``:name:`` drawn as its picture.
+  const { byName } = useCustomEmoji();
   const source = useMemo(() => {
     const names = [...usernames, "promptly", "everyone", "here"].filter(Boolean).sort((a, b) => b.length - a.length);
     let text = body;
@@ -48,8 +52,8 @@ export const MessageBody = memo(function MessageBody({
         .map((part, i) => (i % 2 === 1 ? part : part.replace(re, (_m, pre: string, name: string) => `${pre}[@${name}](mention:${name})`)))
         .join("");
     }
-    return linkAddresses(text);
-  }, [body, usernames]);
+    return markCustomEmoji(linkAddresses(text), byName);
+  }, [body, usernames, byName]);
 
   const components = useMemo<Components>(
     () => ({
@@ -108,13 +112,22 @@ export const MessageBody = memo(function MessageBody({
       h1: ({ children }) => <p className="my-1 text-lg font-bold">{children}</p>,
       h2: ({ children }) => <p className="my-1 text-base font-bold">{children}</p>,
       h3: ({ children }) => <p className="my-1 font-semibold">{children}</p>,
-      img: ({ src, alt }) => (
+      img: ({ src, alt }) =>
+        typeof src === "string" && src.startsWith("emoji:") && byName[src.slice(6)] ? (
+          <img
+            src={byName[src.slice(6)].url}
+            alt={alt ?? ""}
+            title={alt ?? ""}
+            draggable={false}
+            className="inline-block h-[1.4em] w-[1.4em] object-contain align-[-0.3em]"
+          />
+        ) : (
         <a href={src} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-text)] underline">
           {alt || src}
         </a>
-      ),
+        ),
     }),
-    [me],
+    [me, byName],
   );
 
   return (

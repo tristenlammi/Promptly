@@ -1,13 +1,15 @@
-import { AlarmClock, CalendarPlus, Copy, CornerUpLeft, Pencil, Pin, Plus, Trash2 } from "lucide-react";
+import { AlarmClock, Bookmark, CalendarPlus, Copy, CornerUpLeft, Link2Off, Pencil, Pin, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState, type ComponentType } from "react";
 
-import { REMIND_CHOICES, type Message } from "@/api/rooms";
+import { REMIND_CHOICES, gifOf, previewOf, type Message } from "@/api/rooms";
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
 import { copyText, deleteMessage, remindMe, togglePin, toggleReaction } from "../actions";
 import { QUICK_REACTIONS } from "../emoji";
 import { plainSnippet } from "../format";
+import { isAnimated, saveGif } from "./GifViews";
+import { removePreview } from "./LinkPreviewCard";
 import { EmojiGrid } from "./ui";
 
 /** Long-press a message on a phone: react, reply, edit, pin, copy, delete. */
@@ -37,6 +39,9 @@ export function MessageActionSheet({
   }, [m?.id]);
   if (!m) return null;
   const own = m.kind === "user" && m.author_id === meId;
+  // A GIF on it that can be kept: one from the library, or one someone attached.
+  const libraryGif = gifOf(m);
+  const ownGif = m.attachments.find((a) => a.mime.startsWith("image/") && isAnimated(a));
   const act = (fn: () => void) => () => {
     onClose();
     fn();
@@ -82,9 +87,13 @@ export function MessageActionSheet({
           </div>
           <div className="flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
             <Row icon={CornerUpLeft} label="Reply" onClick={act(() => onReply(m))} />
-            {own && typeof m.meta?.event_id !== "string" && !m.meta?.event_reminder && (!m.meta?.share || (m.meta.share as { has_note?: boolean }).has_note) && <Row icon={Pencil} label="Edit" onClick={act(() => onEdit(m))} />}
+            {own && typeof m.meta?.event_id !== "string" && !m.meta?.event_reminder && (!m.meta?.share || (m.meta.share as { has_note?: boolean }).has_note) && (!libraryGif || libraryGif.has_note) && <Row icon={Pencil} label="Edit" onClick={act(() => onEdit(m))} />}
             <Row icon={Pin} label={m.pinned ? "Unpin" : "Pin"} onClick={act(() => void togglePin(m))} />
             {m.body && <Row icon={Copy} label="Copy text" onClick={act(() => void copyText(m))} />}
+            {(libraryGif || ownGif) && (
+              <Row icon={Bookmark} label="Save GIF" onClick={act(() => void saveGif(libraryGif ? { gif: libraryGif } : { attachment_id: ownGif!.id }))} />
+            )}
+            {own && previewOf(m) && <Row icon={Link2Off} label="Remove link preview" onClick={act(() => void removePreview(m.id))} />}
             {onPlanEvent && m.kind === "user" && m.body && <Row icon={CalendarPlus} label="Plan an event" onClick={act(() => onPlanEvent(m))} />}
             {m.kind !== "system" && <Row icon={AlarmClock} label="Remind me" onClick={() => setRemind((v) => !v)} />}
             {remind && (

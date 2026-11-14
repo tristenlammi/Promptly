@@ -1,3 +1,4 @@
+import { CustomEmojiProvider } from "../customEmoji";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Ban, CalendarDays, Hash, MoreVertical, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -189,6 +190,7 @@ export function RoomView({
   // A voice channel: the stage, with its text chat beside it (Calls).
   if (room.kind === "voice" && space) {
     return (
+      <CustomEmojiProvider space={space}>
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <VoiceChannelView
           b={b}
@@ -220,6 +222,7 @@ export function RoomView({
                 onEdit={onEdit}
                 users={b.users}
                 onPlanEvent={() => setPlanning(true)}
+          gifSearch={b.media?.gif_search ?? null}
               />
             </section>
           }
@@ -236,6 +239,7 @@ export function RoomView({
           onPlanEvent={planFrom}
         />
       </div>
+      </CustomEmojiProvider>
     );
   }
 
@@ -275,6 +279,7 @@ export function RoomView({
   );
 
   return (
+    <CustomEmojiProvider space={space}>
     <div
       className="relative flex min-h-0 min-w-0 flex-1"
       onDragOver={(e) => {
@@ -416,6 +421,7 @@ export function RoomView({
           onEdit={onEdit}
           users={b.users}
           onPlanEvent={() => setPlanning(true)}
+          gifSearch={b.media?.gif_search ?? null}
           attachment={attachment}
           onClearAttachment={clearAttachment}
         />
@@ -468,6 +474,7 @@ export function RoomView({
         </div>
       )}
     </div>
+    </CustomEmojiProvider>
   );
 }
 

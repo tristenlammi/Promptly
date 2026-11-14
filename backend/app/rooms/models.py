@@ -112,3 +112,41 @@ class RoomAttachment(UUIDPKMixin, CreatedAtMixin, Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     has_thumb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # A GIF or animated WebP: played in the chat, not shown as a still.
+    animated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+
+class RoomSavedGif(UUIDPKMixin, CreatedAtMixin, Base):
+    """A GIF someone saved to send again. ``source`` "own": their own copy
+    of the file, at ``rooms/saved/<user_id>/<id>`` (it outlives the message
+    it came from, and leaving that room). "provider": a reference to one in
+    the GIF library (``data``: what a message's ``meta.gif`` holds); the
+    library's terms don't allow keeping a copy."""
+
+    __tablename__ = "room_saved_gifs"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(8), nullable=False, default="own", server_default="own")
+    filename: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    mime: Mapped[str] = mapped_column(String(127), nullable=False, default="image/gif", server_default="image/gif")
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+
+
+class RoomEmoji(UUIDPKMixin, CreatedAtMixin, Base):
+    """A space's own emoji, written ``:name:`` in messages and reactions
+    there. The image is at ``rooms/emoji/<space_id>/<id>``."""
+
+    __tablename__ = "room_emojis"
+    __table_args__ = (UniqueConstraint("space_id", "name", name="uq_room_emojis_space_name"),)
+
+    space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("room_spaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(30), nullable=False)
+    mime: Mapped[str] = mapped_column(String(127), nullable=False, default="image/png", server_default="image/png")
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    animated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

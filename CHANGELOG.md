@@ -21,6 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Rooms: GIFs play in the conversation. Paste or attach a GIF (or an animated WebP) and it loops in place; tap to open it. If your device asks for less motion, or the file is over 8 MB, it waits as a still with a GIF badge until you tap it.
+- Rooms: save a GIF to send again. The bookmark on a GIF (long-press → Save GIF on a phone) keeps your own copy on this server; the new GIF button by the message box (in the + menu on a phone) shows your saved GIFs and sends one in a tap. Works in conversations and in a space's rooms.
+- Rooms: GIF search, if an admin turns it on (Admin → Rooms) and enters a GIPHY or KLIPY key. Both libraries only allow searches and GIFs to go straight from each person's device to them, with no copies kept by the app, so that is how it works: the library sees the device's internet address and the words searched, not who you are or this server's address. Off by default; your own and saved GIFs need none of it.
+- Rooms: a link gets a preview card with the page's name, a line about it and a picture. This server fetches the page once and keeps its own small copy of the picture, so nobody's device contacts the site unless they tap the link. The sender can take the card off (the × on it, or long-press → Remove link preview). Links into this Promptly, and messages that are already a place or other card, get none. An admin can turn previews off.
+- Rooms: a space can have its own emoji. Its owner and admins add a picture with a name (Space settings → Emoji); everyone in the space types `:name:` or picks it from the emoji button, in messages and as reactions.
+- Admin → Rooms: one place for the server-wide Rooms settings (GIF search and its key, link previews, emoji limits), with pointers to Calls and Storage and the fixed limits listed.
+
 ## [0.41.0] - 2026-11-15
 
 ### Added

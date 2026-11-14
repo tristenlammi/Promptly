@@ -157,9 +157,29 @@ def verify_attachment_sig(att_id: uuid.UUID, exp: int, sig: str) -> bool:
     return exp >= int(time.time()) and hmac.compare_digest(_sig(att_id, exp), sig or "")
 
 
+def signed_exp() -> int:
+    """Rounded expiry: the same URL for a while, so the browser can cache it."""
+    return (int(time.time()) // 3600 + 1) * 3600 + ATTACHMENT_TTL
+
+
+def sign(kind: str, obj_id: uuid.UUID | str, exp: int) -> str:
+    """The signature on a Rooms media link (saved GIFs, emoji, link-preview
+    pictures): ``<img src>`` can't send a bearer, so the link is the pass."""
+    msg = f"{kind}:{obj_id}:{exp}".encode()
+    return hmac.new(get_settings().SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
+
+
+def verify(kind: str, obj_id: uuid.UUID | str, exp: int, sig: str) -> bool:
+    return exp >= int(time.time()) and hmac.compare_digest(sign(kind, obj_id, exp), sig or "")
+
+
+def signed_url(kind: str, obj_id: uuid.UUID | str, path: str) -> str:
+    exp = signed_exp()
+    return f"{path}?exp={exp}&sig={sign(kind, obj_id, exp)}"
+
+
 def attachment_out(a: RoomAttachment) -> dict:
-    # Rounded expiry: the same URL for a while, so the browser can cache it.
-    exp = (int(time.time()) // 3600 + 1) * 3600 + ATTACHMENT_TTL
+    exp = signed_exp()
     base = f"/api/rooms/attachments/{a.id}?exp={exp}&sig={_sig(a.id, exp)}"
     return {
         "id": str(a.id),
@@ -170,10 +190,23 @@ def attachment_out(a: RoomAttachment) -> dict:
         "height": a.height,
         "url": base,
         "thumb_url": f"{base}&thumb=1" if a.has_thumb else None,
+        # A GIF or animated WebP: the chat plays ``url`` in place.
+        "animated": bool(a.animated),
     }
 
 
 # ------------------------------------------------------------------ messages
+
+
+def _meta_out(m: RoomMessage) -> dict:
+    """A message's ``meta`` as sent to pages: a link preview's picture gets
+    its signed address (the file is served by this server, never the site)."""
+    meta = m.meta or {}
+    p = meta.get("preview")
+    if isinstance(p, dict) and p.get("image"):
+        url = signed_url("roomprev", m.id, f"/api/rooms/previews/{m.id}/image")
+        meta = {**meta, "preview": {**p, "image_url": f"{url}&v={p.get('v', 0)}"}}
+    return meta
 
 
 def _snippet(m: RoomMessage) -> str:
@@ -219,7 +252,7 @@ async def messages_out(db: AsyncSession, msgs: list[RoomMessage]) -> list[dict]:
                 "edited_at": m.edited_at.isoformat() if m.edited_at else None,
                 "deleted": deleted,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
-                "meta": {} if deleted else (m.meta or {}),
+                "meta": {} if deleted else _meta_out(m),
             }
         )
     return out
