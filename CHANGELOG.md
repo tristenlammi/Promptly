@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- P Maps driving (phone and car, next Promptly for Android): the arrow that shows where you are is a quarter bigger.
+
 ## [0.41.0] - 2026-11-15
 
 ### Added

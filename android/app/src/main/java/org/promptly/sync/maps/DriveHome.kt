@@ -842,7 +842,7 @@ internal fun Puck(at: Pair<Double, Double>?, bearing: Float) {
     SymbolLayer(
         id = "promptly-puck",
         source = source,
-        iconImage = image(value = painterResource(R.drawable.ic_map_puck), size = DpSize(56.dp, 56.dp), drawAsSdf = false),
+        iconImage = image(value = painterResource(R.drawable.ic_map_puck), size = DpSize(70.dp, 70.dp), drawAsSdf = false),
         iconAnchor = const(SymbolAnchor.Center),
         iconRotate = feature["bearing"].asNumber(const(0f)),
         iconPitchAlignment = const(IconPitchAlignment.Map),
