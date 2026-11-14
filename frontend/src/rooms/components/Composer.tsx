@@ -3,7 +3,7 @@ import { AtSign, CalendarPlus, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, S
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { crossApi, type ShareKind } from "@/api/crossapp";
-import { roomsApi, type Attachment, type Message, type RoomUser } from "@/api/rooms";
+import { roomsApi, type Attachment, type Message, type RoomUser, type SharedPlace } from "@/api/rooms";
 import { useThingMentions } from "@/components/links/useThingMentions";
 import { Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -17,6 +17,7 @@ import { SHARE_ICONS } from "./ShareCard";
 import { EmojiGrid, Popover, UserAvatar } from "./ui";
 import { clearDraft, getDraft, setDraft } from "../drafts";
 import { takeIncomingShare, useIncomingShare } from "../incomingShare";
+import { AttachedPlace } from "./PlaceCard";
 
 const MAX_FILE = 50 * 1024 * 1024;
 
@@ -76,6 +77,8 @@ export const Composer = forwardRef<
   const emojiBtn = useRef<HTMLButtonElement>(null);
   const [text, setText] = useState(() => getDraft(meId, roomId));
   const [uploads, setUploads] = useState<Upload[]>([]);
+  // A place from P Maps waiting to go with the next message (its card).
+  const [place, setPlace] = useState<SharedPlace | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const plusBtn = useRef<HTMLButtonElement>(null);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -92,6 +95,7 @@ export const Composer = forwardRef<
   useEffect(() => {
     if (prevRoom.current !== roomId) {
       setText(getDraft(meId, roomId));
+      setPlace(null);
       setUploads((u) => {
         u.forEach((x) => {
           x.abort.abort();
@@ -177,6 +181,7 @@ export const Composer = forwardRef<
     const got = takeIncomingShare(roomId);
     if (!got) return;
     if (got.files.length) addFiles(got.files);
+    if (got.place) setPlace(got.place);
     if (got.text) setText((cur) => (cur.trim() ? `${cur.replace(/\s+$/, "")}\n${got.text}` : got.text));
     ta.current?.focus();
   }, [incoming, roomId, editing, addFiles]);
@@ -245,7 +250,8 @@ export const Composer = forwardRef<
   const uploading = uploads.some((u) => !u.att && !u.error);
   const ready = uploads.filter((u) => u.att).map((u) => u.att!);
   const attached = !editing && attachment ? attachment : null;
-  const canSend = !uploading && (text.trim().length > 0 || (!editing && ready.length > 0) || !!attached);
+  const withPlace = !editing && !attached ? place : null;
+  const canSend = !uploading && (text.trim().length > 0 || (!editing && ready.length > 0) || !!attached || !!withPlace);
   const [sharing, setSharing] = useState(false);
 
   const submit = async () => {
@@ -291,7 +297,8 @@ export const Composer = forwardRef<
     const reply = replyTo?.id ?? null;
     onCancelReply();
     lastTyping.current = 0;
-    void sendMessage(qc, roomId, { body, reply_to_id: reply, attachments: ready });
+    setPlace(null);
+    void sendMessage(qc, roomId, { body, reply_to_id: reply, attachments: ready, place: withPlace });
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -438,6 +445,7 @@ export const Composer = forwardRef<
       )}
 
       {attached && <AttachedShare attachment={attached} onRemove={() => onClearAttachment?.()} />}
+      {withPlace && <AttachedPlace place={withPlace} onRemove={() => setPlace(null)} />}
 
       {uploads.length > 0 && (
         <div className="mb-1.5 flex gap-2 overflow-x-auto pb-1">
@@ -518,7 +526,7 @@ export const Composer = forwardRef<
             thingMention.onSelect();
           }}
           onPaste={onPaste}
-          placeholder={editing ? "Edit your message" : attached ? "Add a message (optional)" : placeholder}
+          placeholder={editing ? "Edit your message" : attached || withPlace ? "Add a message (optional)" : placeholder}
           aria-label={editing ? "Edit message" : attached ? "Message to send with it" : placeholder}
           enterKeyHint={isPhone ? "enter" : "send"}
           className="max-h-[40vh] min-h-[44px] flex-1 resize-none bg-transparent px-1 py-[11px] text-base leading-[22px] text-[var(--text)] !outline-none placeholder:text-[var(--text-muted)] md:min-h-[40px] md:py-[9px] md:text-sm"

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Hash, Image as ImageIcon, Loader2, MessagesSquare, Search } from "lucide-react";
+import { FileText, Hash, Image as ImageIcon, Loader2, MapPin, MessagesSquare, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -64,7 +64,9 @@ export function ShareInSheet({ share, b }: { share: IncomingShare; b: Bootstrap 
   const photos = share.files.filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/")).length;
   const what =
     n === 0
-      ? "What you shared"
+      ? share.place
+        ? share.place.name
+        : "What you shared"
       : photos === n
         ? n === 1
           ? "1 photo or video"
@@ -76,10 +78,10 @@ export function ShareInSheet({ share, b }: { share: IncomingShare; b: Bootstrap 
   return (
     <Sheet open onClose={dropIncomingShare} title="Send to…">
       <p className="mb-3 flex items-center gap-2 text-sm text-[var(--text-muted)]">
-        {n > 0 && photos === n ? <ImageIcon className="h-4 w-4 shrink-0" /> : <FileText className="h-4 w-4 shrink-0" />}
+        {n > 0 && photos === n ? <ImageIcon className="h-4 w-4 shrink-0" /> : n === 0 && share.place ? <MapPin className="h-4 w-4 shrink-0" /> : <FileText className="h-4 w-4 shrink-0" />}
         <span className="min-w-0 truncate">
           <span className="font-medium text-[var(--text)]">{what}</span>
-          {share.text && n > 0 ? " and a message" : share.text && n === 0 ? `: ${share.text.slice(0, 80)}` : ""}
+          {share.text && (n > 0 || share.place) ? " and a message" : share.text ? `: ${share.text.slice(0, 80)}` : ""}
         </span>
       </p>
       <label className="relative mb-3 block">

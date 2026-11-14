@@ -7,7 +7,7 @@ import {
   Home, Layers, List, Loader2, LocateFixed, LocateOff, MapPin, Minus, MoreHorizontal, Navigation, ParkingCircle, Plus, Route as RouteIcon, Search, Share2, Smartphone, SunMoon, TrafficCone, Trash2, User, Users, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
@@ -21,6 +21,8 @@ import { useKeyboardInset } from "@/components/files/documents/useKeyboardInset"
 import { NEARBY, mapsApi, decodeShape, formatDuration, formatKm, routeSeconds, trafficLine, type Charger, type Mode, type PlaceMore, type PreferredRoute, type Route, type SavedPlace, type SearchResult, type Spot } from "./api";
 import { MAP_THEMES, saveMapTheme, savedMapTheme, useMapColours, type MapTheme } from "./daylight";
 import { mapsPinLink, mapsRouteLink } from "./links";
+import { ShareWaysSheet } from "@/components/share/ShareWaysSheet";
+import { sendInRooms } from "@/rooms/incomingShare";
 import { MapView, placeLook, type MapViewHandle } from "./MapView";
 import type { PinHold } from "./pinView";
 import { OFFLINE_KEY, OfflinePanel, saveRouteForOffline, useOffline } from "./Offline";
@@ -243,13 +245,21 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
   }, [raise]);
 
   // Another app sent you here: /maps?to=lat,lon,name (and /maps?q=text, above).
+  // With &go=1 it's directions there straight away (a place card's "Directions").
+  const directionsToLatest = useRef<((s: Spot) => void) | null>(null);
   useEffect(() => {
     const to = params.get("to");
     if (!to) return;
+    const go = params.get("go") === "1";
     const [lat, lon, ...name] = to.split(",");
     const spot = { lat: Number(lat), lon: Number(lon), name: name.join(",") || "Dropped pin" };
     setParams({}, { replace: true });
-    if (Number.isFinite(spot.lat) && Number.isFinite(spot.lon)) window.setTimeout(() => showPlace({ kind: "place", ...spot }), 800);
+    if (Number.isFinite(spot.lat) && Number.isFinite(spot.lon)) {
+      window.setTimeout(() => {
+        showPlace({ kind: "place", ...spot });
+        if (go) directionsToLatest.current?.(spot);
+      }, 800);
+    }
     // Only the link you arrived with.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -346,6 +356,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     setAddingStop(!you && !canFind);
     changeStops(rows);
   };
+  directionsToLatest.current = directionsTo;
 
   /** A stop from the search or the map. With one stop so far, it's where from,
    *  unless that one is already the start ("Directions from here"). */
@@ -1436,6 +1447,8 @@ function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, o
 }) {
   const [picking, setPicking] = useState<"save" | "list" | null>(null);
   const [more, setMore] = useState(false);
+  const [shareWays, setShareWays] = useState(false);
+  const navigate = useNavigate();
   const title = already?.name ?? place.name;
   const away = you ? distanceKm(you, place) : null;
   const share = async () => {
@@ -1480,7 +1493,15 @@ function PlacePanel({ place, isHome, isWork, already, you, onRemove, onEdited, o
         ) : (
           <SaveButton icon={Bookmark} on={picking === "save"} onClick={() => setPicking(picking === "save" ? null : "save")}>Save</SaveButton>
         )}
-        <SaveButton icon={Share2} onClick={() => void share()}>Share</SaveButton>
+        <SaveButton icon={Share2} onClick={() => setShareWays(true)}>Share</SaveButton>
+        <ShareWaysSheet
+          open={shareWays}
+          onClose={() => setShareWays(false)}
+          title="Share this place"
+          what={title}
+          onRooms={() => sendInRooms(navigate, { place: { name: title, address: place.address ?? already?.address ?? null, lat: place.lat, lon: place.lon } })}
+          onOther={() => void share()}
+        />
         <button
           type="button"
           onClick={() => setMore((v) => !v)}
@@ -1884,6 +1905,8 @@ function RoutePanel(p: {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [showSteps, setShowSteps] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
+  const [shareWays, setShareWays] = useState(false);
+  const navigate = useNavigate();
   const route = p.routes[p.selected];
   const avoiding = Object.values(p.avoid).filter(Boolean).length;
   const android = isAndroidDevice();
@@ -1892,10 +1915,21 @@ function RoutePanel(p: {
   const arriving = (r: Route) => new Date(Date.now() + routeSeconds(r) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   // "On my way": the words and a link to the place, through the phone's own share
   // sheet (a message, P Rooms, anything), or copied where there isn't one.
+  const arrivalWords = () => {
+    const to = p.stops[p.stops.length - 1];
+    return route && to ? `On my way to ${to.name}. I should get there about ${arriving(route)}.` : null;
+  };
+  // The same words into a Rooms conversation, with the place as a card.
+  const arrivalInRooms = () => {
+    const to = p.stops[p.stops.length - 1];
+    const text = arrivalWords();
+    if (!to || !text) return;
+    sendInRooms(navigate, { text, place: { name: to.name, address: to.address ?? null, lat: to.lat, lon: to.lon } });
+  };
   const shareArrival = async () => {
     const to = p.stops[p.stops.length - 1];
-    if (!route || !to) return;
-    const text = `On my way to ${to.name}. I should get there about ${arriving(route)}.`;
+    const text = arrivalWords();
+    if (!route || !to || !text) return;
     const url = `${window.location.origin}${mapsPinLink(to.lat, to.lon, to.name)}`;
     if (typeof navigator.share === "function") {
       try {
@@ -2098,7 +2132,15 @@ function RoutePanel(p: {
                 <span className="sm:hidden">Offline</span>
               </button>
             )}
-            <button type="button" onClick={() => void shareArrival()} aria-label="Tell someone when you'll arrive" title="Tell someone when you'll arrive" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
+            <ShareWaysSheet
+              open={shareWays}
+              onClose={() => setShareWays(false)}
+              title="Tell someone when you'll arrive"
+              what={arrivalWords()}
+              onRooms={arrivalInRooms}
+              onOther={() => void shareArrival()}
+            />
+            <button type="button" onClick={() => setShareWays(true)} aria-label="Tell someone when you'll arrive" title="Tell someone when you'll arrive" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
               <Share2 className="h-4 w-4" />
             </button>
             <button type="button" onClick={() => setShowSteps((v) => !v)} aria-expanded={showSteps} className="inline-flex h-10 items-center gap-1 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">

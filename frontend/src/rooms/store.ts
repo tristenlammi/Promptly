@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Attachment, Message } from "@/api/rooms";
+import type { Attachment, Message, SharedPlace } from "@/api/rooms";
 
 /**
  * Client state for Rooms that isn't a plain server read:
@@ -33,6 +33,8 @@ export interface PendingMessage {
   body: string;
   reply_to_id: string | null;
   attachments: Attachment[];
+  /** A place from P Maps going with it (its card). */
+  place?: SharedPlace | null;
   status: "sending" | "failed";
   created_at: string;
 }

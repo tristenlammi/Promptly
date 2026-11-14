@@ -23,6 +23,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 
+- Rooms: a message that hasn't gone yet (still sending, or it failed) is kept on your device. Reload the page or close the app and it's back under the conversation, and it sends by itself; a message that had in fact arrived isn't posted twice. Kept per person and cleared when you sign out, along with what you'd typed but not sent.
+- Rooms: a place sent from P Maps shows as a card: a small picture of the map with a pin, the name and address, and Directions and Open in P Maps. The picture is drawn from your own server's map; nothing goes to an outside map service.
+- P Maps: Share on a place, and "Tell someone when you'll arrive" on a trip, now ask how: Send in Rooms (pick a conversation; the place goes as a card, and the trip as "On my way to… I should get there about…" with the place), or share another way as before. Nothing is sent until you press Send in the conversation.
+- Mail: Share on an email offers Send in Rooms: pick a conversation and the subject, who it's from and a short piece of it wait there as a draft to trim and send. The link back to the email opens only for you. Sharing another way works as before.
+- P Maps: a link can ask for directions straight away (`/maps?to=…&go=1`), which is what a place card's Directions button uses.
+
 - Today: someone sharing their trip with you shows under "Needs you" and on the Getting there card ("Sam arrives in 12 min"). When they arrive, never where they are.
 - Today: a trip or stay on your calendar is called out a day or two before it starts ("Nelly starts tomorrow · 2 nights"), and email waiting for a reply is under "Needs you" with who it's from.
 - Today: an event with a place has a Directions button on the schedule, and Coming up includes your next planned workouts.

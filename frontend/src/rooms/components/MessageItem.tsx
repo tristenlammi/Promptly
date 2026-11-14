@@ -2,7 +2,7 @@ import { AlarmClock, AlertCircle, Copy, CornerUpLeft, Loader2, MoreHorizontal, P
 import { memo, useRef, useState, type ReactNode } from "react";
 
 import type { ShareKind } from "@/api/crossapp";
-import { REMIND_CHOICES, type Message, type RoomUser } from "@/api/rooms";
+import { REMIND_CHOICES, placeOf, type Message, type RoomUser } from "@/api/rooms";
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
@@ -13,6 +13,7 @@ import type { PendingMessage } from "../store";
 import { AttachmentList } from "./Attachments";
 import { EventCard } from "./EventCard";
 import { MessageBody } from "./MessageBody";
+import { PlaceCard } from "./PlaceCard";
 import { ShareCard } from "./ShareCard";
 import { CallLine, callMetaOf } from "@/rtc/call/ui/CallLine";
 import { EmojiGrid, Popover, PromptlyAvatar, UserAvatar } from "./ui";
@@ -206,6 +207,15 @@ export const MessageItem = memo(function MessageItem({
                 )}
                 <ShareCard messageId={m.id} kind={shareOf(m)!.kind as ShareKind} label={shareOf(m)!.label} />
               </>
+            ) : placeOf(m) ? (
+              <>
+                {placeOf(m)!.has_note && m.body && (
+                  <Bubble own={own}>
+                    <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />
+                  </Bubble>
+                )}
+                <PlaceCard place={placeOf(m)!} own={own} />
+              </>
             ) : (
               m.body && (
                 <Bubble own={own}>
@@ -250,7 +260,7 @@ export const MessageItem = memo(function MessageItem({
           <ToolButton label="Reply" onClick={() => ctx.onReply(m)}>
             <CornerUpLeft className="h-4 w-4" />
           </ToolButton>
-          {own && typeof m.meta?.event_id !== "string" && (!shareOf(m) || shareOf(m)!.has_note) && (
+          {own && typeof m.meta?.event_id !== "string" && (!shareOf(m) || shareOf(m)!.has_note) && (!placeOf(m) || placeOf(m)!.has_note) && (
             <ToolButton label="Edit" onClick={() => ctx.onEdit(m)}>
               <Pencil className="h-4 w-4" />
             </ToolButton>
@@ -532,6 +542,7 @@ export function PendingItem({
             <MessageBody body={p.body} usernames={ctx.usernames} me={ctx.meName} />
           </Bubble>
         )}
+        {p.place && <PlaceCard place={p.place} own />}
         {p.attachments.length > 0 && <AttachmentList attachments={p.attachments} />}
         {failed ? (
           <div className="mt-1 flex items-center gap-2 text-xs text-[var(--danger)]">

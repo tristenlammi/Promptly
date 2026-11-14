@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Download, MessageSquarePlus, MessagesSquare, Phone, PhoneCall, Plus, Search, Settings, X } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
@@ -24,6 +24,7 @@ import { BOOTSTRAP_KEY, findRoom, totals } from "./cache";
 import { ShareInSheet } from "./components/ShareInSheet";
 import { setIncomingShare, useIncomingShare } from "./incomingShare";
 import { useRoomsEvents } from "./live";
+import { startOutbox } from "./outbox";
 import { useRoomsStore } from "./store";
 import { CallDetail, CallsHome, CallsList, NewCallSheet } from "./components/Calls";
 import { ConfirmSheetHost } from "./components/ConfirmSheet";
@@ -148,6 +149,10 @@ export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?:
   const [newCall, setNewCall] = useState(false);
 
   useRoomsEvents(roomId);
+  // Messages that were still waiting to send when the page last closed.
+  const meId = b?.me.id ?? null;
+  const qc = useQueryClient();
+  useEffect(() => (meId ? startOutbox(meId, qc) : undefined), [meId, qc]);
   // Calls: who's in each voice channel, live, and the bootstrap's view of it.
   useVoiceLive();
   useEffect(() => seedFromBootstrap(b), [b]);

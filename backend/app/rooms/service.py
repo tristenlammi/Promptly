@@ -99,10 +99,25 @@ async def post_message(
     reply_to_id: uuid.UUID | None = None,
     attachment_ids: list[uuid.UUID] | None = None,
     client_id: str | None = None,
+    place: dict | None = None,
 ) -> RoomMessage:
     """Add a message to ``room`` (locked by the caller), attach uploads, and
     move your read point to it. The caller commits and publishes."""
     body = (body or "").strip()
+    meta: dict = {"client_id": client_id[:64]} if client_id else {}
+    if place:
+        # A place from P Maps (``meta.place``), drawn as a card. With no words
+        # of your own, its name stands in for them in lists and notifications.
+        name = " ".join(str(place.get("name") or "").split())[:120] or "A place"
+        address = " ".join(str(place.get("address") or "").split())[:240]
+        meta["place"] = {
+            "name": name,
+            "address": address or None,
+            "lat": round(float(place["lat"]), 6),
+            "lon": round(float(place["lon"]), 6),
+            "has_note": bool(body),
+        }
+        body = body or f"\U0001F4CD {name}"
     attachment_ids = list(dict.fromkeys(attachment_ids or []))[:MAX_ATTACHMENTS]
     if not body and not attachment_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty message")
@@ -141,7 +156,7 @@ async def post_message(
         body=body,
         reply_to_id=reply_to_id,
         mentions=await core.parse_mentions(db, body, members),
-        meta={"client_id": client_id[:64]} if client_id else {},
+        meta=meta,
     )
     db.add(msg)
     await db.flush()
