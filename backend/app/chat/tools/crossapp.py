@@ -9,12 +9,10 @@ a search over the everyday apps, and Rooms.
   contact card, their account on this Promptly, events coming up with them
   and the rooms you share.
 * ``search_apps`` — events, contacts, tasks, trips and recipes matching words.
-* ``read_room`` — your rooms with unread counts; a room's recent messages
-  only where Rooms already lets the AI read it (a room admin's "Promptly can
-  read this room", or every member of a DM saying yes). Messages are other
-  people's words, so the chat router treats this tool as outside content.
 * ``post_to_room`` — send a message as the user. Like ``use_item`` it
-  refuses on a turn that read outside content.
+  refuses on a turn that read outside content. It writes; nothing here
+  reads Rooms: no chat tool may load a room's messages (owner rule,
+  ``tests/test_social_no_ai.py``).
 
 Everything is the user's own view: their own app files, events they can
 see, rooms they're in. Category ``apps`` rides on the Tools toggle for
@@ -518,7 +516,7 @@ async def _find_room(ctx: ToolContext, ref: str):  # noqa: ANN202
         try:
             room, _sm = await core.load_room(ctx.db, rid, ctx.user)
         except Exception as e:  # noqa: BLE001 — a 404 for rooms you can't see
-            raise ToolError("No room with that id — call read_room to list them.") from e
+            raise ToolError("No room with that id. Use its name, or a username for a direct message.") from e
         return room
     want = ref.lower().lstrip("#@").strip()
     rooms = await _labelled_rooms(ctx)
@@ -545,79 +543,6 @@ async def _find_room(ctx: ToolContext, ref: str):  # noqa: ANN202
     if not hits:
         raise ToolError(f"No room matches “{ref}”. Rooms: {names}")
     raise ToolError(f"Several rooms match “{ref}” — name the space too, or pass its id. Rooms: {names}")
-
-
-class ReadRoomTool(Tool):
-    name = "read_room"
-    category = "rooms"
-    max_per_turn = 4
-    timeout_seconds = 15.0
-    max_content_chars = 12_000
-    description = (
-        "Rooms (the team/family chat app). With no room: the user's rooms and DMs with unread counts and ids. "
-        "With a room: its recent messages — only for rooms where everyone agreed Promptly may read them."
-    )
-    parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "room": {"type": "string", "description": "Room id, name ('general', 'Family/general'), or a username for a DM."},
-            "limit": {"type": "integer", "description": "Messages to read (default 20, at most 50)."},
-        },
-    }
-
-    async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
-        from app.auth.models import User
-        from app.rooms.models import RoomMessage
-        from app.rooms.promptly import can_read_history
-        from app.rooms.core import rooms_out
-        from app.today.core import zone_of
-
-        ref = str(args.get("room") or "").strip()
-        if not ref:
-            rooms = await _labelled_rooms(ctx)
-            if not rooms:
-                return ToolResult(content="The user isn't in any rooms yet.")
-            states = {d["id"]: d for d in await rooms_out(ctx.db, [r for r, *_ in rooms[:40]], ctx.user)}
-            lines = []
-            for room, label, _s, _p in rooms[:40]:
-                st = states.get(str(room.id), {})
-                if st.get("hidden"):
-                    continue
-                bits = [label]
-                if st.get("unread"):
-                    bits.append(f"{st['unread']} unread" + (f", {st['mentions']} mention you" if st.get("mentions") else ""))
-                bits.append("Promptly can read it" if st.get("ai_context") else "private to its members")
-                lines.append(f"- {' · '.join(bits)} (id {room.id})")
-            return ToolResult(content="Rooms:\n" + "\n".join(lines))
-        room = await _find_room(ctx, ref)
-        label = next((lab for r, lab, _s, _p in await _labelled_rooms(ctx) if r.id == room.id), room.name or "the room")
-        if not await can_read_history(ctx.db, room):
-            how = "a room admin turns on “Promptly can read this room”" if room.space_id else "everyone in it turns on “Promptly can read this conversation”"
-            return ToolResult(content=f"{label}: its messages are private to its members — you can't read them unless {how}. You can still post there if asked.")
-        limit = max(1, min(int(args.get("limit") or 20), 50))
-        rows = list(
-            (
-                await ctx.db.execute(
-                    select(RoomMessage)
-                    .where(RoomMessage.room_id == room.id, RoomMessage.deleted_at.is_(None))
-                    .order_by(RoomMessage.seq.desc())
-                    .limit(limit)
-                )
-            ).scalars()
-        )[::-1]
-        names = {
-            u.id: u.username
-            for u in (await ctx.db.execute(select(User).where(User.id.in_({r.author_id for r in rows if r.author_id})))).scalars()
-        }
-        tz = zone_of(ctx.user)
-        out = []
-        for m in rows:
-            who = "Promptly" if m.kind == "promptly" else ("system" if m.kind == "system" else names.get(m.author_id, "someone"))
-            if m.author_id == ctx.user.id:
-                who += " (the user)"
-            when = m.created_at.astimezone(tz).strftime("%a %d %b %H:%M") if m.created_at else ""
-            out.append(f"[{when}] {who}: {(m.body or '').strip()[:1000]}")
-        return ToolResult(content=f"Last {len(out)} messages in {label}:\n" + ("\n".join(out) or "(no messages)"), meta={"url": f"/rooms/r/{room.id}"})
 
 
 class PostToRoomTool(Tool):

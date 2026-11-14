@@ -1055,8 +1055,6 @@ export interface SearchResult {
 
 export interface SearchResults {
   results: SearchResult[];
-  /** False: photos weren't searched by what's in them (the photo service is off). */
-  photos_searched: boolean;
 }
 
 export interface EventPrefillOut {

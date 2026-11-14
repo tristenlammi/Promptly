@@ -3,11 +3,12 @@
 A message that mentions it gets an answer posted in the room (kind
 ``promptly``, a reply to the ask), made with the *asking* person's model.
 
-What it sees, and nothing else:
-* the asking message, and the message it replies to; or
-* in an **AI-context room** (a room admin's switch, shown to everyone) or a
-  DM where **every** member has switched it on: that room's recent
-  history.
+What it sees, and nothing else: **the one message that mentions it**, and the
+name of the person who wrote it. Not the message it replies to, not earlier
+messages, not other people's messages, not attachments, not its own earlier
+answers. There is no switch that widens this (owner rule, 2026-11-15: Rooms
+and Porch are never read or indexed by AI; ``tests/test_social_no_ai.py``
+holds it).
 
 No tools: it can't reach anyone's files, photos, memories or other rooms.
 """
@@ -23,11 +24,10 @@ from sqlalchemy import select
 from app.database import SessionLocal
 
 from . import core
-from .models import Room, RoomMember, RoomMessage, RoomSpace
+from .models import Room, RoomMessage, RoomSpace
 
 logger = logging.getLogger("promptly.rooms.promptly")
 
-HISTORY = 40
 MAX_CHARS = 24_000
 
 
@@ -65,62 +65,23 @@ async def model_for(db, user):  # noqa: ANN001, ANN201
     return await resolve_model(db, user, uuid.UUID(str(pid)), str(mid))
 
 
-async def can_read_history(db, room: Room) -> bool:  # noqa: ANN001
-    if room.space_id is not None:
-        return room.ai_context
-    members = (await db.execute(select(RoomMember).where(RoomMember.room_id == room.id))).scalars().all()
-    return core.dm_ai_context(list(members))
-
-
 async def build(db, room: Room, ask: RoomMessage, asker) -> tuple[str, list[dict]]:  # noqa: ANN001
-    """The system prompt and messages @promptly is given."""
-    from app.auth.models import User
-
+    """The system prompt and messages @promptly is given: the asking message
+    alone. Nothing else of the room is loaded here, on purpose."""
     space = await db.get(RoomSpace, room.space_id) if room.space_id else None
     where = (f"the voice channel {room.name}’s text chat" if room.kind == "voice" else f"the room #{room.name}") + f" in the space “{space.name}”" if space else ("a direct message" if room.kind == "dm" else "a group conversation")
-    history = await can_read_history(db, room)
-    if history:
-        rows = list(
-            (
-                await db.execute(
-                    select(RoomMessage)
-                    .where(RoomMessage.room_id == room.id, RoomMessage.seq <= ask.seq, RoomMessage.deleted_at.is_(None))
-                    .order_by(RoomMessage.seq.desc())
-                    .limit(HISTORY)
-                )
-            ).scalars()
-        )[::-1]
-    else:
-        rows = [ask]
-        if ask.reply_to_id:
-            parent = await db.get(RoomMessage, ask.reply_to_id)
-            if parent is not None and parent.deleted_at is None and parent.room_id == room.id:
-                rows.insert(0, parent)
-    names = {
-        u.id: u.username
-        for u in (await db.execute(select(User).where(User.id.in_({r.author_id for r in rows if r.author_id})))).scalars()
-    }
-    lines: list[str] = []
-    for r in rows:
-        who = "Promptly" if r.kind == "promptly" else names.get(r.author_id, "someone")
-        lines.append(f"{who}: {strip_send_keys(r.body)}")
-    transcript = "\n".join(lines)[-MAX_CHARS:]
-    seen = (
-        "You can see this conversation's recent messages (below)."
-        if history
-        else "You can only see the message that mentions you (and the one it replies to). "
-        "If asked about earlier messages, say you can't see them unless "
-        + ("a room admin turns on “Promptly can read this room”." if space else "everyone here turns on “Promptly can read this conversation”.")
-    )
+    question = strip_send_keys(ask.body)[-MAX_CHARS:]
     system = (
         f"You are Promptly, a helpful assistant people can @-mention in a group chat. You're in {where}. "
         f"{asker.username} just asked you something.\n"
-        f"{seen}\n"
+        "You can only see the one message that mentions you. You can't see earlier messages, replies, attachments "
+        "or anything else in this conversation, and nobody can switch that on. If the question needs them, say so "
+        "and ask for what you need to be put in the message.\n"
         "You can't see anyone's files, photos, notes, memories or other rooms, and you can't take actions. "
         "Reply like a person in a chat: short and direct (a few sentences; bullet points or Markdown only when they help). "
         "Don't start with a greeting or restate the question."
     )
-    messages = [{"role": "user", "content": f"Conversation:\n{transcript}\n\nAnswer {asker.username}'s last message."}]
+    messages = [{"role": "user", "content": f"{asker.username}: {question}"}]
     return system, messages
 
 

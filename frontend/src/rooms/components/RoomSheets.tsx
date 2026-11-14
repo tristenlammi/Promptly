@@ -1,10 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { EyeOff, Hash, Sparkles, Trash2, Volume2 } from "lucide-react";
+import { EyeOff, Hash, Trash2, Volume2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { roomsApi, type Bootstrap, type NotifyLevel, type Room, type RoomUser, type Space } from "@/api/rooms";
-import { Field, ItemButton, Sheet, TextArea, TextInput, Toggle } from "@/items/ui";
+import { Field, ItemButton, Sheet, TextArea, TextInput } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -13,10 +13,7 @@ import { askInSheet } from "./ConfirmSheet";
 import { PeoplePicker } from "./PeoplePicker";
 import { ChannelVoiceSettings } from "@/rtc/ui/ChannelVoiceSettings";
 import { cn } from "@/utils/cn";
-import { NotifyControl, UserAvatar } from "./ui";
-
-export const AI_CONTEXT_EXPLAINER =
-  "Off: @promptly only sees the message that mentions it. On: it can read this room's recent messages to answer — everyone in the room sees that this is on.";
+import { NotifyControl } from "./ui";
 
 function slug(name: string) {
   return name
@@ -239,28 +236,6 @@ export function RoomSettingsSheet({
 
         {isVoice && <ChannelVoiceSettings room={room} isAdmin={isAdmin} />}
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="flex items-start gap-3">
-            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent-text)]" />
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="text-sm font-semibold text-[var(--text)]">Promptly can read this room</span>
-              <span className="text-xs leading-relaxed text-[var(--text-muted)]">{AI_CONTEXT_EXPLAINER}</span>
-              {!isAdmin && (
-                <span className="text-xs font-medium text-[var(--text)]">
-                  {room.ai_context ? "It's on." : "It's off."} Only space admins can change this.
-                </span>
-              )}
-            </div>
-            {isAdmin && (
-              <Toggle
-                label="Promptly can read this room"
-                checked={room.ai_context}
-                onChange={(v) => void save({ ai_context: v }, v ? "Promptly can now read this room." : "Promptly only sees messages that mention it.")}
-              />
-            )}
-          </div>
-        </div>
-
         <NotifyRow room={room} space={space} />
 
         {isAdmin && (
@@ -347,54 +322,9 @@ export function NewDmSheet({ open, onClose, b }: { open: boolean; onClose: () =>
 export function DmSettingsSheet({ open, onClose, room, b }: { open: boolean; onClose: () => void; room: Room; b: Bootstrap }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const members = room.members ?? [];
-  const aiOk = room.ai_ok ?? {};
-  const allOn = members.length > 0 && members.every((id) => aiOk[id]);
-  const mine = !!aiOk[b.me.id];
-
-  const setMine = (v: boolean) => {
-    const before = room.ai_ok;
-    patchRoom(qc, room.id, (r) => ({ ...r, ai_ok: { ...(r.ai_ok ?? {}), [b.me.id]: v } }));
-    roomsApi
-      .updateMyRoom(room.id, { ai_ok: v })
-      .then((r) => r && upsertRoom(qc, r))
-      .catch((err) => {
-        patchRoom(qc, room.id, (r) => ({ ...r, ai_ok: before }));
-        toast.error(apiErrorMessage(err, "Couldn't change that."));
-      });
-  };
-
   return (
     <Sheet open={open} onClose={onClose} title={dmTitle(b, room)} size="md">
       <div className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="flex items-start gap-3">
-            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent-text)]" />
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="text-sm font-semibold text-[var(--text)]">Let Promptly read this conversation</span>
-              <span className="text-xs leading-relaxed text-[var(--text-muted)]">
-                {AI_CONTEXT_EXPLAINER} In a conversation it's on only when <b>everyone</b> in it has switched it on.
-              </span>
-              <span className="text-xs font-medium text-[var(--text)]">{allOn ? "Everyone agreed — it's on." : "It's off for now."}</span>
-            </div>
-            <Toggle label="My consent: Promptly can read this conversation" checked={mine} onChange={setMine} />
-          </div>
-          <ul className="mt-1 flex flex-col gap-1.5 border-t border-[var(--border)] pt-3">
-            {members.map((id) => (
-              <li key={id} className="flex items-center gap-2 text-sm">
-                <UserAvatar user={b.users[id]} size={24} />
-                <span className="min-w-0 flex-1 truncate text-[var(--text)]">
-                  {b.users[id]?.username ?? "Someone"}
-                  {id === b.me.id && <span className="text-[var(--text-muted)]"> (you)</span>}
-                </span>
-                <span className={aiOk[id] ? "text-xs font-medium text-[var(--success)]" : "text-xs text-[var(--text-muted)]"}>
-                  {aiOk[id] ? "Agreed" : "Not yet"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
         <NotifyRow room={room} space={null} />
 
         <div className="border-t border-[var(--border)] pt-4">

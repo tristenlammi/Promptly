@@ -21,7 +21,7 @@ logger = logging.getLogger("promptly.talk")
 
 KEEP = 6
 # In the car, these are said as a gist; the thing itself goes to the phone.
-CUT = frozenset({"mail_read", "maps_search", "rooms_unread", "read_note"})
+CUT = frozenset({"mail_read", "maps_search", "read_note"})
 SAID_FIRST = "I've sent the details to your phone."
 
 
@@ -48,8 +48,6 @@ def link_of(name: str, meta: dict[str, Any]) -> dict[str, str] | None:
     title = _clean(meta.get("title") or meta.get("summary"))
     if name == "mail_read" and title.startswith("Read "):
         title = "Email: " + title[5:]
-    elif name == "rooms_unread":
-        title = "New messages in Rooms"
     return {"title": title or "Something from Talk", "url": url}
 
 

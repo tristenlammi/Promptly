@@ -146,7 +146,6 @@ export function RoomView({
   }
 
   const title = space ? room.name : dmTitle(b, room);
-  const aiOn = space ? room.ai_context : (room.members ?? []).length > 0 && (room.members ?? []).every((id) => room.ai_ok?.[id]);
   const others = (room.members ?? []).filter((id) => id !== b.me.id);
   // A 1:1 conversation: Block / Unblock the other person (decision D7).
   const oneToOne = !space && room.kind === "dm" && others.length === 1 ? b.users[others[0]] ?? null : null;
@@ -326,19 +325,6 @@ export function RoomView({
               )}
             </span>
           </button>
-          {aiOn && (
-            <span
-              className="hidden shrink-0 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-text)] sm:inline-flex"
-              title="Promptly can read this room's recent messages when someone asks it something."
-            >
-              <Sparkles className="h-3 w-3" /> AI can read this room
-            </span>
-          )}
-          {aiOn && (
-            <span className="inline-flex shrink-0 sm:hidden" title="AI can read this room" aria-label="AI can read this room">
-              <Sparkles className="h-4 w-4 text-[var(--accent-text)]" />
-            </span>
-          )}
           <div className="ml-auto flex shrink-0 items-center">
             {!space && <CallHeaderButtons b={b} room={room} otherName={oneToOne?.username ?? null} />}
             {(compactHeader || oneToOne) && (

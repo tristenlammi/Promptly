@@ -47,9 +47,6 @@ class Room(UUIDPKMixin, CreatedAtMixin, Base):
     name: Mapped[str] = mapped_column(String(80), nullable=False, default="", server_default="")
     topic: Mapped[str] = mapped_column(String(300), nullable=False, default="", server_default="")
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    # @promptly may read this room's recent history (a room admin's switch;
-    # for a DM, every member's ``ai_ok`` instead).
-    ai_context: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     last_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -65,7 +62,6 @@ class RoomMember(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
     last_read_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     notify: Mapped[str | None] = mapped_column(String(8), nullable=True)  # override: all/mentions/none
-    ai_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

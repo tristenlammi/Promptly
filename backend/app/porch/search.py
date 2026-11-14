@@ -1,5 +1,4 @@
-"""Searching Porch (build §3.10): posts you can see, by their words and,
-for photos, by what's in them.
+"""Searching Porch (build §3.10): posts you can see, by their words.
 
 * **Words**: the post's text and place (``porch_posts.body_tsv``, simple and
   English, the word being typed included), a life event's title, a link's
@@ -7,10 +6,11 @@ for photos, by what's in them.
 * **People**: a word that is someone's name ("beach Sam") narrows the
   search to what they posted. Only people with Porch you have no block
   with count.
-* **What's in a photo**: Photos' own image search (``photos.ml``: the query
-  as a SigLIP text vector, matched against ``photo_embeddings``) over the
-  photos of posts you can see. When the photo service isn't there or isn't
-  ready, only words are searched, without an error.
+* **Not by what's in a photo.** Porch posts are never matched by a model
+  (it used to run Photos' image search over the photos of posts you could
+  see; removed 2026-11-15, owner rule: Porch and Rooms are never read or
+  indexed by AI). Your own Photos library still has its own search, in
+  Photos and in the composer's picker.
 
 Every query is limited by :func:`access.visible_post_sql`, so nothing you
 can't see is ever matched, counted or named — whoever's photos they are.
@@ -38,10 +38,6 @@ logger = logging.getLogger("promptly.porch.search")
 
 router = APIRouter()
 
-# A photo must look like the words this much (SigLIP cosine) and be near
-# the best match — as Photos' own search does for a look on its own.
-LOOKS_MIN = 0.07
-LOOKS_WINDOW = 0.05
 _WORD = re.compile(r"[\w'’.-]+", re.UNICODE)
 
 
@@ -108,60 +104,17 @@ async def _word_hits(db: AsyncSession, user: User, term: str, authors: list[uuid
     return list((await db.execute(text(sql), params)).scalars())
 
 
-async def _look_hits(db: AsyncSession, user: User, term: str, authors: list[uuid.UUID], limit: int) -> tuple[list[uuid.UUID], bool]:
-    """Posts whose photos look like ``term``, best first, and whether the
-    photo search ran at all."""
-    if not term:
-        return [], False
-    from app.custom_models.embedding import vector_literal
-    from app.photos import ml
-
-    try:
-        if await ml.waiting():
-            return [], False
-        model, vectors = await ml.embed_texts([f"This is a photo of {term}."])
-    except Exception:  # noqa: BLE001 — words still work
-        logger.info("porch photo search unavailable", exc_info=True)
-        return [], False
-    params: dict[str, Any] = {"me": user.id, "m": model, "v": vector_literal(vectors[0]), "n": limit}
-    extra = ""
-    if authors:
-        extra = " AND p.author_id = ANY(:authors)"
-        params["authors"] = authors
-    sql = f"""
-        SELECT pm.post_id, max(1 - (e.embedding <=> CAST(:v AS vector))) AS s
-        FROM photo_embeddings e
-        JOIN porch_post_media pm ON pm.file_id = e.file_id
-        JOIN files f ON f.id = pm.file_id AND f.trashed_at IS NULL
-        JOIN porch_posts p ON p.id = pm.post_id
-        WHERE e.model = :m AND {access.visible_post_sql("p")}{extra}
-        GROUP BY pm.post_id
-        ORDER BY s DESC
-        LIMIT :n"""
-    rows = [(pid, float(s)) for pid, s in (await db.execute(text(sql), params)).all()]
-    if not rows:
-        return [], True
-    best = rows[0][1]
-    floor = max(LOOKS_MIN, best - LOOKS_WINDOW)
-    return [pid for pid, s in rows if s >= floor], True
-
-
-async def find(db: AsyncSession, user: User, q: str, limit: int = 30) -> tuple[list[PorchPost], bool]:
-    """Posts you can see that answer ``q``, best first; and whether photos
-    were searched by what's in them."""
+async def find(db: AsyncSession, user: User, q: str, limit: int = 30) -> list[PorchPost]:
+    """Posts you can see that answer ``q``, newest first. Words only."""
     q = (q or "").strip()[:200]
     if len(q) < 2 or not await deps.allowed(db, user):
-        return [], False
+        return []
     authors, rest = await _names(db, user, q)
-    words = await _word_hits(db, user, rest, authors, limit) if (rest or authors) else []
-    looks, looked = await _look_hits(db, user, rest, authors, limit)
-    # Both first, then words (newest first), then looks (closest first).
-    both = [p for p in words if p in set(looks)]
-    order = list(dict.fromkeys([*both, *words, *looks]))[:limit]
+    order = (await _word_hits(db, user, rest, authors, limit) if (rest or authors) else [])[:limit]
     if not order:
-        return [], looked
+        return []
     rows = {p.id: p for p in (await db.execute(select(PorchPost).where(PorchPost.id.in_(order), access.visible_post(user.id)))).scalars()}
-    return [rows[i] for i in order if i in rows], looked
+    return [rows[i] for i in order if i in rows]
 
 
 @router.get("/search")
@@ -173,18 +126,14 @@ async def search(
 ) -> dict:
     """Porch's search sheet: posts you can see, as small cards (a grid with
     the poster's name)."""
-    posts, looked = await find(db, user, q, limit)
+    posts = await find(db, user, q, limit)
     cards = await handoffs.summaries(db, user, posts)
-    return {
-        "results": [{**cards[p.id], "kind": p.kind} for p in posts],
-        # False: photos weren't searched by what's in them (the service is off).
-        "photos_searched": looked,
-    }
+    return {"results": [{**cards[p.id], "kind": p.kind} for p in posts]}
 
 
 async def quick(db: AsyncSession, user: User, q: str, limit: int = 5) -> list[dict[str, Any]]:
     """Ctrl+K's "Porch" rows (empty when Porch isn't on for you)."""
-    posts, _ = await find(db, user, q, limit)
+    posts = await find(db, user, q, limit)
     cards = await handoffs.summaries(db, user, posts)
     return [{k: cards[p.id][k] for k in ("id", "title", "subtitle", "thumb")} | {"url": cards[p.id]["href"]} for p in posts]
 

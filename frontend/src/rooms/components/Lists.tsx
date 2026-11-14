@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { BellOff, ChevronDown, Hash, LogOut, MessageSquarePlus, Plus, Settings, Sparkles, UserPlus, Users, Volume2 } from "lucide-react";
+import { BellOff, ChevronDown, Hash, LogOut, MessageSquarePlus, Plus, Settings, UserPlus, Users, Volume2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -198,7 +198,6 @@ export function SpaceRoomList({
                 >
                   <Hash className="h-4 w-4 shrink-0 opacity-70" />
                   <span className={cn("min-w-0 flex-1 truncate", (unread || active) && "font-semibold")}>{r.name}</span>
-                  {r.ai_context && <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)] opacity-70" aria-label="AI can read this room" />}
                   {r.notify === "none" && <BellOff className="h-3.5 w-3.5 shrink-0 opacity-60" aria-label="Muted" />}
                   <CountBadge n={r.mentions} />
                   {unread && r.mentions === 0 && <span className="sr-only">unread</span>}

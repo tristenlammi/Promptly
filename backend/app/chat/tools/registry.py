@@ -14,7 +14,7 @@ from typing import Any
 from app.chat.tools.base import Tool
 from app.chat.tools.maps import MapsChargersTool, MapsDirectionsTool, MapsSearchTool, TimelineDayTool, TimelineVisitsTool
 from app.chat.tools.calendar import CalendarAddEventTool, CalendarChangeEventTool, CalendarEventsTool, CalendarFreeTimesTool
-from app.chat.tools.crossapp import FindPersonTool, MyDayTool, PostToRoomTool, ReadRoomTool, SearchAppsTool
+from app.chat.tools.crossapp import FindPersonTool, MyDayTool, PostToRoomTool, SearchAppsTool
 from app.chat.tools.deep_research import DeepResearchTool
 from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
@@ -126,7 +126,6 @@ REGISTRY: list[Tool] = [
     FindPersonTool(),
     SearchAppsTool(),
     # Rooms (category "rooms"): for people in a space or conversation.
-    ReadRoomTool(),
     PostToRoomTool(),
     # Forms (category "apps"): a draft form to check and send, and a form's
     # answers (other people's words — outside content).
@@ -152,10 +151,6 @@ REGISTRY.extend(DEVICE_TOOLS)
 from app.chat.tools.trip import DRIVE_TOOLS  # noqa: E402
 
 REGISTRY.extend(DRIVE_TOOLS)
-# Talk phase 2: "any messages?" (category "rooms").
-from app.chat.tools.talk_rooms import TALK_ROOMS_TOOLS  # noqa: E402
-
-REGISTRY.extend(TALK_ROOMS_TOOLS)
 # Talk phase 2: "send that to my phone" (category "talk").
 from app.chat.tools.talk_phone import TALK_PHONE_TOOLS  # noqa: E402
 

@@ -4,7 +4,7 @@ What's checked: a Rooms message to someone on Promptly is read back whole and
 sent only on a yes; in the car it must be your own words, and a message the
 model wrote is refused; after reading outside content it's refused too unless
 it's your words, and then it's asked with "From that ...:" first; the
-arrival-time phrase is allowed on a trip; ``rooms_unread`` is outside content;
+arrival-time phrase is allowed on a trip; Rooms is never read by voice (no ``rooms_unread``);
 a list add runs at once and "undo" takes it back, but not after reading a page.
 """
 from __future__ import annotations
@@ -148,23 +148,6 @@ def test_from_that_email():
     assert g.from_where("Add Sports carnival to your calendar for Friday 13 November at 9 AM?") == (
         "From that email: add Sports carnival to your calendar for Friday 13 November at 9 AM?"
     )
-
-
-async def test_rooms_unread_is_outside_content(db, user, conversation, sidecars, talk_app, monkeypatch):
-    from app.chat.tools.base import reads_outside_content
-
-    assert reads_outside_content("rooms_unread")
-    model = use_model(
-        monkeypatch,
-        Model([[{"tool": "rooms_unread", "args": {}}, {"tool": "calendar_add_event", "args": {"title": "Party", "start": "2026-11-20T18:00"}}], "Unused."]),
-    )
-    c = await open_talk(talk_app, user, conversation)
-    live = await sidecars.live()
-    await live.say(1, "Any messages? Add the party on Friday.")
-    ask = await c.expect("ask", timeout=10)
-    assert ask["question"].startswith("From that message: add Party")
-    assert "rooms_unread" in model.tools_offered()
-    await finish(c)
 
 
 @pytest.fixture

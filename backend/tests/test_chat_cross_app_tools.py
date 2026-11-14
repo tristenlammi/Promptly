@@ -1,4 +1,4 @@
-"""Main chat across the apps: my_day, find_person, search_apps, read_room and
+"""Main chat across the apps: my_day, find_person, search_apps and
 post_to_room — what they return, and that they never show one person
 another's data (events, tasks, bills, contacts, rooms)."""
 from __future__ import annotations
@@ -174,73 +174,22 @@ async def _space(client, owner, *members, name="Family"):  # noqa: F811
     return sid, rid
 
 
-async def test_rooms_read_respects_ai_switch_and_membership(client, db, trio):  # noqa: F811
-    from app.chat.tools.base import ToolError
-    from app.chat.tools.crossapp import ReadRoomTool, has_rooms
+async def test_no_chat_tool_reads_a_room(client, db, trio):  # noqa: F811
+    """Rooms are never read by the AI (owner rule): there is no tool that
+    loads a room's messages, and what the chat is told about Rooms is names
+    and unread counts only."""
+    from app.chat.tools.crossapp import MyDayTool, has_rooms
+    from app.chat.tools.registry import REGISTRY, get_tool
 
     ann, bob, cat = trio
     _sid, rid = await _space(client, ann, bob)
     r = await client.post(f"/api/rooms/rooms/{rid}/messages", headers=H(bob), json={"body": "the surprise party is Saturday"})
     assert r.status_code == 201, r.text
     assert await has_rooms(db, ann.id) and not await has_rooms(db, cat.id)
-
-    listing = (await ReadRoomTool().run(_ctx(db, ann), {})).content
-    assert "Family" in listing and "1 unread" in listing and rid in listing and "surprise" not in listing
-    private = (await ReadRoomTool().run(_ctx(db, ann), {"room": "Family"})).content
-    assert "private" in private and "surprise" not in private
-
-    assert (await client.patch(f"/api/rooms/rooms/{rid}", headers=H(ann), json={"ai_context": True})).status_code == 200
-    db.expire_all()  # the tool runs on a fresh session in the chat; here, re-read
-    for u in trio:
-        await db.refresh(u)
-    readable = (await ReadRoomTool().run(_ctx(db, ann), {"room": "general"})).content
-    assert "the surprise party is Saturday" in readable and bob.username in readable
-
-    # Cat isn't in the space: the room doesn't exist for her.
-    with pytest.raises(ToolError):
-        await ReadRoomTool().run(_ctx(db, cat), {"room": rid})
-    with pytest.raises(ToolError):
-        await ReadRoomTool().run(_ctx(db, cat), {"room": "Family"})
-    assert "isn't in any rooms" in (await ReadRoomTool().run(_ctx(db, cat), {})).content
-
-
-async def test_post_to_room_and_dm_with_the_untrusted_guard(client, db, trio):  # noqa: F811
-    from sqlalchemy import select
-
-    from app.chat.tools.base import ToolError
-    from app.chat.tools.crossapp import PostToRoomTool
-    from app.rooms.models import Room, RoomMember, RoomMessage
-
-    ann, bob, cat = trio
-    _sid, rid = await _space(client, ann, bob)
-    out = await PostToRoomTool().run(_ctx(db, ann), {"room": "Family", "message": "Dinner at 7"})
-    assert "Sent in #general in Family" in out.content and out.meta["room_id"] == rid
-    msgs = (await db.execute(select(RoomMessage).where(RoomMessage.room_id == uuid.UUID(rid)))).scalars().all()
-    assert [(m.body, m.author_id) for m in msgs if m.kind == "user"] == [("Dinner at 7", ann.id)]
-
-    # A DM to a username opens (or reuses) the conversation.
-    dm = await PostToRoomTool().run(_ctx(db, ann), {"to": bob.username, "message": "Running late"})
-    room = await db.get(Room, uuid.UUID(dm.meta["room_id"]))
-    assert room.kind == "dm"
-    members = {m.user_id for m in (await db.execute(select(RoomMember).where(RoomMember.room_id == room.id))).scalars()}
-    assert members == {ann.id, bob.id}
-    again = await PostToRoomTool().run(_ctx(db, ann), {"to": bob.username, "message": "Five minutes"})
-    assert again.meta["room_id"] == dm.meta["room_id"]
-
-    # Not on a turn that read outside content; not into a room you're not in.
-    with pytest.raises(ToolError, match="outside content"):
-        await PostToRoomTool().run(_ctx(db, ann, {"untrusted": True}), {"room": "Family", "message": "x"})
-    with pytest.raises(ToolError):
-        await PostToRoomTool().run(_ctx(db, cat), {"room": rid, "message": "let me in"})
-    with pytest.raises(ToolError):
-        await PostToRoomTool().run(_ctx(db, ann), {"to": "nobody-here-at-all", "message": "hi"})
-    with pytest.raises(ToolError):
-        await PostToRoomTool().run(_ctx(db, ann), {"message": "where?"})
-    n = (await db.execute(select(RoomMessage).where(RoomMessage.body.in_(["x", "let me in"])))).scalars().all()
-    assert n == []
-
-
-# ------------------------------------------------------------------ routing
+    assert get_tool("read_room") is None and get_tool("rooms_unread") is None
+    assert [t.name for t in REGISTRY if t.category == "rooms"] == ["post_to_room"]
+    day = (await MyDayTool().run(_ctx(db, ann), {})).content
+    assert "Unread in Rooms: 1" in day and "surprise" not in day
 
 
 def test_routing_prompt_and_untrusted_marking():
@@ -250,18 +199,14 @@ def test_routing_prompt_and_untrusted_marking():
 
     names = {t.name for t in tools_in({"apps", "rooms"})}
     assert names == {
-        "my_day", "find_person", "search_apps", "read_room", "post_to_room",
+        "my_day", "find_person", "search_apps", "post_to_room",
         "maps_search", "maps_directions", "maps_chargers", "timeline_day", "timeline_visits",
         # Forms (WP-F1.7).
         "draft_form", "read_form_responses",
-        # Talk phase 2: "any messages?" (WP-T10).
-        "rooms_unread",
     }
     p = build_tools_system_prompt({"apps", "calendar", "items", "rooms"})
-    assert "`my_day`" in p and "in one step" in p and "forecast_month_end" in p and "read_room/post_to_room" in p
+    assert "`my_day`" in p and "in one step" in p and "forecast_month_end" in p and "post_to_room" in p and "read_room" not in p
     # Only apps whose tools are offered are named.
     lean = build_tools_system_prompt({"apps", "calendar"})
     assert "use_item" not in lean and "search_photos" not in lean and "read_room" not in lean
-    # Room messages are other people's words; the rest is the user's own.
-    assert reads_outside_content("read_room") and reads_outside_content("rooms_unread")
     assert not reads_outside_content("my_day") and not reads_outside_content("post_to_room")

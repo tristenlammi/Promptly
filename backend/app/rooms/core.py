@@ -302,7 +302,6 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
             "name": r.name,
             "topic": r.topic,
             "position": r.position,
-            "ai_context": r.ai_context,
             "last_seq": r.last_seq,
             "last_message_at": r.last_message_at.isoformat() if r.last_message_at else None,
             "last_read_seq": read,
@@ -315,8 +314,6 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
         if r.space_id is None:
             members = dm_members.get(r.id, [])
             d["members"] = [str(m.user_id) for m in members]
-            d["ai_ok"] = {str(m.user_id): m.ai_ok for m in members}
-            d["ai_context"] = bool(members) and all(m.ai_ok for m in members)
             d["hidden"] = st.hidden if st else False
             if r.kind == "dm":
                 others = {m.user_id for m in members} - {user.id}
@@ -346,8 +343,6 @@ async def room_out(db: AsyncSession, room: Room, user: User) -> dict:
     return (await rooms_out(db, [room], user))[0]
 
 
-def dm_ai_context(members: list[RoomMember]) -> bool:
-    return bool(members) and all(m.ai_ok for m in members)
 
 
 # ------------------------------------------------------------------ live
