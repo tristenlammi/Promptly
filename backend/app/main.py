@@ -703,6 +703,10 @@ app.include_router(maps_router, prefix="/api/maps", tags=["maps"])
 from app.maps.timeline import router as maps_timeline_router  # noqa: E402
 
 app.include_router(maps_timeline_router, prefix="/api/maps", tags=["maps"])
+# The phone app hands the P Maps page its own GPS (app/maps/phone_location.py).
+from app.maps.phone_location import router as maps_phone_location_router  # noqa: E402
+
+app.include_router(maps_phone_location_router, prefix="/api/maps", tags=["maps"])
 # Mail: the mailboxes people connect (app/mail).
 from app.mail.router import router as mail_router  # noqa: E402
 

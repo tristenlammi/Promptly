@@ -83,10 +83,10 @@ public class ShareTargetTest {
         }
         assertTrue(send && multiple && images && videos && text);
 
-        // Only Porch takes shares.
+        // Rooms takes shares too (its launcher filter, plus its share filter).
         Element rooms = activity(doc, ".RoomsLauncher");
         assertNotNull(rooms);
-        assertEquals(1, rooms.getElementsByTagName("intent-filter").getLength());
+        assertEquals(2, rooms.getElementsByTagName("intent-filter").getLength());
     }
 
     @Test

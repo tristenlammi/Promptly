@@ -21,6 +21,7 @@ import { useKeyboardInset } from "@/components/files/documents/useKeyboardInset"
 import { NEARBY, mapsApi, decodeShape, formatDuration, formatKm, routeSeconds, trafficLine, type Charger, type Mode, type PlaceMore, type PreferredRoute, type Route, type SavedPlace, type SearchResult, type Spot } from "./api";
 import { MAP_THEMES, saveMapTheme, savedMapTheme, useMapColours, type MapTheme } from "./daylight";
 import { mapsPinLink, mapsRouteLink } from "./links";
+import { phoneKey, phoneLocateLink, watchPhoneLocation } from "./phoneLocation";
 import { ShareWaysSheet } from "@/components/share/ShareWaysSheet";
 import { sendInRooms } from "@/rooms/incomingShare";
 import { MapView, placeLook, type MapViewHandle } from "./MapView";
@@ -126,22 +127,32 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
   const followingRef = useRef(following);
   followingRef.current = following;
   useEffect(() => {
-    if (followingRef.current && you) map.current?.panTo(you.lat, you.lon);
+    // In the middle of the map you can see, not under the panel.
+    if (followingRef.current && you) map.current?.panTo(you.lat, you.lon, coveredNow());
   }, [you]);
   // Which way is up on the map, for the compass.
   const [bearing, setBearing] = useState(0);
   const [layersOpen, setLayersOpen] = useState(false);
+  // Inside the Promptly Android app, when the browser can't say where you are, the
+  // app's own GPS stands in (phoneLocation.ts). Off again once the browser can.
+  const [phoneGps, setPhoneGps] = useState(false);
+  const lastPhoneFix = useRef(0);
+  const phoneFixIsFresh = () => Date.now() - lastPhoneFix.current < 8000;
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      if (phoneKey()) setPhoneGps(true);
+      return;
+    }
     let exact = false;
     const show = (p: GeolocationPosition) => {
       const here = { lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy };
+      setPhoneGps(false);
       setYou(here);
       setLocationBlocked(false);
       setLocationProblem(null);
       if (!centredOnYou.current) {
         centredOnYou.current = true;
-        map.current?.flyTo(here.lat, here.lon, 13);
+        map.current?.flyTo(here.lat, here.lon, 13, coveredNow());
       }
     };
     const id = navigator.geolocation.watchPosition(
@@ -150,6 +161,11 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
         show(p);
       },
       (e) => {
+        if (phoneKey()) {
+          setPhoneGps(true);
+          // The app is already saying where you are: the browser's "no" isn't news.
+          if (phoneFixIsFresh()) return;
+        }
         setLocationBlocked(e.code === e.PERMISSION_DENIED);
         setLocationProblem(e.code === e.PERMISSION_DENIED ? null : locationProblemText(e));
       },
@@ -170,6 +186,20 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
       navigator.geolocation.clearWatch(id);
     };
   }, [watching]);
+  useEffect(() => {
+    if (!phoneGps) return;
+    return watchPhoneLocation((fix) => {
+      lastPhoneFix.current = Date.now();
+      const here = { lat: fix.lat, lon: fix.lon, accuracy: fix.accuracy ?? 30 };
+      setYou(here);
+      setLocationBlocked(false);
+      setLocationProblem(null);
+      if (!centredOnYou.current) {
+        centredOnYou.current = true;
+        map.current?.flyTo(here.lat, here.lon, 13, coveredNow());
+      }
+    });
+  }, [phoneGps]);
   // Phones can quietly end a watch while the app's in the background, such as during
   // a drive in the navigation screen. Coming back starts a fresh one.
   useEffect(() => {
@@ -1129,9 +1159,16 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
         {/* Map buttons. */}
         <div className={`absolute right-3 top-[4.5rem] z-10 flex-col gap-2 md:top-3 ${isMobile && (addingStop || keyboard > 0 || dropdown) ? "hidden" : "flex"}`}>
           <MapButton
-            label={locationBlocked ? "Promptly isn't allowed to use your location" : following ? "The map is following you" : you ? "Go to your location" : "Waiting for your location"}
+            label={locationBlocked && !phoneGps ? "Promptly isn't allowed to use your location" : following ? "The map is following you" : you ? "Go to your location" : "Waiting for your location"}
             active={following}
             onClick={() => {
+              // The app's GPS has gone quiet (it stops a minute after the map was last in
+              // front) or was never started: a tap is what lets the app start it.
+              if (phoneGps && !phoneFixIsFresh()) {
+                if (!you) setLocationHint("Asking the Promptly app where you are…");
+                window.location.href = phoneLocateLink();
+                if (!you) return;
+              }
               if (!you) {
                 setLocationHint(noLocationYet());
                 // Ask again: the phone may have an answer by now.
@@ -1142,7 +1179,7 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
               map.current?.flyTo(you.lat, you.lon, 15, coveredNow());
             }}
           >
-            {locationBlocked ? (
+            {locationBlocked && !phoneGps ? (
               <LocateOff className="h-5 w-5 text-[var(--danger,#c0392b)]" />
             ) : following ? (
               <LocateFixed className="h-5 w-5" />

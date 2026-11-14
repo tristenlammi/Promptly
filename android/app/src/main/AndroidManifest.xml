@@ -186,6 +186,26 @@
         <service
             android:name=".maps.TimelineService"
             android:foregroundServiceType="location" />
+        <!-- This phone's GPS for the P Maps page the app opened, while that page asks for it. -->
+        <service
+            android:name=".maps.PageLocationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+        <!-- The page's location button (promptly://maps/locate): starts the service above, then goes back. -->
+        <activity
+            android:name=".maps.PageLocateActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="org.promptly.app.pagelocate"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptly" android:host="maps" android:path="/locate" />
+            </intent-filter>
+        </activity>
         <!-- Your position on the car's screen with no trip (the car screen counts as background). -->
         <service
             android:name=".maps.CarLocationService"

@@ -77,6 +77,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- P Maps in the Android app: "my location" works on the map page even where Chrome can't check the app against your server (the "NoTwaFound" error). The app passes its own GPS to the page through your server, only while the map is open, and nothing is kept. The first time, the location button asks. The followed dot stays in the part of the map the panel leaves showing.
 - Today: the Body & Health card no longer shows "Sleep 0 h" and "Steps 0" for someone who only logs their weight. A goal the Health app came with shows once you've logged that thing at least once.
 - Today: hiding the Mail, Passwords, Forms, Notes, Porch or Hanging out now card in Customise now sticks. The server was quietly dropping those six from what you'd hidden.
 - Today, the Today widget, "Read me my day" and the Journal's day strip: an all-day event showed on two days if you live far from UTC (in Brisbane, on its own day and again the next morning). All-day events are now on their own day wherever you are.

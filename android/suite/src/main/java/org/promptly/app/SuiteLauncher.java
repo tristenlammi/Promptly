@@ -74,6 +74,8 @@ public class SuiteLauncher extends LauncherActivity {
             startActivity(new Intent(Intent.ACTION_VIEW).setClassName(getPackageName(), offlineActivity())
                     .putExtra(EXTRA_FROM_ICON, true));
             finish();
+        } else {
+            startPageLocation();
         }
         // The widgets refresh a couple of minutes after an app is opened (by then
         // you're likely back on the home screen). An explicit broadcast to our own
@@ -153,8 +155,75 @@ public class SuiteLauncher extends LauncherActivity {
         return path;
     }
 
+    // ---- This phone's GPS for the map page ---------------------------------------
+    // Chrome only passes a page's location request to this app once Google has
+    // verified the app against the server; where it can't, the page never learns
+    // where you are. The app module's PageLocationService hands the position over
+    // by way of your own server instead. The page proves it's the one this app
+    // opened with a random key, given to it in the address's fragment (which never
+    // reaches a server).
+
+    private static final String PAGE_LOCATION_SERVICE = "org.promptly.sync.maps.PageLocationService";
+    private static final String PAGE_LOCATION_KEY = "page_location_key";
+    private static final String PAGE_LOCATION_USED = "page_location_used";
+
+    /** The key this phone's pages are opened with: random, made once (PageLocationService.key makes the same). */
+    private String pageLocationKey() {
+        android.content.SharedPreferences p = getSharedPreferences("promptly", MODE_PRIVATE);
+        String key = p.getString(PAGE_LOCATION_KEY, null);
+        if (key == null) {
+            byte[] raw = new byte[32];
+            new java.security.SecureRandom().nextBytes(raw);
+            key = android.util.Base64.encodeToString(raw,
+                    android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING | android.util.Base64.NO_WRAP);
+            p.edit().putString(PAGE_LOCATION_KEY, key).apply();
+        }
+        return key;
+    }
+
+    /** Opening a map page on a phone where the page has needed the app's GPS before:
+     *  have it ready. It does nothing unless the page asks, and ends within a minute
+     *  if it doesn't. Now, while this screen is showing, is the only time Android
+     *  lets it start. */
+    private void startPageLocation() {
+        try {
+            if (!launchPath().startsWith("/maps")) return;
+            if (!getSharedPreferences("promptly", MODE_PRIVATE).getBoolean(PAGE_LOCATION_USED, false)) return;
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                    && checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
+            startForegroundService(new Intent().setClassName(getPackageName(), PAGE_LOCATION_SERVICE));
+        } catch (RuntimeException e) {
+            // Not in this build, or Android said no: the page's own button can still ask.
+            Log.w("SuiteLauncher", "Couldn't ready the map page's location", e);
+        }
+    }
+
     @Override
     protected Uri getLaunchingUrl() {
+        String path = launchPath();
+        String sep = path.contains("?") ? "&" : "?";
+        // caps=voice: this app can hold a voice channel in the background
+        // (the page hands Join over to it, frontend/src/rtc/voice/androidApp.ts).
+        // calls: this app rings DM calls itself, full screen (Calls WP-D3), so the
+        // page gives its rings the answer token and leaves the ringing to it.
+        // callout: Call / Video call on the page hands the call to this app too
+        // (promptly://call/start, Calls WP-D5), with the phone's own camera.
+        // np: this app shows Promptly's notifications itself (the app module's push
+        // package), so the page keeps Chrome's own quiet on this phone. Its value says
+        // which registration (the SHA-256 of its push address), nothing more.
+        // #pl: the map page's key for this phone's GPS (above), after any fragment
+        // the path already has.
+        String query = sep + "source=android&caps=voice,calls,callout" + nativePush();
+        String frag = "pl=" + pageLocationKey();
+        int hash = path.indexOf('#');
+        String url = hash < 0
+                ? path + query + "#" + frag
+                : path.substring(0, hash) + query + path.substring(hash) + "&" + frag;
+        return Uri.parse(Server.get(this) + url);
+    }
+
+    /** The path on the saved server this launch opens. */
+    private String launchPath() {
         String path = "/";
         try {
             ActivityInfo info = getPackageManager().getActivityInfo(getComponentName(), PackageManager.GET_META_DATA);
@@ -173,17 +242,7 @@ public class SuiteLauncher extends LauncherActivity {
         } else if (asked != null && asked.startsWith("/") && !asked.startsWith("//") && !asked.contains("\\")) {
             path = asked;
         }
-        String sep = path.contains("?") ? "&" : "?";
-        // caps=voice: this app can hold a voice channel in the background
-        // (the page hands Join over to it, frontend/src/rtc/voice/androidApp.ts).
-        // calls: this app rings DM calls itself, full screen (Calls WP-D3), so the
-        // page gives its rings the answer token and leaves the ringing to it.
-        // callout: Call / Video call on the page hands the call to this app too
-        // (promptly://call/start, Calls WP-D5), with the phone's own camera.
-        // np: this app shows Promptly's notifications itself (the app module's push
-        // package), so the page keeps Chrome's own quiet on this phone. Its value says
-        // which registration (the SHA-256 of its push address), nothing more.
-        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice,calls,callout" + nativePush());
+        return path;
     }
 
     /** "&np=<sha-256>" while the app's own notifications are on (see NativePush), else "". */

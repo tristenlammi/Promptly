@@ -4,6 +4,8 @@ import "./lib/installPrompt";
 // The Promptly Android app says it can hold voice channels (?caps=voice).
 import "./rtc/voice/androidApp";
 import "./lib/androidPush";
+// ...and hands the map its own GPS (#pl=<key>).
+import "./maps/phoneLocation";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";

@@ -19,7 +19,8 @@ export interface MapViewHandle {
   /** The part of the map you can see past the panels (pixels covered on each side). */
   visibleBounds(inset: { top: number; bottom: number; left: number; right: number }): [number, number, number, number] | null;
   /** Slide to a spot without changing how far in you are. */
-  panTo(lat: number, lon: number): void;
+  /** Keep a point in the middle of what the panel leaves showing ([covered]), as you move. */
+  panTo(lat: number, lon: number, covered?: { top: number; bottom: number; left: number; right: number }): void;
   /**
    * The panel over the map changed size: keep this pin in the map that's still
    * showing. Does nothing while you have a finger (or the mouse) on the map.
@@ -217,8 +218,9 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
       return [clamp(Math.min(...lons), -180, 180), clamp(Math.min(...lats), -85, 85), clamp(Math.max(...lons), -180, 180), clamp(Math.max(...lats), -85, 85)];
     },
-    panTo(lat, lon) {
-      mapRef.current?.easeTo({ center: [lon, lat], duration: 400 });
+    panTo(lat, lon, covered) {
+      const offset: [number, number] = covered ? [(covered.left - covered.right) / 2, (covered.top - covered.bottom) / 2] : [0, 0];
+      mapRef.current?.easeTo({ center: [lon, lat], offset, duration: 400 });
     },
     settlePin(lat, lon, covered, hold) {
       const map = mapRef.current;
