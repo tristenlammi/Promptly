@@ -122,16 +122,17 @@ registerRoute(
 self.addEventListener("fetch", (event: FetchEvent) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "POST") return;
-  const app = url.pathname === "/files/share-target" ? "files" : url.pathname === "/porch/share-target" ? "porch" : null;
+  const app =
+    url.pathname === "/files/share-target" ? "files" : url.pathname === "/porch/share-target" ? "porch" : url.pathname === "/rooms/share-target" ? "rooms" : null;
   if (!app) return;
   event.respondWith(
     (async () => {
       try {
         const form = await event.request.formData();
-        const files = form.getAll(app === "porch" ? "media" : "files").filter((v): v is File => v instanceof File);
-        // Porch keeps the shared words and link as the caption.
+        const files = form.getAll(app === "files" ? "files" : "media").filter((v): v is File => v instanceof File);
+        // Porch keeps the shared words and link as the caption; Rooms as the message.
         const words =
-          app === "porch"
+          app !== "files"
             ? ["title", "text", "url"]
                 .map((k) => form.get(k))
                 .filter((v): v is string => typeof v === "string" && !!v.trim())
@@ -142,7 +143,7 @@ self.addEventListener("fetch", (event: FetchEvent) => {
       } catch {
         // Nothing usable arrived — still land the user in the app.
       }
-      return Response.redirect(app === "porch" ? "/porch/new?shared=1" : "/files/?shared=1", 303);
+      return Response.redirect(app === "porch" ? "/porch/new?shared=1" : app === "rooms" ? "/rooms/?shared=1" : "/files/?shared=1", 303);
     })()
   );
 });
@@ -204,7 +205,7 @@ interface PushPayload {
   /** Buttons on the notification ("Going", "Done", "Snooze 1 hour"): each
    * carries a signed token the worker POSTs to ``/api/notifications/action``
    * (it has no sign-in of its own). See ``app/notifications/actions.py``. */
-  actions?: { action: string; title: string; token: string }[];
+  actions?: { action: string; title: string; token: string; type?: "text"; placeholder?: string }[];
   /** Calls (``category: "call"``): ``call_ring`` / ``call_stop`` /
    * ``call_missed``, and the ring's fields (see ``backend/app/calls/ring.py``). */
   kind?: string;
@@ -379,6 +380,19 @@ self.addEventListener("push", (event) => {
       let body = payload.body;
       let lines: string[] = [];
       let count = 1;
+      // The room is open, on screen and focused on this device: the message
+      // is already in front of you (the page may not have said "looking"
+      // lately, if you've been reading without touching it). No notification.
+      if (payload.category === "room_message" && payload.url) {
+        try {
+          const path = new URL(payload.url, self.location.origin).pathname;
+          const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+          const reading = wins.some((w) => (w as WindowClient).focused && (w as WindowClient).visibilityState === "visible" && new URL(w.url).pathname === path);
+          if (reading) return;
+        } catch {
+          // Can't tell: show it.
+        }
+      }
       // A room's messages stack in one notification, like a messaging app:
       // the newest few lines, and "+N more" for the rest. Tapping it (or
       // reading the room in the app) clears the stack.
@@ -417,7 +431,9 @@ self.addEventListener("push", (event) => {
       const buttons = (payload.actions ?? []).slice(0, maxActions);
       const options = {
         body,
-        actions: buttons.map((a) => ({ action: a.action, title: a.title })),
+        // ``type: "text"`` (a Rooms reply) is a box to type in where the
+        // platform has one (Android); elsewhere it's a button that opens the room.
+        actions: buttons.map((a) => (a.type === "text" ? { action: a.action, title: a.title, type: "text", placeholder: a.placeholder ?? "" } : { action: a.action, title: a.title })),
         // The sender's picture for a message; Promptly's icon otherwise.
         icon: payload.icon || "/pwa-192.png",
         badge: "/pwa-192.png",
@@ -442,15 +458,17 @@ self.addEventListener("push", (event) => {
 
 /** A notification's button: do it in the background and say so briefly;
  * if it can't be done (expired, gone, offline), open the app instead. */
-async function runAction(token: string, note: Notification): Promise<boolean> {
+async function runAction(token: string, note: Notification, text?: string, quiet = false): Promise<boolean> {
   try {
     const res = await fetch("/api/notifications/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify(text ? { token, text } : { token }),
       credentials: "omit",
     });
     if (!res.ok) return false;
+    // Marking a room read needs no word back: the notification going is the answer.
+    if (quiet) return true;
     const out = (await res.json().catch(() => ({}))) as { message?: string };
     const tag = `${note.tag || "promptly"}:done`;
     await self.registration.showNotification(out.message || "Done", {
@@ -477,9 +495,13 @@ self.addEventListener("notificationclick", (event) => {
   // call needs a page for the microphone).
   if (event.action === "call_answer" && data.answer_url) url = data.answer_url as string;
   const token = event.action ? (data.tokens as Record<string, string> | undefined)?.[event.action] : undefined;
-  if (token) {
+  // A reply typed into the notification (Android). Where there's no box to
+  // type in, "Reply" has no words: open the room instead, below.
+  const typed = ((event as NotificationEvent & { reply?: string | null }).reply ?? "").trim();
+  const replyWithoutWords = event.action === "room_reply" && !typed;
+  if (token && !replyWithoutWords) {
     event.waitUntil(
-      runAction(token, event.notification).then(async (ok) => {
+      runAction(token, event.notification, typed || undefined, event.action === "room_read").then(async (ok) => {
         if (!ok) await self.clients.openWindow(new URL(url, self.location.origin).href);
       }),
     );

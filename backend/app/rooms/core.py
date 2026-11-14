@@ -369,30 +369,61 @@ async def publish(user_ids: Iterable[uuid.UUID | str], event: dict) -> None:
             logger.debug("rooms publish failed", exc_info=True)
 
 
-async def set_presence(user_id: uuid.UUID, room_id: uuid.UUID | None) -> None:
+# "Looking at a room" is per device (a browser tab, the phone app) and short:
+# the page says so every 10 seconds while it's on screen, focused and being
+# used, and each word lasts PRESENCE_S. So a phone that locks without getting
+# to say "gone", or a tab left open on a desk, stops holding back that
+# person's notifications within seconds, not a minute (or for ever).
+PRESENCE_S = 25
+# A page from before devices were named says it every 30 seconds.
+PRESENCE_OLD_S = 60
+
+
+def _presence_key(user_id: uuid.UUID | str) -> str:
+    return f"rooms:looking:{user_id}"
+
+
+async def set_presence(user_id: uuid.UUID, room_id: uuid.UUID | None, device: str | None = None) -> None:
+    """This device is looking at ``room_id`` (None: at no room)."""
     from app.redis_client import redis
 
+    field = re.sub(r"[^A-Za-z0-9_-]", "", device or "")[:40] or "-"
     try:
-        key = f"rooms:presence:{user_id}"
+        key = _presence_key(user_id)
         if room_id is None:
-            await redis.delete(key)
+            await redis.hdel(key, field)
         else:
-            await redis.set(key, str(room_id), ex=60)
+            lasts = PRESENCE_S if field != "-" else PRESENCE_OLD_S
+            await redis.hset(key, field, f"{room_id}|{int(time.time()) + lasts}")
+            await redis.expire(key, PRESENCE_OLD_S)
     except Exception:  # noqa: BLE001
         logger.debug("rooms presence failed", exc_info=True)
 
 
-async def viewing(user_ids: list[uuid.UUID]) -> dict[str, str]:
-    """Which room each person is looking at right now (if any)."""
+async def viewing(user_ids: list[uuid.UUID]) -> dict[str, set[str]]:
+    """The rooms each person is looking at right now, on any of their devices."""
     from app.redis_client import redis
 
     if not user_ids:
         return {}
     try:
-        vals = await redis.mget([f"rooms:presence:{u}" for u in user_ids])
+        pipe = redis.pipeline()
+        for u in user_ids:
+            pipe.hgetall(_presence_key(u))
+        found = await pipe.execute()
     except Exception:  # noqa: BLE001
         return {}
-    return {str(u): v for u, v in zip(user_ids, vals) if v}
+    now = time.time()
+    out: dict[str, set[str]] = {}
+    for u, devices in zip(user_ids, found):
+        rooms = set()
+        for value in (devices or {}).values():
+            room, _, until = str(value).partition("|")
+            if room and until.isdigit() and int(until) > now:
+                rooms.add(room)
+        if rooms:
+            out[str(u)] = rooms
+    return out
 
 
 async def unread_total(db: AsyncSession, user_id: uuid.UUID) -> int:

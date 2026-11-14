@@ -1,4 +1,4 @@
-import { apiClient } from "@/api/client";
+import { API_BASE_URL, apiClient } from "@/api/client";
 import type { CallServerEvent, DmCall } from "@/api/dmCalls";
 import type { VoiceChannelSettings, VoiceMember, VoiceServerEvent, VoiceWhere } from "@/api/voiceChannels";
 
@@ -167,6 +167,15 @@ export type RoomEvent =
 
 export const ROOMS_EVENTS_PATH = "/rooms/events";
 
+/** When a "Remind me" on a message is due. */
+export type RemindWhen = "hour" | "evening" | "tomorrow" | "none";
+export const REMIND_CHOICES: { when: RemindWhen; label: string }[] = [
+  { when: "hour", label: "In an hour" },
+  { when: "evening", label: "This evening" },
+  { when: "tomorrow", label: "Tomorrow morning" },
+  { when: "none", label: "Just add to Tasks" },
+];
+
 export const roomsApi = {
   async bootstrap(): Promise<Bootstrap> {
     const { data } = await apiClient.get<Bootstrap>("/rooms/bootstrap");
@@ -261,6 +270,11 @@ export const roomsApi = {
   async removeReaction(id: string, emoji: string): Promise<void> {
     await apiClient.delete(`/rooms/messages/${id}/reactions`, { params: { emoji } });
   },
+  /** "Remind me": a task in your own Tasks that links back to the message. */
+  async remind(messageId: string, when: RemindWhen): Promise<{ title: string; due: string | null; time: string | null; href: string }> {
+    const { data } = await apiClient.post(`/rooms/messages/${messageId}/remind`, { when });
+    return data;
+  },
   async pins(roomId: string): Promise<Message[]> {
     const { data } = await apiClient.get<Message[]>(`/rooms/rooms/${roomId}/pins`);
     return data;
@@ -273,8 +287,22 @@ export const roomsApi = {
   async typing(roomId: string): Promise<void> {
     await apiClient.post(`/rooms/rooms/${roomId}/typing`);
   },
-  async presence(roomId: string | null): Promise<void> {
-    await apiClient.post("/rooms/presence", { room_id: roomId });
+  async presence(roomId: string | null, device: string): Promise<void> {
+    await apiClient.post("/rooms/presence", { room_id: roomId, device });
+  },
+  /** "Not looking any more", in a way that still goes out as the page is
+   *  hidden or closed (a phone locking): a plain request can be dropped. */
+  presenceGone(device: string, token: string | null): void {
+    try {
+      void fetch(`${API_BASE_URL}/rooms/presence`, {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ room_id: null, device }),
+      }).catch(() => undefined);
+    } catch {
+      /* it lapses by itself in a few seconds */
+    }
   },
 
   // ---- attachments ----

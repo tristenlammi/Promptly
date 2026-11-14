@@ -9,6 +9,7 @@ import { blockPerson, unblockPerson } from "@/components/people/blockActions";
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
+import { plainSnippet } from "../format";
 import { dmTitle, findRoom } from "../cache";
 import { useRoomsStore } from "../store";
 import { Composer, type ComposerAttachment, type ComposerHandle } from "./Composer";
@@ -47,6 +48,11 @@ export function RoomView({
   const [panel, setPanel] = useState<Panel>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [planning, setPlanning] = useState(false);
+  const [planTitle, setPlanTitle] = useState<string | undefined>(undefined);
+  const planFrom = useCallback((m: Message) => {
+    setPlanTitle(plainSnippet(m.body, 80) || undefined);
+    setPlanning(true);
+  }, []);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [actionsFor, setActionsFor] = useState<Message | null>(null);
@@ -90,7 +96,10 @@ export function RoomView({
     [b, room, b.me.id, b.me.username, b.users, usernames, canModerate, isPhone, onReply, onEdit],
   );
 
-  const closePlanning = useCallback(() => setPlanning(false), []);
+  const closePlanning = useCallback(() => {
+    setPlanning(false);
+    setPlanTitle(undefined);
+  }, []);
 
   const jumpTo = useCallback(
     (rid: string, seq: number) => {
@@ -216,7 +225,7 @@ export function RoomView({
           }
         />
         <RoomSettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} room={room} space={space} />
-        <PlanEventSheet open={planning} onClose={closePlanning} room={{ id: room.id, name: title }} members={members} meId={b.me.id} />
+        <PlanEventSheet open={planning} onClose={closePlanning} room={{ id: room.id, name: title }} members={members} meId={b.me.id} title={planTitle} />
         <MessageActionSheet
           m={actionsFor}
           onClose={() => setActionsFor(null)}
@@ -224,6 +233,7 @@ export function RoomView({
           canModerate={canModerate}
           onReply={onReply}
           onEdit={onEdit}
+          onPlanEvent={planFrom}
         />
       </div>
     );
@@ -437,6 +447,7 @@ export function RoomView({
         room={{ id: room.id, name: space ? `#${title}` : title }}
         members={members}
         meId={b.me.id}
+        title={planTitle}
       />
 
       <MessageActionSheet
@@ -446,6 +457,7 @@ export function RoomView({
         canModerate={canModerate}
         onReply={onReply}
         onEdit={onEdit}
+        onPlanEvent={room.can_send === false || room.blocked ? undefined : planFrom}
       />
 
       {dragging && (

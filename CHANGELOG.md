@@ -32,6 +32,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Mail: the Add to calendar sheet has "See it in Maps" once a place is filled in.
 - Meals & Macros: "another one", "the same again" and "2 more" log the earlier food again with the same portion and numbers, straight away. The assistant now always has today's entries and what you've eaten in the last few weeks in front of it, so it doesn't look anything up or estimate again.
 - Meals & Macros: Undo on the "Added" and "Removed" messages in the diary.
+- Rooms: answer a message, or mark it read, from its notification. On Android "Reply" opens a box to type in right there; where a notification has no such box it opens the conversation. "Mark as read" clears the unread count on all your devices.
+- Rooms: share into a conversation from other apps on your phone. "Share → P Rooms" on a photo, a video, a file or a link asks which conversation, then opens it with everything attached and ready; nothing is sent until you press Send. (The Android side arrives with the next Promptly phone app.)
+- Rooms: "Remind me" on any message (long-press on a phone, the clock in the bar on a computer): in an hour, this evening, tomorrow morning, or just add it to Tasks. It becomes a task in your own Tasks that links back to the message; nobody else is told.
+- Rooms: "Plan an event" on a message (long-press on a phone) opens the event editor with the message as its title and everyone in the conversation invited.
+- Rooms: a street address in a message is a link that opens the place in Maps.
 
 ### Changed
 
@@ -69,6 +74,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps on a phone: "Choose on the map" now shrinks the panel to one line so the map is in view while you tap (it could stay covering most of the map); the search results no longer sit under the location and layers buttons; a route's last stop isn't half hidden under the panel.
 - P Maps driving (phone and car, next Promptly for Android): on a road the route uses twice (out and back, or a round trip that ends where it started) the arrow and the line ahead stay on the stretch you're actually on instead of jumping to the later pass. A map you're still moving isn't pulled back to you mid-pan: it comes back 15 seconds after you stop.
 - P Maps driving: the turn card no longer adds "Then" with the same road's name at a roundabout.
+- Rooms: a message could arrive with no notification because Promptly still thought you were looking at that conversation. That lasted a minute after your phone locked, and for as long as a tab sat open on a computer. "Looking" is now per device, lapses within seconds, and needs you to have touched the page in the last two minutes. With the conversation open and focused on the device itself, there's still no notification.
+- Rooms: a message that didn't send on a bad connection is sent again by itself when the connection is back, and a message whose "sent" answer got lost is no longer posted twice when it's retried.
+- Rooms: reading a conversation on one device (or pressing "Mark as read") clears its notification on your other devices the next time they're open.
 
 ## [0.40.2] - 2026-11-13
 

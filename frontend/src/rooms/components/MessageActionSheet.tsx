@@ -1,11 +1,11 @@
-import { Copy, CornerUpLeft, Pencil, Pin, Plus, Trash2 } from "lucide-react";
+import { AlarmClock, CalendarPlus, Copy, CornerUpLeft, Pencil, Pin, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState, type ComponentType } from "react";
 
-import type { Message } from "@/api/rooms";
+import { REMIND_CHOICES, type Message } from "@/api/rooms";
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
-import { copyText, deleteMessage, togglePin, toggleReaction } from "../actions";
+import { copyText, deleteMessage, remindMe, togglePin, toggleReaction } from "../actions";
 import { QUICK_REACTIONS } from "../emoji";
 import { plainSnippet } from "../format";
 import { EmojiGrid } from "./ui";
@@ -18,6 +18,7 @@ export function MessageActionSheet({
   canModerate,
   onReply,
   onEdit,
+  onPlanEvent,
 }: {
   m: Message | null;
   onClose: () => void;
@@ -25,9 +26,15 @@ export function MessageActionSheet({
   canModerate: boolean;
   onReply: (m: Message) => void;
   onEdit: (m: Message) => void;
+  /** Make a calendar event from this message (absent where you can't post). */
+  onPlanEvent?: (m: Message) => void;
 }) {
   const [more, setMore] = useState(false);
-  useEffect(() => setMore(false), [m?.id]);
+  const [remind, setRemind] = useState(false);
+  useEffect(() => {
+    setMore(false);
+    setRemind(false);
+  }, [m?.id]);
   if (!m) return null;
   const own = m.kind === "user" && m.author_id === meId;
   const act = (fn: () => void) => () => {
@@ -78,6 +85,22 @@ export function MessageActionSheet({
             {own && typeof m.meta?.event_id !== "string" && !m.meta?.event_reminder && (!m.meta?.share || (m.meta.share as { has_note?: boolean }).has_note) && <Row icon={Pencil} label="Edit" onClick={act(() => onEdit(m))} />}
             <Row icon={Pin} label={m.pinned ? "Unpin" : "Pin"} onClick={act(() => void togglePin(m))} />
             {m.body && <Row icon={Copy} label="Copy text" onClick={act(() => void copyText(m))} />}
+            {onPlanEvent && m.kind === "user" && m.body && <Row icon={CalendarPlus} label="Plan an event" onClick={act(() => onPlanEvent(m))} />}
+            {m.kind !== "system" && <Row icon={AlarmClock} label="Remind me" onClick={() => setRemind((v) => !v)} />}
+            {remind && (
+              <div className="flex flex-wrap gap-2 border-t border-[var(--border)] px-4 py-3">
+                {REMIND_CHOICES.map((c) => (
+                  <button
+                    key={c.when}
+                    type="button"
+                    onClick={act(() => void remindMe(m, c.when))}
+                    className="inline-flex min-h-10 items-center rounded-full border border-[var(--border)] px-3.5 text-sm text-[var(--text)] hover:bg-[var(--hover)]"
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {(own || canModerate) && <Row icon={Trash2} label="Delete" danger onClick={act(() => void deleteMessage(m))} />}
           </div>
         </div>

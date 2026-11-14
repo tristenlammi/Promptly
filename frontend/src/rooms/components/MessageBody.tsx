@@ -7,6 +7,23 @@ const REMARK = [remarkGfm];
 
 const urlTransform = (url: string) => (url.startsWith("mention:") ? url : defaultUrlTransform(url));
 
+/** A street address as people type one: "342 Palmwoods-Montville Road",
+ *  "12 Smith St, Baringa". Deliberately narrow (a number, capitalised words, a
+ *  road word) so ordinary sentences aren't turned into links; the short
+ *  road words that are also titles ("Dr", "St") don't count before a name. */
+const ADDRESS =
+  /\b\d{1,5}[A-Za-z]?(?:[-/]\d{1,5})?\s+(?:[A-Z][A-Za-z']+[ -]){1,4}(?:Street|Road|Rd|Avenue|Ave|Drive|Court|Place|Lane|Ln|Terrace|Tce|Parade|Pde|Boulevard|Blvd|Crescent|Cres|Highway|Hwy|Circuit|Cct|Close|(?:St|Dr|Ct|Pl|Cl|Way)(?!\s+[A-Z][a-z]))\b(?:,\s*[A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)?)?/g;
+
+/** Addresses become links that open the place in Maps. Code, links already
+ *  written and web addresses are left exactly as they are. */
+export function linkAddresses(text: string): string {
+  if (!/\d/.test(text)) return text;
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`|!?\[[^\]]*\]\([^)]*\)|https?:\/\/\S+)/g)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(ADDRESS, (addr) => `[${addr}](/maps?q=${encodeURIComponent(addr)})`)))
+    .join("");
+}
+
 function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -27,13 +44,16 @@ export const MessageBody = memo(function MessageBody({
 }) {
   const source = useMemo(() => {
     const names = [...usernames, "promptly", "everyone", "here"].filter(Boolean).sort((a, b) => b.length - a.length);
-    if (!names.length || !body.includes("@")) return body;
-    const re = new RegExp(`(^|[\\s(])@(${names.map(escapeRe).join("|")})(?![\\w.-])`, "gi");
-    // Leave fenced / inline code alone.
-    return body
-      .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
-      .map((part, i) => (i % 2 === 1 ? part : part.replace(re, (_m, pre: string, name: string) => `${pre}[@${name}](mention:${name})`)))
-      .join("");
+    let text = body;
+    if (names.length && body.includes("@")) {
+      const re = new RegExp(`(^|[\\s(])@(${names.map(escapeRe).join("|")})(?![\\w.-])`, "gi");
+      // Leave fenced / inline code alone.
+      text = body
+        .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+        .map((part, i) => (i % 2 === 1 ? part : part.replace(re, (_m, pre: string, name: string) => `${pre}[@${name}](mention:${name})`)))
+        .join("");
+    }
+    return linkAddresses(text);
   }, [body, usernames]);
 
   const components = useMemo<Components>(

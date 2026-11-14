@@ -291,3 +291,51 @@ def remove_room_files(room_id: uuid.UUID) -> None:
         shutil.rmtree(absolute_path(room_dir(room_id)), ignore_errors=True)
     except ValueError:
         pass
+
+
+# ------------------------------------------------------------------ remind me
+
+
+def remind_time(now_local: datetime, when: str) -> tuple[str | None, str | None]:
+    """(due day, due time) in the person's own time for a "Remind me" choice.
+    "evening" after 5 pm is tomorrow evening: a reminder is never in the past."""
+    if when == "hour":
+        at = (now_local + timedelta(hours=1)).replace(second=0, microsecond=0)
+        return at.date().isoformat(), at.strftime("%H:%M")
+    if when == "evening":
+        day = now_local.date() if now_local.hour < 17 else now_local.date() + timedelta(days=1)
+        return day.isoformat(), "18:00"
+    if when == "tomorrow":
+        return (now_local.date() + timedelta(days=1)).isoformat(), "09:00"
+    return None, None
+
+
+async def remind_me(db: AsyncSession, user: User, room: Room, msg: RoomMessage, author: str | None, when: str) -> dict:
+    """Add a task to ``user``'s Tasks about this message, due at ``when``."""
+    import copy
+
+    from app.items import service as items
+    from app.items.registry import get_spec
+    from app.items.spec import ActionError
+
+    words = re.sub(r"\s+", " ", re.sub(r"[*_`>#~]+", "", msg.body or "")).strip()
+    who = author or "Promptly"
+    title = (f"{who}: {words}" if words else f"Reply to {who}")[:200]
+    link = f"/rooms/r/{room.id}?m={msg.seq}"
+    due, at = remind_time(datetime.now(items.zone_for(user)), when)
+    task: dict = {"title": title, "notes": f"From a message in Rooms.\n{link}"}
+    if due:
+        task.update({"due": due, "time": at, "alerts": [0]})
+    try:
+        row, _ = await items.open_app(db, user, "tasks")
+        row, doc, _access = await items.load(db, user, row.id, lock=True)
+        spec = get_spec("tasks")
+        data = copy.deepcopy(doc.data)
+        ctx = items.make_context(db, user, row.id, spec)
+        await items.run_action(ctx, spec, data, "add_tasks", {"tasks": [task]})
+        await items.save_data(db, user, row, doc, data, base_revision=None)
+    except (ActionError, items.ItemError, items.ItemNotFound) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc) or "Couldn't add that to Tasks.") from exc
+    file_id = row.id
+    await db.commit()
+    return {"title": title, "due": due, "time": at, "href": "/app/open/tasks", "file_id": str(file_id)}

@@ -16,6 +16,7 @@ import { useRoomsStore } from "../store";
 import { SHARE_ICONS } from "./ShareCard";
 import { EmojiGrid, Popover, UserAvatar } from "./ui";
 import { clearDraft, getDraft, setDraft } from "../drafts";
+import { takeIncomingShare, useIncomingShare } from "../incomingShare";
 
 const MAX_FILE = 50 * 1024 * 1024;
 
@@ -167,6 +168,18 @@ export const Composer = forwardRef<
   );
 
   useImperativeHandle(ref, () => ({ addFiles, focus: () => ta.current?.focus() }), [addFiles]);
+
+  // Shared into Rooms from another app, and this conversation was chosen:
+  // the files attach and the words wait in the box. Nothing is sent yet.
+  const incoming = useIncomingShare();
+  useEffect(() => {
+    if (!incoming || incoming.roomId !== roomId || editing) return;
+    const got = takeIncomingShare(roomId);
+    if (!got) return;
+    if (got.files.length) addFiles(got.files);
+    if (got.text) setText((cur) => (cur.trim() ? `${cur.replace(/\s+$/, "")}\n${got.text}` : got.text));
+    ta.current?.focus();
+  }, [incoming, roomId, editing, addFiles]);
 
   const removeUpload = (key: string) =>
     setUploads((u) => {
