@@ -142,7 +142,13 @@ class MapLinkActivity : ComponentActivity() {
         val promptly = ComponentName(packageName, "org.promptly.app.PromptlyLauncher")
         val target = if (enabled(maps)) maps else promptly
         runCatching {
-            startActivity(Intent().setComponent(target).putExtra(EXTRA_PATH, path).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            // CLEAR_TASK: with P Maps already open, its launcher would only bring the
+            // open page forward and the place asked for would never show (seen on the
+            // emulator; the same reason as widgets.Open.go).
+            startActivity(
+                Intent().setComponent(target).putExtra(EXTRA_PATH, path)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+            )
         }.onFailure {
             Toast.makeText(this, "Open P Maps to see this place.", Toast.LENGTH_LONG).show()
         }
