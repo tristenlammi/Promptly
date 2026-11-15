@@ -6,7 +6,7 @@ import { apiClient } from "@/api/client";
  * until an admin turns Home on. A home's devices are only ever its members'.
  */
 
-export type HomeRole = "owner" | "adult" | "guest";
+export type HomeRole = "owner" | "member";
 
 export interface HomeEntity {
   id: string;
@@ -24,6 +24,84 @@ export interface HomeEntity {
   /** Its box is connected right now. */
   online: boolean;
   can_switch: boolean;
+  /** A lock, or a garage door or gate: ask "are you sure?" before letting someone in. */
+  careful: boolean;
+  /** What its controls need beyond on and off. */
+  x?: {
+    /** Light: colour modes it supports; climate: its modes. */
+    modes?: string[];
+    /** Light warmth in kelvin, and its range. */
+    k?: number;
+    kmin?: number;
+    kmax?: number;
+    rgb?: [number, number, number];
+    /** Fan speed, 0–100. */
+    pct?: number;
+    /** Cover position, 0 (closed) – 100 (open). */
+    pos?: number;
+    /** Climate: target and current temperature, range and step. */
+    target?: number;
+    cur?: number;
+    min?: number;
+    max?: number;
+    step?: number;
+    /** Media: volume 0–100, what's playing. */
+    vol?: number;
+    title?: string;
+    muted?: boolean;
+  };
+}
+
+export type HomeAction =
+  | "turn_on" | "turn_off" | "toggle" | "set" | "speed" | "open" | "close" | "stop" | "position"
+  | "temperature" | "mode" | "play" | "pause" | "volume" | "lock" | "unlock";
+
+/** One field of a set-up step. */
+export interface SetupField {
+  name: string;
+  label: string;
+  hint?: string;
+  required: boolean;
+  type: "text" | "password" | "number" | "bool" | "select" | "multiselect" | "unsupported";
+  default?: string | number | boolean | string[];
+  options?: { value: string; label: string }[];
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+/** One step of adding a device, as the box describes it. */
+export type SetupStep = { flow: string; brand: string; brand_name: string; step?: string } & (
+  | { kind: "form"; title: string; text?: string; fields: SetupField[]; errors: Record<string, string>; last: boolean }
+  | { kind: "menu"; title: string; text?: string; options: { value: string; label: string }[] }
+  | { kind: "wait"; text: string }
+  | { kind: "done"; title: string; entry_id?: string; devices?: { device_id: string; name: string; area: string }[] }
+  | { kind: "stopped"; reason: string; text: string }
+  | { kind: "elsewhere"; text: string }
+);
+
+export interface FoundDevice {
+  flow: string;
+  brand: string;
+  brand_name: string;
+  name: string;
+}
+
+export interface Brand {
+  id: string;
+  name: string;
+  note: string;
+  /** Works through its maker's cloud, not only inside your home. */
+  cloud: boolean;
+  featured: boolean;
+}
+
+export interface Connected {
+  id: string;
+  brand: string;
+  brand_name: string;
+  title: string;
+  state: string;
 }
 
 export interface HomeBox {
@@ -31,6 +109,8 @@ export interface HomeBox {
   name: string;
   online: boolean;
   last_seen_at: string | null;
+  version: string | null;
+  added_at: string | null;
 }
 
 export interface HomeDevices {
@@ -55,14 +135,31 @@ export const homeApi = {
   state: (homeId: string, after: number) => apiClient.get<HomeState>(`/home/${homeId}/state`, { params: { after } }).then((r) => r.data),
   claim: (body: { code: string; home_id?: string; home_name?: string }) =>
     apiClient.post<{ home_id: string; box_id: string; online: boolean }>("/home/claim", body).then((r) => r.data),
-  act: (homeId: string, body: { box_id: string; entity_id: string; action: "turn_on" | "turn_off" | "toggle" }) =>
+  act: (homeId: string, body: { box_id: string; entity_id: string; action: HomeAction; value?: unknown; confirm?: boolean }) =>
     apiClient.post(`/home/${homeId}/act`, body).then(() => undefined),
   rename: (homeId: string, name: string) => apiClient.patch(`/home/${homeId}`, { name }).then(() => undefined),
-  addMember: (homeId: string, username: string, role: "adult" | "guest") =>
-    apiClient.post(`/home/${homeId}/members`, { username, role }).then(() => undefined),
+  addMember: (homeId: string, username: string) => apiClient.post(`/home/${homeId}/members`, { username }).then(() => undefined),
   removeMember: (homeId: string, userId: string) => apiClient.delete(`/home/${homeId}/members/${userId}`).then(() => undefined),
   releaseBox: (homeId: string, boxId: string) =>
     apiClient.delete<{ claim_code: string }>(`/home/${homeId}/boxes/${boxId}`).then((r) => r.data.claim_code),
+
+  // ---- adding devices, rooms (each goes to the home's box and back) ----
+  found: (h: string, b: string) => apiClient.get<{ found: FoundDevice[] }>(`/home/${h}/boxes/${b}/setup/found`).then((r) => r.data.found),
+  brands: (h: string, b: string, q: string) => apiClient.get<{ brands: Brand[] }>(`/home/${h}/boxes/${b}/setup/brands`, { params: { q } }).then((r) => r.data.brands),
+  setupStart: (h: string, b: string, brand: string) => apiClient.post<SetupStep>(`/home/${h}/boxes/${b}/setup`, { brand }).then((r) => r.data),
+  setupGet: (h: string, b: string, flow: string) => apiClient.get<SetupStep>(`/home/${h}/boxes/${b}/setup/${flow}`).then((r) => r.data),
+  /** What was typed goes straight through to the box; the server keeps none of it. */
+  setupStep: (h: string, b: string, flow: string, input: Record<string, unknown>) =>
+    apiClient.post<SetupStep>(`/home/${h}/boxes/${b}/setup/${flow}`, { input }).then((r) => r.data),
+  setupAbort: (h: string, b: string, flow: string) => apiClient.delete(`/home/${h}/boxes/${b}/setup/${flow}`).then(() => undefined).catch(() => undefined),
+  connected: (h: string, b: string) => apiClient.get<{ connected: Connected[] }>(`/home/${h}/boxes/${b}/connected`).then((r) => r.data.connected),
+  disconnect: (h: string, b: string, id: string) => apiClient.delete(`/home/${h}/boxes/${b}/connected/${id}`).then(() => undefined),
+  addRoom: (h: string, b: string, name: string) => apiClient.post<{ id: string; name: string }>(`/home/${h}/boxes/${b}/rooms`, { name }).then((r) => r.data),
+  renameRoom: (h: string, b: string, area: string, name: string) => apiClient.patch(`/home/${h}/boxes/${b}/rooms/${area}`, { name }).then(() => undefined),
+  deleteRoom: (h: string, b: string, area: string) => apiClient.delete(`/home/${h}/boxes/${b}/rooms/${area}`).then(() => undefined),
+  updateDevice: (h: string, b: string, body: { device_id?: string; entity_id?: string; name?: string; area?: string }) =>
+    apiClient.patch(`/home/${h}/boxes/${b}/devices`, body).then(() => undefined),
+  renameBox: (h: string, b: string, name: string) => apiClient.patch(`/home/${h}/boxes/${b}`, { name }).then(() => undefined),
 };
 
 // ---- Admin → Home ----

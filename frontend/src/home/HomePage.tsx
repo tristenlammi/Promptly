@@ -1,16 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Blinds,
+  BatteryMedium,
   DoorClosed,
   Droplets,
   Fan,
   Lightbulb,
   Lock,
+  MoreHorizontal,
   Plug,
   Plus,
   Power,
   Radio,
   Router,
+  Settings,
   Thermometer,
   Tv,
   WifiOff,
@@ -27,13 +30,21 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
+import { AddDeviceSheet } from "./AddDeviceSheet";
+import { DeviceSheet } from "./DeviceSheet";
+import { HomeSettingsSheet } from "./HomeSettingsSheet";
+import { byReading, isReading, stateWords } from "./words";
+
 /**
  * Home: the devices in your home, through the box that lives there.
  *
- * The first page of Promptly Home: your home, its rooms, each device as a
- * tile. Lights, plugs and switches turn on and off with a tap; everything
- * else shows what it's doing. "Add a home box" takes the code on the box's
- * card (the card's QR opens this page with the code filled in).
+ * Your home, its rooms, each device as a tile. Lights, plugs, switches and
+ * fans turn on and off with a tap, and "…" opens the rest (brightness,
+ * warmth, speed); a blind, a thermostat, a lock or a speaker opens its
+ * controls. Readings (a temperature, a door, a battery) sit in a row under
+ * each room. "Add a device" runs a brand's set-up steps on the home's box;
+ * "Add a home box" takes the code on the box's card (the card's QR opens
+ * this page with the code filled in).
  *
  * Live: while the page is in front it asks the server every two seconds
  * whether anything changed (one number comes back when nothing has).
@@ -59,6 +70,8 @@ export function HomePage() {
   const { data: homes, isLoading, isError, refetch } = useQuery({ queryKey: KEY, queryFn: homeApi.homes, enabled: on === true });
   const [picked, setPicked] = useState<string | null>(null);
   const [adding, setAdding] = useState(() => codeFromAddress() !== "");
+  const [addingDevice, setAddingDevice] = useState(false);
+  const [settings, setSettings] = useState(false);
   const home = useMemo(() => homes?.find((h) => h.id === picked) ?? homes?.[0] ?? null, [homes, picked]);
 
   useLive(home);
@@ -89,9 +102,16 @@ export function HomePage() {
         title={home?.name ?? "Home"}
         actions={
           home && (
-            <button type="button" onClick={() => setAdding(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)]">
-              <Plus className="h-3.5 w-3.5" /> Add a box
-            </button>
+            <div className="flex items-center gap-2">
+              {home.boxes.length > 0 && (
+                <button type="button" onClick={() => setAddingDevice(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-3 text-xs font-medium text-white hover:opacity-90">
+                  <Plus className="h-3.5 w-3.5" /> Add a device
+                </button>
+              )}
+              <button type="button" onClick={() => setSettings(true)} aria-label="Home settings" title="Home settings" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
+                <Settings className="h-4 w-4" />
+              </button>
+            </div>
           )
         }
       />
@@ -111,15 +131,41 @@ export function HomePage() {
           </div>
         )}
         {homes && !home && (
-          <EmptyState
-            icon={<Router className="h-5 w-5" />}
-            title="Add your home box"
-            description="Plug the box into power and your router. Then scan the code on its card with your phone's camera, or type it here."
-            action={<button type="button" className={primary} onClick={() => setAdding(true)}><Plus className="h-4 w-4" /> Add a home box</button>}
-          />
+          <div className="flex flex-col gap-5">
+            <EmptyState
+              icon={<Router className="h-5 w-5" />}
+              title="Add your home box"
+              description="A home box is a small computer that lives in your home and connects your lights, plugs and other devices to Promptly."
+              action={<button type="button" className={primary} onClick={() => setAdding(true)}><Plus className="h-4 w-4" /> Add a home box</button>}
+            />
+            <ol className="mx-auto flex w-full max-w-md flex-col gap-3 text-sm text-[var(--text)]">
+              {[
+                ["Plug it in.", "Power, and a network cable from the box to your router. Give it a few minutes to start."],
+                ["Find its card.", "The card that came with the box has a code like ABCD-EFGH-JKMN and a square QR code."],
+                ["Scan or type.", "Point your phone's camera at the QR code, or tap Add a home box and type the code."],
+                ["Add your devices.", "Your home appears here. Tap Add a device to bring in your lights, plugs and bridges."],
+              ].map(([head, body], i) => (
+                <li key={head} className="flex gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/15 text-sm font-semibold text-[var(--accent-text,var(--accent))]">{i + 1}</span>
+                  <span><span className="font-medium">{head}</span> <span className="text-[var(--text-muted)]">{body}</span></span>
+                </li>
+              ))}
+            </ol>
+            <p className="mx-auto max-w-md text-center text-xs text-[var(--text-muted)]">No box? Ask whoever looks after this Promptly: they prepare one in Admin → Home.</p>
+          </div>
         )}
-        {home && <Devices home={home} />}
+        {home && <Devices home={home} onAddDevice={() => setAddingDevice(true)} />}
       </div>
+      {home && <AddDeviceSheet open={addingDevice} home={home} onClose={() => setAddingDevice(false)} />}
+      {home && (
+        <HomeSettingsSheet
+          open={settings}
+          home={home}
+          onClose={() => setSettings(false)}
+          onAddBox={() => { setSettings(false); setAdding(true); }}
+          onLeft={() => { setSettings(false); setPicked(null); }}
+        />
+      )}
       <AddBoxSheet
         open={adding}
         home={home}
@@ -175,8 +221,11 @@ function useLive(home: Home | null) {
   }, [id, qc]);
 }
 
-function Devices({ home }: { home: Home }) {
+function Devices({ home, onAddDevice }: { home: Home; onAddDevice: () => void }) {
   const offline = home.boxes.filter((b) => !b.online);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const keyOf = (e: HomeEntity) => `${e.box_id}/${e.id}`;
+  const opened = openKey ? home.entities.find((e) => keyOf(e) === openKey) ?? null : null;
   const rooms = useMemo(() => {
     const names = new Map(home.areas.map((a) => [a.id, a.name]));
     const groups = new Map<string, HomeEntity[]>();
@@ -202,16 +251,44 @@ function Devices({ home }: { home: Home }) {
         </div>
       )}
       {home.entities.length === 0 && offline.length === 0 && (
-        <EmptyState icon={<Lightbulb className="h-5 w-5" />} title="No devices yet" description="Your box is connected. Devices it finds will show here." />
+        <EmptyState
+          icon={<Lightbulb className="h-5 w-5" />}
+          title="No devices yet"
+          description="Your box is connected. Add your lights, plugs and bridges, and they'll show here."
+          action={<button type="button" className={primary} onClick={onAddDevice}><Plus className="h-4 w-4" /> Add a device</button>}
+        />
       )}
-      {rooms.map(([room, list]) => (
-        <section key={room} aria-label={room}>
-          <h2 className="mb-2 text-sm font-semibold text-[var(--text-muted)]">{room}</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {list.map((e) => <Tile key={`${e.box_id}/${e.id}`} homeId={home.id} entity={e} />)}
-          </div>
-        </section>
-      ))}
+      {rooms.map(([room, list]) => {
+        const tiles = list.filter((e) => !isReading(e));
+        const readings = list.filter(isReading).sort(byReading);
+        return (
+          <section key={room} aria-label={room}>
+            <h2 className="mb-2 text-sm font-semibold text-[var(--text-muted)]">{room}</h2>
+            {tiles.length > 0 && (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {tiles.map((e) => <Tile key={keyOf(e)} homeId={home.id} entity={e} onOpen={() => setOpenKey(keyOf(e))} />)}
+              </div>
+            )}
+            {readings.length > 0 && (
+              <ul className={cn("flex flex-wrap gap-2", tiles.length > 0 && "mt-3")} aria-label={`${room} readings`}>
+                {readings.map((e) => {
+                  const Icon = iconOf(e);
+                  return (
+                    <li key={keyOf(e)}>
+                      <button type="button" onClick={() => setOpenKey(keyOf(e))} className={cn("inline-flex min-h-9 max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-left text-xs hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]", !e.online && "opacity-60")}>
+                        <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" aria-hidden />
+                        <span className="truncate text-[var(--text-muted)]">{e.name}</span>
+                        <span className="shrink-0 font-medium text-[var(--text)]">{stateWords(e)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        );
+      })}
+      <DeviceSheet home={home} entity={opened} onClose={() => setOpenKey(null)} />
     </>
   );
 }
@@ -221,31 +298,23 @@ const ICONS: Record<string, LucideIcon> = { light: Lightbulb, switch: Plug, inpu
 function iconOf(e: HomeEntity): LucideIcon {
   if (e.cls === "temperature") return Thermometer;
   if (e.cls === "humidity" || e.cls === "moisture") return Droplets;
+  if (e.cls === "battery") return BatteryMedium;
   if (e.cls === "door" || e.cls === "window" || e.cls === "opening" || e.cls === "garage_door") return DoorClosed;
   return ICONS[e.domain] ?? Radio;
 }
 
-/** What a device is doing, in plain words. */
-export function stateWords(e: HomeEntity): string {
-  if (!e.online) return "Offline";
-  const s = e.state;
-  if (s === "unavailable" || s === "unknown" || s === "") return "Not responding";
-  if (e.domain === "sensor") return e.unit ? `${s} ${e.unit}` : s;
-  if (e.domain === "binary_sensor") {
-    const on = s === "on";
-    if (e.cls === "door" || e.cls === "window" || e.cls === "opening" || e.cls === "garage_door") return on ? "Open" : "Closed";
-    if (e.cls === "motion" || e.cls === "occupancy" || e.cls === "presence") return on ? "Movement" : "Clear";
-    if (e.cls === "moisture") return on ? "Wet" : "Dry";
-    if (e.cls === "smoke" || e.cls === "gas" || e.cls === "carbon_monoxide") return on ? "Detected" : "Clear";
-    return on ? "On" : "Off";
-  }
-  if (e.domain === "light" && s === "on" && typeof e.bri === "number" && e.bri > 0 && e.bri < 100) return `On · ${e.bri}%`;
-  return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+/** "On" for the tile's look: lit, open, unlocked, playing, heating. */
+function lit(e: HomeEntity): boolean {
+  if (e.domain === "cover") return e.state === "open" || e.state === "opening";
+  if (e.domain === "lock") return e.state === "unlocked";
+  if (e.domain === "climate") return e.state !== "off";
+  if (e.domain === "media_player") return e.state === "playing";
+  return e.state === "on";
 }
 
-function Tile({ homeId, entity }: { homeId: string; entity: HomeEntity }) {
+function Tile({ homeId, entity, onOpen }: { homeId: string; entity: HomeEntity; onOpen: () => void }) {
   const qc = useQueryClient();
-  const on = entity.state === "on";
+  const on = lit(entity);
   const dead = !entity.online || entity.state === "unavailable";
   const flip = useMutation({
     mutationFn: () => homeApi.act(homeId, { box_id: entity.box_id, entity_id: entity.id, action: on ? "turn_off" : "turn_on" }),
@@ -272,15 +341,23 @@ function Tile({ homeId, entity }: { homeId: string; entity: HomeEntity }) {
     </>
   );
   const shell = cn(
-    "flex min-h-24 flex-col items-start rounded-2xl border px-3 py-3 text-left transition",
+    "flex min-h-24 w-full flex-col items-start rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
     on && !dead ? "border-[var(--accent)]/50 bg-[color-mix(in_srgb,var(--accent)_9%,var(--surface))]" : "border-[var(--border)] bg-[var(--surface)]",
     dead && "opacity-60",
   );
-  if (!entity.can_switch) return <div className={shell}>{body}</div>;
+  // A blind, a thermostat, a lock, a speaker: the tile opens its controls.
+  if (!entity.can_switch) {
+    return <button type="button" aria-label={`${entity.name}, ${stateWords(entity)}`} onClick={onOpen} className={cn(shell, "hover:border-[var(--accent)]/60")}>{body}</button>;
+  }
   return (
-    <button type="button" role="switch" aria-checked={on} aria-label={entity.name} disabled={dead || flip.isPending} onClick={() => flip.mutate()} className={cn(shell, "hover:border-[var(--accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed")}>
-      {body}
-    </button>
+    <div className="relative">
+      <button type="button" role="switch" aria-checked={on} aria-label={entity.name} disabled={dead || flip.isPending} onClick={() => flip.mutate()} className={cn(shell, "hover:border-[var(--accent)]/60 disabled:cursor-not-allowed")}>
+        {body}
+      </button>
+      <button type="button" aria-label={`${entity.name}: more`} onClick={onOpen} className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+        <MoreHorizontal className="h-4 w-4" aria-hidden />
+      </button>
+    </div>
   );
 }
 

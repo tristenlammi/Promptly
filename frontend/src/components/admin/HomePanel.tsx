@@ -95,6 +95,32 @@ export function HomePanel() {
         </label>
       </SettingsCard>
 
+      <SettingsCard title="How it works">
+        <div className="flex flex-col gap-3 text-sm text-[var(--text)]">
+          <p className="text-[var(--text-muted)]">
+            A home box is a small computer in someone's home. It runs Home Assistant, a free program that knows how to talk to thousands of smart
+            devices, plus a small Promptly connector that links it to this server. People only ever see Promptly.
+          </p>
+          <ol className="flex list-decimal flex-col gap-2 pl-5">
+            <li><span className="font-medium">Start with a fresh Home Assistant.</span> <span className="text-[var(--text-muted)]">One nobody has opened or set up. The connector sets it up by itself. Add the connector and nothing else.</span></li>
+            <li><span className="font-medium">Prepare a box below.</span> <span className="text-[var(--text-muted)]">You get a setup string for the box, and a card (a code and a QR) for whoever will use it. Both are shown once.</span></li>
+            <li>
+              <span className="font-medium">Start the box with the setup string.</span>{" "}
+              <span className="text-[var(--text-muted)]">
+                Two ways. To try it on any computer with Docker: open a terminal in this repository's <code className="rounded bg-[var(--hover)] px-1">home-box/compose</code> folder and
+                run the two commands shown after you prepare a box. For a real box (a Home Assistant Green, a Raspberry Pi): install the Promptly Home add-on and
+                paste the setup string into its settings. <code className="rounded bg-[var(--hover)] px-1">home-box/README.md</code> has every step.
+              </span>
+            </li>
+            <li><span className="font-medium">Wait for "Waiting to be claimed · online".</span> <span className="text-[var(--text-muted)]">That means the box reached this server and nobody has added it to a home yet. It takes about a minute.</span></li>
+            <li><span className="font-medium">Hand over the card.</span> <span className="text-[var(--text-muted)]">They open Home, tap Add a home box and type the code (or scan the QR). From then on the box and its devices are theirs: you see only that it was claimed and whether it's online.</span></li>
+          </ol>
+          <p className="text-xs text-[var(--text-muted)]">
+            With Docker on Windows or macOS the box can't find devices by itself; people add them by brand and type the device's address. A real box, or Docker on Linux, finds them.
+          </p>
+        </div>
+      </SettingsCard>
+
       <SettingsCard title="Prepare a box">
         <p className="text-sm text-[var(--text-muted)]">
           Do this once for each box you hand out. You get a setup string to paste into the box, and a card to give with it.
@@ -119,11 +145,27 @@ export function HomePanel() {
             </p>
             {setup && (
               <div>
-                <p className="text-xs font-medium text-[var(--text-muted)]">1 · Setup string: paste into the box (the Promptly add-on's settings)</p>
+                <p className="text-xs font-medium text-[var(--text-muted)]">1 · Setup string: goes into the box</p>
                 <div className="mt-1 flex items-start gap-2">
                   <code className="min-w-0 flex-1 select-all break-all rounded-lg bg-[var(--hover)] px-2 py-1.5 text-xs text-[var(--text)]">{setup}</code>
                   <button type="button" className={quiet} onClick={() => void copy(setup, "Setup string")}><Copy className="h-3.5 w-3.5" /> Copy</button>
                 </div>
+                <p className="mt-3 text-xs text-[var(--text-muted)]">
+                  With Docker: in a terminal in the <code className="rounded bg-[var(--hover)] px-1">home-box/compose</code> folder, run this (it saves the setup string and starts the box).
+                  On a Home Assistant OS box: paste the setup string into the Promptly Home add-on's settings instead.
+                </p>
+                {([
+                  ["Windows (PowerShell)", `Set-Content .env "PROMPTLY_SETUP=${setup}"; docker compose up -d --build`],
+                  ["macOS or Linux", `echo "PROMPTLY_SETUP=${setup}" > .env && docker compose up -d --build`],
+                ] as const).map(([where, command]) => (
+                  <div key={where} className="mt-2">
+                    <p className="text-xs text-[var(--text-muted)]">{where}</p>
+                    <div className="mt-1 flex items-start gap-2">
+                      <code className="min-w-0 flex-1 select-all break-all rounded-lg bg-[var(--hover)] px-2 py-1.5 text-xs text-[var(--text)]">{command}</code>
+                      <button type="button" className={quiet} onClick={() => void copy(command, "Command")}><Copy className="h-3.5 w-3.5" /> Copy</button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {card && <ClaimCard code={card.code} url={card.url} />}

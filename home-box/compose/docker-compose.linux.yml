@@ -1,0 +1,15 @@
+# Linux only: Home Assistant on the home's own network, so it finds devices
+# by itself (they announce themselves by broadcast, which doesn't reach a
+# container on Docker's private network). Docker Desktop on Windows and macOS
+# can't do this: there, add devices by brand and type their address.
+services:
+  homeassistant:
+    network_mode: host
+    ports: !reset []
+    volumes:
+      - ha-config:/config
+      - /run/dbus:/run/dbus:ro
+
+  connector:
+    environment:
+      - HA_URL=http://host.docker.internal:8123

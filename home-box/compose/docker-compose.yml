@@ -1,32 +1,44 @@
-# A Promptly Home box without Home Assistant OS: Home Assistant and the
-# connector as two containers on any Linux machine in the home.
+# A Promptly Home box on any computer with Docker: a fresh Home Assistant and
+# the Promptly connector. See ../README.md.
 #
-#   PROMPTLY_SETUP='pbox1.…' docker compose up -d
+#   1. put the setup string from Promptly (Admin -> Home -> Prepare a box)
+#      into a file called .env here:   PROMPTLY_SETUP=pbox1....
+#   2. docker compose up -d --build
 #
-# (the setup string is from Promptly: Admin → Home → Prepare a box). The
-# connector sets a fresh Home Assistant up by itself; nobody has to open
-# Home Assistant's own screens. For a box you hand to someone, the Home
-# Assistant OS add-on (../addon-repo) is the better fit: it brings updates
-# and the Zigbee / Matter / Thread add-ons with it.
+# The connector sets the fresh Home Assistant up by itself; nobody has to open
+# Home Assistant's own screens. A Promptly on this same computer
+# (http://localhost:8091) is reached through the host, with nothing to change.
+#
+# On Linux, add the second file so Home Assistant can find devices on the
+# home network by itself:
+#   docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d --build
+name: promptly-home-box
+
 services:
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
     restart: unless-stopped
-    # Devices are found by broadcast on the home network (mDNS, Matter).
-    network_mode: host
     volumes:
       - ha-config:/config
-      - /run/dbus:/run/dbus:ro
     environment:
       - TZ=${TZ:-UTC}
+    # Only this computer can open Home Assistant's own screens (you shouldn't
+    # need to). Change HA_PORT if 8123 is taken.
+    ports:
+      - "127.0.0.1:${HA_PORT:-8123}:8123"
 
   connector:
     build: ../connector
     restart: unless-stopped
-    network_mode: host
     environment:
-      - PROMPTLY_SETUP=${PROMPTLY_SETUP:?Paste the setup string from Admin → Home}
-      - HA_URL=http://127.0.0.1:8123
+      - PROMPTLY_SETUP=${PROMPTLY_SETUP:?Put PROMPTLY_SETUP=... (from Admin -> Home -> Prepare a box) in a .env file next to this one}
+      - HA_URL=${HA_URL:-http://homeassistant:8123}
+      # Only if the box should dial somewhere other than the address in the
+      # setup string.
+      - PROMPTLY_SERVER=${PROMPTLY_SERVER:-}
+    # "localhost" in the setup string means this computer, not the container.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - box-data:/data
     depends_on:
