@@ -161,7 +161,7 @@ const TABS: TabDef[] = [
     id: "home",
     label: "Home",
     icon: <Router className="h-3.5 w-3.5" />,
-    subtitle: "Promptly Home: turn it on, and prepare the boxes you hand out.",
+    subtitle: "Promptly Home: smart devices. Turn it on here, then use the Home page.",
   },
   {
     id: "talk",

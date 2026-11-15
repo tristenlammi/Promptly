@@ -21,6 +21,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Promptly Home is bundled in. An update adds Home Assistant (out of sight) and Promptly's connector to it as part of Promptly itself, and they connect by themselves: no box to prepare, no setup string, no code. Turn Promptly Home on in Admin → Home and open Home: your home is there, ready for "Add a device"; add the rest of your household from Home's settings. About 3.5 GB of disk and roughly half a gigabyte of memory; take `home` out of COMPOSE_PROFILES to leave it out.
+- Home on Linux and Unraid: Home Assistant shares the server's network so it finds devices by itself, and its own screens listen on this machine only (127.0.0.1), so nothing on your home network can open them. On Docker Desktop it's on Promptly's private network, and devices are added by brand with their address.
+- Home: while it's starting (a minute or two, longer the first time) or its Home Assistant is restarting, the Home page says "Home is starting up" and fills in by itself; Admin → Home shows whether this server's home box is running.
+- The full backup (scripts/backup) now includes what Home knows about your devices and bridges, and restore puts it back.
+
+### Changed
+
+- Admin → Home: preparing a separate home box, its card and its list are under "Other homes (advanced)", closed by default. The Home page no longer starts with "add your home box".
+
+### Fixed
+
+- Home: a light's brightness (or any slider) could snap back while you were dragging it, because the light's own updates arrived mid-drag, and letting go then changed nothing. The slider now holds its place while you're on it.
+
 ## [0.43.0] - 2026-11-15
 
 ### Added

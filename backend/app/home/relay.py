@@ -13,6 +13,8 @@ Protocol (JSON text frames, each with a ``t``)::
     box  -> {"t":"snapshot","areas":[{"id","name"}],"entities":[Entity...]}
     box  -> {"t":"state","e":Entity}            one entity changed
     box  -> {"t":"gone","id":"light.x"}         one entity removed
+    box  -> {"t":"down"}                        Home Assistant on the box went away
+                                                (restarting); a snapshot follows when it's back
     srv  -> {"t":"req","id":"<req>","op":"<what>","args":{...}}
     box  -> {"t":"res","id":"<req>","ok":true,"data":...} | {"ok":false,"error":"..."}
     srv  -> {"t":"ping"}   box -> {"t":"pong"}  (either side may send either)
@@ -482,6 +484,13 @@ async def _from_box(live: Link, msg: dict[str, Any]) -> None:
             if live.entities.get(e["id"]) != e:
                 live.entities[e["id"]] = e
                 bump(live.home_id)
+    elif t == "down":
+        # The box is here but its Home Assistant isn't: what we hold is
+        # last time's picture, to look at and not to switch.
+        if live.got_snapshot:
+            await _save(live.box_id, snapshot=_snapshot_of(live))
+            live.got_snapshot = False
+            bump(live.home_id)
     elif t == "gone":
         if live.entities.pop(_text(msg.get("id"), 200), None) is not None:
             bump(live.home_id)

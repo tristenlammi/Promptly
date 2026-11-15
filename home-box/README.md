@@ -1,17 +1,109 @@
-# Promptly Home box
+# Promptly Home
+
+**Home Assistant is bundled with Promptly.** After a normal install or update
+it is simply there: two containers (Home Assistant, out of sight, and
+Promptly's connector to it) that start with the rest of Promptly and connect
+by themselves. There is nothing to prepare and no code to type.
+
+1. Update Promptly as usual (`./update.sh`, or `update.ps1` on Windows).
+2. Promptly → **Admin → Home** → turn on **Promptly Home**.
+3. Open **Home**. Your home is there. Tap **Add a device**.
+
+You add the rest of your household under Home → settings → People. Nobody
+outside a home sees its devices, admins included.
+
+## What the update adds
+
+- Two containers: `Promptly-Home` (Home Assistant, pinned to a version) and
+  `Promptly-HomeConnector`. About **3.5 GB** of disk for the image, downloaded
+  once, and roughly **half a gigabyte of memory** while running.
+- One line in `.env`: `HOME_BOX_SECRET`, which the connector proves itself to
+  the backend with. Nobody needs to see it.
+- A token in `COMPOSE_PROFILES`: `home` on Linux and Unraid, `home-desktop` on
+  Docker Desktop (Windows, macOS). Take it out (and `docker compose up -d
+  --remove-orphans`) to leave Home out; the update won't put it back.
+- Its data in `./data/home` (what Home Assistant knows about your devices and
+  bridges). The full backup (`scripts/backup.sh`) includes it, without history
+  and logs. The nightly database backup doesn't: restore that alone and your
+  devices need adding again.
+
+## Linux and Unraid: what is reachable on your network
+
+Home Assistant shares the server's network (`network_mode: host`), because
+devices announce themselves by broadcast and that doesn't reach Docker's
+private network. With that:
+
+- **Its own web screens listen on 127.0.0.1 only** (port 8123, or
+  `HOME_HA_PORT` in `.env` if 8123 is taken; the update picks a free one). No
+  other computer on your network can open them.
+- If Home Assistant can't use that port (something else has it), it falls back
+  to its own defaults: **every address, port 8123**. The update checks for
+  this when it first turns Home on, and the connector's log says so loudly if
+  it ever happens (`docker compose logs home-connector`): set `HOME_HA_PORT`
+  to a free port and restart the two containers.
+- It listens for device announcements on UDP 5353 (mDNS) and 1900 (SSDP), and
+  uses whatever ports a brand you add needs.
+- The connector shares the server's network too. It talks to Home Assistant on
+  127.0.0.1 and to Promptly through Promptly's own port on this machine.
+
+**Unraid:** if "Host access to custom networks" is on and Home never finds
+devices, Home Assistant may be listening on the wrong interface. This hasn't
+been tried on Unraid yet; tell us what you see.
+
+## Docker Desktop (Windows, macOS)
+
+Both containers sit on Promptly's private network and publish no port.
+Docker Desktop can't share the computer's network, so **"Found on your
+network" stays empty**: add devices with **Add by brand** and type the
+device's or bridge's address. Brands that are happy with an address should
+work (Philips Hue, TP-Link Kasa and Tapo, Shelly, LIFX, WiZ, ESPHome); ones
+that rely on finding the device or being called back (Google Cast, Sonos)
+won't work well. None of these has been tried with real hardware yet.
+
+## Changing the Home Assistant version
+
+The image tag is pinned in `docker-compose.yml` (both `home-assistant` and
+`home-assistant-desktop`). The connector sets a fresh Home Assistant up
+through the calls its own first-run screens make, which aren't a promised
+interface, so bump the tag on purpose and try it on a private copy first:
+
+```bash
+scripts/stack.sh up hometest --with home
+```
+
+## If it doesn't come up
+
+- Admin → Home says "This server's home box is starting" for more than ten
+  minutes: `docker compose ps` should show the two Home containers running;
+  `docker compose logs home-connector` (or `home-connector-desktop`) says what
+  it's waiting for.
+- "This Home Assistant is already set up and the box has no token for it":
+  `./data/home/box` was deleted but `./data/home/ha` wasn't. Stop the two
+  containers, delete `./data/home`, start them again. Devices need adding
+  again.
+
+---
+
+# Other homes (advanced): a separate home box
+
+Everything below is for a home that isn't where the server is: a small
+computer in that home runs a fresh Home Assistant and the same connector, and
+dials out to your Promptly server. It's parked, not the main path: the code
+works and is tested, and its controls are under **Admin → Home → Other homes
+(advanced)**.
 
 A **home box** is a small computer in a home that runs Home Assistant (out of
 sight) and the Promptly connector. The connector dials out to your Promptly
 server, so nothing is opened on the home's router. People add the box to their
-home in Promptly with the code on its card, then add and control their devices
-from Promptly's Home page. They never see Home Assistant.
+home in Promptly with the code on its card (Home → settings → "Have a separate
+home box with a code?").
 
 Start from a **fresh** Home Assistant: one nobody has opened or set up. The
 connector sets it up by itself. Add the connector and nothing else.
 
 There are two ways to run a box. Both begin the same way:
 
-1. In Promptly, open **Admin → Home**, turn Promptly Home on, and press
+1. In Promptly, open **Admin → Home → Other homes (advanced)** and press
    **Prepare a box**. You get a **setup string** (for the box) and a **card**
    (a code and a QR, for whoever will use the box). Both are shown once.
 
@@ -117,6 +209,7 @@ This path has not been run on real hardware yet.
 
 ## What the pieces are
 
+- `ha_config.py`: writes the bundled Home Assistant's configuration (where it listens) on every start.
 - `connector/promptly_box.py`: the connector. Talks to Home Assistant on the
   box and to the Promptly server; turns Home Assistant's devices and set-up
   steps into the plain shapes Promptly shows.

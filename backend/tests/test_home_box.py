@@ -140,3 +140,62 @@ def test_brands_under_a_maker_are_found_by_their_own_id():
     })
     assert flat["hue"]["name"] == "Philips Hue" and flat["tuya"]["iot_class"] == "cloud_push" and "group" in flat
     assert pb.brands_for(flat, {"hue", "tuya"}, "")[1]["cloud"] is True
+
+
+# ------------------------------------------------------------------ the bundled Home Assistant's settings
+
+
+def _ha_config():
+    here = Path(__file__).resolve()
+    for root in (os.environ.get("HOME_BOX_DIR"), here.parents[2] / "home-box", Path("/home-box")):
+        path = Path(root) / "ha_config.py" if root else None
+        if path and path.exists():
+            spec = importlib.util.spec_from_file_location("ha_config", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    pytest.skip("home-box/ha_config.py isn't mounted here")
+
+
+def test_its_web_server_setting_is_written_as_confirmed_not_on_trial(tmp_path, monkeypatch):
+    """Home Assistant reverts an unconfirmed web setting after five minutes
+    (to every address, port 8123). Ours is written as the confirmed one."""
+    import json
+
+    hc = _ha_config()
+    monkeypatch.setenv("HOME_HA_BIND", "127.0.0.1")
+    monkeypatch.setenv("HOME_HA_PORT", "8137")
+    hc.main(str(tmp_path))
+    data = json.loads((tmp_path / ".storage" / "http").read_text())["data"]
+    assert (data["stable"]["server_host"], data["stable"]["server_port"], data["pending"], data["yaml_migration_done"]) == (["127.0.0.1"], 8137, None, True)
+    yaml = (tmp_path / "configuration.yaml").read_text()
+    assert "zeroconf:" in yaml and "ssdp:" in yaml and "default_config" not in yaml.replace("``default_config``", "") and "http:" not in yaml
+
+    # What Home Assistant left after a failed trial: back to ours, the rest kept.
+    left = {"version": 3, "minor_version": 1, "key": "http", "data": {
+        "stable": {"server_port": 8123, "cors_allowed_origins": ["https://x"], "ssl_profile": "intermediate_v6", "error": None},
+        "pending": {"server_port": 8137, "server_host": ["127.0.0.1"], "error": "not_promoted"},
+        "yaml_migration_done": True,
+    }}
+    (tmp_path / ".storage" / "http").write_text(json.dumps(left))
+    monkeypatch.setenv("HOME_HA_PORT", "8200")
+    hc.main(str(tmp_path))
+    data = json.loads((tmp_path / ".storage" / "http").read_text())["data"]
+    assert (data["stable"]["server_host"], data["stable"]["server_port"], data["pending"]) == (["127.0.0.1"], 8200, None)
+    assert data["stable"]["cors_allowed_origins"] == ["https://x"]
+
+    # Somebody's own configuration.yaml is left alone, and so are their web settings.
+    other = tmp_path / "theirs"
+    other.mkdir()
+    (other / "configuration.yaml").write_text("default_config:\n")
+    hc.main(str(other))
+    assert (other / "configuration.yaml").read_text() == "default_config:\n" and not (other / ".storage").exists()
+
+
+def test_the_bundled_box_uses_the_deployments_secret_and_goes_where_its_told(monkeypatch):
+    monkeypatch.setenv("PROMPTLY_BUILTIN_KEY", "k" * 64)
+    monkeypatch.setenv("PROMPTLY_SERVER", "http://127.0.0.1:8087/")
+    assert pb.read_setup() == {"server": "http://127.0.0.1:8087", "box": "b0000000-0000-4000-8000-00000000b0c5", "key": "k" * 64}
+    monkeypatch.setenv("PROMPTLY_BUILTIN_KEY", "")
+    with pytest.raises(SystemExit):
+        pb.read_setup()

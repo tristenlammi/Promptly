@@ -247,7 +247,7 @@ async def act(home_id: uuid.UUID, body: ActBody, db: AsyncSession = Depends(get_
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "That can't be done from here yet.")
     live = relay.link(box.id)
     entity = live.entities.get(body.entity_id) if live is not None else None
-    if live is None or entity is None:
+    if live is None or not live.got_snapshot or entity is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "The home box is offline. Check it has power and internet.")
     try:
         value = relay.clean_value(domain, body.action, body.value, entity)

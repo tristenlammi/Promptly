@@ -522,6 +522,7 @@ class HomeAssistant:
                         await self._load()
                         for event in ("state_changed", "area_registry_updated", "entity_registry_updated", "device_registry_updated"):
                             await self.ask({"type": "subscribe_events", "event_type": event})
+                        await self._check_listening()
                         self.ready.set()
                         attempt = 0
                         log.info("Home Assistant: %d devices in %d rooms", len(self.entities), len(self.areas))
@@ -533,12 +534,32 @@ class HomeAssistant:
             except Exception as e:  # noqa: BLE001
                 log.warning("Home Assistant line: %s", e)
             self.ws = None
+            if self.ready.is_set():
+                # The server should know its picture is stale until we're back.
+                self.changes.put_nowait(("down", None))
             self.ready.clear()
             for fut in self._waiting.values():
                 if not fut.done():
                     fut.set_exception(RuntimeError("Home Assistant went away."))
             attempt += 1
             await asyncio.sleep(backoff(attempt))
+
+    async def _check_listening(self) -> None:
+        """Home Assistant falls back to its built-in web settings (every
+        address, port 8123) if it can't use the ones it was given, e.g. the
+        port is taken. Bundled with Promptly on a Linux host that would put
+        its own screens on the home network: say so, loudly."""
+        if self.supervised:
+            return
+        try:
+            got = await self.ask({"type": "http/config"})
+        except Exception:  # noqa: BLE001 - older Home Assistant: nothing to check
+            return
+        if str((got or {}).get("active_config_type") or "stable") != "stable":
+            log.error(
+                "Home Assistant couldn't use the web settings Promptly gave it and fell back to its own "
+                "(it may be listening on every address). Is its port taken? Set HOME_HA_PORT in .env to a free one."
+            )
 
     async def _read(self, ws: aiohttp.ClientWebSocketResponse) -> None:
         async for frame in ws:
@@ -784,7 +805,8 @@ class Server:
                     if welcome.get("t") != "welcome":
                         raise RuntimeError("the server didn't say welcome")
                     attempt = 0
-                    log.info("connected to %s (%s)", self.setup["server"], "in a home" if welcome.get("claimed") else "waiting to be claimed")
+                    waiting = "waiting for Promptly Home to be turned on" if self.setup["box"] == BUILTIN_BOX else "waiting to be claimed"
+                    log.info("connected to %s (%s)", self.setup["server"], "in a home" if welcome.get("claimed") else waiting)
                     await self._serve(ws)
                     code = ws.close_code
             except asyncio.CancelledError:
@@ -854,6 +876,15 @@ class Server:
             batch = [(kind, eid)]
             while not ha.changes.empty():
                 batch.append(ha.changes.get_nowait())
+            if batch[-1][0] == "down" or (not ha.ready.is_set() and any(k == "down" for k, _ in batch)):
+                # Home Assistant went away (restarting, updating): say so, and
+                # wait for it before saying anything else.
+                await ws.send_json({"t": "down"})
+                await ha.ready.wait()
+                while not ha.changes.empty():
+                    ha.changes.get_nowait()
+                await ws.send_json({"t": "snapshot", "areas": ha.areas, "entities": list(ha.entities.values())})
+                continue
             if any(k == "snapshot" for k, _ in batch):
                 await ws.send_json({"t": "snapshot", "areas": ha.areas, "entities": list(ha.entities.values())})
                 continue

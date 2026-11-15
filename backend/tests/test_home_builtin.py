@@ -195,3 +195,24 @@ async def test_an_admin_who_looks_gets_it_going_if_nobody_has(user, client, db):
     assert (await client.get("/api/home", headers=_hdr(sam))).json()["homes"] == []  # not for someone who isn't an admin
     (home,) = (await client.get("/api/home", headers=_hdr(user))).json()["homes"]
     assert home["role"] == "owner" and home["boxes"][0]["builtin"] is True
+
+
+async def test_home_assistant_restarting_is_starting_not_broken(user, client):
+    """The box stays connected while its Home Assistant restarts: the home
+    sees last time's devices, can't switch them, and is told it's starting."""
+    await _on(client, user)
+    live, task = await _dial()
+    await live.say({"t": "snapshot", "areas": [], "entities": [LAMP]})
+    await _wait(_live)
+    await live.say({"t": "down"})
+    await _wait(lambda: not _live())
+    home = (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]
+    assert (home["boxes"][0]["online"], home["boxes"][0]["ready"]) == (True, False)
+    assert [(e["id"], e["online"]) for e in home["entities"]] == [("light.lamp", False)]
+    body = {"box_id": home["boxes"][0]["id"], "entity_id": "light.lamp", "action": "turn_on"}
+    assert (await client.post(f"/api/home/{home['id']}/act", headers=_hdr(user), json=body)).status_code == 409
+    await live.say({"t": "snapshot", "areas": [], "entities": [LAMP]})
+    await _wait(_live)
+    assert (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]["boxes"][0]["ready"] is True
+    await live.hang_up()
+    await task
