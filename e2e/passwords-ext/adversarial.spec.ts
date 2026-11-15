@@ -185,8 +185,13 @@ test("cards and addresses never fill from one inline click, or without a confirm
   await page.click("#num");
   await expect.poll(() => !!menuFrame(page)).toBe(true);
   const f = menuFrame(page)!;
-  await expect(f.getByText("Open Promptly Passwords to fill this")).toBeVisible();
-  await expect(f.getByText("My Visa")).toHaveCount(0);
+  // The card is named in the menu (D137), and a press on it fills nothing: it only puts
+  // the card at the top of the panel, which still asks.
+  await expect(f.getByRole("button", { name: "Pick My Visa" })).toBeVisible();
+  await page.waitForTimeout(800);
+  await f.getByRole("button", { name: "Pick My Visa" }).click();
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => (window as any).__state().num)).toBe("");
 
   const pop = await popupFor(rig, page);
   await pop.getByRole("textbox", { name: "Search your vault" }).fill("Visa");

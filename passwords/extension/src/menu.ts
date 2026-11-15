@@ -62,9 +62,27 @@ function handOff(e: Event, picked?: Candidate) {
   });
 }
 
+/** Cards and addresses for a card or address box (D137). They're never filled from here:
+ *  a pick opens the toolbar panel with it at the top, and the panel asks before it fills.
+ *  True when the box is one of theirs and nothing else, so "no saved logins" isn't said. */
+function sitelessRows(r: { kinds?: string[]; cards?: Candidate[] }, button: (c: Candidate) => HTMLButtonElement, open: () => HTMLButtonElement): boolean {
+  const kinds = r.kinds ?? [];
+  const card = kinds.includes("card");
+  const identity = kinds.includes("identity");
+  if (!card && !identity) return false;
+  const rows = r.cards ?? [];
+  for (const c of rows.slice(0, 6)) root.appendChild(button(c));
+  if (rows.length) note(card ? "Opens the panel, which asks before it fills your card." : "Opens the panel, which asks before it fills.");
+  else {
+    note(card ? "No saved cards." : "No saved addresses.");
+    root.appendChild(open());
+  }
+  return kinds.every((k) => k === "card" || k === "identity");
+}
+
 /** Firefox's menu: this site's logins, and each one opens the panel. */
 async function renderHandoff() {
-  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; handoff?: boolean } | null;
+  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; handoff?: boolean; kinds?: string[]; cards?: Candidate[]; relayed?: boolean } | null;
   if (!r || (!r.locked && !r.handoff)) {
     note("To fill here, click the Promptly Passwords button in your toolbar.");
     return;
@@ -93,6 +111,11 @@ async function renderHandoff() {
     root.appendChild(plain("Open Promptly Passwords", "", undefined, "Open Promptly Passwords"));
     return;
   }
+  const onlySiteless = sitelessRows(r, (c) => plain(c.title, c.username, c, `Pick ${c.title}`), () => plain("Open Promptly Passwords to add one", "", undefined, "Open Promptly Passwords"));
+  if (onlySiteless || r.relayed) {
+    if (r.relayed && !onlySiteless) root.appendChild(plain("Open Promptly Passwords", "", undefined, "Open Promptly Passwords"));
+    return;
+  }
   for (const c of r.candidates.slice(0, 6)) root.appendChild(plain(c.title, c.username, c, `Pick ${c.title}`));
   if (!r.candidates.length) {
     note("No saved logins for this site.");
@@ -100,6 +123,17 @@ async function renderHandoff() {
     return;
   }
   note("Firefox can't confirm this menu is really showing, so filling finishes in the toolbar panel.");
+}
+
+/** A card or address picked where the press was judged (Chromium): the panel opens with
+ *  it at the top. */
+function handOffPicked(picked: Candidate) {
+  void call({ t: "menuHandoff", itemId: picked.id });
+  void call({ t: "menuOpenPopup" }).then((answer) => {
+    root.textContent = "";
+    note(answer === true ? `${picked.title} is at the top of the Promptly Passwords panel. Click Fill there.` : `Click the Promptly Passwords button in your toolbar. ${picked.title} will be at the top, ready to fill.`);
+    guard.rendered();
+  });
 }
 
 /** It didn't count. Doesn't take the rows away: the person's looking now, and can press again. */
@@ -161,11 +195,21 @@ async function render() {
   // Nothing here can tell a person from a hidden cover, so it doesn't pretend to: a pick
   // only opens the toolbar panel.
   if (!inlineCanAct()) return renderHandoff();
-  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; url?: string; site?: string; lookalike?: string | null; kinds?: string[]; mail?: MailRow[]; otherMail?: string[]; passkeys?: { key: string; credentialId: string; userName: string; rpId: string }[] } | null;
+  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; url?: string; site?: string; lookalike?: string | null; kinds?: string[]; cards?: Candidate[]; relayed?: boolean; mail?: MailRow[]; otherMail?: string[]; passkeys?: { key: string; credentialId: string; userName: string; rpId: string }[] } | null;
   if (!r) return note("Can't reach Promptly Passwords.");
   if (r.locked) {
     note("Your vault is locked.");
     root.appendChild(row("Open Promptly Passwords", "", () => call({ t: "menuOpenPopup" })));
+    guard.rendered();
+    return;
+  }
+  // A card or an address: picked here, filled from the panel after it asks (D137). The
+  // press still has to be one a person could see, so a hidden menu opens nothing.
+  const toPanel = (c: Candidate) => row(c.title, c.username, () => handOffPicked(c), `Pick ${c.title}`);
+  const openPanel = (label: string) => row(label, "", () => call({ t: "menuOpenPopup" }));
+  if (r.relayed) {
+    // Drawn by a bigger frame for a box in a small one: it only suggests.
+    if (!sitelessRows(r, toPanel, () => openPanel("Open Promptly Passwords to add one"))) root.appendChild(openPanel("Open Promptly Passwords to fill this"));
     guard.rendered();
     return;
   }
@@ -210,8 +254,9 @@ async function render() {
     note(`Other logins for ${r.site || "this domain"}`, "heading");
     for (const c of others.slice(0, 4)) root.appendChild(fillRow(c));
   }
-  if (!r.candidates.length && !r.lookalike) note("No saved logins for this site.");
   const kinds = r.kinds ?? [];
+  const onlySiteless = sitelessRows(r, toPanel, () => openPanel("Open Promptly Passwords to add one"));
+  if (!r.candidates.length && !r.lookalike && !onlySiteless) note("No saved logins for this site.");
   const generate = async (itemId?: string) => {
     const out = (await call({ t: "menuGenerate", itemId })) as { ok: boolean } | null;
     if (!out?.ok) toToolbar();
@@ -224,9 +269,6 @@ async function render() {
     }
   } else if (kinds.includes("signup") || kinds.includes("change-password")) {
     root.appendChild(row("Generate a password", "", () => void generate()));
-  }
-  if (kinds.includes("card") || kinds.includes("identity")) {
-    root.appendChild(row("Open Promptly Passwords to fill this", "Cards and addresses always ask first", () => call({ t: "menuOpenPopup" })));
   }
   guard.rendered();
 }

@@ -28,7 +28,7 @@ Install the extension from your server's Install page, connect it to your server
 - Logins for different services on one domain stay apart. On zyx.example.org you get the zyx login, and the one for abc.example.org is under "Other logins for example.org" in the toolbar panel.
 - A website saved with no port works on any port of that host, so `nas.home` covers `nas.home:5001`. Save it with a port, like `nas.home:5001`, to keep it to that port.
 - To change how a login matches, edit it and pick **Match websites**. Auto suits nearly everything. Same domain offers it on every host of the domain. Exact host keeps it to one host. Exact host and port keeps it to one host and port. Starts with keeps it to addresses that start with the one saved. Never stops it being offered; you can still search for it. Each website can have its own setting too.
-- Cards and addresses always ask first.
+- Cards and addresses always ask first. Click a card box and the menu lists your cards; pick one and the toolbar panel opens with it at the top, where Fill asks once and then fills the number, expiry, security code and name, including on checkouts that keep each box in its own frame.
 
 Settings has more: filling only when you click the toolbar button, a PIN of 6 to 12 digits for the browser (it stops working 8 hours after the vault locks), and offering codes from your Promptly Mail.
 

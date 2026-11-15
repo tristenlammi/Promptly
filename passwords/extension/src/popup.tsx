@@ -331,6 +331,13 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
         } catch {
           carefulness = "careful";
         }
+      } else if (t?.id !== undefined) {
+        // A card or an address picked in the menu on the page (D137).
+        try {
+          setPicked((await call<{ item: Candidate | null; pageOpened: boolean }>({ t: "handoffFor", tabId: t.id })).item);
+        } catch {
+          /* nothing was picked */
+        }
       }
       setTabInfo(t ?? null);
       if (t?.id !== undefined) {

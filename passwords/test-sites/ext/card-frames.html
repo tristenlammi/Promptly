@@ -15,9 +15,22 @@
     <script>
       const q = new URLSearchParams(location.search);
       const at = q.get("at") || location.origin;
+      // ?layout=one: the whole card in one frame a single row tall (a "card element").
+      // ?layout=nested: the number box two frames down, both too small for a menu.
+      const layout = q.get("layout") || "three";
       for (const field of ["number", "exp", "cvc"]) {
         const f = document.getElementById(`f-${field}`);
-        f.src = `${at}/card-frame.html?field=${field}`;
+        if (layout !== "three" && field !== "number") {
+          f.parentElement.remove();
+          continue;
+        }
+        if (layout === "one") {
+          f.style.height = "44px";
+          f.src = `${at}/card-frame.html?field=all`;
+        } else if (layout === "nested") {
+          f.style.height = "90px";
+          f.src = `${at}/card-nest.html?at=${encodeURIComponent(at)}`;
+        } else f.src = `${at}/card-frame.html?field=${field}${q.get("far") && field === "number" ? "&far=1" : ""}`;
         if (q.get("hide") === field) f.style.opacity = "0.001";
       }
       window.__state = () => ({ name: document.getElementById("name").value });

@@ -71,7 +71,8 @@ export type PageRequest =
   | { t: "aliasNew"; tabId: number; domainId?: string; custom?: string }
   | { t: "clipWatch"; text: string }
   | { t: "clipClear" }
-  /** Firefox: what the on-page menu picked, and whether a page opened this panel (D78). */
+  /** What the on-page menu picked for the toolbar panel (a login on Firefox, D78; a card or
+   *  address anywhere, D137), and whether a page opened this panel. */
   | { t: "handoffFor"; tabId: number };
 
 export type FillOutcome =
@@ -89,7 +90,17 @@ export type ContentRequest =
   | { t: "captured"; capture: { kind: string; username?: string; password?: string; newPassword?: string; host: string; url: string; at: number } }
   | { t: "capturedUser"; username: string }
   | { t: "submitFailed" }
-  | { t: "teachResult"; rule: { host: string; username?: string; password?: string; submit?: string; otp?: string } };
+  | { t: "teachResult"; rule: { host: string; username?: string; password?: string; submit?: string; otp?: string } }
+  /** This frame is too small to show its own menu (a hosted card box): the frame around it
+   *  draws one, at this box's place. `source` is the frame the box is in, carried along
+   *  when a frame in between passes it further up (D137). */
+  | { t: "menuUp"; rect: FrameRect; source?: FrameRef }
+  | { t: "menuUpClose" };
+
+/** A box's place in its own frame's viewport. */
+export type FrameRect = { left: number; top: number; right: number; bottom: number };
+/** One document in a tab. */
+export type FrameRef = { frameId: number; documentId?: string };
 
 /** What the inline menu frame may ask. */
 export type MenuRequest = { token: string } & (
@@ -121,6 +132,11 @@ export type ToContent =
   | { t: "hideSave" }
   | { t: "checkFailed" }
   | { t: "openMenu" }
+  /** Draw the menu for a box in the frame `child` (one of this document's own iframes), at
+   *  `rect` inside it. The box itself is in `source`. Such a menu only suggests (D137). */
+  | { t: "openMenuFor"; child: number; rect: FrameRect; source: FrameRef }
+  /** The box in frame `from` lost focus: a menu drawn for that frame goes. */
+  | { t: "closeMenuFor"; from: number }
   | { t: "fillGenerated"; password: string; origin: string }
   | { t: "teachStart" }
   | { t: "describeForm" }

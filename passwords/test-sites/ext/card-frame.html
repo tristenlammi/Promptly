@@ -9,9 +9,23 @@
         number: '<label>Card number <input id="box" name="cardnumber" autocomplete="cc-number"></label>',
         exp: '<label>Expiry <input id="box" name="exp" autocomplete="cc-exp"></label>',
         cvc: '<label>Security code <input id="box" name="cvc" autocomplete="cc-csc"></label>',
+        // One frame for the whole card, one row tall, as a single "card element" is.
+        all: '<input id="box" name="cardnumber" autocomplete="cc-number" placeholder="Card number" style="width:180px"> <input id="exp" name="exp" autocomplete="cc-exp" placeholder="MM / YY" style="width:70px"> <input id="cvc" name="cvc" autocomplete="cc-csc" placeholder="CVC" style="width:50px">',
       };
+      if (field === "all") document.body.style.margin = "4px";
       document.getElementById("f").innerHTML = inputs[field];
+      // ?far=1: a frame that parks its box far below what it shows and focuses it itself.
+      if (new URLSearchParams(location.search).get("far")) {
+        const box = document.getElementById("box");
+        box.style.cssText = "position:absolute;top:3000px;left:900px";
+        const b = document.createElement("button");
+        b.id = "go";
+        b.textContent = "Pay";
+        b.onclick = () => box.focus({ preventScroll: true });
+        document.body.prepend(b);
+      }
       window.__value = () => document.getElementById("box").value;
+      window.__all = () => ({ number: document.getElementById("box").value, exp: document.getElementById("exp")?.value, cvc: document.getElementById("cvc")?.value });
     </script>
   </body>
 </html>
