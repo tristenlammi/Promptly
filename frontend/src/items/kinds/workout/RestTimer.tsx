@@ -237,11 +237,13 @@ export function RestTimer({ item }: { item: ItemHandle<WorkoutData> }) {
     <div className="sticky bottom-[calc(72px+env(safe-area-inset-bottom,0px))] z-20 md:bottom-4">
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)]">
         <div className="absolute inset-y-0 left-0 bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] transition-[width] duration-300" style={{ width: `${pct * 100}%` }} />
-        <div className="relative flex items-center gap-2 px-3 py-2">
-          <Timer className="h-5 w-5 shrink-0 text-[var(--item-accent)]" aria-hidden />
+        <div className="relative flex items-center gap-1.5 py-2 pl-4 pr-2">
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Rest</div>
-            <div className="text-2xl font-semibold tabular-nums text-[var(--text)]" role="timer" aria-live={left <= 10 ? "assertive" : "off"} aria-atomic>
+            <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              <Timer className="h-3.5 w-3.5 text-[var(--item-accent)]" aria-hidden /> Rest
+            </div>
+            {/* Big enough to read from the bench with the phone on the floor. */}
+            <div className="text-[32px] font-semibold leading-none tabular-nums text-[var(--text)]" role="timer" aria-live={left <= 10 ? "assertive" : "off"} aria-atomic>
               {fmtDuration(left)}
             </div>
           </div>
@@ -252,18 +254,18 @@ export function RestTimer({ item }: { item: ItemHandle<WorkoutData> }) {
               aria-pressed={notify}
               aria-label={notifyHint}
               title={notifyHint}
-              className={cn("flex h-11 w-11 items-center justify-center rounded-xl hover:bg-[var(--hover)]", notify ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}
+              className={cn("flex h-12 w-10 shrink-0 items-center justify-center rounded-xl hover:bg-[var(--hover)] min-[390px]:w-11", notify ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}
             >
               {notify ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
             </button>
           )}
-          <button type="button" onClick={() => adjust(-15)} aria-label="15 seconds less rest" className="flex h-11 min-w-11 items-center justify-center gap-0.5 rounded-xl px-2 text-sm font-semibold text-[var(--text-muted)] hover:bg-[var(--hover)]">
+          <button type="button" onClick={() => adjust(-15)} aria-label="15 seconds less rest" className="flex h-12 min-w-10 shrink-0 items-center justify-center gap-0.5 rounded-xl px-1 min-[390px]:min-w-11 min-[390px]:px-1.5 text-sm font-semibold tabular-nums text-[var(--text-muted)] hover:bg-[var(--hover)] active:bg-[var(--hover)]">
             <Minus className="h-3.5 w-3.5" />15
           </button>
-          <button type="button" onClick={() => adjust(15)} aria-label="15 seconds more rest" className="flex h-11 min-w-11 items-center justify-center gap-0.5 rounded-xl px-2 text-sm font-semibold text-[var(--text-muted)] hover:bg-[var(--hover)]">
+          <button type="button" onClick={() => adjust(15)} aria-label="15 seconds more rest" className="flex h-12 min-w-10 shrink-0 items-center justify-center gap-0.5 rounded-xl px-1 min-[390px]:min-w-11 min-[390px]:px-1.5 text-sm font-semibold tabular-nums text-[var(--text-muted)] hover:bg-[var(--hover)] active:bg-[var(--hover)]">
             <Plus className="h-3.5 w-3.5" />15
           </button>
-          <button type="button" onClick={skip} aria-label="Skip rest" className="flex h-11 items-center gap-1 rounded-xl bg-[var(--item-accent-fill)] px-3 text-sm font-semibold text-white">
+          <button type="button" onClick={skip} aria-label="Skip rest" className="flex h-12 shrink-0 items-center gap-1 rounded-xl bg-[var(--item-accent-fill)] px-3 text-sm font-semibold text-white active:opacity-90 min-[390px]:px-3.5">
             <SkipForward className="h-4 w-4" /> Skip
           </button>
         </div>

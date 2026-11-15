@@ -319,7 +319,7 @@ export function Segmented<V extends string>({
   onChange: (v: V) => void;
   options: { value: V; label: ReactNode }[];
   className?: string;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
 }) {
   return (
     <div role="radiogroup" className={cn("inline-flex rounded-xl bg-[var(--surface-2)] p-1", className)}>
@@ -332,7 +332,7 @@ export function Segmented<V extends string>({
           onClick={() => onChange(o.value)}
           className={cn(
             "flex-1 whitespace-nowrap rounded-lg px-3 font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
-            size === "sm" ? "h-7 text-xs" : "h-9 text-sm",
+            size === "sm" ? "h-7 text-xs" : size === "lg" ? "h-10 text-sm" : "h-9 text-sm",
             o.value === value
               ? "bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-sm)]"
               : "text-[var(--text-muted)] hover:text-[var(--text)]",
@@ -485,7 +485,8 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition",
+        // The switch stays 48 × 28; the invisible pad makes it a 56 × 44 target.
+        "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition before:absolute before:-inset-x-1 before:-inset-y-2 before:content-['']",
         checked ? "bg-[var(--item-accent-fill)]" : "bg-[var(--surface-2)]",
       )}
     >

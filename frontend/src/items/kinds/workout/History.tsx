@@ -73,9 +73,9 @@ export function History({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>
           {day ? fmtDay(day, { long: true }) : `${list.length} workout${list.length === 1 ? "" : "s"}`}
         </h2>
         <div className="flex gap-1">
-          {day && <ItemButton size="sm" variant="ghost" onClick={() => setDay(null)}>All</ItemButton>}
+          {day && <ItemButton size="sm" variant="ghost" className="min-h-10" onClick={() => setDay(null)}>All</ItemButton>}
           {item.canEdit && (
-            <ItemButton size="sm" icon={<CalendarPlus className="h-3.5 w-3.5" />} onClick={logPast} disabled={full} title={full ? "This file is full — archive older workouts first" : undefined}>
+            <ItemButton size="sm" className="min-h-10" icon={<CalendarPlus className="h-3.5 w-3.5" />} onClick={logPast} disabled={full} title={full ? "This file is full — archive older workouts first" : undefined}>
               Log past workout
             </ItemButton>
           )}
@@ -113,8 +113,8 @@ export function History({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>
                     {prs > 0 && <span className="inline-flex items-center gap-1 font-semibold text-[var(--item-accent)]"><Trophy className="h-3.5 w-3.5" aria-hidden />{prs} PR{prs === 1 ? "" : "s"}</span>}
                   </div>
                   <div className="mt-0.5 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 border-t border-[var(--border)] pt-2 text-xs">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Exercise</span>
-                    <span className="text-right text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Best set</span>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Exercise</span>
+                    <span className="text-right text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Best set</span>
                     {w.exercises.slice(0, 4).map((we) => {
                       const ex = ctx.lib.get(we.exercise_id);
                       const best = bestSet(we, ex, s);
@@ -208,7 +208,7 @@ function MonthCalendar({ data, ctx, month, setMonth, day, setDay }: { data: Work
       </div>
       <div className="grid grid-cols-7 gap-1 text-center" role="grid" aria-label="Workouts this month">
         {labels.map((l, i) => (
-          <span key={i} className="text-[10px] font-medium text-[var(--text-muted)]">{l}</span>
+          <span key={i} className="text-[11px] font-medium text-[var(--text-muted)]">{l}</span>
         ))}
         {Array.from({ length: startDow }, (_, i) => <span key={`b${i}`} />)}
         {Array.from({ length: days }, (_, i) => {

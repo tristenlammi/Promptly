@@ -44,6 +44,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Changed
 
+- Workout on a phone: logging a set is easier to hit mid-workout. The weight and reps steppers in the set editor now match, with bigger − / + and a taller Done; set rows, ticks, the exercise menu and "Add set" are all at least thumb-sized; Delete sits away from Done; the keypad's own key moves from weight to reps, then puts the keypad away, and while the keypad is up the editor slides so Done stays on screen; and a tick gives a short buzz (when Vibrate is on).
+- Workout: the rest countdown is larger, so it reads from the bench with the phone on the floor.
+- Workout: small text on the plan, history, progress and routine screens is a size up, and their small buttons (Calendar / Routines, the routine editor's move, swap and remove, History, Log past workout, the exercise picker's muscle filters, the settings switches) are easier to hit. Nothing moved.
 - Rooms calls: a conversation you've muted, or set to Nothing, doesn't ring you. No ring, no heads-up, and no missed-call notification; the caller hears it ring out as usual, and the "Missed call" line is there in the conversation when you look. "Mentions only" still rings.
 - Rooms calls: when the person you rang presses Decline, you're told "Can't talk right now" on the call screen and in the conversation. "No answer" is now only for a call nobody picked up.
 - A missed call's notification has a Message button beside Call back: type a reply right there (Android and Chrome).
@@ -55,6 +58,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- Workout: ticking a warm-up set no longer changes the next warm-up's suggested weight to the one you just did (20 → 20 → 20); each keeps its own step up the ramp (20 → 32.5 → 47.5).
+- Workout on a narrow phone (360 px): the weight in the set editor was cut off ("47.") and the tick on Done shrank to a dot.
 - Promptly for Android: a map link opened from another app (an address in a message, a geo: link) shows that place even when P Maps is already open. It used to just bring the open map forward.
 - Account → Notifications no longer talks about exam grading (Study is gone); it says what notifications are for now.
 - Promptly for Android tells the server its new version the first time it starts after an update, not up to a day later, so the server knows straight away what that version can do.

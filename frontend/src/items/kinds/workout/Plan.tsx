@@ -79,7 +79,7 @@ export function Plan({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>) {
   const left = (
     <div className="flex flex-col gap-4">
       <ActiveBanner data={data} goTo={goTo} />
-      <Segmented value={mode} onChange={setMode} options={[{ value: "week", label: "Calendar" }, { value: "routines", label: `Routines${data.routines.length ? ` (${data.routines.length})` : ""}` }]} />
+      <Segmented value={mode} onChange={setMode} options={[{ value: "week", label: "Calendar" }, { value: "routines", label: `Routines${data.routines.length ? ` (${data.routines.length})` : ""}` }]}  size="lg" />
       {mode === "week" ? (
         <>
           <div className="flex items-center gap-1">
@@ -94,7 +94,7 @@ export function Plan({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>) {
             <IconButton label="Next week" icon={ChevronRight} onClick={() => setWeek(addDays(week, 7))} />
           </div>
           {week !== weekStartOf(today, s) && (
-            <ItemButton size="sm" variant="ghost" onClick={() => setWeek(weekStartOf(today, s))} className="self-center">
+            <ItemButton size="sm" variant="ghost" onClick={() => setWeek(weekStartOf(today, s))} className="min-h-10 self-center">
               Back to this week
             </ItemButton>
           )}
@@ -110,7 +110,7 @@ export function Plan({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>) {
               return (
                 <div key={d} role="listitem" className={cn("flex items-start gap-2 px-2", rest ? "py-1" : "py-1.5", isToday && "bg-[color-mix(in_srgb,var(--item-accent)_7%,transparent)]")}>
                   <div className={cn("flex w-11 shrink-0 flex-col items-center", rest ? "py-1" : "py-1.5")} aria-label={fmtDay(d, { long: true })}>
-                    <span className={cn("text-[10px] font-semibold uppercase tracking-wide", isToday ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}>
+                    <span className={cn("text-[11px] font-semibold uppercase tracking-wide", isToday ? "text-[var(--item-accent)]" : "text-[var(--text-muted)]")}>
                       {isToday ? "Today" : new Date(d + "T12:00").toLocaleDateString(undefined, { weekday: "short" })}
                     </span>
                     <span className={cn("font-semibold tabular-nums leading-tight", rest ? "text-sm" : "text-lg", isToday ? "text-[var(--item-accent)]" : rest ? "text-[var(--text-muted)]" : "text-[var(--text)]")}>{Number(d.slice(8))}</span>
@@ -174,7 +174,7 @@ export function Plan({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>) {
             />
           )}
           {weekSessions.length > 0 && (
-            <Section title="Planned volume" hint="Sets per muscle this week vs landmarks" action={<ItemButton size="sm" variant="ghost" icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => ask(`Check my plan for the week of ${week}: is the volume per muscle right for my goal and does each session fit my time? Fix what isn't.`)}>Check</ItemButton>}>
+            <Section title="Planned volume" hint="Sets per muscle this week vs landmarks" action={<ItemButton size="sm" variant="ghost" className="min-h-10" icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => ask(`Check my plan for the week of ${week}: is the volume per muscle right for my goal and does each session fit my time? Fix what isn't.`)}>Check</ItemButton>}>
               <Card>
                 <VolumeBars sets={planned} muscles={lib.catalog.muscles} only="trained" compact={isPhone} />
               </Card>
@@ -255,7 +255,7 @@ function ProgramCard({ item, ctx, programId, ask }: { item: ItemHandle<WorkoutDa
         {p.weeks.map((w) => (
           <div key={w.n} className="flex flex-1 flex-col items-center gap-1" title={w.label || `Week ${w.n}`}>
             <div className={cn("h-2 w-full rounded-full", w.deload ? "bg-[color-mix(in_srgb,var(--warning)_45%,transparent)]" : w.n < cur ? "bg-[var(--item-accent-fill)]" : w.n === cur ? "bg-[color-mix(in_srgb,var(--item-accent)_55%,transparent)]" : "bg-[var(--surface-2)]")} />
-            <span className={cn("text-[10px] tabular-nums", w.n === cur ? "font-semibold text-[var(--text)]" : "text-[var(--text-muted)]")}>{w.deload ? "DL" : w.n}</span>
+            <span className={cn("text-[11px] tabular-nums", w.n === cur ? "font-semibold text-[var(--text)]" : "text-[var(--text-muted)]")}>{w.deload ? "DL" : w.n}</span>
           </div>
         ))}
       </div>
@@ -548,7 +548,7 @@ function NumField({ label, value, onChange, step = 1, min = 0, max = 999, disabl
   };
   return (
     <label className="flex min-w-0 flex-col gap-0.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{label}</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{label}</span>
       <span className="flex items-center rounded-lg border border-[var(--border)] bg-[var(--bg)] focus-within:border-[var(--item-accent)]">
         <input
           inputMode={step % 1 === 0 && min >= 0 && !suffix ? "numeric" : "decimal"}
@@ -612,15 +612,15 @@ function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove,
         )}
       </div>
       <div className="mt-1 flex items-center gap-1">
-        <button type="button" onClick={() => setMore((m) => !m)} className="min-h-9 min-w-0 flex-1 truncate text-left text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)]" aria-expanded={more}>
+        <button type="button" onClick={() => setMore((m) => !m)} className="min-h-10 min-w-0 flex-1 truncate text-left text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)]" aria-expanded={more}>
           {more ? "Less" : `Rest, superset, warm-up, notes${rx.rest_s ? ` · ${rx.rest_s}s rest` : ""}${rx.warmup === true ? " · warm-up on" : rx.warmup === false ? " · no warm-up" : ""}${rx.notes ? " · note" : ""}`}
         </button>
         {!ro && (
           <>
-            <IconButton label={`Move ${ex.name} up`} icon={ArrowUp} onClick={() => onMove(-1)} disabled={first} className="h-9 w-9" />
-            <IconButton label={`Move ${ex.name} down`} icon={ArrowDown} onClick={() => onMove(1)} disabled={last} className="h-9 w-9" />
-            <IconButton label={`Swap ${ex.name}`} icon={Repeat2} onClick={onSwap} className="h-9 w-9" />
-            <IconButton label={`Remove ${ex.name}`} icon={Trash2} onClick={onRemove} className="h-9 w-9" />
+            <IconButton label={`Move ${ex.name} up`} icon={ArrowUp} onClick={() => onMove(-1)} disabled={first} className="h-10 w-10" />
+            <IconButton label={`Move ${ex.name} down`} icon={ArrowDown} onClick={() => onMove(1)} disabled={last} className="h-10 w-10" />
+            <IconButton label={`Swap ${ex.name}`} icon={Repeat2} onClick={onSwap} className="h-10 w-10" />
+            <IconButton label={`Remove ${ex.name}`} icon={Trash2} onClick={onRemove} className="h-10 w-10" />
           </>
         )}
       </div>
@@ -628,7 +628,7 @@ function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove,
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <NumField label="Rest (s)" value={rx.rest_s} min={0} max={900} step={15} disabled={ro} onChange={(v) => onChange((x) => { x.rest_s = v; })} placeholder="auto" />
           <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Superset</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Superset</span>
             <Select value={rx.superset ?? ""} disabled={ro} onChange={(e) => onChange((x) => { x.superset = e.target.value || null; })} className="h-10">
               <option value="">—</option>
               {"ABCDE".split("").map((c) => (
@@ -641,7 +641,7 @@ function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove,
           <NumField label="Drop sets" value={rx.drop_sets ?? 0} min={0} max={3} disabled={ro} onChange={(v) => onChange((x) => { x.drop_sets = v ?? 0; })} />
           {ex.log === "weight_reps" && (
             <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Warm-up</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Warm-up</span>
               <Select
                 value={rx.warmup == null ? "auto" : rx.warmup ? "on" : "off"}
                 disabled={ro}

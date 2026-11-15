@@ -124,12 +124,12 @@ export function SettingsView({ item }: ItemViewProps<WorkoutData>) {
           <Stepper label="Session length (min)" value={s.session_minutes} step={5} min={15} max={240} onChange={(v) => set((st) => { st.session_minutes = v; })} />
         </div>
         <Row label="Week starts on">
-          <Segmented value={s.week_start} onChange={(v) => set((st) => { st.week_start = v; })} options={[{ value: "mon", label: "Mon" }, { value: "sun", label: "Sun" }]} size="sm" />
+          <Segmented value={s.week_start} onChange={(v) => set((st) => { st.week_start = v; })} options={[{ value: "mon", label: "Mon" }, { value: "sun", label: "Sun" }]} />
         </Row>
 
         <H>You</H>
         <Row label="Units">
-          <Segmented value={s.units} onChange={(u) => item.update((d) => applyUnits(d, u))} options={[{ value: "kg", label: "kg" }, { value: "lb", label: "lb" }]} size="sm" />
+          <Segmented value={s.units} onChange={(u) => item.update((d) => applyUnits(d, u))} options={[{ value: "kg", label: "kg" }, { value: "lb", label: "lb" }]} />
         </Row>
         <div className="grid grid-cols-2 gap-3">
           <Stepper label={`Bodyweight (${s.units})`} value={bw ?? (s.units === "lb" ? 165 : 75)} step={s.units === "lb" ? 1 : 0.5} min={0} max={900} onChange={(v) => set((st) => { st.bodyweight_kg = v ? Math.max(20, fromUnit(v, s)) : null; })} />
@@ -194,7 +194,7 @@ export function SettingsView({ item }: ItemViewProps<WorkoutData>) {
         </div>
         )}
         <Row label="1RM formula">
-          <Segmented value={s.e1rm_formula} onChange={(v) => set((st) => { st.e1rm_formula = v; })} options={[{ value: "epley", label: "Epley" }, { value: "brzycki", label: "Brzycki" }]} size="sm" />
+          <Segmented value={s.e1rm_formula} onChange={(v) => set((st) => { st.e1rm_formula = v; })} options={[{ value: "epley", label: "Epley" }, { value: "brzycki", label: "Brzycki" }]} />
         </Row>
         <Row label="Warm-up sets" hint="Auto ramp before the first heavy lift">
           <Toggle checked={s.warmups} onChange={(v) => set((st) => { st.warmups = v; })} label="Warm-up sets" />
@@ -320,7 +320,7 @@ export function Onboarding({ item, ask }: ItemViewProps<WorkoutData>) {
         {step === 1 && (
           <div className="flex flex-col gap-4">
             <Row label="Units">
-              <Segmented value={s.units} onChange={(u) => item.update((d) => applyUnits(d, u))} options={[{ value: "kg", label: "kg" }, { value: "lb", label: "lb" }]} size="sm" />
+              <Segmented value={s.units} onChange={(u) => item.update((d) => applyUnits(d, u))} options={[{ value: "kg", label: "kg" }, { value: "lb", label: "lb" }]} />
             </Row>
             <Field label="Training experience">
               <Segmented value={s.experience} onChange={(v) => set((st) => { st.experience = v; })} options={[{ value: "beginner", label: "< 1 year" }, { value: "intermediate", label: "1–3 years" }, { value: "advanced", label: "3+ years" }]} />

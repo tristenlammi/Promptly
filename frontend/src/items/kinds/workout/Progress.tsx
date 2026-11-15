@@ -122,7 +122,7 @@ export function Progress({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData
         <Card>
           <VolumeBars sets={vol} muscles={ctx.lib.catalog.muscles} compact={isPhone} />
         </Card>
-        <ItemButton size="sm" variant="ghost" icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => ask("Look at my weekly sets per muscle over the last 4 weeks vs MEV/MAV/MRV and adjust my plan where it's off.")} className="self-start">
+        <ItemButton size="sm" variant="ghost" icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => ask("Look at my weekly sets per muscle over the last 4 weeks vs MEV/MAV/MRV and adjust my plan where it's off.")} className="min-h-10 self-start">
           Ask the coach to balance it
         </ItemButton>
       </Section>
@@ -146,7 +146,7 @@ export function Progress({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData
                       </span>
                       <span className="shrink-0 text-right" title={rec.e1rm ? `Set ${fmtDay(rec.e1rm.date)}` : undefined}>
                         <span className="block text-base font-semibold tabular-nums text-[var(--text)]">{rec.e1rm ? fmtW(rec.e1rm.value, s, false) : "–"}</span>
-                        <span className="block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{PR_LABEL.e1rm}</span>
+                        <span className="block text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{PR_LABEL.e1rm}</span>
                       </span>
                     </button>
                   </li>
@@ -189,7 +189,7 @@ export function Progress({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData
                   <h2 className="truncate font-semibold text-[var(--text)]">{ctx.lib.get(sel!).name}</h2>
                   <p className="truncate text-xs text-[var(--text-muted)]">{muscleLine(ctx.lib.get(sel!), ctx.lib)}</p>
                 </div>
-                <ItemButton size="sm" variant="ghost" onClick={() => setSel(null)}>Close</ItemButton>
+                <ItemButton size="sm" variant="ghost" className="min-h-10" onClick={() => setSel(null)}>Close</ItemButton>
               </div>
               {detail}
             </Card>
@@ -254,7 +254,7 @@ export function ExerciseDetail({ ctx, data, id, ask }: { ctx: Ctx; data: Workout
               <Trophy className="h-3 w-3" /> {PR_LABEL[k]}
             </div>
             <div className="text-base font-semibold tabular-nums text-[var(--text)]">{fmtRecord(k, rec[k]!.value, s)}</div>
-            <div className="text-[10px] text-[var(--text-muted)]">
+            <div className="text-[11px] text-[var(--text-muted)]">
               {fmtDay(rec[k]!.date)}
               {k === "e1rm" && rec[k]!.kg ? ` · ${fmtW(rec[k]!.kg, s, false)}×${rec[k]!.reps}` : ""}
             </div>
