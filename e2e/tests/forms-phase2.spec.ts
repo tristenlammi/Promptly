@@ -234,7 +234,7 @@ test("a Location question: typed on a phone without an account, and a signed-in 
   const bobBox = bob.getByRole("combobox", { name: "Where should we pick you up?" });
   await bobBox.click();
   await bobBox.pressSequentially("hom", { delay: 40 });
-  const option = bob.getByRole("option", { name: /Home/ });
+  const option = bob.locator('[role="option"][data-kind="home"]');
   await expect(option).toBeVisible({ timeout: 10_000 });
   await option.click();
   await expect(bob.getByText("(a place on the map)")).toBeAttached();
