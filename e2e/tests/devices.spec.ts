@@ -1,4 +1,5 @@
 import { expect, ready, stamp, test } from "../fixtures";
+import { NO_RESUMABLE_UPLOADS, resumableUploadsReady } from "../lib/stack";
 
 /** Settings → Devices (WP-8.3): an app password per syncing device, shown
  *  once, works with Basic auth for what it was allowed, and stops the
@@ -20,6 +21,7 @@ async function startUpload(page: import("@playwright/test").Page, auth: string) 
 }
 
 test("a device gets its own password once, and revoking it cuts it off", async ({ alice: page }) => {
+  test.skip(!resumableUploadsReady(), NO_RESUMABLE_UPLOADS);
   await page.goto("/account/devices");
   await ready(page);
   const panel = page.getByRole("region", { name: "Devices" });

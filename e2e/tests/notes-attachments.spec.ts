@@ -8,7 +8,7 @@ import { chromium, type Page } from "@playwright/test";
 import { expect, run, stamp, test } from "../fixtures";
 import { png } from "../lib/files";
 import { notesReady } from "../lib/notes";
-import { BACKEND, BASE_URL, storageStateFile } from "../lib/stack";
+import { BACKEND, BASE_URL, NO_RESUMABLE_UPLOADS, resumableUploadsReady, storageStateFile } from "../lib/stack";
 
 /** Promptly Notes (N1.3): pictures and voice notes.
  *
@@ -68,6 +68,7 @@ async function plays(page: Page): Promise<void> {
 
 test.describe("notes: pictures and voice", () => {
   test("a picture and a recorded voice note: transcribed, found, and played by a collaborator", async ({ alice: page, bob }) => {
+    test.skip(!resumableUploadsReady(), NO_RESUMABLE_UPLOADS);
     test.setTimeout(6 * 60_000);
     const auth = await notesReady(page);
     const title = `Song ${stamp}`;
@@ -156,6 +157,7 @@ test.describe("notes: pictures and voice", () => {
   });
 
   test("a 20-minute recording uploads over a dropping connection, plays for a collaborator, and is found", async ({ alice: page, bob }) => {
+    test.skip(!resumableUploadsReady(), NO_RESUMABLE_UPLOADS);
     test.setTimeout(15 * 60_000);
     const auth = await notesReady(page);
     const title = `Rehearsal ${stamp}`;

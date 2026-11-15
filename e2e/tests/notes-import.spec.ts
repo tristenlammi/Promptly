@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { expect, ready, stamp, test } from "../fixtures";
-import { BACKEND, E2E_ROOT } from "../lib/stack";
+import { BACKEND, E2E_ROOT, NO_RESUMABLE_UPLOADS, resumableUploadsReady } from "../lib/stack";
 import { card, notesReady, serverNotes } from "../lib/notes";
 
 /** Promptly Notes (N1.6): moving in from Google Keep. A Keep Takeout (made
@@ -63,6 +63,7 @@ print(base64.b64encode(b.getvalue()).decode())
 
 test.describe("notes: moving in from Google Keep", () => {
   test("a Keep Takeout comes in with colours, pins, labels, lists, pictures and recordings, once", async ({ alice: page }) => {
+    test.skip(!resumableUploadsReady(), NO_RESUMABLE_UPLOADS);
     test.setTimeout(240_000);
     // Its own tag: notes-across and notes make a "Gate code <stamp>" too.
     const tag = `${stamp}k`;

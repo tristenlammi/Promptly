@@ -1,10 +1,12 @@
 import { expect, ready, stamp, test } from "../fixtures";
+import { NO_RESUMABLE_UPLOADS, resumableUploadsReady } from "../lib/stack";
 import { takeout } from "../lib/files";
 
 /** Moving in (WP-10.1): a Google Takeout's parts are uploaded on the Import
  *  page, read, and the dry-run report says what's in them. */
 
 test("a Takeout's parts are uploaded and checked, and the report says what's in it", async ({ alice: page }) => {
+  test.skip(!resumableUploadsReady(), NO_RESUMABLE_UPLOADS);
   test.setTimeout(120_000);
   const parts = takeout(stamp);
   await page.goto("/files/import");
@@ -37,6 +39,7 @@ test("a Takeout's parts are uploaded and checked, and the report says what's in 
 });
 
 test("a Takeout is imported once — importing it again adds nothing", async ({ alice: page }) => {
+  test.skip(!resumableUploadsReady(), NO_RESUMABLE_UPLOADS);
   test.setTimeout(180_000);
   const tag = `${stamp}r`;
   const parts = takeout(tag);

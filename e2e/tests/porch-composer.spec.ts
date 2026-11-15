@@ -4,6 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
 import { expect, ready, run, stamp, test } from "../fixtures";
+import { seriousFindings } from "../lib/axe";
 import { wordPhoto } from "../lib/files";
 
 /** Porch's composer (WP-P1.4): pick photos from your library, put them in
@@ -64,16 +65,12 @@ async function scan(page: Page, what: string): Promise<string[]> {
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .include("#porch-scroll")
     .analyze();
-  return violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical")
-    .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
+  return seriousFindings(page, what, violations);
 }
 
 async function scanDialog(page: Page, what: string): Promise<string[]> {
   const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).include("[role=dialog]").analyze();
-  return violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical")
-    .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
+  return seriousFindings(page, what, violations);
 }
 
 test("three photos, reordered, one cropped for this post only, to one group: mentions and outsiders", async ({ alice, bob, dana }) => {
@@ -109,6 +106,8 @@ test("three photos, reordered, one cropped for this post only, to one group: men
   const editor = alice.getByRole("dialog", { name: "Edit for this post" });
   await expect(editor).toContainText("The photo in your library stays as it is.");
   await expect(editor.getByRole("tab", { name: "Mark up" })).toHaveCount(0);
+  // Done is live once the picture is in: a shape picked before that used to be dropped.
+  await expect(editor.getByRole("button", { name: "Done" })).toBeEnabled();
   await editor.getByRole("button", { name: "Square" }).click();
   await editor.getByRole("tab", { name: "Filters" }).click();
   await editor.getByRole("radio", { name: "Mono" }).click();

@@ -5,6 +5,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
+import { seriousFindings } from "../lib/axe";
 
 /** Porch stories (WP-P2.2–P2.4, P3.x): post a text story to one group, an
  *  outsider sees no ring, a member watches it and the author sees "Seen by
@@ -51,9 +52,7 @@ async function groupWith(owner: Page, oAuth: string, name: string, members: [Pag
 async function scan(page: Page, what: string, selector: string): Promise<string[]> {
   await page.mouse.move(0, 0);
   const { violations } = await new AxeBuilder({ page }).include(selector).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
-  return violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical")
-    .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
+  return seriousFindings(page, what, violations);
 }
 
 test("a text story reaches only its group, and its poster sees who watched", async ({ alice, bob, dana }) => {
