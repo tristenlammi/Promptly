@@ -52,6 +52,12 @@ describe("a set-up step", () => {
     expect(missing(HUE_BUTTON, {})).toEqual([]);
     expect(toInput(HUE_BUTTON, {})).toEqual({});
     expect(draw(HUE_BUTTON_FAILED)).toContain("Failed to register, please try again");
+    // What went wrong is a message (an alert with an icon), never a bordered box that reads as a field.
+    const failed = draw(HUE_BUTTON_FAILED);
+    const alert = /<p role="alert" class="([^"]*)"/.exec(failed);
+    expect(alert).not.toBeNull();
+    expect(alert![1]).not.toMatch(/border/);
+    expect(failed).toContain("<svg");
   });
 
   it("draws a sign-in with each kind of field, and hides what's typed into a password", () => {

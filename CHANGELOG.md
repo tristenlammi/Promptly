@@ -21,6 +21,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Home: adding a brand no longer ends in a form for every device. What it brought goes straight into the rooms its own app knows (a room is made when you don't have one by that name; "Lounge Room" is never guessed to be "Living Room"), and you get one line: "Added Philips Hue: 1 light in Lounge Room." "Change names or rooms" is there if you want it, and anything that came with no room is offered for sorting, now or later.
+- Home: rooms have one place of their own (the Rooms button): make a room, rename it, put rooms in order, fold one into another, or remove one. "Sort into rooms" puts several devices into a room at once.
+- Home: a new home starts with no rooms. It used to come with Living Room, Kitchen and Bedroom already made, which is how a home ended up with both a Living Room and Hue's Lounge Room. Homes that already have them keep them; remove or merge them under Rooms.
+- Home: a room with two or more lights has one switch for all of them. Where the brand has its own group for exactly those lights (a Hue room), that's what is switched, so they change together.
+- Home: a bridge or hub isn't a device you place, and a brand's own "room" or "zone" of lights isn't one either. Neither gets a tile or asks for a name; bridges are listed under Home settings. If you already added Hue, its bridge and its room disappear from your devices by themselves and your lights stay where they are. Hue zones aren't shown for now.
+- Home, Philips Hue: the step says which button and how long ("Press the big round button on top of your Hue bridge, then tap \"I've pressed it\" within 30 seconds."), its button says "I've pressed it", and a miss says "The bridge didn't see its button pressed" in place of "Failed to register". Common problems with any brand (can't reach it, sign-in refused, already added) are in plain words.
+- Home: speakers have a speaker icon and say "Not playing" when idle, where they showed a TV and "Off". Several speakers that play as one are kept and marked "Group".
+
+### Fixed
+
+- Home: nothing joins your home unless you add it. A fresh Home Assistant set up anything it found on the network before it had finished its own first start, so a house's Chromecast speakers appeared on the Home page with nobody adding them. It now doesn't look for devices until that first start is done, and what it finds waits under Add a device → Found on your network. If that happened in your home, the next update puts those back under Found on your network (unless you've since named one or put it in a room, in which case they're left alone) and tells you once.
+- Home: what went wrong in a set-up step looks like a message, with an icon. It was drawn in a bordered box that looked like a field to type in.
+
 ## [0.44.0] - 2026-11-15
 
 ### Added

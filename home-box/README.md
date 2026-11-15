@@ -27,6 +27,23 @@ outside a home sees its devices, admins included.
   and logs. The nightly database backup doesn't: restore that alone and your
   devices need adding again.
 
+## Nothing joins a home by itself
+
+Home Assistant sets up some things it finds on the network without asking,
+but only while it is still being set up itself (Chromecast speakers, Sonos,
+WiZ and LIFX bulbs, WLED, Yeelight and more). In a home that meant speakers
+on the Home page that nobody had added.
+
+So the bundled Home Assistant starts **without** looking for devices. The
+connector gives it its account within seconds, then restarts it once, and
+from then on it looks, and anything it finds waits under **Add a device →
+Found on your network** until someone taps it. The first start therefore
+takes about half a minute longer.
+
+As a backstop the connector also takes out any set-up that came from the
+network without anyone finishing a step for it (it goes back to "Found on
+your network"), and the Home page says so once.
+
 ## Linux and Unraid: what is reachable on your network
 
 Home Assistant shares the server's network (`network_mode: host`), because

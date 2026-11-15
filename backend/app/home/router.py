@@ -104,6 +104,9 @@ async def _devices(db: AsyncSession, home_id: uuid.UUID) -> dict[str, Any]:
                 # It has said what devices it has (a box is online a moment
                 # before that; a fresh one takes a minute or two to set up).
                 "ready": is_live,
+                # Said once: things that had joined on their own and went back
+                # under "Found on your network".
+                "note": relay.note_of(box.id, box.snapshot),
             }
         )
         for a in box_areas:
@@ -482,6 +485,54 @@ async def add_room(home_id: uuid.UUID, box_id: uuid.UUID, body: RoomBody, db: As
     return await _ask_box(db, box.id, "areas.create", {"name": body.name.strip()})
 
 
+class OrderBody(BaseModel):
+    order: list[str] = Field(max_length=300)
+
+
+@router.put("/{home_id}/boxes/{box_id}/rooms/order", dependencies=SETUP)
+async def order_rooms(home_id: uuid.UUID, box_id: uuid.UUID, body: OrderBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """The order rooms are shown in, for everyone in the home."""
+    box = await _box_of(db, user, home_id, box_id)
+    if any(not re.match(_ID, a) for a in body.order):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That order can't be saved.")
+    await _ask_box(db, box.id, "areas.order", {"order": body.order})
+    return {"ok": True}
+
+
+class MergeBody(BaseModel):
+    into: str = Field(pattern=_ID)
+
+
+@router.post("/{home_id}/boxes/{box_id}/rooms/{area_id}/merge", dependencies=SETUP)
+async def merge_rooms(home_id: uuid.UUID, box_id: uuid.UUID, area_id: str, body: MergeBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """Two rooms that are really one ("Lounge Room" and "Living Room"):
+    everything in this one moves to the other, and this one goes."""
+    box = await _box_of(db, user, home_id, box_id)
+    if not re.match(_ID, area_id) or area_id == body.into:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick two different rooms.")
+    await _ask_box(db, box.id, "areas.merge", {"area": area_id, "into": body.into}, timeout=relay.SETUP_S)
+    return {"ok": True}
+
+
+class LightsBody(BaseModel):
+    on: bool
+
+
+@router.post("/{home_id}/boxes/{box_id}/rooms/{area_id}/lights", dependencies=[Depends(_on), Depends(_act_limit)])
+async def room_lights(home_id: uuid.UUID, box_id: uuid.UUID, area_id: str, body: LightsBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """All of a room's lights, on or off."""
+    box = await _box_of(db, user, home_id, box_id)
+    live = relay.link(box.id)
+    if not re.match(_ID, area_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if live is None or not live.got_snapshot:
+        raise HTTPException(status.HTTP_409_CONFLICT, "The home box is offline. Check it has power and internet.")
+    if not any(e.get("domain") == "light" and e.get("area") == area_id for e in live.entities.values()):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "There are no lights in that room.")
+    await _ask_box(db, box.id, "room.lights", {"area": area_id, "action": "turn_on" if body.on else "turn_off"})
+    return {"ok": True}
+
+
 @router.patch("/{home_id}/boxes/{box_id}/rooms/{area_id}", dependencies=SETUP)
 async def rename_room(home_id: uuid.UUID, box_id: uuid.UUID, area_id: str, body: RoomBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
     box = await _box_of(db, user, home_id, box_id)
@@ -497,6 +548,34 @@ async def delete_room(home_id: uuid.UUID, box_id: uuid.UUID, area_id: str, db: A
     if not re.match(_ID, area_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     await _ask_box(db, box.id, "areas.delete", {"area": area_id})
+    return {"ok": True}
+
+
+class PlaceBody(BaseModel):
+    entities: list[str] = Field(min_length=1, max_length=200)
+    # A room's id; "" takes them out of their room.
+    area: str = Field(max_length=80)
+
+
+@router.post("/{home_id}/boxes/{box_id}/devices/place", dependencies=SETUP)
+async def place_devices(home_id: uuid.UUID, box_id: uuid.UUID, body: PlaceBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """Several devices into one room at once."""
+    box = await _box_of(db, user, home_id, box_id)
+    if any(not re.match(r"^[a-z0-9_]+\.[a-z0-9_]+$", e) or len(e) > 200 for e in body.entities) or (body.area and not re.match(_ID, body.area)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Say which devices, and which room.")
+    await _ask_box(db, box.id, "devices.place", {"entities": body.entities, "area": body.area}, timeout=relay.SETUP_S)
+    return {"ok": True}
+
+
+@router.delete("/{home_id}/boxes/{box_id}/note", dependencies=SETUP)
+async def clear_note(home_id: uuid.UUID, box_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """"Got it": the one-time line about things that had joined on their own."""
+    box = await _box_of(db, user, home_id, box_id)
+    live = relay.link(box.id)
+    if live is not None:
+        live.note = None
+        relay.bump(home_id)
+    await _ask_box(db, box.id, "note.clear", {})
     return {"ok": True}
 
 

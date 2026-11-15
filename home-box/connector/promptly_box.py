@@ -34,12 +34,13 @@ import random
 import re
 import secrets
 import signal
+import time
 from pathlib import Path
 from typing import Any
 
 import aiohttp
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 log = logging.getLogger("promptly-box")
 
 SHOWN = {"light", "switch", "input_boolean", "fan", "sensor", "binary_sensor", "climate", "cover", "lock", "media_player"}
@@ -80,6 +81,48 @@ NOT_BRANDS = {"sun", "backup", "hassio", "cloud", "analytics", "mobile_app", "pe
 SECRET_NAMES = ("password", "token", "api_key", "apikey", "secret", "passcode", "access_key", "pin", "psk")
 # Home Assistant's own housekeeping, which isn't a device in anyone's home.
 NOT_DEVICES = {"sun", "backup", "hassio", "update", "analytics", "cloud", "person", "zone", "shopping_list", "tts", "stt"}
+# How a set-up can start without anyone asking for it: something on the
+# network announced itself. An entry that came this way and that nobody
+# chose doesn't stay in the home (see ``uninvited``).
+NETWORK_SOURCES = {"zeroconf", "ssdp", "dhcp", "homekit", "usb", "bluetooth"}
+# What a device mainly is, when it has several parts: the first of these it has.
+KIND_ORDER = ("light", "climate", "cover", "lock", "fan", "media_player", "switch", "input_boolean", "binary_sensor", "sensor")
+
+# Our own words for steps people actually meet, over Home Assistant's.
+# (brand, step) -> title / text / button. Anything not here uses its wording.
+OUR_STEPS: dict[tuple[str, str], dict[str, str]] = {
+    ("hue", "link"): {
+        "title": "Link your Hue bridge",
+        "text": "Press the big round button on top of your Hue bridge, then tap \"I've pressed it\" within 30 seconds.",
+        "button": "I've pressed it",
+    },
+    ("hue", "init"): {"title": "Which Hue bridge?"},
+    ("hue", "manual"): {"title": "Your Hue bridge's address"},
+}
+# (brand or "*", error code) -> what went wrong, in plain words.
+OUR_ERRORS: dict[tuple[str, str], str] = {
+    ("hue", "register_failed"): "The bridge didn't see its button pressed. Press it, then tap \"I've pressed it\" within 30 seconds.",
+    ("hue", "linking"): "The bridge didn't answer. Check it has power and is on your network, then try again.",
+    ("*", "cannot_connect"): "Couldn't reach it. Check it's switched on and on the same network, and that the address is right.",
+    ("*", "invalid_auth"): "That sign-in wasn't accepted. Check the details and try again.",
+    ("*", "invalid_host"): "That doesn't look like an address. It's usually something like 192.168.1.20.",
+    ("*", "timeout_connect"): "It took too long to answer. Check it's switched on and close enough to your router, then try again.",
+    ("*", "already_configured"): "This is already added to your home.",
+    ("*", "unknown"): "Something went wrong. Try again.",
+}
+# (brand or "*", reason) -> why a set-up stopped.
+OUR_STOPS: dict[tuple[str, str], str] = {
+    ("hue", "no_bridges"): "No Hue bridge was found on your network. Check it has power and is plugged into your router.",
+    ("hue", "discover_timeout"): "Looking for a Hue bridge took too long. Check it has power and is plugged into your router.",
+    ("hue", "all_configured"): "Every Hue bridge on your network is already added.",
+    ("hue", "not_hue_bridge"): "That address isn't a Hue bridge.",
+    ("*", "already_configured"): "This is already added to your home.",
+    ("*", "already_in_progress"): "This is already being added. Look under \"Found on your network\".",
+    ("*", "no_devices_found"): "Nothing was found on your network. Check it's switched on and on the same network as this home.",
+    ("*", "single_instance_allowed"): "This is already added, and there can only be one.",
+    ("*", "cannot_connect"): "Couldn't reach it. Check it's switched on and on the same network.",
+    ("*", "unknown"): "Something went wrong. Try again.",
+}
 CLIENT_ID = "http://promptly-box.local/"
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 # Close codes the server uses to say "don't keep trying like this".
@@ -178,6 +221,109 @@ def extras(domain: str, attrs: dict[str, Any]) -> dict[str, Any]:
         if isinstance(attrs.get("is_volume_muted"), bool):
             x["muted"] = attrs["is_volume_muted"]
     return x
+
+
+def our_words(table: dict[tuple[str, str], str], brand: str, code: str) -> str | None:
+    return table.get((brand, code)) or table.get(("*", code))
+
+
+def brand_group(domain: str, attrs: dict[str, Any]) -> dict[str, Any] | None:
+    """A brand's own "room" or "zone" of lights (Hue's grouped lights), or a
+    light group made in Home Assistant: one switch for several lights. It
+    isn't a device anyone has, so it gets no tile; Promptly's own rooms use
+    it under the hood to turn a room's lights on and off in one go."""
+    if domain != "light":
+        return None
+    members = attrs.get("entity_id")
+    if attrs.get("is_hue_group") is True or isinstance(members, (list, tuple)):
+        return {"members": sorted(str(m) for m in members or [] if isinstance(m, str)), "kind": str(attrs.get("hue_type") or "group")}
+    return None
+
+
+def speaker_group(attrs: dict[str, Any], model: str | None) -> bool:
+    """Several speakers that play as one ("Downstairs Speakers"): kept, since
+    it's something to play to, and marked as a group."""
+    return isinstance(attrs.get("entity_id"), (list, tuple)) or (model or "").strip().lower() == "google cast group"
+
+
+def lights_target(lights: list[str], groups: dict[str, dict[str, Any]]) -> list[str]:
+    """What to switch for "all the lights in this room": the brand's own
+    group when it is exactly these lights (one command, they change
+    together), otherwise each light."""
+    want = set(lights)
+    for gid, g in sorted(groups.items()):
+        if want and set(g.get("members") or []) == want:
+            return [gid]
+    return sorted(lights)
+
+
+def devices_of(entry_id: str, devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [d for d in devices if d.get("config_entry_id") == entry_id or entry_id in (d.get("config_entries") or [])]
+
+
+def _shown_entity(e: dict[str, Any]) -> bool:
+    return (
+        str(e.get("entity_id") or "").split(".", 1)[0] in SHOWN
+        and not e.get("hidden_by")
+        and not e.get("disabled_by")
+        and e.get("entity_category") not in ("config", "diagnostic")
+        and e.get("platform") not in NOT_DEVICES
+    )
+
+
+def brought(entry_id: str, devices: list[dict[str, Any]], registry: list[dict[str, Any]], groups: set[str], areas: dict[str, str]) -> dict[str, Any]:
+    """What a finished set-up brought into the home, for a one-line summary
+    ("1 light in Lounge Room") instead of a form per device.
+
+    Left out: bridges and hubs (nothing of theirs to show), the brand's own
+    rooms and zones (``groups``; Home Assistant lists Hue's as devices), and
+    anything with nothing to show. ``areas`` is id -> name."""
+    by_device: dict[str, list[str]] = {}
+    for e in registry:
+        if e.get("device_id") and e.get("entity_id") not in groups and _shown_entity(e):
+            by_device.setdefault(e["device_id"], []).append(str(e["entity_id"]).split(".", 1)[0])
+    things: list[dict[str, Any]] = []
+    for d in devices_of(entry_id, devices):
+        kinds = by_device.get(d["id"]) or []
+        if not kinds:
+            continue
+        kind = next((k for k in KIND_ORDER if k in kinds), kinds[0])
+        things.append({"device_id": d["id"], "name": d.get("name_by_user") or d.get("name") or "Device", "kind": kind, "area": d.get("area_id") or ""})
+    counts: dict[tuple[str, str], int] = {}
+    for t in things:
+        key = (t["kind"], areas.get(t["area"], "") if t["area"] else "")
+        counts[key] = counts.get(key, 0) + 1
+    summary = [{"n": n, "kind": kind, "room": room} for (kind, room), n in sorted(counts.items(), key=lambda kv: (kv[0][1] == "", kv[0][1].lower(), kv[0][0]))]
+    return {"things": things[:60], "summary": summary[:20], "loose": sum(1 for t in things if not t["area"])}
+
+
+def uninvited(entries: list[dict[str, Any]], chosen: set[str]) -> list[dict[str, Any]]:
+    """Set-ups that are in the home though nobody chose them: they came from
+    something announcing itself on the network, and no one tapped Add.
+    Nothing joins a home by itself, so these go back to "Found on your
+    network"."""
+    return [
+        e for e in entries
+        if e.get("source") in NETWORK_SOURCES and e.get("domain") not in NOT_BRANDS and e.get("entry_id") not in chosen
+    ]
+
+
+def first_chosen(entries: list[dict[str, Any]], devices: list[dict[str, Any]], onboarded_at: float | None) -> set[str]:
+    """The first time this rule runs on a home that already exists: which
+    set-ups count as chosen. Everything, except what appeared on its own.
+
+    Home Assistant only sets a found device up without asking while it is
+    still being set up itself, so "on its own" is: came from the network,
+    before (or as) the box finished its own first start, and nobody has since
+    named any of it or put it in a room. Without knowing when that was
+    (``onboarded_at`` is None), everything is kept."""
+    chosen: set[str] = set()
+    for e in entries:
+        touched = any(d.get("name_by_user") or d.get("area_id") for d in devices_of(str(e.get("entry_id")), devices))
+        early = onboarded_at is not None and float(e.get("created_at") or 0) <= onboarded_at + 30
+        if not (e.get("source") in NETWORK_SOURCES and early and not touched):
+            chosen.add(str(e.get("entry_id")))
+    return chosen
 
 
 def service_for(domain: str, action: str, value: Any) -> tuple[str, str, dict[str, Any]] | None:
@@ -364,13 +510,7 @@ def shape_flow(r: dict[str, Any], words: dict[str, str], brand_name: str) -> dic
         return out
     if kind == "abort":
         reason = str(r.get("reason") or "")
-        text = words.get(f"{base}.abort.{reason}") or {
-            "already_configured": "This is already set up.",
-            "already_in_progress": "This is already being set up.",
-            "no_devices_found": "Nothing was found on your network.",
-            "single_instance_allowed": "This is already set up, and there can only be one.",
-            "cannot_connect": "Couldn't reach it.",
-        }.get(reason) or "This couldn't be set up."
+        text = our_words(OUR_STOPS, brand, reason) or words.get(f"{base}.abort.{reason}") or "This couldn't be added."
         out.update(kind="stopped", reason=reason, text=_say(text, places))
         return out
     if kind in ("external", "external_done"):
@@ -380,8 +520,9 @@ def shape_flow(r: dict[str, Any], words: dict[str, str], brand_name: str) -> dic
         action = str(r.get("progress_action") or "")
         out.update(kind="wait", text=_say(words.get(f"{base}.progress.{action}") or "Working on it…", places))
         return out
-    out["title"] = _say(words.get(f"{base}.step.{step}.title") or brand_name, places)
-    described = words.get(f"{base}.step.{step}.description")
+    ours = OUR_STEPS.get((brand, step)) or {}
+    out["title"] = _say(ours.get("title") or words.get(f"{base}.step.{step}.title") or brand_name, places)
+    described = ours.get("text") or words.get(f"{base}.step.{step}.description")
     if described:
         out["text"] = _say(described, places)
     if kind == "menu":
@@ -399,8 +540,10 @@ def shape_flow(r: dict[str, Any], words: dict[str, str], brand_name: str) -> dic
     ]
     errors = {}
     for field, code in (r.get("errors") or {}).items():
-        errors[str(field)] = _say(words.get(f"{base}.error.{code}") or {"cannot_connect": "Couldn't reach it. Check the address and that it's switched on.", "invalid_auth": "That sign-in wasn't accepted.", "unknown": "Something went wrong. Try again."}.get(str(code)) or str(code).replace("_", " ").capitalize(), places)
+        errors[str(field)] = _say(our_words(OUR_ERRORS, brand, str(code)) or words.get(f"{base}.error.{code}") or str(code).replace("_", " ").capitalize(), places)
     out.update(kind="form", fields=fields, errors=errors, last=bool(r.get("last_step")))
+    if ours.get("button"):
+        out["button"] = ours["button"]
     return out
 
 
@@ -426,6 +569,16 @@ class HomeAssistant:
         self._resnap: asyncio.Task | None = None
         self._words: dict[str, dict[str, str]] = {}
         self._manifests: dict[str, dict[str, Any]] = {}
+        # A brand's own rooms and zones of lights: entity -> {members, kind}.
+        self.groups: dict[str, dict[str, Any]] = {}
+        self._device_of: dict[str, str] = {}  # entity -> device
+        self._model_of: dict[str, str] = {}  # device -> model
+        # Just made its own account on a fresh Home Assistant.
+        self._fresh = False
+        # Set-ups someone chose, and what to tell them once (policy.json).
+        self._policy: dict[str, Any] | None = None
+        self._steps: list[list[float]] = []  # [started, ended or 0] of each answer sent to a set-up
+        self._enforcing = False
 
     # -- signing in
 
@@ -442,6 +595,7 @@ class HomeAssistant:
         if saved.exists():
             return saved.read_text().strip()
         token = await self._first_run()
+        self._fresh = True
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         saved.write_text(token)
         saved.chmod(0o600)
@@ -519,6 +673,14 @@ class HomeAssistant:
                     self.ws = ws
                     reader = asyncio.create_task(self._read(ws))
                     try:
+                        if await self._restart_to_listen():
+                            try:  # it goes away now; the loop comes back for it
+                                await asyncio.wait_for(asyncio.shield(reader), timeout=90)
+                                continue
+                            except asyncio.TimeoutError:
+                                log.warning("Home Assistant didn't restart; carrying on without it looking for devices")
+                        await self._enforce()
+                        await self._no_rooms_of_its_own()
                         await self._load()
                         for event in ("state_changed", "area_registry_updated", "entity_registry_updated", "device_registry_updated"):
                             await self.ask({"type": "subscribe_events", "event_type": event})
@@ -543,6 +705,132 @@ class HomeAssistant:
                     fut.set_exception(RuntimeError("Home Assistant went away."))
             attempt += 1
             await asyncio.sleep(backoff(attempt))
+
+    async def _restart_to_listen(self) -> bool:
+        """Bundled with Promptly, a fresh Home Assistant starts without
+        looking for devices (``home-box/ha_config.py``): until it has its
+        account, it would set up whatever it found without asking. Now that
+        it has one, restart it once so it starts looking."""
+        # Only a Home Assistant this box set up itself, and not over and over.
+        if self.supervised or os.environ.get("HA_TOKEN") or not (DATA_DIR / "ha_token").exists():
+            return False
+        tries = DATA_DIR / "listen_restarts"
+        try:
+            n = int(tries.read_text().strip() or 0) if tries.exists() else 0
+        except (OSError, ValueError):
+            n = 0
+        if n >= 3:
+            return False
+        try:
+            config = await self.ask({"type": "get_config"})
+            if "zeroconf" in ((config or {}).get("components") or []):
+                return False
+            try:
+                tries.write_text(str(n + 1))
+            except OSError:
+                return False
+            log.info("restarting Home Assistant once, so it starts looking for devices")
+            await self.ask({"type": "call_service", "domain": "homeassistant", "service": "restart", "service_data": {}}, timeout=4)
+        except Exception as e:  # noqa: BLE001 - it may go before it answers
+            log.info("restart asked (%s)", e)
+        return True
+
+    async def _no_rooms_of_its_own(self) -> None:
+        """A fresh Home Assistant comes with three rooms of its own (Living
+        Room, Kitchen, Bedroom). Rooms are made in Promptly, or come with a
+        brand's devices: a new home starts with none."""
+        if not self._fresh:
+            return
+        self._fresh = False
+        try:
+            for a in await self.ask({"type": "config/area_registry/list"}) or []:
+                await self.ask({"type": "config/area_registry/delete", "area_id": a["area_id"]})
+        except Exception as e:  # noqa: BLE001
+            log.warning("clearing the starter rooms: %s", e)
+
+    # -- nothing joins a home by itself
+
+    def _policy_path(self) -> Path:
+        return DATA_DIR / "policy.json"
+
+    def _save_policy(self) -> None:
+        if self._policy is None:
+            return
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = self._policy_path().with_suffix(".tmp")
+            tmp.write_text(json.dumps({**self._policy, "chosen": sorted(self._policy["chosen"])}))
+            tmp.replace(self._policy_path())
+        except OSError as e:
+            log.warning("couldn't save what was chosen: %s", e)
+
+    def note(self) -> dict[str, Any] | None:
+        return (self._policy or {}).get("note") or None
+
+    def _chose(self, entry_id: Any) -> None:
+        if entry_id and self._policy is not None:
+            self._policy["chosen"].add(str(entry_id))
+            self._save_policy()
+
+    async def _enforce(self) -> None:
+        """Take out set-ups nobody chose (``uninvited``), so what was found
+        goes back to "Found on your network", and note it to say once."""
+        if self._enforcing or any(not ended for _, ended in self._steps):
+            return
+        if self.supervised or os.environ.get("HA_TOKEN"):
+            return  # somebody's own Home Assistant: what they add there is theirs
+        self._enforcing = True
+        try:
+            entries = await self.rest("GET", "/config/config_entries/entry") or []
+            devices = await self.ask({"type": "config/device_registry/list"}) or []
+            if self._policy is None:
+                path = self._policy_path()
+                if path.exists():
+                    try:
+                        saved = json.loads(path.read_text())
+                        self._policy = {"chosen": set(saved.get("chosen") or []), "note": saved.get("note")}
+                    except (OSError, ValueError):
+                        self._policy = None
+                if self._policy is None:
+                    token = DATA_DIR / "ha_token"
+                    self._policy = {"chosen": first_chosen(entries, devices, token.stat().st_mtime if token.exists() else None), "note": None}
+                    self._save_policy()
+            chosen: set[str] = self._policy["chosen"]
+            # Chosen a moment ago, in a step whose answer we never saw (it timed out).
+            for e in uninvited(entries, chosen):
+                made = float(e.get("created_at") or 0)
+                if any(start - 2 <= made <= (end or time.time()) + 90 for start, end in self._steps):
+                    chosen.add(str(e["entry_id"]))
+            out = uninvited(entries, chosen)
+            if not out:
+                return
+            registry = await self.ask({"type": "config/entity_registry/list"}) or []
+            names = await self.brand_names()
+            n, kinds = 0, set()
+            for e in out:
+                mine = {d["id"] for d in devices_of(str(e["entry_id"]), devices)}
+                for r in registry:
+                    domain = str(r.get("entity_id") or "").split(".", 1)[0]
+                    if r.get("device_id") in mine and _shown_entity(r) and domain not in ("sensor", "binary_sensor"):
+                        n += 1
+                        kinds.add(domain)
+                try:
+                    await self.rest("DELETE", f"/config/config_entries/entry/{e['entry_id']}")
+                    log.info("%s appeared on its own: back to \"Found on your network\"", e.get("domain"))
+                except RuntimeError as err:
+                    log.warning("couldn't take out %s: %s", e.get("domain"), err)
+            old = self._policy.get("note") or {}
+            brands = sorted({*(old.get("brands") or []), *(str((names.get(e["domain"]) or {}).get("name") or e["domain"]) for e in out)})
+            self._policy["note"] = {
+                "n": int(old.get("n") or 0) + n,
+                "what": "speakers" if kinds <= {"media_player"} and (old.get("what") in (None, "speakers")) else "devices",
+                "brands": brands[:6],
+            }
+            self._save_policy()
+        except Exception as e:  # noqa: BLE001 - never at the cost of the line
+            log.warning("checking what was chosen: %s", e)
+        finally:
+            self._enforcing = False
 
     async def _check_listening(self) -> None:
         """Home Assistant falls back to its built-in web settings (every
@@ -580,6 +868,7 @@ class HomeAssistant:
             eid = str(data.get("entity_id") or "")
             new = data.get("new_state")
             if new is None:
+                self.groups.pop(eid, None)
                 if self.entities.pop(eid, None) is not None:
                     self.changes.put_nowait(("gone", eid))
                 return
@@ -597,6 +886,7 @@ class HomeAssistant:
     async def _reload_soon(self) -> None:
         await asyncio.sleep(1.5)
         try:
+            await self._enforce()
             await self._load()
         except Exception as e:  # noqa: BLE001
             log.warning("re-reading devices: %s", e)
@@ -609,8 +899,12 @@ class HomeAssistant:
         self.areas = [{"id": a["area_id"], "name": a["name"]} for a in areas or []]
         device_area = {d["id"]: d.get("area_id") for d in devices or []}
         self._area_of, self._skip, self._names = {}, set(), {}
+        self._model_of = {d["id"]: str(d.get("model") or "") for d in devices or []}
+        self._device_of, self.groups = {}, {}
         for e in registry or []:
             eid = e["entity_id"]
+            if e.get("device_id"):
+                self._device_of[eid] = e["device_id"]
             if e.get("hidden_by") or e.get("disabled_by") or e.get("entity_category") in ("config", "diagnostic") or e.get("platform") in NOT_DEVICES:
                 self._skip.add(eid)
             area = e.get("area_id") or device_area.get(e.get("device_id"))
@@ -632,6 +926,11 @@ class HomeAssistant:
         if domain not in SHOWN or eid in self._skip:
             return None
         attrs = s.get("attributes") or {}
+        group = brand_group(domain, attrs)
+        if group is not None:
+            # Not a device: kept to switch a room's lights together.
+            self.groups[eid] = {**group, "area": self._area_of.get(eid, "")}
+            return None
         out: dict[str, Any] = {
             "id": eid,
             "domain": domain,
@@ -646,6 +945,11 @@ class HomeAssistant:
             out["cls"] = str(attrs["device_class"])
         if domain == "light" and isinstance(attrs.get("brightness"), (int, float)):
             out["bri"] = round(attrs["brightness"] / 255 * 100)
+        device = self._device_of.get(eid)
+        if device:
+            out["dev"] = device
+        if domain == "media_player" and speaker_group(attrs, self._model_of.get(device or "")):
+            out["grp"] = True
         x = extras(domain, attrs)
         if x:
             out["x"] = x
@@ -716,7 +1020,13 @@ class HomeAssistant:
             return await self._shaped(await self.rest("GET", f"/config/config_entries/flow/{a.get('flow')}"))
         if op == "flows.step":
             given = a.get("input") if isinstance(a.get("input"), dict) else {}
-            return await self._shaped(await self.rest("POST", f"/config/config_entries/flow/{a.get('flow')}", given))
+            # Someone is answering a set-up: what it makes is theirs (see _enforce).
+            mark = [time.time(), 0.0]
+            self._steps = [w for w in self._steps[-20:] if not w[1] or time.time() - w[1] < 600] + [mark]
+            try:
+                return await self._shaped(await self.rest("POST", f"/config/config_entries/flow/{a.get('flow')}", given))
+            finally:
+                mark[1] = time.time()
         if op == "flows.abort":
             try:
                 await self.rest("DELETE", f"/config/config_entries/flow/{a.get('flow')}")
@@ -747,10 +1057,55 @@ class HomeAssistant:
         if op == "areas.delete":
             await self.ask({"type": "config/area_registry/delete", "area_id": str(a.get("area"))})
             return None
+        if op == "areas.merge":
+            await self._merge_rooms(str(a.get("area") or ""), str(a.get("into") or ""))
+            return None
+        if op == "areas.order":
+            have = [x["area_id"] for x in await self.ask({"type": "config/area_registry/list"}) or []]
+            want = [str(i) for i in a.get("order") or [] if str(i) in have]
+            await self.ask({"type": "config/area_registry/reorder", "area_ids": want + [i for i in have if i not in want]})
+            return None
+        if op == "devices.place":
+            area = str(a.get("area") or "")
+            done: set[str] = set()
+            for eid in [str(i) for i in a.get("entities") or []][:200]:
+                device = self._device_of.get(eid)
+                if device in done:
+                    continue
+                await self._device_update({"entity_id": eid, "device_id": device, "area": area})
+                if device:
+                    done.add(device)
+            return None
+        if op == "room.lights":
+            area, action = str(a.get("area") or ""), str(a.get("action") or "")
+            lights = [eid for eid, e in self.entities.items() if e["domain"] == "light" and e.get("area") == area]
+            if not lights or action not in ("turn_on", "turn_off"):
+                raise RuntimeError("There are no lights in that room.")
+            await self.ask({"type": "call_service", "domain": "light", "service": action, "service_data": {}, "target": {"entity_id": lights_target(lights, self.groups)}})
+            return None
+        if op == "note.clear":
+            if self._policy is not None and self._policy.get("note"):
+                self._policy["note"] = None
+                self._save_policy()
+                self.changes.put_nowait(("snapshot", None))
+            return None
         if op == "device.update":
             await self._device_update(a)
             return None
         raise RuntimeError("This box doesn't know how to do that yet. It may need updating.")
+
+    async def _merge_rooms(self, gone: str, into: str) -> None:
+        """Everything in one room moves to another, and the first goes."""
+        have = {x["area_id"] for x in await self.ask({"type": "config/area_registry/list"}) or []}
+        if gone == into or gone not in have or into not in have:
+            raise RuntimeError("Pick two different rooms.")
+        for d in await self.ask({"type": "config/device_registry/list"}) or []:
+            if d.get("area_id") == gone:
+                await self.ask({"type": "config/device_registry/update", "device_id": d["id"], "area_id": into})
+        for e in await self.ask({"type": "config/entity_registry/list"}) or []:
+            if e.get("area_id") == gone:
+                await self.ask({"type": "config/entity_registry/update", "entity_id": e["entity_id"], "area_id": into})
+        await self.ask({"type": "config/area_registry/delete", "area_id": gone})
 
     async def _device_update(self, a: dict[str, Any]) -> None:
         device = a.get("device_id")
@@ -779,10 +1134,20 @@ class HomeAssistant:
         names = await self.brand_names()
         out = shape_flow(result, await self.words(brand), (names.get(brand) or {}).get("name") or brand)
         if out["kind"] == "done":
-            # What it brought, so the page can ask for a name and a room.
-            entry = out.get("entry_id")
-            devices = [d for d in await self.ask({"type": "config/device_registry/list"}) or [] if entry and entry in (d.get("config_entries") or [])]
-            out["devices"] = [{"device_id": d["id"], "name": d.get("name_by_user") or d.get("name") or "Device", "area": d.get("area_id") or ""} for d in devices[:12]]
+            entry = str(out.get("entry_id") or "")
+            self._chose(entry)
+            # What it brought, already in the rooms the brand knows them by
+            # (Home Assistant makes a room for a new name): said in a line.
+            await asyncio.sleep(1.0)  # its parts are still arriving
+            try:
+                devices = await self.ask({"type": "config/device_registry/list"}) or []
+                registry = await self.ask({"type": "config/entity_registry/list"}) or []
+                areas = {x["area_id"]: x["name"] for x in await self.ask({"type": "config/area_registry/list"}) or []}
+                groups = {str(st.get("entity_id")) for st in await self.ask({"type": "get_states"}) or [] if brand_group(str(st.get("entity_id") or "").split(".", 1)[0], st.get("attributes") or {})}
+                out.update(brought(entry, devices, registry, groups, areas))
+            except Exception as e:  # noqa: BLE001 - it's added; the page just says less
+                log.warning("couldn't list what was added: %s", e)
+                out.update(things=[], summary=[], loose=0)
         return out
 
 
@@ -860,6 +1225,13 @@ class Server:
         except Exception:  # noqa: BLE001
             pass
 
+    def _snapshot(self) -> dict[str, Any]:
+        ha = self.ha
+        msg: dict[str, Any] = {"t": "snapshot", "areas": ha.areas, "entities": list(ha.entities.values())}
+        if ha.note():
+            msg["note"] = ha.note()
+        return msg
+
     async def _send(self, ws: aiohttp.ClientWebSocketResponse) -> None:
         """Everything the server should hear: the whole picture first, then
         changes, a few at a time."""
@@ -869,7 +1241,7 @@ class Server:
         await ha.ready.wait()
         while not ha.changes.empty():  # we're about to say it all anyway
             ha.changes.get_nowait()
-        await ws.send_json({"t": "snapshot", "areas": ha.areas, "entities": list(ha.entities.values())})
+        await ws.send_json(self._snapshot())
         while True:
             kind, eid = await ha.changes.get()
             await asyncio.sleep(0.1)  # let a burst arrive
@@ -883,10 +1255,10 @@ class Server:
                 await ha.ready.wait()
                 while not ha.changes.empty():
                     ha.changes.get_nowait()
-                await ws.send_json({"t": "snapshot", "areas": ha.areas, "entities": list(ha.entities.values())})
+                await ws.send_json(self._snapshot())
                 continue
             if any(k == "snapshot" for k, _ in batch):
-                await ws.send_json({"t": "snapshot", "areas": ha.areas, "entities": list(ha.entities.values())})
+                await ws.send_json(self._snapshot())
                 continue
             seen: set[str] = set()
             for k, e in reversed(batch):  # the latest word on each one

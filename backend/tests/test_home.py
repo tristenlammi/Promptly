@@ -580,8 +580,74 @@ async def test_nobody_outside_the_home_reaches_its_set_up(user, client, db):
                 client.patch(f"{base}/rooms/a", headers=_hdr(who), json={"name": "x"}),
                 client.delete(f"{base}/rooms/a", headers=_hdr(who)),
                 client.patch(f"{base}/devices", headers=_hdr(who), json={"entity_id": "light.bulb", "name": "x"}),
+                client.put(f"{base}/rooms/order", headers=_hdr(who), json={"order": ["a"]}),
+                client.post(f"{base}/rooms/a/merge", headers=_hdr(who), json={"into": "b"}),
+                client.post(f"{base}/rooms/a/lights", headers=_hdr(who), json={"on": True}),
+                client.post(f"{base}/devices/place", headers=_hdr(who), json={"entities": ["light.bulb"], "area": "a"}),
+                client.delete(f"{base}/note", headers=_hdr(who)),
             ]
             assert {(await c).status_code for c in calls} == {404}, (who.username, home)
     assert box.from_server.empty()  # nothing was asked of the box
     await box.hang_up()
     await task
+
+
+# ------------------------------------------------------------------ rooms are Promptly's
+
+
+async def test_rooms_are_merged_ordered_and_filled_from_promptly(user, client):
+    await _turn_on(client, user)
+    lounge = {**BULB, "id": "light.lamp", "area": "lounge", "dev": "d1"}
+    prepared, home_id, box, task = await _home_with(client, user, user, [lounge, {**BULB, "id": "light.desk", "dev": "d2"}])
+    base = f"/api/home/{home_id}/boxes/{prepared['box']['id']}"
+    side = asyncio.create_task(_answer(box, n=4))
+    assert (await client.post(f"{base}/rooms/lounge/merge", headers=_hdr(user), json={"into": "living"})).status_code == 200
+    assert (await client.put(f"{base}/rooms/order", headers=_hdr(user), json={"order": ["living", "study"]})).status_code == 200
+    assert (await client.post(f"{base}/devices/place", headers=_hdr(user), json={"entities": ["light.desk", "light.lamp"], "area": "study"})).status_code == 200
+    assert (await client.post(f"{base}/rooms/lounge/lights", headers=_hdr(user), json={"on": False})).status_code == 200
+    assert [(a["op"], a["args"]) for a in await side] == [
+        ("areas.merge", {"area": "lounge", "into": "living"}),
+        ("areas.order", {"order": ["living", "study"]}),
+        ("devices.place", {"entities": ["light.desk", "light.lamp"], "area": "study"}),
+        ("room.lights", {"area": "lounge", "action": "turn_off"}),
+    ]
+    # A room into itself, a room with no lights, nonsense ids: refused here, the box isn't asked.
+    assert (await client.post(f"{base}/rooms/lounge/merge", headers=_hdr(user), json={"into": "lounge"})).status_code == 400
+    assert (await client.post(f"{base}/rooms/attic/lights", headers=_hdr(user), json={"on": True})).status_code == 404
+    assert (await client.post(f"{base}/devices/place", headers=_hdr(user), json={"entities": ["not an id"], "area": "study"})).status_code == 400
+    assert box.from_server.empty()
+    await box.hang_up()
+    await task
+
+
+async def test_what_joined_on_its_own_is_said_once(user, client):
+    """The box put three speakers back under "Found on your network": the
+    home is told, and "Got it" ends it, here and on the box."""
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home_with(client, user, user, [])
+    base = f"/api/home/{home_id}/boxes/{prepared['box']['id']}"
+    await box.say({"t": "snapshot", "areas": [], "entities": [], "note": {"n": 3, "what": "speakers", "brands": ["Google Cast"], "extra": "x" * 9000}})
+
+    def told() -> bool:
+        from app.home import relay
+
+        return relay.link(uuid.UUID(prepared["box"]["id"])).note is not None
+
+    await _wait(told)
+    home = (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]
+    assert home["boxes"][0]["note"] == {"n": 3, "what": "speakers", "brands": ["Google Cast"]}
+    side = asyncio.create_task(_answer(box))
+    assert (await client.delete(f"{base}/note", headers=_hdr(user))).status_code == 200
+    assert [(a["op"], a["args"]) for a in await side] == [("note.clear", {})]
+    assert (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]["boxes"][0]["note"] is None
+    await box.hang_up()
+    await task
+
+
+def test_a_device_id_and_a_speaker_group_come_through_and_nothing_else_new():
+    from app.home import relay
+
+    got = relay.clean_entity({"id": "media_player.downstairs", "domain": "media_player", "name": "Downstairs", "state": "off", "dev": "abc123", "grp": True, "cls": "speaker", "members": ["x"]})
+    assert got == {"id": "media_player.downstairs", "domain": "media_player", "name": "Downstairs", "state": "off", "dev": "abc123", "grp": True, "cls": "speaker"}
+    assert "grp" not in relay.clean_entity({"id": "light.a", "domain": "light", "name": "A", "state": "on", "grp": "yes"})
+    assert relay.clean_note({"n": "3"}) is None and relay.clean_note({"n": 0, "brands": []}) is None

@@ -8,11 +8,15 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { cannotDraw, missing, SetupStepView, startValues, toInput, type Values } from "./SetupStepView";
+import { addedLine } from "./words";
 
 /**
  * "Add a device": what the home's box has found on the network, a list of
  * brands, and then that brand's own set-up steps, one at a time, drawn by
- * ``SetupStepView``. When it's done: a name and a room for what it brought.
+ * ``SetupStepView``. When it's done: one line saying what it brought and
+ * which rooms it went into (the rooms the brand's own app knows; "Change"
+ * opens names and rooms for anyone who wants them), and an offer to sort
+ * whatever came with no room.
  *
  * Whatever is typed into a step (a password, a key) goes to the box in one
  * request and is kept nowhere else.
@@ -29,7 +33,7 @@ const field =
 
 const NEW_ROOM = "__new__";
 
-export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: Home; onClose: () => void }) {
+export function AddDeviceSheet({ open, home, onClose, onSort }: { open: boolean; home: Home; onClose: () => void; onSort: () => void }) {
   const qc = useQueryClient();
   const online = home.boxes.filter((b) => b.online);
   const [boxId, setBoxId] = useState<string | null>(null);
@@ -40,8 +44,9 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
   const [values, setValues] = useState<Values>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  // After it's added: a name and a room for each thing it brought.
+  // After it's added, only if they ask to change something: a name and a room for each thing it brought.
   const [named, setNamed] = useState<Record<string, { name: string; area: string; room: string }>>({});
+  const [changing, setChanging] = useState(false);
   const live = useRef<{ box: string; flow: string } | null>(null);
   // A device the box found stays found if you back out of it; a brand you
   // started yourself is dropped.
@@ -57,6 +62,7 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
       setProblem(null);
       setQ("");
       setNamed({});
+      setChanging(false);
     }
   }, [open]);
 
@@ -70,7 +76,8 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
     setProblem(null);
     live.current = next.kind === "done" || next.kind === "stopped" || next.kind === "elsewhere" || !box ? null : { box: box.id, flow: next.flow };
     if (next.kind === "done") {
-      setNamed(Object.fromEntries((next.devices ?? []).map((d) => [d.device_id, { name: d.name, area: d.area, room: "" }])));
+      setNamed(Object.fromEntries((next.things ?? []).map((d) => [d.device_id, { name: d.name, area: d.area, room: "" }])));
+      setChanging(false);
       void qc.invalidateQueries({ queryKey: ["home", "homes"] });
     }
   };
@@ -108,11 +115,11 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
   };
 
   const saveNames = async () => {
-    if (!box || step?.kind !== "done") return onClose();
+    if (!box || step?.kind !== "done" || !changing) return onClose();
     setBusy(true);
     setProblem(null);
     try {
-      for (const d of step.devices ?? []) {
+      for (const d of step.things ?? []) {
         const mine = named[d.device_id];
         if (!mine) continue;
         let area = mine.area;
@@ -141,11 +148,18 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
     <div className="flex w-full gap-2">
       <button type="button" className={quiet} onClick={back} disabled={busy}>Back</button>
       <button type="button" className={primary} disabled={busy || lacking.length > 0 || cannotDraw(step)} onClick={() => void run(() => homeApi.setupStep(home.id, box.id, step.flow, toInput(step, values)))}>
-        {busy ? "Working…" : step.last ? "Add" : "Continue"}
+        {busy ? "Working…" : step.button ?? (step.last ? "Add" : "Continue")}
       </button>
     </div>
   ) : step.kind === "done" ? (
-    <button type="button" className={primary} disabled={busy} onClick={() => void saveNames()}>{busy ? "Saving…" : "Done"}</button>
+    !changing && (step.loose ?? 0) > 0 ? (
+      <div className="flex w-full gap-2">
+        <button type="button" className={quiet} onClick={onClose}>Later</button>
+        <button type="button" className={primary} onClick={() => { onClose(); onSort(); }}>{step.loose === 1 ? "Sort it now" : "Sort them now"}</button>
+      </div>
+    ) : (
+      <button type="button" className={primary} disabled={busy} onClick={() => void saveNames()}>{busy ? "Saving…" : "Done"}</button>
+    )
   ) : step.kind === "stopped" || step.kind === "elsewhere" ? (
     <div className="flex w-full gap-2">
       <button type="button" className={quiet} onClick={back}>Pick another</button>
@@ -173,7 +187,7 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
             <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--text)]"><Radar className="h-4 w-4 text-[var(--text-muted)]" aria-hidden /> Found on your network</h3>
             {found.isLoading && <p className="text-sm text-[var(--text-muted)]">Looking…</p>}
             {found.data && found.data.length === 0 && (
-              <p className="text-sm text-[var(--text-muted)]">Nothing new right now. Make sure the device is switched on and on the same network as your box, or pick its brand below.</p>
+              <p className="text-sm text-[var(--text-muted)]">Nothing new right now. Make sure the device is switched on and on your home network, or pick its brand below.</p>
             )}
             <div className="flex flex-col gap-2">
               {found.data?.map((f) => (
@@ -215,9 +229,18 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
         </div>
       ) : step.kind === "done" ? (
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-[var(--text)]">{step.title} is added.</p>
-          {(step.devices ?? []).length === 0 && <p className="text-sm text-[var(--text-muted)]">What it brings will show on your Home page in a moment.</p>}
-          {(step.devices ?? []).map((d) => {
+          <p className="text-sm text-[var(--text)]">{addedLine(step.brand_name, step.summary)}</p>
+          {!changing && (step.loose ?? 0) > 0 && (
+            <p className="text-sm text-[var(--text-muted)]">
+              {step.loose === 1 ? "1 device isn't in a room yet." : `${step.loose} devices aren't in a room yet.`} Sort {step.loose === 1 ? "it" : "them"} now, or later from your Home page.
+            </p>
+          )}
+          {!changing && (step.things ?? []).length > 0 && (
+            <button type="button" className="self-start text-sm font-medium text-[var(--accent-text,var(--accent))] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]" onClick={() => setChanging(true)}>
+              Change names or rooms
+            </button>
+          )}
+          {changing && (step.things ?? []).map((d) => {
             const mine = named[d.device_id] ?? { name: d.name, area: d.area, room: "" };
             const put = (change: Partial<typeof mine>) => setNamed((n) => ({ ...n, [d.device_id]: { ...mine, ...change } }));
             return (

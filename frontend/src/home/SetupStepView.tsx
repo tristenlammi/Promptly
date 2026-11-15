@@ -1,3 +1,5 @@
+import { AlertCircle } from "lucide-react";
+
 import type { SetupField, SetupStep } from "@/api/home";
 
 /**
@@ -144,6 +146,17 @@ function FieldView({ field, value, error, onChange }: { field: SetupField; value
   );
 }
 
+/** What went wrong with the whole step. A message, with an icon and a tint:
+ *  never a box with a border, which reads as a field to type in. */
+export function StepError({ text }: { text: string }) {
+  return (
+    <p role="alert" className="flex items-start gap-2 rounded-lg bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] px-3 py-2.5 text-sm font-medium text-[var(--danger)]">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      <span className="min-w-0">{text}</span>
+    </p>
+  );
+}
+
 export function SetupStepView({ step, values, onChange, onPick }: { step: SetupStep; values: Values; onChange: (name: string, v: unknown) => void; onPick: (option: string) => void }) {
   if (step.kind === "wait") {
     return <p role="status" className="py-6 text-center text-sm text-[var(--text-muted)]">{step.text}</p>;
@@ -176,7 +189,7 @@ export function SetupStepView({ step, values, onChange, onPick }: { step: SetupS
   return (
     <div className="flex flex-col gap-4">
       {step.text && <p className="whitespace-pre-line text-sm text-[var(--text-muted)]">{step.text}</p>}
-      {step.errors.base && <p role="alert" className="rounded-xl border border-[var(--danger)]/50 px-3 py-2 text-sm text-[var(--danger)]">{step.errors.base}</p>}
+      {step.errors.base && <StepError text={step.errors.base} />}
       {step.fields.map((f) => <FieldView key={f.name} field={f} value={values[f.name]} error={step.errors[f.name]} onChange={(v) => onChange(f.name, v)} />)}
       {step.fields.length === 0 && !step.text && <p className="text-sm text-[var(--text-muted)]">Ready when you are.</p>}
     </div>

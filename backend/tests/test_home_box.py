@@ -60,16 +60,16 @@ LOGIN_WORDS = {"component.acme.config.step.user.description": "Sign in at {url} 
 
 def test_hue_asks_for_the_bridge_then_for_its_button():
     step = pb.shape_flow(HUE_MANUAL, HUE_WORDS, "Philips Hue")
-    assert (step["kind"], step["title"]) == ("form", "Manual configure a Hue bridge")
+    assert (step["kind"], step["title"]) == ("form", "Your Hue bridge's address")
     assert step["fields"] == [{"name": "host", "label": "Host", "required": True, "type": "text"}]
 
     link = pb.shape_flow(HUE_LINK, HUE_WORDS, "Philips Hue")
     # No fields: "press the button, then Continue". Home Assistant is never named, and its picture is dropped.
     assert link["kind"] == "form" and link["fields"] == [] and link["errors"] == {}
-    assert link["text"] == "Press the button on the bridge to register Philips Hue with Promptly."
+    assert link["text"] == "Press the big round button on top of your Hue bridge, then tap \"I've pressed it\" within 30 seconds."
 
     failed = pb.shape_flow(HUE_LINK_FAILED, HUE_WORDS, "Philips Hue")
-    assert failed["errors"] == {"base": "Failed to register, please try again"}
+    assert failed["errors"] == {"base": "The bridge didn't see its button pressed. Press it, then tap \"I've pressed it\" within 30 seconds."}
 
     done = pb.shape_flow(HUE_DONE, HUE_WORDS, "Philips Hue")
     assert (done["kind"], done["title"], done["entry_id"]) == ("done", "Hue Bridge 1a2b3c", "e-hue")
@@ -78,7 +78,7 @@ def test_hue_asks_for_the_bridge_then_for_its_button():
 def test_a_sign_in_step_draws_its_fields_and_never_echoes_a_secret():
     step = pb.shape_flow(LOGIN, LOGIN_WORDS, "Acme")
     assert step["text"] == "Sign in at https://acme.example first." and step["last"] is True
-    assert step["errors"] == {"base": "That sign-in wasn't accepted."}
+    assert step["errors"] == {"base": "That sign-in wasn't accepted. Check the details and try again."}
     by = {f["name"]: f for f in step["fields"]}
     assert by["username"] == {"name": "username", "label": "Email", "required": True, "type": "text", "default": "sam@example.com"}
     assert by["password"]["type"] == "password" and "default" not in by["password"]
@@ -91,8 +91,8 @@ def test_a_sign_in_step_draws_its_fields_and_never_echoes_a_secret():
 
 def test_stops_menus_waits_and_other_websites():
     stopped = pb.shape_flow({"type": "abort", "flow_id": "x", "handler": "hue", "reason": "already_configured"}, HUE_WORDS, "Philips Hue")
-    assert (stopped["kind"], stopped["text"]) == ("stopped", "Device is already configured")
-    assert pb.shape_flow({"type": "abort", "flow_id": "x", "handler": "zzz", "reason": "no_devices_found"}, {}, "Zzz")["text"] == "Nothing was found on your network."
+    assert (stopped["kind"], stopped["text"]) == ("stopped", "This is already added to your home.")
+    assert pb.shape_flow({"type": "abort", "flow_id": "x", "handler": "zzz", "reason": "no_devices_found"}, {}, "Zzz")["text"] == "Nothing was found on your network. Check it's switched on and on the same network as this home."
     menu = pb.shape_flow({"type": "menu", "flow_id": "m", "handler": "zzz", "step_id": "user", "menu_options": ["cloud", "local_network"]}, {"component.zzz.config.step.user.menu_options.cloud": "Sign in"}, "Zzz")
     assert menu["kind"] == "menu" and menu["options"] == [{"value": "cloud", "label": "Sign in"}, {"value": "local_network", "label": "Local network"}]
     assert pb.shape_flow({"type": "external", "flow_id": "o", "handler": "zzz", "step_id": "auth", "url": "https://x"}, {}, "Zzz")["kind"] == "elsewhere"
@@ -199,3 +199,148 @@ def test_the_bundled_box_uses_the_deployments_secret_and_goes_where_its_told(mon
     monkeypatch.setenv("PROMPTLY_BUILTIN_KEY", "")
     with pytest.raises(SystemExit):
         pb.read_setup()
+
+
+# ------------------------------------------------------------------ first real hardware: Hue, rooms, what added itself
+
+
+def test_the_hue_button_step_says_which_button_and_how_long():
+    step = pb.shape_flow(HUE_LINK, HUE_WORDS, "Philips Hue")
+    assert step["title"] == "Link your Hue bridge" and step["button"] == "I've pressed it"
+    assert "big round button on top" in step["text"] and "30 seconds" in step["text"] and "Home Assistant" not in step["text"]
+    failed = pb.shape_flow(HUE_LINK_FAILED, HUE_WORDS, "Philips Hue")
+    assert failed["errors"] == {"base": "The bridge didn't see its button pressed. Press it, then tap \"I've pressed it\" within 30 seconds."}
+    # A step we have no button for of our own.
+    assert "button" not in pb.shape_flow(HUE_MANUAL, HUE_WORDS, "Philips Hue")
+
+
+def test_common_errors_and_stops_are_in_plain_words_for_any_brand():
+    form = {"type": "form", "flow_id": "f", "handler": "shelly", "step_id": "user", "data_schema": [{"type": "string", "name": "host", "required": True}], "errors": {"base": "cannot_connect", "host": "invalid_host"}}
+    words = {"component.shelly.config.error.cannot_connect": "Failed to connect", "component.shelly.config.error.custom_thing": "Shelly's own words"}
+    got = pb.shape_flow(form, words, "Shelly")["errors"]
+    assert got["base"].startswith("Couldn't reach it.") and "192.168" in got["host"]
+    form["errors"] = {"base": "invalid_auth"}
+    assert "sign-in wasn't accepted" in pb.shape_flow(form, words, "Shelly")["errors"]["base"]
+    form["errors"] = {"base": "custom_thing"}  # not ours: the brand's
+    assert pb.shape_flow(form, words, "Shelly")["errors"]["base"] == "Shelly's own words"
+    form["errors"] = {"base": "weird_code"}  # nobody's
+    assert pb.shape_flow(form, words, "Shelly")["errors"]["base"] == "Weird code"
+    stop = pb.shape_flow({"type": "abort", "flow_id": "f", "handler": "shelly", "reason": "already_configured"}, words, "Shelly")
+    assert (stop["kind"], stop["text"]) == ("stopped", "This is already added to your home.")
+    assert pb.shape_flow({"type": "abort", "flow_id": "f", "handler": "hue", "reason": "no_bridges"}, {}, "Philips Hue")["text"].startswith("No Hue bridge was found")
+
+
+# What Home Assistant holds after a real Hue bridge is linked (shapes from its
+# Hue integration: the bridge, a lamp, and Hue's own room, which it lists as a
+# "service" device carrying one grouped light).
+HUE_DEVICES = [
+    {"id": "d-bridge", "config_entry_id": "e-hue", "config_entries": ["e-hue"], "name": "Hue Bridge", "model": "BSB002", "manufacturer": "Signify", "area_id": "lounge_room", "via_device_id": None, "entry_type": None, "name_by_user": None},
+    {"id": "d-lamp", "config_entry_id": "e-hue", "config_entries": ["e-hue"], "name": "Living room lamp", "model": "Hue white lamp", "area_id": "lounge_room", "via_device_id": "d-bridge", "entry_type": None, "name_by_user": None},
+    {"id": "d-room", "config_entry_id": "e-hue", "config_entries": ["e-hue"], "name": "Lounge Room", "model": "Room", "area_id": "lounge_room", "via_device_id": "d-bridge", "entry_type": "service", "name_by_user": None},
+    {"id": "d-cast", "config_entry_id": "e-cast", "config_entries": ["e-cast"], "name": "Kitchen Speaker", "model": "Nest Mini", "area_id": None, "via_device_id": None, "entry_type": None, "name_by_user": None},
+]
+HUE_REGISTRY = [
+    {"entity_id": "light.living_room_lamp", "device_id": "d-lamp", "platform": "hue"},
+    {"entity_id": "sensor.living_room_lamp_zigbee", "device_id": "d-lamp", "platform": "hue", "entity_category": "diagnostic"},
+    {"entity_id": "light.lounge_room", "device_id": "d-room", "platform": "hue"},
+    {"entity_id": "scene.lounge_room_relax", "device_id": "d-room", "platform": "hue"},
+    {"entity_id": "switch.automation_wake_up", "device_id": "d-bridge", "platform": "hue", "entity_category": "config"},
+    {"entity_id": "media_player.kitchen_speaker", "device_id": "d-cast", "platform": "cast"},
+]
+HUE_ROOM_ATTRS = {"is_hue_group": True, "hue_type": "room", "lights": ["Living room lamp"], "entity_id": ["light.living_room_lamp"], "friendly_name": "Lounge Room"}
+
+
+def test_a_brands_own_room_is_not_a_device_and_neither_is_its_bridge():
+    """Hue's "Lounge Room" and the bridge itself: no tile, no questions."""
+    assert pb.brand_group("light", HUE_ROOM_ATTRS) == {"members": ["light.living_room_lamp"], "kind": "room"}
+    assert pb.brand_group("light", {"entity_id": ["light.a", "light.b"]})["kind"] == "group"  # a light group made in Home Assistant
+    assert pb.brand_group("light", {"brightness": 200}) is None and pb.brand_group("switch", HUE_ROOM_ATTRS) is None
+
+    got = pb.brought("e-hue", HUE_DEVICES, HUE_REGISTRY, {"light.lounge_room"}, {"lounge_room": "Lounge Room"})
+    assert got["things"] == [{"device_id": "d-lamp", "name": "Living room lamp", "kind": "light", "area": "lounge_room"}]
+    assert got["summary"] == [{"n": 1, "kind": "light", "room": "Lounge Room"}] and got["loose"] == 0
+    # Something that came with no room is counted, to offer sorting later.
+    cast = pb.brought("e-cast", HUE_DEVICES, HUE_REGISTRY, set(), {})
+    assert cast["summary"] == [{"n": 1, "kind": "media_player", "room": ""}] and cast["loose"] == 1
+
+
+def test_a_group_entity_never_reaches_the_page_as_a_tile():
+    ha = pb.HomeAssistant(session=None)
+    ha._area_of = {"light.lounge_room": "lounge_room", "light.living_room_lamp": "lounge_room"}
+    ha._device_of = {"media_player.downstairs": "d-grp", "media_player.kitchen_speaker": "d-cast"}
+    ha._model_of = {"d-grp": "Google Cast Group", "d-cast": "Nest Mini"}
+    assert ha._entity({"entity_id": "light.lounge_room", "state": "on", "attributes": HUE_ROOM_ATTRS}) is None
+    assert ha.groups["light.lounge_room"] == {"members": ["light.living_room_lamp"], "kind": "room", "area": "lounge_room"}
+    lamp = ha._entity({"entity_id": "light.living_room_lamp", "state": "on", "attributes": {"brightness": 128}})
+    assert lamp["area"] == "lounge_room" and "grp" not in lamp
+    group = ha._entity({"entity_id": "media_player.downstairs", "state": "off", "attributes": {"device_class": "speaker"}})
+    one = ha._entity({"entity_id": "media_player.kitchen_speaker", "state": "off", "attributes": {"device_class": "speaker"}})
+    assert group["grp"] is True and group["dev"] == "d-grp" and "grp" not in one and one["cls"] == "speaker"
+
+
+def test_a_rooms_lights_use_the_brands_group_only_when_it_is_exactly_that_room():
+    groups = {"light.lounge_room": {"members": ["light.a", "light.b"], "kind": "room"}, "light.downstairs": {"members": ["light.a", "light.b", "light.c"], "kind": "zone"}}
+    assert pb.lights_target(["light.b", "light.a"], groups) == ["light.lounge_room"]
+    assert pb.lights_target(["light.a"], groups) == ["light.a"]  # one was moved out in Promptly: each light, not Hue's room
+    assert pb.lights_target(["light.a", "light.b", "light.d"], groups) == ["light.a", "light.b", "light.d"]
+
+
+# What added itself: Google Cast, found before the box had finished its own
+# first start (Home Assistant sets those up without asking).
+ENTRIES = [
+    {"entry_id": "e-cast", "domain": "cast", "source": "zeroconf", "created_at": 1000.0},
+    {"entry_id": "e-hue", "domain": "hue", "source": "user", "created_at": 5000.0},
+    {"entry_id": "e-wiz", "domain": "wiz", "source": "dhcp", "created_at": 6000.0},  # from "Found on your network", later
+    {"entry_id": "e-met", "domain": "met", "source": "onboarding", "created_at": 1000.0},
+    {"entry_id": "e-sun", "domain": "sun", "source": "import", "created_at": 1000.0},
+]
+
+
+def test_what_nobody_chose_goes_back_to_found_and_what_they_chose_stays():
+    chosen = pb.first_chosen(ENTRIES, HUE_DEVICES, onboarded_at=1005.0)
+    assert chosen == {"e-hue", "e-wiz", "e-met", "e-sun"}
+    assert [e["entry_id"] for e in pb.uninvited(ENTRIES, chosen)] == ["e-cast"]
+    # Someone named a speaker or put it in a room: it's theirs now, and stays.
+    for touch in ({"name_by_user": "Kitchen"}, {"area_id": "kitchen"}):
+        devices = [{**d, **touch} if d["id"] == "d-cast" else d for d in HUE_DEVICES]
+        assert pb.uninvited(ENTRIES, pb.first_chosen(ENTRIES, devices, onboarded_at=1005.0)) == []
+    # A box whose first start we can't date keeps everything.
+    assert pb.uninvited(ENTRIES, pb.first_chosen(ENTRIES, HUE_DEVICES, onboarded_at=None)) == []
+
+
+def test_an_entry_in_a_home_without_anyone_adding_it_is_caught():
+    """The rule itself: from now on, a set-up that came from the network and
+    that no one tapped Add for is never left in the home."""
+    chosen = {"e-hue"}
+    later = [*ENTRIES[:2], {"entry_id": "e-sonos", "domain": "sonos", "source": "ssdp", "created_at": 9000.0}]
+    assert {e["entry_id"] for e in pb.uninvited(later, chosen)} == {"e-cast", "e-sonos"}
+    for source in ("zeroconf", "ssdp", "dhcp", "homekit", "usb", "bluetooth"):
+        assert pb.uninvited([{"entry_id": "x", "domain": "anything", "source": source}], set()), source
+    for source in ("user", "import", "reauth", "system", "ignore"):
+        assert not pb.uninvited([{"entry_id": "x", "domain": "anything", "source": source}], set()), source
+
+
+def test_it_looks_for_devices_only_once_it_has_its_own_account(tmp_path, monkeypatch):
+    """Before that, Home Assistant sets up what it finds without asking."""
+    import json
+
+    hc = _ha_config()
+    hc.main(str(tmp_path), hooked=True)
+    yaml = (tmp_path / "configuration.yaml").read_text()
+    assert "zeroconf:" not in yaml and "ssdp:" not in yaml and "dhcp:" not in yaml and "frontend:" in yaml
+    (tmp_path / ".storage" / "onboarding").write_text(json.dumps({"version": 4, "key": "onboarding", "data": {"done": ["user", "core_config"]}}))
+    hc.main(str(tmp_path), hooked=True)
+    assert "zeroconf:" not in (tmp_path / "configuration.yaml").read_text()  # half-way isn't done
+    (tmp_path / ".storage" / "onboarding").write_text(json.dumps({"version": 4, "key": "onboarding", "data": {"done": ["user", "core_config", "analytics", "integration"]}}))
+    hc.main(str(tmp_path), hooked=True)
+    yaml = (tmp_path / "configuration.yaml").read_text()
+    assert "zeroconf:" in yaml and "ssdp:" in yaml and "dhcp:" in yaml
+
+    # The hook: this script runs before every start of Home Assistant, once only.
+    run = tmp_path / "run"
+    run.write_text("#!/usr/bin/with-contenv bashio\ncd /config\nexec python3 -P -m homeassistant --config /config\n")
+    assert hc.install_hook(str(run)) and hc.install_hook(str(run))
+    lines = run.read_text().split("\n")
+    assert lines.count(hc.HOOK) == 1 and lines.index(hc.HOOK) == lines.index("exec python3 -P -m homeassistant --config /config") - 1
+    # No such script (a different image): it says so, and the looking stays on.
+    assert hc.install_hook(str(tmp_path / "nope")) is False
