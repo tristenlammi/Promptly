@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Flashlight, FlashlightOff, Images, Loader2, RefreshCw, SendHorizontal, SwitchCamera, X } from "lucide-react";
+import { Aperture, Flashlight, FlashlightOff, Images, Loader2, RefreshCw, SendHorizontal, SwitchCamera, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -33,20 +33,35 @@ import {
  * it, sending, or switching away lets go of it (and the microphone) at once.
  * The microphone is asked for the first time you hold for a video, not
  * before; said no, a video is recorded without sound.
+ *
+ * **Phone camera** hands over to the phone's own camera app for one photo:
+ * a browser's camera gives the sensor's picture as it is, while the camera
+ * app merges frames, balances light and sharpens. What it takes comes back
+ * to the same review screen.
  */
 
 type Phase = "starting" | "live" | "recording" | "review" | "sending" | "error";
 type Facing = "environment" | "user";
 interface Shot {
   kind: "photo" | "video";
+  /** What's sent, untouched. */
   file: File;
+  /** What's shown: the file itself, or a smaller copy of a big photo. */
   url: string;
 }
 
 // Chrome's still-photo API: full sensor resolution, where the phone has it.
-interface ImageCaptureLike {
-  takePhoto(): Promise<Blob>;
+interface PhotoRange {
+  max?: number;
 }
+interface ImageCaptureLike {
+  takePhoto(settings?: { imageWidth?: number; imageHeight?: number }): Promise<Blob>;
+  getPhotoCapabilities?(): Promise<{ imageWidth?: PhotoRange; imageHeight?: PhotoRange }>;
+}
+// A still as big as the sensor gives, up to about 12 megapixels: plenty for a
+// chat, and not a 50-megapixel upload on phones that offer one.
+const STILL_LONG = 4032;
+const STILL_SHORT = 3024;
 type ImageCaptureCtor = new (track: MediaStreamTrack) => ImageCaptureLike;
 
 /** Any picture the browser can read, re-saved as a JPEG at its own size. */
@@ -62,6 +77,34 @@ async function asJpeg(blob: Blob): Promise<Blob | null> {
   } catch {
     return null;
   }
+}
+
+// A 12-megapixel still decodes to about 50 MB; the review screen shows a
+// copy no bigger than the screen needs. The file that's sent is the real one.
+const PREVIEW_OVER_BYTES = 1_500_000;
+const PREVIEW_EDGE = 2048;
+
+async function previewUrl(file: File): Promise<string> {
+  if (file.size > PREVIEW_OVER_BYTES && typeof createImageBitmap === "function") {
+    try {
+      const full = await createImageBitmap(file);
+      const scale = Math.min(1, PREVIEW_EDGE / Math.max(full.width, full.height));
+      if (scale < 1) {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(full.width * scale);
+        canvas.height = Math.round(full.height * scale);
+        canvas.getContext("2d")?.drawImage(full, 0, 0, canvas.width, canvas.height);
+        full.close?.();
+        const small = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+        if (small && small.size > 0) return URL.createObjectURL(small);
+      } else {
+        full.close?.();
+      }
+    } catch {
+      // A kind of picture this browser can't read here: show the file itself.
+    }
+  }
+  return URL.createObjectURL(file);
 }
 
 const round =
@@ -84,6 +127,7 @@ export function CameraView({
 }) {
   const qc = useQueryClient();
   const video = useRef<HTMLVideoElement>(null);
+  const phoneCamera = useRef<HTMLInputElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const mic = useRef<MediaStream | null>(null);
   const micAsked = useRef(false);
@@ -119,6 +163,7 @@ export function CameraView({
     async (which: Facing) => {
       release();
       setTorch(null);
+      phaseRef.current = "starting";
       setPhase("starting");
       if (!navigator.mediaDevices?.getUserMedia) {
         setProblem(cameraProblem(null, window.isSecureContext));
@@ -130,7 +175,10 @@ export function CameraView({
           video: { facingMode: { ideal: which }, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
         });
-        if (!alive.current || document.visibilityState === "hidden") {
+        // Gone, behind something else, or already looking at a photo the
+        // phone's camera app handed back: nothing to film.
+        const phaseNow = phaseRef.current as Phase; // may have moved on while the camera opened
+        if (!alive.current || document.visibilityState === "hidden" || phaseNow === "review" || phaseNow === "sending") {
           s.getTracks().forEach((t) => t.stop());
           return;
         }
@@ -231,13 +279,21 @@ export function CameraView({
         return;
       }
       const file = new File([blob], captureName(kind, new Date(), type), { type: plainType(type) });
-      setShot({ kind, file, url: URL.createObjectURL(file) });
       setCaption("");
       setSendError("");
       setHint("");
+      phaseRef.current = "review"; // a camera still opening must not take over
       setPhase("review");
       // Nothing more to film until Retake: the camera goes off.
       release();
+      if (kind === "video") {
+        setShot({ kind, file, url: URL.createObjectURL(file) });
+        return;
+      }
+      void previewUrl(file).then((url) => {
+        if (alive.current) setShot({ kind, file, url });
+        else URL.revokeObjectURL(url);
+      });
     },
     [open, release],
   );
@@ -251,7 +307,29 @@ export function CameraView({
     const Capture = (window as unknown as { ImageCapture?: ImageCaptureCtor }).ImageCapture;
     if (Capture) {
       try {
-        const blob = await new Capture(track).takePhoto();
+        const capture = new Capture(track);
+        // Asked for nothing, Chrome takes the still at the preview's size
+        // (about 2 megapixels). Ask for the sensor's own size.
+        let size: { imageWidth?: number; imageHeight?: number } | undefined;
+        try {
+          const caps = await capture.getPhotoCapabilities?.();
+          const w = caps?.imageWidth?.max;
+          const h = caps?.imageHeight?.max;
+          if (w && h) {
+            const scale = Math.min(1, STILL_LONG / Math.max(w, h), STILL_SHORT / Math.min(w, h));
+            size = { imageWidth: Math.round(w * scale), imageHeight: Math.round(h * scale) };
+          }
+        } catch {
+          // No list of sizes: take what it gives.
+        }
+        let blob: Blob;
+        try {
+          blob = await capture.takePhoto(size);
+        } catch (e) {
+          // Some phones refuse a size they listed: the default still, then.
+          if (!size) throw e;
+          blob = await capture.takePhoto();
+        }
         if (blob.size > 0 && blob.type === "image/jpeg") return keep("photo", blob, "image/jpeg");
         // Some browsers hand back a PNG: the same picture, as a JPEG.
         const jpeg = blob.size > 0 ? await asJpeg(blob) : null;
@@ -400,16 +478,32 @@ export function CameraView({
     }
   };
 
+  // A photo from the phone's own camera app. Backing out of it gives no
+  // file and changes nothing.
+  const fromPhoneCamera = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setHint("That wasn't a photo. Tap the round button, or try the phone camera again.");
+      return;
+    }
+    keep("photo", file, file.type);
+  };
+
   const reviewing = (phase === "review" || phase === "sending") && shot;
+  const developing = (phase === "review" || phase === "sending") && !shot;
   const recording = phase === "recording";
   const R = 36;
   const around = 2 * Math.PI * R;
 
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label="Camera" data-testid="camera-view" className="fixed inset-0 z-[92] flex select-none flex-col bg-black text-white">
+      {/* The phone's own camera app: one tap, no chooser (images only). */}
+      <input ref={phoneCamera} type="file" accept="image/*" capture="environment" onChange={fromPhoneCamera} className="hidden" tabIndex={-1} aria-hidden data-testid="camera-phone-input" />
       {/* ---- the picture */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {!reviewing && (
+        {!reviewing && !developing && (
           <video
             ref={video}
             autoPlay
@@ -421,7 +515,7 @@ export function CameraView({
         {reviewing && shot.kind === "photo" && <img src={shot.url} alt="The photo you took" className="h-full w-full object-contain" />}
         {reviewing && shot.kind === "video" && <video src={shot.url} controls playsInline autoPlay loop className="h-full w-full object-contain" data-testid="camera-review-video" />}
 
-        {phase === "starting" && (
+        {(phase === "starting" || developing) && (
           <div className="absolute inset-0 flex items-center justify-center">
             <Loader2 className="h-7 w-7 animate-spin text-white/70" />
           </div>
@@ -431,11 +525,19 @@ export function CameraView({
             <p className="max-w-sm text-base text-white/90">{problem}</p>
             <button
               type="button"
+              onClick={() => phoneCamera.current?.click()}
+              className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black"
+            >
+              <Aperture className="h-4 w-4" />
+              Use the phone's camera app
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 onClose();
                 onGallery();
               }}
-              className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black"
+              className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2.5 text-sm font-medium text-white hover:bg-white/25"
             >
               <Images className="h-4 w-4" />
               Choose from gallery instead
@@ -471,10 +573,23 @@ export function CameraView({
       </div>
 
       {/* ---- along the bottom */}
-      {!reviewing && phase !== "error" && (
+      {!reviewing && !developing && phase !== "error" && (
         <div className="flex shrink-0 flex-col items-center gap-2 px-6 pb-safe pt-4">
           <div className="grid w-full max-w-sm grid-cols-3 items-center pb-3">
-            <span />
+            <span className="flex justify-start">
+              {(phase === "live" || phase === "starting") && (
+                <button
+                  type="button"
+                  onClick={() => phoneCamera.current?.click()}
+                  data-testid="camera-phone-camera"
+                  aria-label="Use the phone's camera app for a sharper photo"
+                  className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl px-2 py-1 text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                >
+                  <Aperture className="h-6 w-6" />
+                  <span className="whitespace-nowrap text-[11px] font-medium leading-tight">Phone camera</span>
+                </button>
+              )}
+            </span>
             <button
               type="button"
               aria-label="Take a photo, or hold for a video"
@@ -520,7 +635,7 @@ export function CameraView({
               )}
             </span>
           </div>
-          <p className="pb-3 text-xs text-white/70">{recording ? "Let go to stop" : "Tap for a photo, hold for a video"}</p>
+          <p className="pb-3 text-center text-xs text-white/70">{recording ? "Let go to stop" : "Tap for a photo, hold for a video. Phone camera takes a sharper one."}</p>
         </div>
       )}
 

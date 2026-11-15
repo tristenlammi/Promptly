@@ -217,15 +217,29 @@ export function MessageList({
     if (el.scrollHeight <= el.clientHeight + 20 && w.hasMoreBefore) void loadOlder(roomId).catch(() => undefined);
   }, [w, pending.length, roomId, lastSeq, scrollToBottom, recordAnchor, maybeMarkRead]);
 
-  // Stay pinned to the bottom while images / embeds settle.
+  // Stay pinned to the bottom while images / embeds settle, and when the
+  // view itself gets shorter or taller: the phone's keyboard opening, its
+  // suggestion strip, a composer growing to several lines, the "replying to"
+  // bar. A view that only shrinks fires no scroll event, so without this the
+  // latest messages slid under the composer until something else (a new
+  // message, a picture loading) happened to pin the list again.
   useEffect(() => {
     const el = scroller.current;
     const inner = el?.firstElementChild;
     if (!el || !inner || typeof ResizeObserver === "undefined") return;
+    let height = el.clientHeight;
     const ro = new ResizeObserver(() => {
-      if (atBottom.current) el.scrollTop = el.scrollHeight;
+      const was = height;
+      height = el.clientHeight;
+      if (atBottom.current) {
+        el.scrollTop = el.scrollHeight;
+      } else if (height !== was) {
+        // Reading further up: what was at the bottom edge stays there.
+        el.scrollTop += was - height;
+      }
     });
     ro.observe(inner);
+    ro.observe(el);
     return () => ro.disconnect();
   }, [roomId]);
 

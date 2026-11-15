@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Rooms camera: "Phone camera" hands over to your phone's own camera app in one tap, for a sharper photo than a camera inside a web page can take (the camera app merges frames, balances light and sharpens). The photo comes back to the same Retake / Send screen. It's also offered when Promptly isn't allowed to use the camera.
+
 ### Changed
 
 - Home: adding a brand no longer ends in a form for every device. What it brought goes straight into the rooms its own app knows (a room is made when you don't have one by that name; "Lounge Room" is never guessed to be "Living Room"), and you get one line: "Added Philips Hue: 1 light in Lounge Room." "Change names or rooms" is there if you want it, and anything that came with no room is offered for sorting, now or later.
@@ -36,6 +40,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Updating: an update that brings a newer update script now hands the rest of the update over to it. Before, the old script finished the job, so a one-time set-up step that arrived with the update (Promptly Home's containers in v0.44.0) only happened on the update after.
 - Home: nothing joins your home unless you add it. A fresh Home Assistant set up anything it found on the network before it had finished its own first start, so a house's Chromecast speakers appeared on the Home page with nobody adding them. It now doesn't look for devices until that first start is done, and what it finds waits under Add a device → Found on your network. If that happened in your home, the next update puts those back under Found on your network (unless you've since named one or put it in a room, in which case they're left alone) and tells you once.
 - Home: what went wrong in a set-up step looks like a message, with an icon. It was drawn in a bordered box that looked like a field to type in.
+- Rooms on a phone: opening the keyboard no longer hides the latest messages. The list kept its top where it was when it got shorter, so the last few messages (or the photo you'd just sent) slid under the message box until something else moved the list. Now the latest message stays in view when the keyboard opens, its suggestion strip changes, the message box grows or the "replying to" bar shows; if you'd scrolled up to read, your place is kept.
+- On Android the page now gets shorter when the keyboard opens (everywhere in Promptly), so a box at the bottom of the screen sits just above the keyboard. On phones that draw behind the gesture bar, Chrome's own figure for the visible area was a little too tall with the keyboard up, and the bottom of the Rooms message box was cut off.
+- Rooms: a photo in a conversation is shown from a larger copy (1440 pixels, up from 720), so it is no longer stretched and soft on a phone's screen. Photos already sent keep the copy they have.
+- Rooms camera: a photo is taken at the camera's own size (up to about 12 megapixels). Where the phone offered less, it was being taken at the size of the preview, about 2 megapixels, so it looked soft.
 
 ## [0.44.0] - 2026-11-15
 
