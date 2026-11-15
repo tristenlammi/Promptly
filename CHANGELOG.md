@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-15
+
 ### Added
 
 - Promptly Home (off until an admin turns it on in Admin → Home): the smart devices in your home, in Promptly. A small box in the home runs Home Assistant out of sight and connects out to this server, so nothing is opened on the home's router. An admin prepares a box (Admin → Home has the steps, and the two commands to start one with Docker); whoever gets it plugs it in, scans the code on its card and taps Add this box.
