@@ -10,7 +10,7 @@ Protocol (JSON text frames, each with a ``t``)::
 
     box  -> {"t":"hello","box":"<uuid>","key":"<key>","v":"<connector version>"}
     srv  -> {"t":"welcome","claimed":true|false,"ping":25}
-    box  -> {"t":"snapshot","areas":[{"id","name"}],"entities":[Entity...]}
+    box  -> {"t":"snapshot","areas":[{"id","name"}],"entities":[Entity...],"note"?:Note}
     box  -> {"t":"state","e":Entity}            one entity changed
     box  -> {"t":"gone","id":"light.x"}         one entity removed
     box  -> {"t":"down"}                        Home Assistant on the box went away
@@ -20,13 +20,25 @@ Protocol (JSON text frames, each with a ``t``)::
     srv  -> {"t":"ping"}   box -> {"t":"pong"}  (either side may send either)
     srv  -> {"t":"claimed"} | {"t":"released"}  told when it joins or leaves a home
 
-    Entity = {"id","domain","name","state","area"?,"unit"?,"cls"?,"bri"?,"x"?}
+    Entity = {"id","domain","name","state","area"?,"unit"?,"cls"?,"bri"?,"x"?,
+              "dev"?: its device (several entities can be one device),
+              "grp"?: true for several speakers that play as one}
+    Note   = {"n": how many, "what": "speakers"|"devices", "brands": [names]}:
+             things that had joined the home on their own and were put back
+             under "Found on your network". Said once; ``note.clear`` ends it.
 
 ``op`` is one of: ``do`` (switch or set one device), ``flows.found``,
 ``brands``, ``flows.start``, ``flows.get``, ``flows.step``, ``flows.abort``
 (adding a device: Home Assistant's own set-up steps, in plain shapes),
 ``entries.list``, ``entries.remove``, ``areas.create``, ``areas.rename``,
-``areas.delete``, ``device.update``.
+``areas.delete``, ``areas.merge``, ``areas.order``, ``device.update``,
+``devices.place`` (several into a room at once), ``room.lights`` (all of a
+room's lights on or off), ``note.clear``.
+
+Rooms are Promptly's: the page makes, names, merges and orders them. The
+box keeps them (they are Home Assistant's areas underneath, which no one is
+told). A brand's own rooms and zones of lights, and its bridges, never come
+through as entities: the box leaves them out.
 
 The box does the Home Assistant work and sends plain shapes; the server
 never speaks Home Assistant. What someone types into a set-up step (a
@@ -141,6 +153,7 @@ class Link:
     heard: float = field(default_factory=time.monotonic)
     entities: dict[str, dict[str, Any]] = field(default_factory=dict)
     areas: list[dict[str, str]] = field(default_factory=list)
+    note: dict[str, Any] | None = None
     pending: dict[str, asyncio.Future] = field(default_factory=dict)
     got_snapshot: bool = False
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -202,10 +215,12 @@ def clean_entity(raw: Any) -> dict[str, Any] | None:
         "name": _text(raw.get("name"), 120) or eid,
         "state": _text(raw.get("state"), 64),
     }
-    for key, limit in (("area", 64), ("unit", 16), ("cls", 32)):
+    for key, limit in (("area", 64), ("unit", 16), ("cls", 32), ("dev", 64)):
         v = _text(raw.get(key), limit)
         if v:
             out[key] = v
+    if raw.get("grp") is True:
+        out["grp"] = True
     bri = raw.get("bri")
     if isinstance(bri, (int, float)) and not isinstance(bri, bool) and 0 <= bri <= 100:
         out["bri"] = int(bri)
@@ -231,6 +246,24 @@ def _clean_x(raw: Any) -> dict[str, Any]:
         elif key == "rgb" and isinstance(v, list) and len(v) == 3 and all(isinstance(c, int) and 0 <= c <= 255 for c in v):
             out[key] = v
     return out
+
+
+def clean_note(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    n = raw.get("n")
+    brands = [_text(b, 60) for b in raw.get("brands") if _text(b, 60)][:6] if isinstance(raw.get("brands"), list) else []
+    if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= 10_000 or (n == 0 and not brands):
+        return None
+    return {"n": n, "what": "speakers" if raw.get("what") == "speakers" else "devices", "brands": brands}
+
+
+def note_of(box_id: uuid.UUID, saved: dict[str, Any] | None) -> dict[str, Any] | None:
+    """What this box has to say once, live or from what it last said."""
+    live = _links.get(box_id)
+    if live is not None and live.got_snapshot:
+        return live.note
+    return clean_note((saved or {}).get("note")) if isinstance(saved, dict) else None
 
 
 def _clean_areas(raw: Any) -> list[dict[str, str]]:
@@ -383,11 +416,14 @@ async def _save(box_id: uuid.UUID, *, version: str | None = None, snapshot: dict
 
 
 def _snapshot_of(live: Link) -> dict[str, Any]:
-    return {
+    out = {
         "entities": list(live.entities.values()),
         "areas": live.areas,
         "at": datetime.now(timezone.utc).isoformat(),
     }
+    if live.note:
+        out["note"] = live.note
+    return out
 
 
 async def serve(ws: WebSocket) -> None:
@@ -473,6 +509,7 @@ async def _from_box(live: Link, msg: dict[str, Any]) -> None:
                 break
         live.entities = entities
         live.areas = _clean_areas(msg.get("areas"))
+        live.note = clean_note(msg.get("note"))
         first = not live.got_snapshot
         live.got_snapshot = True
         bump(live.home_id)

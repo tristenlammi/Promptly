@@ -26,6 +26,10 @@ export interface HomeEntity {
   can_switch: boolean;
   /** A lock, or a garage door or gate: ask "are you sure?" before letting someone in. */
   careful: boolean;
+  /** Its device: a device can have several parts (a plug and its power reading). */
+  dev?: string;
+  /** Several speakers that play as one. */
+  grp?: boolean;
   /** What its controls need beyond on and off. */
   x?: {
     /** Light: colour modes it supports; climate: its modes. */
@@ -72,13 +76,39 @@ export interface SetupField {
 
 /** One step of adding a device, as the box describes it. */
 export type SetupStep = { flow: string; brand: string; brand_name: string; step?: string } & (
-  | { kind: "form"; title: string; text?: string; fields: SetupField[]; errors: Record<string, string>; last: boolean }
+  | { kind: "form"; title: string; text?: string; fields: SetupField[]; errors: Record<string, string>; last: boolean; /** What the button says ("I've pressed it"). */ button?: string }
   | { kind: "menu"; title: string; text?: string; options: { value: string; label: string }[] }
   | { kind: "wait"; text: string }
-  | { kind: "done"; title: string; entry_id?: string; devices?: { device_id: string; name: string; area: string }[] }
+  | {
+      kind: "done";
+      title: string;
+      entry_id?: string;
+      /** What it brought, already in the rooms the brand knows them by. No bridges, no brand "rooms". */
+      things?: AddedThing[];
+      /** The same, counted: "1 light in Lounge Room". ``room`` is "" for none. */
+      summary?: { n: number; kind: string; room: string }[];
+      /** How many came with no room. */
+      loose?: number;
+    }
   | { kind: "stopped"; reason: string; text: string }
   | { kind: "elsewhere"; text: string }
 );
+
+export interface AddedThing {
+  device_id: string;
+  name: string;
+  /** light, switch, media_player… what it mainly is. */
+  kind: string;
+  /** Room id, or "". */
+  area: string;
+}
+
+/** Things that had joined the home on their own and were put back under "Found on your network". Said once. */
+export interface BoxNote {
+  n: number;
+  what: "speakers" | "devices";
+  brands: string[];
+}
 
 export interface FoundDevice {
   flow: string;
@@ -115,6 +145,7 @@ export interface HomeBox {
   builtin: boolean;
   /** It has said what devices it has (a fresh one takes a minute or two). */
   ready: boolean;
+  note?: BoxNote | null;
 }
 
 export interface HomeDevices {
@@ -166,6 +197,14 @@ export const homeApi = {
   updateDevice: (h: string, b: string, body: { device_id?: string; entity_id?: string; name?: string; area?: string }) =>
     apiClient.patch(`/home/${h}/boxes/${b}/devices`, body).then(() => undefined),
   renameBox: (h: string, b: string, name: string) => apiClient.patch(`/home/${h}/boxes/${b}`, { name }).then(() => undefined),
+  /** Everything in ``area`` moves to ``into``, and ``area`` goes. */
+  mergeRooms: (h: string, b: string, area: string, into: string) => apiClient.post(`/home/${h}/boxes/${b}/rooms/${area}/merge`, { into }).then(() => undefined),
+  orderRooms: (h: string, b: string, order: string[]) => apiClient.put(`/home/${h}/boxes/${b}/rooms/order`, { order }).then(() => undefined),
+  /** All of a room's lights, on or off. */
+  roomLights: (h: string, b: string, area: string, on: boolean) => apiClient.post(`/home/${h}/boxes/${b}/rooms/${area}/lights`, { on }).then(() => undefined),
+  /** Several devices into one room ("" = out of their room). */
+  placeDevices: (h: string, b: string, entities: string[], area: string) => apiClient.post(`/home/${h}/boxes/${b}/devices/place`, { entities, area }).then(() => undefined),
+  clearNote: (h: string, b: string) => apiClient.delete(`/home/${h}/boxes/${b}/note`).then(() => undefined),
 };
 
 // ---- Admin → Home ----

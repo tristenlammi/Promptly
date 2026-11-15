@@ -5,6 +5,7 @@ import {
   DoorClosed,
   Droplets,
   Fan,
+  LayoutGrid,
   Lightbulb,
   Lock,
   MoreHorizontal,
@@ -14,9 +15,11 @@ import {
   Radio,
   Router,
   Settings,
+  Speaker,
   Thermometer,
   Tv,
   WifiOff,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -33,7 +36,9 @@ import { cn } from "@/utils/cn";
 import { AddDeviceSheet } from "./AddDeviceSheet";
 import { DeviceSheet } from "./DeviceSheet";
 import { HomeSettingsSheet } from "./HomeSettingsSheet";
-import { byReading, isReading, stateWords } from "./words";
+import { RoomsSheet } from "./RoomsSheet";
+import { looseDevices, SortSheet } from "./SortSheet";
+import { byReading, isReading, noteLine, stateWords } from "./words";
 
 /**
  * Home: the devices in your home, through the box that lives there.
@@ -42,7 +47,10 @@ import { byReading, isReading, stateWords } from "./words";
  * fans turn on and off with a tap, and "…" opens the rest (brightness,
  * warmth, speed); a blind, a thermostat, a lock or a speaker opens its
  * controls. Readings (a temperature, a door, a battery) sit in a row under
- * each room. "Add a device" runs a brand's set-up steps on the home's box;
+ * each room. A room with lights has one switch for all of them. Rooms are
+ * made, named, ordered and merged under "Rooms"; devices with no room yet
+ * sit last, with "Sort into rooms". A brand's bridge, and its own "rooms" of
+ * lights, are never tiles. "Add a device" runs a brand's set-up steps on the home's box;
  * "Add a home box" takes the code on the box's card (the card's QR opens
  * this page with the code filled in).
  *
@@ -73,6 +81,8 @@ export function HomePage() {
   const [adding, setAdding] = useState(() => codeFromAddress() !== "");
   const [addingDevice, setAddingDevice] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [rooms, setRooms] = useState(false);
+  const [sorting, setSorting] = useState(false);
   const home = useMemo(() => homes?.find((h) => h.id === picked) ?? homes?.[0] ?? null, [homes, picked]);
 
   useLive(home);
@@ -109,6 +119,9 @@ export function HomePage() {
                   <Plus className="h-3.5 w-3.5" /> Add a device
                 </button>
               )}
+              <button type="button" onClick={() => setRooms(true)} aria-label="Rooms" title="Rooms" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
+                <LayoutGrid className="h-4 w-4" />
+              </button>
               <button type="button" onClick={() => setSettings(true)} aria-label="Home settings" title="Home settings" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
                 <Settings className="h-4 w-4" />
               </button>
@@ -152,9 +165,11 @@ export function HomePage() {
             <p className="mx-auto max-w-md text-center text-xs text-[var(--text-muted)]">No box? Ask whoever looks after this Promptly.</p>
           </div>
         )}
-        {home && <Devices home={home} onAddDevice={() => setAddingDevice(true)} />}
+        {home && <Devices home={home} onAddDevice={() => setAddingDevice(true)} onSort={() => setSorting(true)} />}
       </div>
-      {home && <AddDeviceSheet open={addingDevice} home={home} onClose={() => setAddingDevice(false)} />}
+      {home && <AddDeviceSheet open={addingDevice} home={home} onClose={() => setAddingDevice(false)} onSort={() => setSorting(true)} />}
+      {home && <RoomsSheet open={rooms} home={home} onClose={() => setRooms(false)} />}
+      {home && <SortSheet open={sorting} home={home} onClose={() => setSorting(false)} />}
       {home && (
         <HomeSettingsSheet
           open={settings}
@@ -219,7 +234,10 @@ function useLive(home: Home | null) {
   }, [id, qc]);
 }
 
-function Devices({ home, onAddDevice }: { home: Home; onAddDevice: () => void }) {
+const NO_ROOM = "Not in a room yet";
+
+function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () => void; onSort: () => void }) {
+  const qc = useQueryClient();
   // This server's own box takes a minute or two to come up (longer the first
   // time, while it sets itself up): that's "starting", not "offline".
   const starting = home.boxes.filter((b) => b.builtin && !b.ready);
@@ -227,15 +245,39 @@ function Devices({ home, onAddDevice }: { home: Home; onAddDevice: () => void })
   const [openKey, setOpenKey] = useState<string | null>(null);
   const keyOf = (e: HomeEntity) => `${e.box_id}/${e.id}`;
   const opened = openKey ? home.entities.find((e) => keyOf(e) === openKey) ?? null : null;
+  // In the order set under Rooms; what has no room yet comes last.
   const rooms = useMemo(() => {
-    const names = new Map(home.areas.map((a) => [a.id, a.name]));
+    const known = new Map(home.areas.map((a) => [a.id, a]));
     const groups = new Map<string, HomeEntity[]>();
     for (const e of home.entities) {
-      const room = (e.area && names.get(e.area)) || "Not in a room yet";
-      groups.set(room, [...(groups.get(room) ?? []), e]);
+      const key = e.area && known.has(e.area) ? e.area : "";
+      groups.set(key, [...(groups.get(key) ?? []), e]);
     }
-    return [...groups.entries()].sort(([a], [b]) => (a === "Not in a room yet" ? 1 : b === "Not in a room yet" ? -1 : a.localeCompare(b)));
+    const out: { id: string; name: string; list: HomeEntity[] }[] = [];
+    for (const a of home.areas) if (groups.has(a.id)) out.push({ id: a.id, name: a.name, list: groups.get(a.id)! });
+    if (groups.has("")) out.push({ id: "", name: NO_ROOM, list: groups.get("")! });
+    return out;
   }, [home.areas, home.entities]);
+  const loose = useMemo(() => looseDevices(home.entities).length, [home.entities]);
+  const noted = home.boxes.filter((b) => b.note);
+  const gotIt = useMutation({
+    mutationFn: (boxId: string) => homeApi.clearNote(home.id, boxId),
+    onMutate: (boxId) => qc.setQueryData<Home[]>(KEY, (old) => old?.map((h) => (h.id === home.id ? { ...h, boxes: h.boxes.map((b) => (b.id === boxId ? { ...b, note: null } : b)) } : h))),
+  });
+  const allLights = useMutation({
+    mutationFn: (v: { boxId: string; area: string; on: boolean }) => homeApi.roomLights(home.id, v.boxId, v.area, v.on),
+    // Shows at once; the lights' own word follows within a moment.
+    onMutate: (v) => {
+      qc.setQueryData<Home[]>(KEY, (old) =>
+        old?.map((h) => (h.id === home.id ? { ...h, entities: h.entities.map((x) => (x.domain === "light" && x.area === v.area && x.box_id === v.boxId && x.state !== "unavailable" ? { ...x, state: v.on ? "on" : "off" } : x)) } : h)),
+      );
+      navigator.vibrate?.(8);
+    },
+    onError: (e) => {
+      toast.error(apiErrorMessage(e, "That didn't work. Try again."));
+      void qc.invalidateQueries({ queryKey: KEY });
+    },
+  });
 
   if (home.boxes.length === 0) {
     return <EmptyState icon={<Router className="h-5 w-5" />} title="This home has no box yet" description="Add one with the code on its card." />;
@@ -263,6 +305,15 @@ function Devices({ home, onAddDevice }: { home: Home; onAddDevice: () => void })
           </div>
         </div>
       )}
+      {noted.map((b) => (
+        <div key={b.id} role="status" className="flex items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+          <Radio className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent-text,var(--accent))]" aria-hidden />
+          <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{noteLine(b.note!)}</p>
+          <button type="button" aria-label="Got it" title="Got it" onClick={() => gotIt.mutate(b.id)} className="-mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+      ))}
       {home.entities.length === 0 && offline.length === 0 && starting.length === 0 && (
         <EmptyState
           icon={<Lightbulb className="h-5 w-5" />}
@@ -271,12 +322,38 @@ function Devices({ home, onAddDevice }: { home: Home; onAddDevice: () => void })
           action={<button type="button" className={primary} onClick={onAddDevice}><Plus className="h-4 w-4" /> Add a device</button>}
         />
       )}
-      {rooms.map(([room, list]) => {
+      {rooms.map(({ id, name: room, list }) => {
         const tiles = list.filter((e) => !isReading(e));
         const readings = list.filter(isReading).sort(byReading);
+        // One switch for the room's lights (two or more: one light has its own tile).
+        const lights = id ? tiles.filter((e) => e.domain === "light" && e.online && e.state !== "unavailable") : [];
+        const anyOn = lights.some((e) => e.state === "on");
         return (
-          <section key={room} aria-label={room}>
-            <h2 className="mb-2 text-sm font-semibold text-[var(--text-muted)]">{room}</h2>
+          <section key={id || "none"} aria-label={room}>
+            <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
+              <h2 className="min-w-0 truncate text-sm font-semibold text-[var(--text-muted)]">{room}</h2>
+              {lights.length > 1 && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={anyOn}
+                  aria-label={`All lights in ${room}`}
+                  disabled={allLights.isPending}
+                  onClick={() => allLights.mutate({ boxId: lights[0].box_id, area: id, on: !anyOn })}
+                  className={cn(
+                    "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                    anyOn ? "border-[var(--accent)]/50 bg-[color-mix(in_srgb,var(--accent)_12%,var(--surface))] text-[var(--accent-text,var(--accent))]" : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]",
+                  )}
+                >
+                  <Lightbulb className="h-3.5 w-3.5" aria-hidden /> All lights {anyOn ? "on" : "off"}
+                </button>
+              )}
+              {!id && loose > 0 && home.boxes.some((b) => b.ready) && (
+                <button type="button" onClick={onSort} className="inline-flex h-9 shrink-0 items-center rounded-full border border-[var(--border)] px-3 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+                  Sort into rooms
+                </button>
+              )}
+            </div>
             {tiles.length > 0 && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {tiles.map((e) => <Tile key={keyOf(e)} homeId={home.id} entity={e} onOpen={() => setOpenKey(keyOf(e))} />)}
@@ -306,9 +383,10 @@ function Devices({ home, onAddDevice }: { home: Home; onAddDevice: () => void })
   );
 }
 
-const ICONS: Record<string, LucideIcon> = { light: Lightbulb, switch: Plug, input_boolean: Power, fan: Fan, lock: Lock, cover: Blinds, climate: Thermometer, media_player: Tv };
+const ICONS: Record<string, LucideIcon> = { light: Lightbulb, switch: Plug, input_boolean: Power, fan: Fan, lock: Lock, cover: Blinds, climate: Thermometer, media_player: Speaker };
 
 function iconOf(e: HomeEntity): LucideIcon {
+  if (e.domain === "media_player") return e.cls === "tv" || e.cls === "receiver" ? Tv : Speaker;
   if (e.cls === "temperature") return Thermometer;
   if (e.cls === "humidity" || e.cls === "moisture") return Droplets;
   if (e.cls === "battery") return BatteryMedium;
@@ -351,7 +429,7 @@ function Tile({ homeId, entity, onOpen }: { homeId: string; entity: HomeEntity; 
         <Icon className="h-[18px] w-[18px]" aria-hidden />
       </span>
       <span className="mt-2 block w-full truncate text-sm font-medium text-[var(--text)]">{entity.name}</span>
-      <span className="block w-full truncate text-xs text-[var(--text-muted)]">{stateWords(entity)}</span>
+      <span className="block w-full truncate text-xs text-[var(--text-muted)]">{entity.grp ? "Group · " : ""}{stateWords(entity)}</span>
     </>
   );
   const shell = cn(
