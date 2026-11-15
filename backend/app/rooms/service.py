@@ -23,7 +23,7 @@ logger = logging.getLogger("promptly.rooms.service")
 
 MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 MAX_ATTACHMENTS = 10
-THUMB_EDGE = 720
+THUMB_EDGE = 1440
 
 
 async def dm_refusal(db: AsyncSession, room: Room, user_id: uuid.UUID) -> str | None:

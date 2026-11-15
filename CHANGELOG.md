@@ -21,9 +21,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Rooms camera: "Phone camera" hands over to your phone's own camera app in one tap, for a sharper photo than a camera inside a web page can take (the camera app merges frames, balances light and sharpens). The photo comes back to the same Retake / Send screen. It's also offered when Promptly isn't allowed to use the camera.
+
 ### Fixed
 
-- Rooms camera: a photo is taken at the camera's own size (up to about 12 megapixels). It was being taken at the size of the preview, about 2 megapixels, so it looked soft.
+- Rooms on a phone: opening the keyboard no longer hides the latest messages. The list kept its top where it was when it got shorter, so the last few messages (or the photo you'd just sent) slid under the message box until something else moved the list. Now the latest message stays in view when the keyboard opens, its suggestion strip changes, the message box grows or the "replying to" bar shows; if you'd scrolled up to read, your place is kept.
+- On Android the page now gets shorter when the keyboard opens (everywhere in Promptly), so a box at the bottom of the screen sits just above the keyboard. On phones that draw behind the gesture bar, Chrome's own figure for the visible area was a little too tall with the keyboard up, and the bottom of the Rooms message box was cut off.
+- Rooms: a photo in a conversation is shown from a larger copy (1440 pixels, up from 720), so it is no longer stretched and soft on a phone's screen. Photos already sent keep the copy they have.
+- Rooms camera: a photo is taken at the camera's own size (up to about 12 megapixels). Where the phone offered less, it was being taken at the size of the preview, about 2 megapixels, so it looked soft.
 
 ## [0.44.0] - 2026-11-15
 
