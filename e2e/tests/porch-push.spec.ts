@@ -5,6 +5,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
+import { seriousFindings } from "../lib/axe";
 
 /** Porch push, admin and phone (WP-P1.7): Settings → Notifications kind by
  *  kind (kept after a reload), a group's bell and "Notify me" on a profile;
@@ -61,9 +62,7 @@ async function groupWith(owner: Page, oAuth: string, name: string, members: [Pag
 async function scan(page: Page, what: string, selector: string): Promise<string[]> {
   await page.mouse.move(0, 0);
   const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).include(selector).analyze();
-  return violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical")
-    .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
+  return seriousFindings(page, what, violations);
 }
 
 test("Settings → Notifications per kind, a group's bell and Notify me, on a phone", async ({ alice, bob }) => {

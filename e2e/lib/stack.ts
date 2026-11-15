@@ -92,3 +92,22 @@ export function lastModelRequest(): any {
   const read = `import urllib.request,sys; sys.stdout.write(urllib.request.urlopen("http://localhost:8000/last-request", timeout=5).read().decode())`;
   return JSON.parse(docker(["exec", MOCK, "python", "-c", read]));
 }
+
+/** Big uploads, imports and note attachments go through tusd, whose hooks the
+ *  backend only answers when both were started with TUS_HOOK_SECRET
+ *  (./update.sh and update.ps1 make it). A stack without one refuses every
+ *  resumable upload with a 500, which says nothing about the code under test. */
+export function resumableUploadsReady(): boolean {
+  try {
+    const out = execFileSync(
+      "docker",
+      ["exec", BACKEND, "python", "-c", "from app.config import get_settings; print('yes' if (get_settings().TUS_HOOK_SECRET or '') else 'no')"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    return !out.includes("no");
+  } catch {
+    return true; // can't tell: let the test run and say what it finds
+  }
+}
+export const NO_RESUMABLE_UPLOADS =
+  "this stack has no TUS_HOOK_SECRET, so its upload service refuses every resumable upload (run update.ps1 or ./update.sh once, then recreate backend and tusd)";

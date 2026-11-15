@@ -3,6 +3,7 @@ import fs from "node:fs";
 import type { Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
+import { NO_RESUMABLE_UPLOADS, resumableUploadsReady } from "../lib/stack";
 import { bigText } from "../lib/files";
 
 /** Big uploads, resumably (WP-8.2): over the threshold a file goes to tusd
@@ -17,6 +18,7 @@ async function bearer(page: Page): Promise<string> {
 }
 
 test("a big upload survives a refresh and carries on from where it got to", async ({ alice: page }) => {
+  test.skip(!resumableUploadsReady(), NO_RESUMABLE_UPLOADS);
   test.setTimeout(240_000);
   const big = bigText();
   const size = fs.statSync(big).size;

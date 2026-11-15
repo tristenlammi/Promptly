@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page, Route } from "@playwright/test";
 
 import { expect, ready, run, stamp, test } from "../fixtures";
+import { seriousFindings } from "../lib/axe";
 
 /** Porch (WP-P1.3): the app's feed, groups, invites, live "new posts" pill,
  *  who can see what from the outside, public joins, the feed's ticks after a
@@ -43,9 +44,7 @@ async function scan(page: Page, what: string): Promise<string[]> {
     .include("#porch-scroll")
     .include("nav[aria-label='Porch']")
     .analyze();
-  return violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical")
-    .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
+  return seriousFindings(page, what, violations);
 }
 
 test("a private group: invite, accept, posts in the feed live — and invisible from outside", async ({ alice, bob, dana }) => {

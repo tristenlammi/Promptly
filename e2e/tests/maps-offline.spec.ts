@@ -17,6 +17,14 @@ async function bearer(page: Page): Promise<string> {
   return (await seen).headers()["authorization"];
 }
 
+/** These need the server's offline packs (the stub map has them; a real map
+ *  built before offline maps were on doesn't until its next monthly update). */
+async function packsReady(page: Page, auth: { Authorization: string }): Promise<boolean> {
+  const r = await page.request.get("/api/maps/offline", { headers: auth });
+  return r.ok() && (await r.json()).ready === true;
+}
+const NO_PACKS = "this stack's map has no offline packs yet (built before offline maps were on)";
+
 async function clearAreas(page: Page, auth: { Authorization: string }) {
   const got = await (await page.request.get("/api/maps/offline", { headers: auth })).json();
   for (const a of got.areas as { id: string }[]) await page.request.delete(`/api/maps/offline/areas/${a.id}`, { headers: auth });
@@ -54,6 +62,7 @@ async function scan(page: Page, what: string): Promise<string[]> {
 test("save the map's view for offline, see it on a phone, rename it and delete it", async ({ bob: page }) => {
   test.setTimeout(120_000);
   const auth = { Authorization: await bearer(page) };
+  test.skip(!(await packsReady(page, auth)), NO_PACKS);
   await clearAreas(page, auth);
   const external: string[] = [];
   page.on("request", (r) => {
@@ -157,6 +166,7 @@ function polyline6(points: [number, number][]): string {
 test("a route's roads saved for offline, and the panel at phone width", async ({ bob: page }) => {
   test.setTimeout(120_000);
   const auth = { Authorization: await bearer(page) };
+  test.skip(!(await packsReady(page, auth)), NO_PACKS);
   await clearAreas(page, auth);
   // The stub map has no router: Dubbo to Orange, the way the server would send it.
   const shape = polyline6([[-32.25, 148.6], [-32.6, 148.9], [-33.0, 149.05], [-33.28, 149.1]]);
@@ -196,6 +206,7 @@ test("a route's roads saved for offline, and the panel at phone width", async ({
 });
 
 test("admins see the offline packs' state and disk use", async ({ dana: page }) => {
+  test.skip(!(await packsReady(page, { Authorization: await bearer(page) })), NO_PACKS);
   await page.goto("/admin?tab=settings");
   await ready(page);
   const card = page.getByTestId("maps-offline-status");

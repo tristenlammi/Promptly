@@ -181,12 +181,15 @@ test("a Location question: typed on a phone without an account, and a signed-in 
     q("suburb", "location", "Which suburb?", { ask: "town" }),
   ], { audience: "link" });
 
-  // This e2e stack has no map data (no Photon): the place search says so
-  // quietly and the question is a plain text box. Picking a suggestion
-  // from Photon is covered by backend/tests/test_forms_location.py.
+  // A stack with no map data (no Photon) says so quietly and the question
+  // is a plain text box; one with it suggests places. Either way what was
+  // typed is what's sent. Picking a suggestion from Photon is covered by
+  // backend/tests/test_forms_location.py.
   const probe = await alice.request.get(`/api/f/${token}/places`, { params: { q: "Smith" } });
   expect(probe.ok()).toBe(true);
-  expect(await probe.json()).toEqual({ results: [], maps: false });
+  const places = (await probe.json()) as { maps: boolean; results: { name: string; lat: number; lon: number }[] };
+  if (places.maps) for (const r of places.results) expect(r).toMatchObject({ name: expect.any(String), lat: expect.any(Number), lon: expect.any(Number) });
+  else expect(places).toEqual({ results: [], maps: false });
 
   const { context, page } = await stranger(browser);
   const asked: string[] = [];
@@ -231,7 +234,7 @@ test("a Location question: typed on a phone without an account, and a signed-in 
   const bobBox = bob.getByRole("combobox", { name: "Where should we pick you up?" });
   await bobBox.click();
   await bobBox.pressSequentially("hom", { delay: 40 });
-  const option = bob.getByRole("option", { name: /Home/ });
+  const option = bob.locator('[role="option"][data-kind="home"]');
   await expect(option).toBeVisible({ timeout: 10_000 });
   await option.click();
   await expect(bob.getByText("(a place on the map)")).toBeAttached();

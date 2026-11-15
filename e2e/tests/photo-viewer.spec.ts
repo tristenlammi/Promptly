@@ -88,8 +88,10 @@ test("the viewer: keys, favourite, info, and a Live Photo", async ({ alice: page
   // Favourite from the viewer — it's the Drive star.
   await viewer.getByRole("button", { name: "Favourite" }).click();
   await expect(viewer.getByRole("button", { name: "Unfavourite" })).toBeVisible();
-  const file = await (await page.request.get(`/api/files/${still}`, { headers: { Authorization: auth } })).json();
-  expect(file.starred_at).toBeTruthy();
+  // The heart turns at once; the server hears a moment later.
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/files/${still}`, { headers: { Authorization: auth } })).json()).starred_at ?? null)
+    .toBeTruthy();
 
   // Info: details and who can see it.
   await viewer.getByRole("button", { name: "Info", exact: true }).click();

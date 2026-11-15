@@ -31,8 +31,8 @@ android {
         // 29: the car screen's navigation library needs it.
         minSdk = 29
         targetSdk = 37
-        versionCode = 27
-        versionName = "1.10.0"
+        versionCode = 28
+        versionName = "1.11.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

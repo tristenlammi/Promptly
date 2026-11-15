@@ -1,10 +1,12 @@
 import { expect, ready, stamp, test } from "../fixtures";
+import { NO_RESUMABLE_UPLOADS, resumableUploadsReady } from "../lib/stack";
 import { photoFolder } from "../lib/files";
 
 /** Moving in (WP-10.3): a zipped folder — photos by their date, everything
  *  else keeping its folders, junk left out. */
 
 test("a zipped folder is imported: photos by date, other files in their folders", async ({ alice: page }) => {
+  test.skip(!resumableUploadsReady(), NO_RESUMABLE_UPLOADS);
   test.setTimeout(180_000);
   const zip = photoFolder(stamp);
   await page.goto("/files/import");

@@ -50,7 +50,8 @@ def model(monkeypatch):
     async def quotas(request, user, db):  # noqa: ANN001
         return None
 
-    async def complete(provider, model_id, *, system, messages, **kw):  # noqa: ANN001
+    # ``user`` is required, as on the real one: a caller that leaves it out fails here too.
+    async def complete(provider, model_id, *, system, messages, user, **kw):  # noqa: ANN001
         action = next(a for a, s in ai.SYSTEMS.items() if s == system)
         calls.append({"action": action, "prompt": messages[-1].content})
         return replies[action]

@@ -113,7 +113,9 @@ test("a phone that can't give a location says why, and can try again", async ({ 
   const before = await w();
 
   await page.evaluate(() => (window as unknown as { __fail: (c: number, m: string) => void }).__fail(2, "Failed to request location updates"));
-  await expect(page.getByText(/Your phone isn't giving a location.*Failed to request location updates/)).toBeVisible();
+  // Plain words only: the phone's own ("Failed to request…") stopped being shown in v0.40.1.
+  await expect(page.getByText(/Your phone isn't giving a location\. Check Location is on/)).toBeVisible();
+  await expect(page.getByText(/Failed to request location updates/)).toHaveCount(0);
   await expect(page.getByPlaceholder("Start from where?")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Try again" }).click();

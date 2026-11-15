@@ -243,7 +243,7 @@ async def propose(
         lead = f"Today is {now:%A %Y-%m-%d}, {now:%H:%M}.\n\n" + lead
     raw = await E.complete(
         provider, model_id, system=SYSTEMS[action], messages=[ChatMessage(role="user", content=lead)],
-        max_tokens=4000 if action in ("tidy", "to_list") else 1200, temperature=0.2,
+        max_tokens=4000 if action in ("tidy", "to_list") else 1200, temperature=0.2, user=user,
     )
     try:
         parsed = E.parse_json(raw)
