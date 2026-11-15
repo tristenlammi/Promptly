@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Rooms camera: a photo is taken at the camera's own size (up to about 12 megapixels). It was being taken at the size of the preview, about 2 megapixels, so it looked soft.
+
 ## [0.44.0] - 2026-11-15
 
 ### Added

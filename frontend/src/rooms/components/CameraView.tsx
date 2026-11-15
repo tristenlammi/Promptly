@@ -44,9 +44,17 @@ interface Shot {
 }
 
 // Chrome's still-photo API: full sensor resolution, where the phone has it.
-interface ImageCaptureLike {
-  takePhoto(): Promise<Blob>;
+interface PhotoRange {
+  max?: number;
 }
+interface ImageCaptureLike {
+  takePhoto(settings?: { imageWidth?: number; imageHeight?: number }): Promise<Blob>;
+  getPhotoCapabilities?(): Promise<{ imageWidth?: PhotoRange; imageHeight?: PhotoRange }>;
+}
+// A still as big as the sensor gives, up to about 12 megapixels: plenty for a
+// chat, and not a 50-megapixel upload on phones that offer one.
+const STILL_LONG = 4032;
+const STILL_SHORT = 3024;
 type ImageCaptureCtor = new (track: MediaStreamTrack) => ImageCaptureLike;
 
 /** Any picture the browser can read, re-saved as a JPEG at its own size. */
@@ -251,7 +259,29 @@ export function CameraView({
     const Capture = (window as unknown as { ImageCapture?: ImageCaptureCtor }).ImageCapture;
     if (Capture) {
       try {
-        const blob = await new Capture(track).takePhoto();
+        const capture = new Capture(track);
+        // Asked for nothing, Chrome takes the still at the preview's size
+        // (about 2 megapixels). Ask for the sensor's own size.
+        let size: { imageWidth?: number; imageHeight?: number } | undefined;
+        try {
+          const caps = await capture.getPhotoCapabilities?.();
+          const w = caps?.imageWidth?.max;
+          const h = caps?.imageHeight?.max;
+          if (w && h) {
+            const scale = Math.min(1, STILL_LONG / Math.max(w, h), STILL_SHORT / Math.min(w, h));
+            size = { imageWidth: Math.round(w * scale), imageHeight: Math.round(h * scale) };
+          }
+        } catch {
+          // No list of sizes: take what it gives.
+        }
+        let blob: Blob;
+        try {
+          blob = await capture.takePhoto(size);
+        } catch (e) {
+          // Some phones refuse a size they listed: the default still, then.
+          if (!size) throw e;
+          blob = await capture.takePhoto();
+        }
         if (blob.size > 0 && blob.type === "image/jpeg") return keep("photo", blob, "image/jpeg");
         // Some browsers hand back a PNG: the same picture, as a JPEG.
         const jpeg = blob.size > 0 ? await asJpeg(blob) : null;
