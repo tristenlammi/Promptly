@@ -21,14 +21,17 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
-## [0.42.0] - 2026-11-15
-
 ### Added
 
 - Promptly Home (off until an admin turns it on in Admin → Home): the smart devices in your home, in Promptly. A small box in the home runs Home Assistant out of sight and connects out to this server, so nothing is opened on the home's router. An admin prepares a box (Admin → Home has the steps, and the two commands to start one with Docker); whoever gets it plugs it in, scans the code on its card and taps Add this box.
 - Home: "Add a device" shows what the box has found on your network and a list of brands (Philips Hue, LIFX, TP-Link Kasa and Tapo, Shelly, WiZ, Sonos, ESPHome and the rest behind a search), then that brand's own steps one at a time: a field to fill in, "press the button on the bridge", what went wrong in words. What you type goes straight to your box and is kept nowhere else. When it's added you name it and pick its room.
 - Home: devices by room. Lights, plugs, switches and fans turn on and off with a tap; "…" opens brightness, warmth and colour, or a fan's speed. Blinds, thermostats, speakers and locks open their own controls. A lock, a garage door or a gate asks "are you sure?" before it opens. Temperatures, doors, movement and batteries sit in a row under each room. It says so when the box is offline.
 - Home settings: rename the home, add or remove the people in it, leave it, see the box's status, move or give away the box, and remove a brand you added. A home's devices are seen only by the people in that home: not by other homes and not by admins. There are no guests.
+
+## [0.42.0] - 2026-11-15
+
+### Added
+
 - Rooms on a phone: a camera button in the message box, like Messenger's. It opens the camera inside Rooms: tap the round button for a photo, press and hold it for a video (up to a minute, with sound). You see what you took, with Retake, room for a few words, and Send. Switch between the front and back camera, and turn the light on where the phone has one. It tucks away while you type, and "Camera" is under + too. The camera and microphone are let go the moment you close it.
 - Rooms: a video in a message plays right there, where it used to be a file to download.
 - Rooms: your messages in a conversation (a DM or a group conversation) say how far they've got. Under your latest: Sent, then Delivered once it has reached one of their devices (an open page has it, or their phone's push service took the notification), then Seen with their picture. In a group conversation each person's picture sits under the last of your messages they've read. Space rooms show none of this.
