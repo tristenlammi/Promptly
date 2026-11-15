@@ -57,6 +57,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- Photo editor (Photos and a Porch post): picking Square or another shape before the picture had finished loading showed the shape as chosen but didn't crop. It crops as soon as the picture arrives.
+- Notes: Tidy up, Make a list, Suggest a title, Make an event and Turn into tasks all failed with "Something went wrong" since v0.40.0 (the note's assistant wasn't told who was asking, which the server now insists on). They work again.
 - Workout: ticking a warm-up set no longer changes the next warm-up's suggested weight to the one you just did (20 → 20 → 20); each keeps its own step up the ramp (20 → 32.5 → 47.5).
 - Workout on a narrow phone (360 px): the weight in the set editor was cut off ("47.") and the tick on Done shrank to a dot.
 - Promptly for Android: a map link opened from another app (an address in a message, a geo: link) shows that place even when P Maps is already open. It used to just bring the open map forward.

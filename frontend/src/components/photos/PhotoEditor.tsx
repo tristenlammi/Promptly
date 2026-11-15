@@ -285,6 +285,12 @@ export function PhotoEditor({
     }
     setOps((o) => ({ ...o, crop: { x: (1 - w) / 2, y: (1 - h) / 2, w, h } }));
   };
+  // A shape picked before the picture had arrived (a slow connection, a quick
+  // thumb): its button showed as chosen but nothing was cropped. Fit it now.
+  const sized = !!fullNat;
+  useEffect(() => {
+    if (sized && typeof aspect === "number" && !ops.crop) fitAspect(aspect);
+  }, [sized]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const drag = useRef<{ handle: Handle; x: number; y: number; start: Crop } | null>(null);
   const onDown = (handle: Handle) => (e: React.PointerEvent) => {
