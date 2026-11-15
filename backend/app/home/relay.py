@@ -156,16 +156,18 @@ def _clean_areas(raw: Any) -> list[dict[str, str]]:
 # ------------------------------------------------------------------ the page's side
 
 
-def view(box_id: uuid.UUID, saved: dict[str, Any] | None) -> tuple[bool, list[dict[str, Any]], list[dict[str, str]]]:
-    """``(online, entities, areas)`` for one box: live when it's connected,
-    else what it last said (``HomeBox.snapshot``)."""
+def view(box_id: uuid.UUID, saved: dict[str, Any] | None) -> tuple[bool, bool, list[dict[str, Any]], list[dict[str, str]]]:
+    """``(box online, devices live, entities, areas)`` for one box. Live
+    when it's connected and has said what it has; otherwise what it last
+    said (``HomeBox.snapshot``), which can be looked at but not switched: a
+    box that has just dialled in is online a moment before its devices are."""
     live = _links.get(box_id)
     if live is not None and live.got_snapshot:
-        return True, list(live.entities.values()), list(live.areas)
+        return True, True, list(live.entities.values()), list(live.areas)
     saved = saved if isinstance(saved, dict) else {}
     entities = [e for e in saved.get("entities") or [] if isinstance(e, dict)]
     areas = [a for a in saved.get("areas") or [] if isinstance(a, dict)]
-    return live is not None, entities, areas
+    return live is not None, False, entities, areas
 
 
 class BoxOffline(Exception):

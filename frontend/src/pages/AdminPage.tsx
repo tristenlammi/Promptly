@@ -11,7 +11,7 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2, MessageSquare, MessagesSquare, KeyRound, ClipboardList, PhoneCall, House } from "lucide-react";
+  Users2, MessageSquare, MessagesSquare, KeyRound, ClipboardList, PhoneCall, House, Router } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
@@ -23,6 +23,7 @@ import { CallsPanel } from "@/components/admin/CallsPanel";
 import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
 import { PorchPanel } from "@/components/admin/PorchPanel";
 import { RoomsPanel } from "@/components/admin/RoomsPanel";
+import { HomePanel } from "@/components/admin/HomePanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
 import { TalkAdminPanel } from "@/components/admin/TalkAdminPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
@@ -52,7 +53,8 @@ type TabId =
   // Forms (WP-F1.3)
   | "forms"
   | "rooms"
-  | "calls";
+  | "calls"
+  | "home";
 
 interface TabDef {
   id: TabId;
@@ -156,6 +158,12 @@ const TABS: TabDef[] = [
     subtitle: "Voice channels: turn them on, check they work from outside, and see who's in voice now.",
   },
   {
+    id: "home",
+    label: "Home",
+    icon: <Router className="h-3.5 w-3.5" />,
+    subtitle: "Promptly Home: turn it on, and prepare the boxes you hand out.",
+  },
+  {
     id: "talk",
     label: "Talk",
     icon: <AudioLines className="h-3.5 w-3.5" />,
@@ -239,6 +247,7 @@ export function AdminPage() {
             {tab === "forms" && <FormsAdminPanel />}
             {tab === "rooms" && <RoomsPanel />}
             {tab === "calls" && <CallsPanel />}
+            {tab === "home" && <HomePanel />}
             {tab === "talk" && <TalkAdminPanel />}
             {tab === "settings" && <AppSettingsPanel />}
           </div>

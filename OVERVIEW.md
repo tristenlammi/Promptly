@@ -817,6 +817,16 @@ A visual flow engine (`backend/app/tasks/`) — "Automations two-tier." A single
 
 ---
 
+## 15a. Promptly Home (managed smart devices)
+
+Off until an admin turns it on (`app_settings.home_enabled`, Admin → Home); until then `/api/home/*` is a 404. Plan and decisions: `docs/home-plan.md` (local-only).
+
+- **Shape.** Each home has a **box**: a small computer running Home Assistant (never shown) plus our connector (`home-box/connector/promptly_box.py`; as a Home Assistant OS add-on in `home-box/addon-repo`, or two containers in `home-box/compose`). The connector dials **out** to `/api/home/box/ws` and keeps that WebSocket open, so no port is opened in the home. It turns Home Assistant's entities into plain ones and does what the server asks; the server never speaks Home Assistant.
+- **Server** (`backend/app/home/`). `models.py`: `homes`, `home_members` (owner / adult / guest), `home_boxes` (0476). `relay.py`: the open lines and each box's last-said devices, in process memory (one uvicorn worker; no DB connection held while a line idles; a snapshot is saved on the box's row so an offline box's devices still show). `codes.py`: a box's key (in its setup string) and claim code (on its card); only hashes are stored. `router.py`: `/api/home` for members (list, `state?after=rev` polled every 2 s by the page, `claim`, `act`, members, release). `admin_router.py`: `/api/admin/home` (the switch, prepare / re-card / re-key / cut off a box).
+- **Rule.** A home's devices and state belong to its members only. Another home gets a 404; an admin's box list says claimed and online and nothing else (`tests/test_home.py`).
+- **Switchable today:** light, switch, input_boolean, fan (on / off / toggle). Everything else is read-only; locks, doors and alarms wait for approval cards. No AI reads or controls devices yet.
+- **Web.** `frontend/src/home/HomePage.tsx` (`/home`, a built-in app shown only when Home is on), `components/admin/HomePanel.tsx`.
+
 ## 16. Feedback & saved prompts
 
 - **Feedback** (`feedback/`, migration `0424_feedback_to_admin`) — the account menu's **Send feedback** (same `Sidebar` footer on desktop, the phone drawer and in-app drawers; the Passwords page links to `/chat?sidebar=feedback`) opens `FeedbackModal`: a message to **this server's admins**, nothing leaves the server. `POST /api/feedback {message ≤ 5000}` (6/hour) stores a `feedback_messages` row (`user_id` SET NULL, `message`, `created_at`, `read_at`; no page address or chat id), sends every active admin a `system_alert` notification "<name> sent feedback" linking to `/admin?tab=feedback` (the words aren't in the notification), and, when SMTP is set up, emails the admins with Reply-To the sender (background task, never an error to the sender). There is no outside address, no `FEEDBACK_EMAIL` and no `mailto:` fallback. **Admin → Feedback** (`components/admin/FeedbackPanel.tsx`; `GET /api/admin/feedback`, `POST /{id}/read {read}`, `DELETE /{id}`, class `inbox` in the admin route guardrail) lists who, when and the message, with mark read / delete. The thumbs up/down on AI replies (`messages.feedback`/`feedback_reason`, the rating endpoint and Analytics → Response quality) were removed in the same migration.

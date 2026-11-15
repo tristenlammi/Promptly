@@ -377,3 +377,30 @@ def test_claim_codes_read_the_same_however_typed():
     code = codes.new_claim_code()
     assert codes.claim_digest(code) == codes.claim_digest(code.lower().replace("-", " "))
     assert codes.claim_digest("ABCD") is None and codes.claim_digest("O0O0-I1I1-LLLL") is None
+
+
+async def test_a_box_that_just_dialled_in_is_online_before_its_devices_are(user, client):
+    """Until it has said what it has, the home sees what it last said, and
+    can't switch it."""
+    await _turn_on(client, user)
+    prepared = await _prepare(client, user)
+    home_id = (await client.post("/api/home/claim", headers=_hdr(user), json={"code": prepared["claim_code"]})).json()["home_id"]
+    box, task = await _dial(prepared)
+    await box.say({"t": "snapshot", "areas": [], "entities": [LAMP]})
+    await _wait(lambda: _has_snapshot(prepared["box"]["id"]))
+    await box.hang_up()
+    await task
+
+    again, task = await _dial(prepared)
+    await again.hear("welcome")
+    home = (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]
+    assert home["boxes"][0]["online"] is True
+    assert [(e["id"], e["online"]) for e in home["entities"]] == [("light.lamp", False)]
+    body = {"box_id": prepared["box"]["id"], "entity_id": "light.lamp", "action": "turn_on"}
+    assert (await client.post(f"/api/home/{home_id}/act", headers=_hdr(user), json=body)).status_code == 409
+    await again.say({"t": "snapshot", "areas": [], "entities": [LAMP]})
+    await _wait(lambda: _has_snapshot(prepared["box"]["id"]))
+    home = (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]
+    assert home["entities"][0]["online"] is True
+    await again.hang_up()
+    await task

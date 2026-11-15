@@ -1,0 +1,37 @@
+# A Promptly Home box without Home Assistant OS: Home Assistant and the
+# connector as two containers on any Linux machine in the home.
+#
+#   PROMPTLY_SETUP='pbox1.…' docker compose up -d
+#
+# (the setup string is from Promptly: Admin → Home → Prepare a box). The
+# connector sets a fresh Home Assistant up by itself; nobody has to open
+# Home Assistant's own screens. For a box you hand to someone, the Home
+# Assistant OS add-on (../addon-repo) is the better fit: it brings updates
+# and the Zigbee / Matter / Thread add-ons with it.
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    restart: unless-stopped
+    # Devices are found by broadcast on the home network (mDNS, Matter).
+    network_mode: host
+    volumes:
+      - ha-config:/config
+      - /run/dbus:/run/dbus:ro
+    environment:
+      - TZ=${TZ:-UTC}
+
+  connector:
+    build: ../connector
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PROMPTLY_SETUP=${PROMPTLY_SETUP:?Paste the setup string from Admin → Home}
+      - HA_URL=http://127.0.0.1:8123
+    volumes:
+      - box-data:/data
+    depends_on:
+      - homeassistant
+
+volumes:
+  ha-config:
+  box-data:

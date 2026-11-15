@@ -89,7 +89,7 @@ async def _devices(db: AsyncSession, home_id: uuid.UUID) -> dict[str, Any]:
     entities: list[dict[str, Any]] = []
     areas: dict[str, dict[str, str]] = {}
     for n, box in enumerate(boxes, start=1):
-        is_on, ents, box_areas = relay.view(box.id, box.snapshot)
+        is_on, is_live, ents, box_areas = relay.view(box.id, box.snapshot)
         out_boxes.append(
             {
                 "id": str(box.id),
@@ -105,7 +105,7 @@ async def _devices(db: AsyncSession, home_id: uuid.UUID) -> dict[str, Any]:
                 {
                     **e,
                     "box_id": str(box.id),
-                    "online": is_on,
+                    "online": is_live,
                     "can_switch": e.get("domain") in relay.SWITCHABLE,
                 }
             )

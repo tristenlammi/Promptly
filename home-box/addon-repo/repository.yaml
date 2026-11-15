@@ -1,0 +1,6 @@
+# A Home Assistant add-on repository: this folder, published as its own git
+# repository, is what gets added under Settings → Add-ons → Add-on store →
+# Repositories on a Home Assistant OS box.
+name: Promptly Home
+url: https://github.com/tristenlammi/Promptly
+maintainer: Promptly

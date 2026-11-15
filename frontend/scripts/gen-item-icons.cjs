@@ -38,6 +38,8 @@ const KINDS = [
   ["notes", "Lightbulb", "#E0A526"], // Notes
   // Porch
   ["porch", "House", "#E0803A"],
+  // Promptly Home (lights and devices)
+  ["home", "Lamp", "#C98A2B"],
   ["example", "ListChecks", "#4F8A8B"],
   ["item", "LayoutGrid", TERRACOTTA], // fallback for a kind without its own
 ];

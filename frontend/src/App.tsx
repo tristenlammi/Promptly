@@ -60,6 +60,10 @@ const SharedWithMePage = lazyWithRetry(
   () => import("@/pages/FilesPage").then((m) => ({ default: m.SharedWithMePage })),
   "SharedWithMePage"
 );
+const HomePage = lazyWithRetry(
+  () => import("@/home/HomePage").then((m) => ({ default: m.HomePage })),
+  "HomePage"
+);
 const TodayPage = lazyWithRetry(
   () => import("@/pages/TodayPage").then((m) => ({ default: m.TodayPage })),
   "TodayPage"
@@ -915,6 +919,8 @@ export default function App() {
         {/* My work folded into Today's Workspaces card. */}
         <Route path="/work" element={<Navigate to="/today" replace />} />
         <Route path="/today" element={<TodayPage />} />
+        {/* Promptly Home: your home's devices (off until an admin turns it on). */}
+        <Route path="/home" element={<HomePage />} />
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/tags/:tagId" element={<TagPage />} />
         <Route path="/places" element={<PlacesPage />} />

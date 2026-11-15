@@ -329,7 +329,7 @@ function usePromptlySidebar(auth: Auth, isPhone: boolean) {
     };
   }, [api, porchPinned]);
   const apps = useMemo(() => {
-    const all = new Map<string, NavApp>(BUILT_IN_APPS.filter((a) => a.id !== "porch" || porchOn).map((a) => [a.id, a]));
+    const all = new Map<string, NavApp>(BUILT_IN_APPS.filter((a) => a.id !== "home" && (a.id !== "porch" || porchOn)).map((a) => [a.id, a]));
     for (const a of launcher) all.set(a.kind, { id: a.kind, name: a.name, icon: `/item-icons/${a.kind}-192.png`, glyph: itemIcon(a.icon), to: `/apps/${a.kind}` });
     return (settings?.nav_apps ?? []).map((id) => all.get(id)).filter((a): a is NavApp => Boolean(a));
   }, [settings?.nav_apps, launcher, porchOn]);

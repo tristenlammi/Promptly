@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 
 import { authApi } from "@/api/auth";
+import { homeApi } from "@/api/home";
 import { porchApi } from "@/api/porch";
 import { extractError } from "@/components/files/helpers";
 import { useAuthStore } from "@/store/authStore";
@@ -17,7 +18,11 @@ export { BUILT_IN_APPS, type NavApp };
  *  on for them. */
 export function useBuiltInApps(): NavApp[] {
   const { data: porch } = useQuery({ queryKey: ["porch", "available"], queryFn: porchApi.available, staleTime: 5 * 60_000 });
-  return useMemo(() => BUILT_IN_APPS.filter((a) => a.id !== "porch" || porch === true), [porch]);
+  const { data: home } = useQuery({ queryKey: ["home", "available"], queryFn: homeApi.available, staleTime: 5 * 60_000 });
+  return useMemo(
+    () => BUILT_IN_APPS.filter((a) => (a.id !== "porch" || porch === true) && (a.id !== "home" || home === true)),
+    [porch, home]
+  );
 }
 
 /**

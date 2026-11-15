@@ -111,6 +111,8 @@ async def prepare_box(body: NewBox, request: Request, db: AsyncSession = Depends
     return {
         "box": _box_out(box),
         "setup": codes.setup_string(server, box.id, key),
+        # Said back, so a wrong address is caught before the box is handed over.
+        "server": server,
         "claim_code": code,
         # In the fragment, so the code isn't sent to (or logged by) a server.
         "claim_url": f"{server}/home#claim={code}",
@@ -151,7 +153,7 @@ async def new_setup(box_id: uuid.UUID, body: SetupBody, request: Request, db: As
     box.key_hash = codes.digest(key)
     await db.commit()
     await relay.drop(box.id, relay.CLOSE_BAD)
-    return {"setup": codes.setup_string(server, box.id, key)}
+    return {"setup": codes.setup_string(server, box.id, key), "server": server}
 
 
 class RevokeBody(BaseModel):
