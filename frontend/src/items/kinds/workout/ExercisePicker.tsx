@@ -147,11 +147,11 @@ export function ExercisePicker({
             <TextInput autoFocus={!isPhone} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search 170+ exercises" className="pl-9" aria-label="Search exercises" />
           </div>
           <ScrollRow>
-            <Chip active={!muscle} onClick={() => setMuscle(null)}>
+            <Chip active={!muscle} onClick={() => setMuscle(null)} className="min-h-10 px-3.5 text-[13px]">
               All
             </Chip>
             {MUSCLE_FILTERS.map((m) => (
-              <Chip key={m} active={muscle === m} onClick={() => setMuscle(muscle === m ? null : m)}>
+              <Chip key={m} active={muscle === m} onClick={() => setMuscle(muscle === m ? null : m)} className="min-h-10 px-3.5 text-[13px]">
                 {lib.catalog.muscles[m]?.label ?? m}
               </Chip>
             ))}

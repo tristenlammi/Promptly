@@ -120,7 +120,7 @@ function Home({ item, ctx, isPhone, ask, goTo }: { item: ItemHandle<WorkoutData>
                     isToday && "bg-[color-mix(in_srgb,var(--item-accent)_12%,transparent)]",
                   )}
                 >
-                  <span className="text-[10px] font-medium uppercase text-[var(--text-muted)]">{new Date(d + "T12:00").toLocaleDateString(undefined, { weekday: "narrow" })}</span>
+                  <span className="text-[11px] font-medium uppercase text-[var(--text-muted)]">{new Date(d + "T12:00").toLocaleDateString(undefined, { weekday: "narrow" })}</span>
                   <span className={cn("text-sm font-semibold tabular-nums", isToday ? "text-[var(--item-accent)]" : "text-[var(--text)]")}>{Number(d.slice(8))}</span>
                   <span
                     className={cn(
@@ -192,7 +192,7 @@ function Home({ item, ctx, isPhone, ask, goTo }: { item: ItemHandle<WorkoutData>
                 <span className="font-medium text-[var(--text)]">Missed {missed.length === 1 ? missed[0].name : `${missed.length} sessions`}</span>
                 <span className="block text-xs text-[var(--text-muted)]">From {fmtDay(missed[0].date)} — do it today or let the coach re-plan.</span>
               </div>
-              <ItemButton size="sm" onClick={() => ask(`I missed ${missed.map((m) => `${m.name} on ${m.date}`).join(", ")}. Re-plan the rest of my week sensibly.`)}>
+              <ItemButton size="sm" className="min-h-10" onClick={() => ask(`I missed ${missed.map((m) => `${m.name} on ${m.date}`).join(", ")}. Re-plan the rest of my week sensibly.`)}>
                 Re-plan
               </ItemButton>
             </Card>
@@ -225,7 +225,7 @@ function Home({ item, ctx, isPhone, ask, goTo }: { item: ItemHandle<WorkoutData>
             </StatGrid>
           </Section>
           {last && (
-            <Section title="Last workout" action={<ItemButton size="sm" variant="ghost" onClick={() => goTo("history")}>History</ItemButton>}>
+            <Section title="Last workout" action={<ItemButton size="sm" variant="ghost" className="min-h-10" onClick={() => goTo("history")}>History</ItemButton>}>
               <Card onClick={() => goTo("history")} className="flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate font-semibold text-[var(--text)]">{last.name}</span>

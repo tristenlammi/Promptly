@@ -5,6 +5,7 @@ import {
   Check,
   Flame,
   LineChart,
+  Minus,
   MoreVertical,
   NotebookPen,
   Plus,
@@ -140,9 +141,11 @@ function NumBox({
   decimal = true,
   placeholder,
   readOnly,
+  enterHint,
 }: {
   placeholder?: number | null;
   readOnly?: boolean;
+  enterHint?: "next" | "done";
   value: number | null;
   onCommit: (v: number | null) => void;
   label: string;
@@ -174,6 +177,7 @@ function NumBox({
   return (
     <input
       inputMode={decimal ? "decimal" : "numeric"}
+      enterKeyHint={enterHint}
       aria-label={label}
       data-set-input={dataKey}
       value={text}
@@ -197,7 +201,7 @@ function NumBox({
         }
       }}
       className={cn(
-        "h-10 w-full min-w-0 rounded-lg border border-transparent bg-[var(--surface-2)] px-1 text-center text-[15px] font-semibold tabular-nums text-[var(--text)] outline-none transition placeholder:font-medium placeholder:text-[var(--text-muted)] placeholder:opacity-70 focus:border-[var(--item-accent)] focus:bg-[var(--surface)]",
+        "h-11 w-full min-w-0 rounded-lg border border-transparent bg-[var(--surface-2)] px-1 text-center text-base font-semibold tabular-nums text-[var(--text)] outline-none transition placeholder:font-medium placeholder:text-[var(--text-muted)] placeholder:opacity-70 focus:border-[var(--item-accent)] focus:bg-[var(--surface)]",
         className,
       )}
     />
@@ -325,6 +329,8 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
         return;
       }
     }
+    // A short buzz says the tick took (sweaty thumbs, eyes on the bar).
+    if (target && s.vibrate) navigator.vibrate?.(12);
     const next = target ? nextOpenAfter(cur, curIdx, setId) : null;
     const partnerOpen = !!curWe.superset && cur.exercises.some((x, i) => i !== curIdx && x.superset === curWe.superset && x.sets.some((y) => !y.done));
     const rest = setType(curSet) === "warmup" ? Math.min(60, restFor(curWe, ex, s)) : restFor(curWe, ex, s);
@@ -344,7 +350,9 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
       // Empty boxes take the hints they showed (only boxes still empty).
       for (const k of ["kg", "reps", "seconds", "meters"] as const) if (st[k] == null && fill[k] != null) st[k] = fill[k];
       // The next unticked set of the same type suggests what they just used.
-      const after = we.sets.slice(we.sets.indexOf(st) + 1).find((x) => !x.done && setType(x) === setType(st));
+      // Not warm-ups: each has its own step up the ramp (20 → 32.5 → 47.5),
+      // and ticking one used to flatten the next to the same weight.
+      const after = setType(st) === "warmup" ? undefined : we.sets.slice(we.sets.indexOf(st) + 1).find((x) => !x.done && setType(x) === setType(st));
       if (after && after.kg == null && st.kg != null) after.suggest_kg = st.kg;
       if (restUntil) {
         w.rest_total_s = rest;
@@ -706,11 +714,11 @@ function ExerciseCard({
         </div>
         {!ro && (
           <div className="relative" ref={menuRef}>
-            <button type="button" aria-label={`${ex.name} options`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} className="flex h-10 w-10 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)]">
+            <button type="button" aria-label={`${ex.name} options`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} className="-mr-1 flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)]">
               <MoreVertical className="h-5 w-5" />
             </button>
             {menu && (
-              <div role="menu" className="absolute right-0 top-11 z-30 w-56 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-lg)]">
+              <div role="menu" className="absolute right-0 top-12 z-30 w-60 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-lg)]">
                 <MenuBtn icon={Repeat2} label="Swap exercise" onClick={() => { setMenu(false); onSwap(); }} />
                 {ex.log === "weight_reps" && (
                   <MenuBtn
@@ -765,13 +773,13 @@ function ExerciseCard({
         )}
       </div>
       {last && (
-        <p className="px-3 pb-1 text-[11px] text-[var(--text-muted)]">
-          Last time ({fmtDay(last.workout.date)}): {last.we.sets.filter(isHard).map((x) => fmtSet(x, ex, s)).join(", ")}
+        <p className="px-3 pb-1.5 text-xs leading-snug text-[var(--text-muted)]">
+          Last time ({fmtDay(last.workout.date)}): <span className="tabular-nums text-[var(--text)]">{last.we.sets.filter(isHard).map((x) => fmtSet(x, ex, s)).join(", ")}</span>
         </p>
       )}
 
       <div className="px-2 pb-2" role="group" aria-label={`${ex.name} sets`}>
-        <div aria-hidden className="grid items-center gap-1.5 px-1 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]" style={{ gridTemplateColumns: grid }}>
+        <div aria-hidden className="grid items-center gap-1.5 px-1 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]" style={{ gridTemplateColumns: grid }}>
           <span>Set</span>
           {showPrev && <span>Previous</span>}
           {cols.map((c) => (
@@ -873,7 +881,7 @@ function ExerciseCard({
                   aria-pressed={!!st.done}
                   aria-label={`${st.done ? "Untick" : "Done —"} ${t === "working" ? `set ${n}` : `${SET_NAME[t].toLowerCase()} ${n}`}`}
                   className={cn(
-                    "flex h-10 w-11 items-center justify-center rounded-xl transition active:scale-95",
+                    "flex h-11 w-11 items-center justify-center rounded-xl transition active:scale-95 motion-reduce:active:scale-100",
                     st.done ? "bg-[var(--success)] text-white" : "bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text)]",
                   )}
                 >
@@ -925,7 +933,7 @@ function ExerciseCard({
                 target.sets.push({ id, type: "working", kg: null, suggest_kg: lastSet?.kg ?? lastSet?.suggest_kg ?? null, reps: lastSet?.reps ?? null, seconds: lastSet?.seconds ?? null, meters: lastSet?.meters ?? null, done: false });
               });
             }}
-            className="mt-1 flex h-10 w-full items-center justify-center gap-1.5 rounded-xl text-sm font-medium text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            className="mt-1 flex h-11 w-full items-center justify-center gap-1.5 rounded-xl text-sm font-medium text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] active:bg-[var(--hover)]"
           >
             <Plus className="h-4 w-4" /> Add set
           </button>
@@ -974,7 +982,14 @@ function setGrid(n: number, prev = true): string {
 function FocusEditor({ st, ex, s, cols, prev, hint, onChange, onDone, onPlates, onDelete }: { st: SetLog; ex: Exercise; s: Settings; cols: Col[]; prev?: SetLog; hint: (c: Col) => number | null; onChange: (fn: (x: SetLog) => void) => void; onDone: () => void; onPlates?: () => void; onDelete: () => void }) {
   const t = setType(st);
   return (
-    <div className="mx-1 mb-2 mt-1 flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-3">
+    <div
+      className="mx-1 mb-2 mt-1 flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-3"
+      // Typing a number: once the keypad is up, slide the editor so Done is
+      // still on screen above it (the browser only clears the box itself).
+      onFocusCapture={(e) => followKeypad(e.currentTarget, e.target as HTMLElement)}
+      // A box that already has the cursor (keypad put away, then tapped again) gets no focus event.
+      onClickCapture={(e) => followKeypad(e.currentTarget, e.target as HTMLElement)}
+    >
       <div className="grid grid-cols-4 gap-1 rounded-xl bg-[var(--surface-2)] p-1" role="radiogroup" aria-label="Set type">
         {(["warmup", "working", "drop", "failure"] as const).map((k) => (
           <button
@@ -983,7 +998,7 @@ function FocusEditor({ st, ex, s, cols, prev, hint, onChange, onDone, onPlates, 
             role="radio"
             aria-checked={t === k}
             onClick={() => onChange((x) => { x.type = k; })}
-            className={cn("h-9 rounded-lg text-xs font-medium transition", t === k ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]")}
+            className={cn("h-10 rounded-lg text-xs font-medium transition", t === k ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]")}
           >
             {SET_NAME[k]}
           </button>
@@ -993,67 +1008,122 @@ function FocusEditor({ st, ex, s, cols, prev, hint, onChange, onDone, onPlates, 
         <button
           type="button"
           onClick={() => onChange((x) => { x.kg = prev.kg ?? x.kg; x.reps = prev.reps ?? x.reps; x.seconds = prev.seconds ?? x.seconds; x.meters = prev.meters ?? x.meters; })}
-          className="-my-1 flex items-center justify-between rounded-lg px-1 py-1 text-xs text-[var(--text-muted)]"
+          className="-my-1.5 flex min-h-11 items-center justify-between rounded-lg px-1 text-[13px] text-[var(--text-muted)] active:bg-[var(--hover)]"
         >
-          <span>Last time: <span className="font-medium tabular-nums text-[var(--text)]">{fmtSet(prev, ex, s)}</span></span>
-          <span className="font-medium text-[var(--item-accent)]">Use</span>
+          <span>Last time: <span className="font-semibold tabular-nums text-[var(--text)]">{fmtSet(prev, ex, s)}</span></span>
+          <span className="rounded-full bg-[var(--surface-2)] px-3 py-1 text-xs font-semibold text-[var(--text)]">Use</span>
         </button>
       )}
       <div className={cn("grid gap-2", cols.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
-        {cols.map((c) => {
+        {cols.map((c, ci) => {
+          const label = colLabel(c, ex, s);
           const shown = getVal(st, c, s) ?? hint(c);
-          if (c === "kg") {
-            const base = st.kg ?? (shown != null ? fromUnit(shown, s) : null);
-            return (
-              <div key={c} className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-[var(--text-muted)]">{colLabel(c, ex, s)}</span>
-                <div className="flex items-center rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-                  <button type="button" aria-label="Lighter" onClick={() => onChange((x) => { x.kg = stepLoad(x.kg ?? base, ex, s, -1); })} className="flex h-12 w-11 items-center justify-center text-lg font-semibold text-[var(--text-muted)] active:bg-[var(--hover-strong)]">−</button>
-                  <NumBox
-                    dataKey={`${st.id}-big`}
-                    label={colLabel(c, ex, s)}
-                    value={getVal(st, c, s)}
-                    placeholder={hint(c)}
-                    onCommit={(v) => onChange((x) => setVal(x, c, v, s))}
-                    className="h-12 flex-1 bg-transparent text-xl focus:bg-transparent"
-                  />
-                  <button type="button" aria-label="Heavier" onClick={() => onChange((x) => { x.kg = stepLoad(x.kg ?? base, ex, s, 1); })} className="flex h-12 w-11 items-center justify-center text-lg font-semibold text-[var(--text-muted)] active:bg-[var(--hover-strong)]">+</button>
-                </div>
-              </div>
-            );
-          }
+          const step = c === "reps" ? 1 : c === "seconds" ? 5 : c === "km" ? 0.1 : c === "minutes" ? 1 : 10;
+          // − / + start from what the box shows (its own number, else the greyed hint).
+          const nudge = (dir: 1 | -1) =>
+            onChange((x) => {
+              if (c === "kg") {
+                x.kg = stepLoad(x.kg ?? (shown != null ? fromUnit(shown, s) : null), ex, s, dir);
+                return;
+              }
+              const from = getVal(x, c, s) ?? shown ?? 0;
+              setVal(x, c, Math.max(0, Math.round((from + dir * step) * 100) / 100), s);
+            });
           return (
-            <Stepper
-              key={c}
-              label={colLabel(c, ex, s)}
-              value={shown ?? 0}
-              step={c === "reps" ? 1 : c === "seconds" ? 5 : c === "km" ? 0.1 : c === "minutes" ? 1 : 10}
-              min={0}
-              onChange={(v) => onChange((x) => setVal(x, c, v, s))}
-            />
+            <div key={c} className="flex min-w-0 flex-col gap-1">
+              <span className="text-xs font-medium text-[var(--text-muted)]">{label}</span>
+              <div className="flex items-stretch overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] focus-within:border-[var(--item-accent)]">
+                <button type="button" aria-label={c === "kg" ? "Lighter" : `Less ${label}`} onClick={() => nudge(-1)} className={STEP_BTN}>
+                  <Minus className="h-5 w-5" />
+                </button>
+                <NumBox
+                  dataKey={`${st.id}-big-${c}`}
+                  label={label}
+                  value={getVal(st, c, s)}
+                  placeholder={hint(c)}
+                  decimal={c !== "reps" && c !== "seconds"}
+                  onCommit={(v) => onChange((x) => setVal(x, c, v, s))}
+                  // The keypad's own key: on to the next box, then put the keypad away.
+                  enterHint={ci < cols.length - 1 ? "next" : "done"}
+                  onEnter={() => {
+                    const next = ci < cols.length - 1 ? document.querySelector<HTMLInputElement>(`[data-set-input="${st.id}-big-${cols[ci + 1]}"]`) : null;
+                    if (next) next.focus();
+                    else (document.activeElement as HTMLElement | null)?.blur();
+                  }}
+                  className="h-[52px] flex-1 rounded-none border-0 bg-transparent px-0 text-lg focus:bg-transparent min-[390px]:text-xl"
+                />
+                <button type="button" aria-label={c === "kg" ? "Heavier" : `More ${label}`} onClick={() => nudge(1)} className={STEP_BTN}>
+                  <Plus className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>
       <div className="flex items-center gap-2">
+        {/* Delete sits furthest from Done: a slip of the thumb shouldn't cost a set. */}
+        <button type="button" aria-label="Delete set" onClick={onDelete} className="flex h-[52px] w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--danger)] active:bg-[var(--hover)]">
+          <Trash2 className="h-[18px] w-[18px]" />
+        </button>
         {onPlates && (
-          <button type="button" aria-label="Plate calculator" onClick={onPlates} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]">
-            <Calculator className="h-4 w-4" />
+          <button type="button" aria-label="Plate calculator" onClick={onPlates} className="flex h-[52px] w-12 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] active:bg-[var(--hover)]">
+            <Calculator className="h-[18px] w-[18px]" />
           </button>
         )}
-        <button type="button" aria-label="Delete set" onClick={onDelete} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--danger)]">
-          <Trash2 className="h-4 w-4" />
-        </button>
-        <ItemButton variant="primary" size="lg" block icon={<Check className="h-5 w-5" />} onClick={onDone} className="min-w-0 flex-1 whitespace-nowrap">
-          {st.done ? "Save" : t === "working" ? "Done" : `Done · ${SET_NAME[t]}`}
+        <ItemButton variant="primary" size="lg" block icon={<Check className="h-5 w-5 shrink-0" />} onClick={onDone} className="h-[52px] min-w-0 flex-1 whitespace-nowrap text-base">
+          <span>
+            {st.done ? "Save" : "Done"}
+            {!st.done && t !== "working" && <span className="hidden min-[390px]:inline"> · {SET_NAME[t]}</span>}
+          </span>
         </ItemButton>
       </div>
     </div>
   );
 }
 
+/** Typing a number on a phone: keep the editor in view while the keypad is
+ *  up. It slides up over ~⅓ s and the visible area shrinks as it does, so
+ *  look when that changes and once more after it has settled. */
+function followKeypad(editor: HTMLElement, box: HTMLElement) {
+  if (box.tagName !== "INPUT") return;
+  const vv = window.visualViewport;
+  const look = () => revealAboveKeypad(editor, box);
+  vv?.addEventListener("resize", look);
+  window.setTimeout(look, 400);
+  window.setTimeout(() => {
+    look();
+    vv?.removeEventListener("resize", look);
+  }, 900);
+}
+
+/** With the keypad up the visible screen is short: scroll the pane so the
+ *  editor's bottom (Done) clears the keypad, without pushing the box being
+ *  typed in off the top. Does nothing when it already fits, or on a browser
+ *  with no visual viewport. */
+function revealAboveKeypad(editor: HTMLElement, box: HTMLElement) {
+  const vv = window.visualViewport;
+  if (!vv || document.activeElement !== box) return;
+  let pane: HTMLElement | null = editor.parentElement;
+  while (pane && !/(auto|scroll)/.test(getComputedStyle(pane).overflowY)) pane = pane.parentElement;
+  const visibleBottom = vv.offsetTop + vv.height - 12;
+  const over = editor.getBoundingClientRect().bottom - visibleBottom;
+  if (over <= 0) return;
+  // Keep the box itself below the app's header.
+  const room = box.getBoundingClientRect().top - (vv.offsetTop + 72);
+  const by = Math.min(over, Math.max(0, room));
+  if (by <= 0) return;
+  const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  (pane ?? document.scrollingElement)?.scrollBy({ top: by, behavior: smooth ? "smooth" : "auto" });
+}
+
+/** The editor's − / +: wide enough for a thumb, narrower on a small phone so
+ *  "102.5" still fits between them. */
+const STEP_BTN =
+  "flex w-10 shrink-0 items-center justify-center text-[var(--text-muted)] hover:bg-[var(--hover)] active:bg-[var(--hover-strong)] active:text-[var(--text)] min-[390px]:w-12";
+
 function MenuBtn({ icon: Icon, label, onClick, danger }: { icon: typeof Plus; label: string; onClick: () => void; danger?: boolean }) {
   return (
-    <button type="button" role="menuitem" onClick={onClick} className={cn("flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-[var(--hover)]", danger ? "text-[var(--danger)]" : "text-[var(--text)]")}>
+    <button type="button" role="menuitem" onClick={onClick} className={cn("flex min-h-11 w-full items-center gap-3 px-3.5 py-2.5 text-left text-[15px] hover:bg-[var(--hover)] active:bg-[var(--hover)]", danger ? "text-[var(--danger)]" : "text-[var(--text)]")}>
       <Icon className="h-4 w-4 opacity-70" />
       {label}
     </button>
