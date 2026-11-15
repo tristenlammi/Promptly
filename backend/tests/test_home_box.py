@@ -124,3 +124,19 @@ def test_a_server_on_this_machine_is_reached_through_the_host():
     assert pb.server_from_here("http://localhost:8091", in_container=True) == "http://host.docker.internal:8091"
     assert pb.server_from_here("http://localhost:8091", in_container=False) == "http://localhost:8091"
     assert pb.server_from_here("https://promptly.example.org", in_container=True) == "https://promptly.example.org"
+
+
+def test_brands_under_a_maker_are_found_by_their_own_id():
+    flat = pb.flat_brands({
+        "core": {
+            "integration": {
+                "philips": {"name": "Philips", "integrations": {"hue": {"name": "Philips Hue", "config_flow": True, "iot_class": "local_push"}}},
+                "tuya": {"name": "Tuya", "config_flow": True, "iot_class": "cloud_push"},
+            },
+            "helper": {"group": {"name": "Group", "config_flow": True}},
+            "translated_name": ["sun"],
+        },
+        "custom": {"integration": {}, "helper": {}},
+    })
+    assert flat["hue"]["name"] == "Philips Hue" and flat["tuya"]["iot_class"] == "cloud_push" and "group" in flat
+    assert pb.brands_for(flat, {"hue", "tuya"}, "")[1]["cloud"] is True

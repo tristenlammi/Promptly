@@ -43,6 +43,9 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
   // After it's added: a name and a room for each thing it brought.
   const [named, setNamed] = useState<Record<string, { name: string; area: string; room: string }>>({});
   const live = useRef<{ box: string; flow: string } | null>(null);
+  // A device the box found stays found if you back out of it; a brand you
+  // started yourself is dropped.
+  const fromFound = useRef(false);
 
   useEffect(() => {
     const t = window.setTimeout(() => setAsked(q.trim()), 250);
@@ -93,12 +96,12 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
 
   const leave = () => {
     // Walking away mid-way: tell the box, so nothing is left half set up.
-    if (live.current) void homeApi.setupAbort(home.id, live.current.box, live.current.flow);
+    if (live.current && !fromFound.current) void homeApi.setupAbort(home.id, live.current.box, live.current.flow);
     live.current = null;
     onClose();
   };
   const back = () => {
-    if (live.current) void homeApi.setupAbort(home.id, live.current.box, live.current.flow);
+    if (live.current && !fromFound.current) void homeApi.setupAbort(home.id, live.current.box, live.current.flow);
     live.current = null;
     setStep(null);
     setProblem(null);
@@ -174,7 +177,7 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
             )}
             <div className="flex flex-col gap-2">
               {found.data?.map((f) => (
-                <button key={f.flow} type="button" className={row} disabled={busy} onClick={() => void run(() => homeApi.setupGet(home.id, box.id, f.flow))}>
+                <button key={f.flow} type="button" className={row} disabled={busy} onClick={() => { fromFound.current = true; void run(() => homeApi.setupGet(home.id, box.id, f.flow)); }}>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium text-[var(--text)]">{f.name}</span>
                     {f.name !== f.brand_name && <span className="block truncate text-xs text-[var(--text-muted)]">{f.brand_name}</span>}
@@ -195,7 +198,7 @@ export function AddDeviceSheet({ open, home, onClose }: { open: boolean; home: H
             {brands.data && brands.data.length === 0 && <p className="text-sm text-[var(--text-muted)]">{asked ? `No brand called "${asked}".` : "No brands to show."}</p>}
             <div className="flex flex-col gap-2">
               {brands.data?.map((b) => (
-                <button key={b.id} type="button" className={row} disabled={busy} onClick={() => void run(() => homeApi.setupStart(home.id, box.id, b.id))}>
+                <button key={b.id} type="button" className={row} disabled={busy} onClick={() => { fromFound.current = false; void run(() => homeApi.setupStart(home.id, box.id, b.id)); }}>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
                       <span className="truncate">{b.name}</span>

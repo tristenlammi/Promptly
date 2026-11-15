@@ -300,6 +300,7 @@ function iconOf(e: HomeEntity): LucideIcon {
   if (e.cls === "humidity" || e.cls === "moisture") return Droplets;
   if (e.cls === "battery") return BatteryMedium;
   if (e.cls === "door" || e.cls === "window" || e.cls === "opening" || e.cls === "garage_door") return DoorClosed;
+  if (e.domain === "cover" && (e.cls === "garage" || e.cls === "door" || e.cls === "gate")) return DoorClosed;
   return ICONS[e.domain] ?? Radio;
 }
 

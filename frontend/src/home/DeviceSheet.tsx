@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Minus, Pause, Play, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { homeApi, type Home, type HomeAction, type HomeEntity } from "@/api/home";
 import { Sheet } from "@/components/shared/Sheet";
@@ -34,9 +34,14 @@ const NEW_ROOM = "__new__";
 /** A slider that shows the number as you drag and sends it when you let go. */
 function Slide({ label, value, min, max, step = 1, unit = "", disabled, onSet }: { label: string; value: number; min: number; max: number; step?: number; unit?: string; disabled?: boolean; onSet: (v: number) => void }) {
   const [at, setAt] = useState(value);
-  useEffect(() => setAt(value), [value]);
+  // The latest position, even if you let go before the page has redrawn.
+  const latest = useRef(value);
+  useEffect(() => {
+    setAt(value);
+    latest.current = value;
+  }, [value]);
   const send = () => {
-    if (at !== value) onSet(at);
+    if (latest.current !== value) onSet(latest.current);
   };
   return (
     <label className="flex flex-col gap-1.5">
@@ -44,7 +49,7 @@ function Slide({ label, value, min, max, step = 1, unit = "", disabled, onSet }:
         {label}
         <span className="font-normal tabular-nums text-[var(--text-muted)]">{at}{unit}</span>
       </span>
-      <input type="range" min={min} max={max} step={step} value={at} disabled={disabled} onChange={(e) => setAt(Number(e.target.value))} onPointerUp={send} onKeyUp={send} onBlur={send} className="h-11 w-full accent-[var(--accent)]" />
+      <input type="range" min={min} max={max} step={step} value={at} disabled={disabled} onChange={(e) => { latest.current = Number(e.target.value); setAt(latest.current); }} onPointerUp={send} onKeyUp={send} onBlur={send} className="h-11 w-full accent-[var(--accent)]" />
     </label>
   );
 }

@@ -195,6 +195,26 @@ def service_for(domain: str, action: str, value: Any) -> tuple[str, str, dict[st
     return (call[0], call[1], data)
 
 
+def flat_brands(descriptions: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Home Assistant groups some brands under a maker ("Philips" holds
+    "hue"): one flat table, by the id a set-up is started with."""
+    out: dict[str, dict[str, Any]] = {}
+    for part in ("core", "custom"):
+        for group in ("integration", "helper"):
+            for domain, info in ((descriptions.get(part) or {}).get(group) or {}).items():
+                if not isinstance(info, dict):
+                    continue
+                inner = info.get("integrations")
+                if isinstance(inner, dict):
+                    for d, i in inner.items():
+                        if isinstance(i, dict):
+                            out[d] = {"domain": d, **i, "name": i.get("name") or info.get("name") or d}
+                if "config_flow" in info or not isinstance(inner, dict):
+                    # Some names live in Home Assistant's translations, not here.
+                    out.setdefault(domain, {"domain": domain, **{k: v for k, v in info.items() if k != "integrations"}, "name": info.get("name") or domain.replace("_", " ").capitalize()})
+    return out
+
+
 def brands_for(manifests: dict[str, dict[str, Any]], can_set_up: set[str], q: str) -> list[dict[str, Any]]:
     """The brands offered: the well-known ones first; with a search, every
     brand this Home Assistant can set up whose name matches."""
@@ -632,9 +652,11 @@ class HomeAssistant:
         return self._words[brand]
 
     async def brand_names(self) -> dict[str, dict[str, Any]]:
+        """Every brand Home Assistant knows, by its id: name, whether it
+        works through a cloud, what kind of thing it is."""
         if not self._manifests:
-            for m in await self.ask({"type": "manifest/list"}) or []:
-                self._manifests[m["domain"]] = m
+            got = await self.ask({"type": "integration/descriptions"}) or {}
+            self._manifests = flat_brands(got)
         return self._manifests
 
     async def op(self, op: str, a: dict[str, Any]) -> Any:
@@ -678,7 +700,12 @@ class HomeAssistant:
             await self.rest("DELETE", f"/config/config_entries/entry/{a.get('entry')}")
             return None
         if op == "areas.create":
-            made = await self.ask({"type": "config/area_registry/create", "name": str(a.get("name") or "")[:60]})
+            name = str(a.get("name") or "").strip()[:60]
+            # "A new room" that's already there is that room, not an error.
+            for area in await self.ask({"type": "config/area_registry/list"}) or []:
+                if str(area.get("name") or "").strip().lower() == name.lower():
+                    return {"id": area["area_id"], "name": area["name"]}
+            made = await self.ask({"type": "config/area_registry/create", "name": name})
             return {"id": made["area_id"], "name": made["name"]}
         if op == "areas.rename":
             await self.ask({"type": "config/area_registry/update", "area_id": str(a.get("area")), "name": str(a.get("name") or "")[:60]})

@@ -13,6 +13,10 @@ export function stateWords(e: HomeEntity): string {
     if (e.cls === "moisture") return on ? "Wet" : "Dry";
     if (e.cls === "smoke" || e.cls === "gas" || e.cls === "carbon_monoxide") return on ? "Detected" : "Clear";
     if (e.cls === "battery") return on ? "Low" : "Fine";
+    if (e.cls === "connectivity") return on ? "Connected" : "Not connected";
+    if (e.cls === "plug" || e.cls === "power") return on ? "On" : "Off";
+    if (e.cls === "lock") return on ? "Unlocked" : "Locked";
+    if (e.cls === "problem" || e.cls === "safety" || e.cls === "tamper") return on ? "Problem" : "Fine";
     return on ? "On" : "Off";
   }
   if (e.domain === "light" && s === "on" && typeof e.bri === "number" && e.bri > 0 && e.bri < 100) return `On · ${e.bri}%`;
