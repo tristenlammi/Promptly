@@ -169,3 +169,5 @@ from app.notes.models import (  # noqa: F401
 )
 # Feedback to this server's admins (0424).
 from app.feedback.models import FeedbackMessage  # noqa: F401
+# Promptly Home: homes, members, boxes (0476).
+from app.home.models import Home, HomeBox, HomeMember  # noqa: F401

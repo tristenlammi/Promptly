@@ -58,6 +58,10 @@ class AppSettings(Base):
     )
     # The GIF library's key (GIPHY or KLIPY), Fernet-encrypted. NULL: none.
     rooms_gif_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Promptly Home (``app/home``): off until an admin turns it on (0476).
+    home_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     smtp_use_tls: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
