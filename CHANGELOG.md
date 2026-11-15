@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-15
+
 ### Added
 
 - Rooms on a phone: a camera button in the message box, like Messenger's. It opens the camera inside Rooms: tap the round button for a photo, press and hold it for a video (up to a minute, with sound). You see what you took, with Retake, room for a few words, and Send. Switch between the front and back camera, and turn the light on where the phone has one. It tucks away while you type, and "Camera" is under + too. The camera and microphone are let go the moment you close it.
