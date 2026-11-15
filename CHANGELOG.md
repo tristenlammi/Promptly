@@ -57,7 +57,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Promptly for Android: a map link opened from another app (an address in a message, a geo: link) shows that place even when P Maps is already open. It used to just bring the open map forward.
 - Account → Notifications no longer talks about exam grading (Study is gone); it says what notifications are for now.
 - Promptly for Android tells the server its new version the first time it starts after an update, not up to a day later, so the server knows straight away what that version can do.
-- Mail on a phone: the notice after archiving or deleting is one slim line that sits above the folders bar, where it used to be a tall card over it. Several in a row share one notice ("Archived 3 conversations") with one Undo for all of them, where each used to add another card.
+- Mail on a phone: the notice after archiving or deleting is one slim line that sits above the folders bar, where it used to be a tall card over it. Several in a row share one notice ("Archived 3 conversations"), where each used to add another card; Undo puts back the last one. The notice sits above the Ask bar too.
 - Short notices with an action ("Archived · Undo") are one line everywhere, with the action at the end.
 - Rooms calls on a phone with the Promptly app: calling someone showed two call screens, one after the other (the page's, then the app's), and after hanging up you landed on the page's again saying the call was cancelled or ended. There is now one call screen, the app's, from the tap to hanging up, and you come straight back to the conversation. The conversation shows a green bar while the app holds the call.
 

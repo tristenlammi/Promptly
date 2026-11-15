@@ -163,9 +163,10 @@ export function MailApp() {
   const undoTimer = useRef<number | null>(null);
   const undoToast = useRef<string | null>(null);
   // Archived or binned and still inside the undo time: one run, one notice.
-  const away = useRef<{ action: "archive" | "trash"; rows: Open[]; timer: number; shown: string } | null>(null);
-  // Notices sit above the folders bar on a phone, not over it.
-  useBottomBarInset(56, isMobile);
+  const away = useRef<{ action: "archive" | "trash"; rows: Open[]; last: Open[]; timer: number; shown: string } | null>(null);
+  // Notices sit above the Ask bar (and the folders bar under it on the
+  // list) on a phone, not over them.
+  useBottomBarInset(open ? 60 : 116, isMobile);
   // Moves still inside their undo time, by conversation: call one to send it now.
   const waiting = useRef(new Map<string, (closing?: boolean) => void>());
   const [prefill, setPrefill] = useState<string | null>(null);
@@ -387,7 +388,7 @@ export function MailApp() {
 
   /** Off the list at once. It only really happens once the undo has passed.
    *  Several in a row (swiping down the list) share one notice that counts
-   *  them, and one Undo that puts them all back. */
+   *  them; its Undo puts back the last one. */
   const moveAway = useCallback((what: Open | Open[], action: "archive" | "trash", _label?: string) => {
     const many = Array.isArray(what) ? what : [what];
     many.map(idOf).forEach(leave);
@@ -410,17 +411,22 @@ export function MailApp() {
         action: {
           label: "Undo",
           onClick: () => {
+            // Undo is for the last one you moved; the ones before it go now.
             const b = away.current;
             if (!b) return;
-            away.current = null;
-            window.clearTimeout(b.timer);
-            waiting.current.delete("away");
-            b.rows.map(idOf).forEach(stay);
+            b.last.map(idOf).forEach(stay);
+            b.rows = b.rows.filter((r) => !b.last.includes(r));
+            if (b.rows.length) flushAway();
+            else {
+              away.current = null;
+              window.clearTimeout(b.timer);
+              waiting.current.delete("away");
+            }
           },
         },
       });
     }
-    away.current = { action, rows, timer, shown };
+    away.current = { action, rows, last: many, timer, shown };
     waiting.current.set("away", flushAway);
   }, [leave, stay, flushAway]);
 
