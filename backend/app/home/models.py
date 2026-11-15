@@ -22,7 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 from app.db_types import CreatedAtMixin, UUIDPKMixin
 
-ROLES = ("owner", "adult", "guest")
+ROLES = ("owner", "member")
 
 
 class Home(UUIDPKMixin, CreatedAtMixin, Base):
@@ -33,13 +33,14 @@ class Home(UUIDPKMixin, CreatedAtMixin, Base):
 
 
 class HomeMember(Base):
-    """owner: everything. adult: devices, and adding a box. guest: devices only."""
+    """owner: everything. member: the home's devices, adding devices and a
+    box. There are no guests: only Promptly users who are in a home see it."""
 
     __tablename__ = "home_members"
 
     home_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("homes.id", ondelete="CASCADE"), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
-    role: Mapped[str] = mapped_column(String(8), nullable=False, default="adult", server_default="adult")
+    role: Mapped[str] = mapped_column(String(8), nullable=False, default="member", server_default="member")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

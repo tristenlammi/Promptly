@@ -6,6 +6,7 @@ seen only by its members: not by other homes, and not by an admin.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -20,7 +21,7 @@ from app.auth.models import User
 from app.database import get_db
 
 from . import codes, relay
-from .models import ROLES, Home, HomeBox, HomeMember
+from .models import Home, HomeBox, HomeMember
 
 router = APIRouter()
 
@@ -96,6 +97,8 @@ async def _devices(db: AsyncSession, home_id: uuid.UUID) -> dict[str, Any]:
                 "name": box.name or (f"Box {n}" if len(boxes) > 1 else "Home box"),
                 "online": is_on,
                 "last_seen_at": box.last_seen_at.isoformat() if box.last_seen_at else None,
+                "version": box.version,
+                "added_at": box.claimed_at.isoformat() if box.claimed_at else None,
             }
         )
         for a in box_areas:
@@ -107,6 +110,8 @@ async def _devices(db: AsyncSession, home_id: uuid.UUID) -> dict[str, Any]:
                     "box_id": str(box.id),
                     "online": is_live,
                     "can_switch": e.get("domain") in relay.SWITCHABLE,
+                    # Unlocking, or opening a garage door: the page asks first.
+                    "careful": e.get("domain") == "lock" or (e.get("domain") == "cover" and e.get("cls") in relay.ENTRANCES),
                 }
             )
     entities.sort(key=lambda e: (str(e.get("area") or "~"), str(e.get("name") or "").lower()))
@@ -183,9 +188,7 @@ async def claim(body: ClaimBody, db: AsyncSession = Depends(get_db), user: User 
     if box is None or box.revoked_at is not None or box.home_id is not None:
         raise wrong
     if body.home_id is not None:
-        member = await _membership(db, user, body.home_id)
-        if member.role == "guest":
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Ask someone who lives there to add the box.")
+        await _membership(db, user, body.home_id)
         home = await db.get(Home, body.home_id)
     else:
         count = len((await db.execute(select(HomeMember.home_id).where(HomeMember.user_id == user.id))).all())
@@ -213,7 +216,11 @@ async def claim(body: ClaimBody, db: AsyncSession = Depends(get_db), user: User 
 class ActBody(BaseModel):
     box_id: uuid.UUID
     entity_id: str = Field(min_length=3, max_length=200, pattern=r"^[a-z0-9_]+\.[a-z0-9_]+$")
-    action: str
+    action: str = Field(max_length=24)
+    # What goes with it: a brightness, a temperature, a mode…
+    value: Any = None
+    # "Yes, unlock it": asked for by the page before a lock or a garage door.
+    confirm: bool = False
 
 
 @router.post("/{home_id}/act", dependencies=[Depends(_on), Depends(_act_limit)])
@@ -222,20 +229,33 @@ async def act(home_id: uuid.UUID, body: ActBody, db: AsyncSession = Depends(get_
     box = await db.get(HomeBox, body.box_id)
     if box is None or box.home_id != home_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
-    if body.action not in relay.ACTIONS or body.entity_id.split(".", 1)[0] not in relay.SWITCHABLE:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That can't be switched from here yet.")
+    domain = body.entity_id.split(".", 1)[0]
+    if body.action not in relay.ACTIONS.get(domain, ()):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That can't be done from here yet.")
     live = relay.link(box.id)
-    if live is None or body.entity_id not in live.entities:
+    entity = live.entities.get(body.entity_id) if live is not None else None
+    if live is None or entity is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "The home box is offline. Check it has power and internet.")
-    # The wait for the box's answer mustn't hold a database connection.
+    try:
+        value = relay.clean_value(domain, body.action, body.value, entity)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"That needs {e}.") from e
+    if relay.needs_confirm(entity, body.action) and not body.confirm:
+        raise HTTPException(status.HTTP_428_PRECONDITION_REQUIRED, "Say you're sure first.")
+    await _ask_box(db, box.id, "do", {"entity": body.entity_id, "action": body.action, "value": value})
+    return {"ok": True}
+
+
+async def _ask_box(db: AsyncSession, box_id: uuid.UUID, op: str, args: dict[str, Any], *, timeout: float = relay.CALL_S) -> Any:
+    """One question to the box. The wait mustn't hold a database connection,
+    so the session is closed first: do every check before calling this."""
     await db.close()
     try:
-        await relay.call(box.id, body.entity_id, body.action)
+        return await relay.request(box_id, op, args, timeout=timeout)
     except relay.BoxOffline as e:
-        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "The home box didn't answer. Try again.") from e
+        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "The home box didn't answer. Check it has power and internet, then try again.") from e
     except relay.BoxSaidNo as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
-    return {"ok": True}
 
 
 # ------------------------------------------------------------------ looking after a home
@@ -265,22 +285,20 @@ async def rename_home(home_id: uuid.UUID, body: HomePatch, db: AsyncSession = De
 
 class MemberBody(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    role: str = "adult"
 
 
 @router.post("/{home_id}/members", dependencies=[Depends(_on)])
 async def add_member(home_id: uuid.UUID, body: MemberBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
     await _owner(db, user, home_id)
-    if body.role not in ROLES or body.role == "owner":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick adult or guest.")
     other = (await db.execute(select(User).where(User.username == body.username.strip().lstrip("@")))).scalar_one_or_none()
     if other is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Nobody here has that username.")
     row = await db.get(HomeMember, (home_id, other.id))
     if row is None:
-        db.add(HomeMember(home_id=home_id, user_id=other.id, role=body.role))
-    elif row.role != "owner":
-        row.role = body.role
+        count = len((await db.execute(select(HomeMember.home_id).where(HomeMember.user_id == other.id))).all())
+        if count >= MAX_HOMES:
+            raise HTTPException(status.HTTP_409_CONFLICT, "They're already in as many homes as one person can be.")
+        db.add(HomeMember(home_id=home_id, user_id=other.id, role="member"))
     await db.commit()
     relay.bump(home_id)
     return {"ok": True}
@@ -339,3 +357,148 @@ async def release_box(home_id: uuid.UUID, box_id: uuid.UUID, db: AsyncSession = 
     await relay.tell(box.id, None)
     relay.bump(home_id)
     return {"claim_code": code}
+
+
+# ------------------------------------------------------------------ adding devices, rooms
+#
+# "Add a device" is Home Assistant's own set-up steps, done on the box and
+# shown here in plain shapes (the box turns them into forms: fields, a
+# "press the button on the bridge" pause, what went wrong). Whatever is typed
+# into a step goes to the box in the body of one request and is passed on as
+# it is: it isn't stored, and request bodies aren't logged.
+
+
+async def _setup_limit(request: Request) -> None:
+    from limits import parse
+
+    from app.rate_limit import rate_limit
+
+    await rate_limit(parse("120/minute"), bucket="home_setup")(request)
+
+
+async def _box_of(db: AsyncSession, user: User, home_id: uuid.UUID, box_id: uuid.UUID) -> HomeBox:
+    await _membership(db, user, home_id)
+    box = await db.get(HomeBox, box_id)
+    if box is None or box.home_id != home_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Box not found")
+    return box
+
+
+_ID = r"^[A-Za-z0-9_.-]{1,80}$"
+SETUP = [Depends(_on), Depends(_setup_limit)]
+
+
+@router.get("/{home_id}/boxes/{box_id}/setup/found", dependencies=SETUP)
+async def setup_found(home_id: uuid.UUID, box_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    """What the box has noticed on the home's network and could set up."""
+    box = await _box_of(db, user, home_id, box_id)
+    return {"found": await _ask_box(db, box.id, "flows.found", {})}
+
+
+@router.get("/{home_id}/boxes/{box_id}/setup/brands", dependencies=SETUP)
+async def setup_brands(home_id: uuid.UUID, box_id: uuid.UUID, q: str = Query(default="", max_length=60), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    box = await _box_of(db, user, home_id, box_id)
+    return {"brands": await _ask_box(db, box.id, "brands", {"q": q.strip()})}
+
+
+class StartBody(BaseModel):
+    brand: str = Field(pattern=_ID)
+
+
+@router.post("/{home_id}/boxes/{box_id}/setup", dependencies=SETUP)
+async def setup_start(home_id: uuid.UUID, box_id: uuid.UUID, body: StartBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    box = await _box_of(db, user, home_id, box_id)
+    return await _ask_box(db, box.id, "flows.start", {"brand": body.brand}, timeout=relay.SETUP_S)
+
+
+@router.get("/{home_id}/boxes/{box_id}/setup/{flow_id}", dependencies=SETUP)
+async def setup_get(home_id: uuid.UUID, box_id: uuid.UUID, flow_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    box = await _box_of(db, user, home_id, box_id)
+    if not re.match(_ID, flow_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    return await _ask_box(db, box.id, "flows.get", {"flow": flow_id}, timeout=relay.SETUP_S)
+
+
+class StepBody(BaseModel):
+    # What was typed into this step. Passed to the box as it is.
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/{home_id}/boxes/{box_id}/setup/{flow_id}", dependencies=SETUP)
+async def setup_step(home_id: uuid.UUID, box_id: uuid.UUID, flow_id: str, body: StepBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    box = await _box_of(db, user, home_id, box_id)
+    if not re.match(_ID, flow_id) or len(body.input) > 60:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That step can't be sent.")
+    return await _ask_box(db, box.id, "flows.step", {"flow": flow_id, "input": body.input}, timeout=relay.SETUP_S)
+
+
+@router.delete("/{home_id}/boxes/{box_id}/setup/{flow_id}", dependencies=SETUP)
+async def setup_abort(home_id: uuid.UUID, box_id: uuid.UUID, flow_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    box = await _box_of(db, user, home_id, box_id)
+    if re.match(_ID, flow_id):
+        await _ask_box(db, box.id, "flows.abort", {"flow": flow_id})
+    return {"ok": True}
+
+
+@router.get("/{home_id}/boxes/{box_id}/connected", dependencies=SETUP)
+async def connected(home_id: uuid.UUID, box_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    """The brands and bridges this home has set up."""
+    box = await _box_of(db, user, home_id, box_id)
+    return {"connected": await _ask_box(db, box.id, "entries.list", {})}
+
+
+@router.delete("/{home_id}/boxes/{box_id}/connected/{entry_id}", dependencies=SETUP)
+async def disconnect(home_id: uuid.UUID, box_id: uuid.UUID, entry_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """Remove a brand or bridge, and with it the devices it brought."""
+    box = await _box_of(db, user, home_id, box_id)
+    if not re.match(_ID, entry_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    await _ask_box(db, box.id, "entries.remove", {"entry": entry_id}, timeout=relay.SETUP_S)
+    return {"ok": True}
+
+
+class RoomBody(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
+@router.post("/{home_id}/boxes/{box_id}/rooms", dependencies=SETUP)
+async def add_room(home_id: uuid.UUID, box_id: uuid.UUID, body: RoomBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    box = await _box_of(db, user, home_id, box_id)
+    return await _ask_box(db, box.id, "areas.create", {"name": body.name.strip()})
+
+
+@router.patch("/{home_id}/boxes/{box_id}/rooms/{area_id}", dependencies=SETUP)
+async def rename_room(home_id: uuid.UUID, box_id: uuid.UUID, area_id: str, body: RoomBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    box = await _box_of(db, user, home_id, box_id)
+    if not re.match(_ID, area_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    await _ask_box(db, box.id, "areas.rename", {"area": area_id, "name": body.name.strip()})
+    return {"ok": True}
+
+
+@router.delete("/{home_id}/boxes/{box_id}/rooms/{area_id}", dependencies=SETUP)
+async def delete_room(home_id: uuid.UUID, box_id: uuid.UUID, area_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    box = await _box_of(db, user, home_id, box_id)
+    if not re.match(_ID, area_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    await _ask_box(db, box.id, "areas.delete", {"area": area_id})
+    return {"ok": True}
+
+
+class DeviceBody(BaseModel):
+    # One of these says which: a device from a finished set-up, or a tile.
+    device_id: str | None = Field(default=None, pattern=_ID)
+    entity_id: str | None = Field(default=None, max_length=200, pattern=r"^[a-z0-9_]+\.[a-z0-9_]+$")
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    # A room's id; "" takes it out of its room.
+    area: str | None = Field(default=None, max_length=80)
+
+
+@router.patch("/{home_id}/boxes/{box_id}/devices", dependencies=SETUP)
+async def update_device(home_id: uuid.UUID, box_id: uuid.UUID, body: DeviceBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """Name a device, or put it in a room."""
+    box = await _box_of(db, user, home_id, box_id)
+    if not (body.device_id or body.entity_id) or (body.name is None and body.area is None):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Say which device, and its name or room.")
+    await _ask_box(db, box.id, "device.update", body.model_dump(exclude_none=True))
+    return {"ok": True}

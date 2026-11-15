@@ -199,9 +199,9 @@ async def test_devices_reach_the_home_and_a_switch_reaches_the_box(user, client,
 
     # Switch the lamp: the box is asked, answers, then says the new state.
     async def box_side():
-        ask = await box.hear("call")
-        assert (ask["entity"], ask["action"]) == ("light.lamp", "turn_on")
-        await box.say({"t": "result", "id": ask["id"], "ok": True})
+        ask = await box.hear("req")
+        assert (ask["op"], ask["args"]["entity"], ask["args"]["action"]) == ("do", "light.lamp", "turn_on")
+        await box.say({"t": "res", "id": ask["id"], "ok": True})
         await box.say({"t": "state", "e": {**LAMP, "state": "on", "bri": 80}})
 
     side = asyncio.create_task(box_side())
@@ -235,8 +235,8 @@ async def test_a_box_that_says_no_is_an_error_not_a_hang(user, client):
     await box.say({"t": "snapshot", "areas": [], "entities": [LAMP]})
 
     async def box_side():
-        ask = await box.hear("call")
-        await box.say({"t": "result", "id": ask["id"], "ok": False, "error": "The lamp isn't answering."})
+        ask = await box.hear("req")
+        await box.say({"t": "res", "id": ask["id"], "ok": False, "error": "The lamp isn't answering."})
 
     side = asyncio.create_task(box_side())
     await _wait(lambda: _has_snapshot(prepared["box"]["id"]))
@@ -286,22 +286,29 @@ async def test_another_home_and_the_admin_see_nothing(user, client, db):
     await t1
 
 
-async def test_guests_switch_things_but_dont_run_the_home(user, client, db):
+async def test_members_use_the_home_and_only_the_owner_runs_it(user, client, db):
+    """Owner and member, nothing else: there are no guests."""
     await _turn_on(client, user)
-    sam, guest = await _other(db), await _other(db)
+    sam, kim = await _other(db), await _other(db)
     prepared = await _prepare(client, user)
     home_id = (await client.post("/api/home/claim", headers=_hdr(sam), json={"code": prepared["claim_code"]})).json()["home_id"]
-    assert (await client.post(f"/api/home/{home_id}/members", headers=_hdr(sam), json={"username": guest.username, "role": "guest"})).status_code == 200
-    assert (await client.get("/api/home", headers=_hdr(guest))).json()["homes"][0]["role"] == "guest"
-    assert (await client.patch(f"/api/home/{home_id}", headers=_hdr(guest), json={"name": "Mine now"})).status_code == 403
-    assert (await client.delete(f"/api/home/{home_id}/boxes/{prepared['box']['id']}", headers=_hdr(guest))).status_code == 403
+    assert (await client.post(f"/api/home/{home_id}/members", headers=_hdr(sam), json={"username": kim.username})).status_code == 200
+    assert (await client.post(f"/api/home/{home_id}/members", headers=_hdr(sam), json={"username": "nobody-here"})).status_code == 404
+    home = (await client.get("/api/home", headers=_hdr(kim))).json()["homes"][0]
+    assert home["role"] == "member" and {m["role"] for m in home["members"]} == {"owner", "member"}
+    assert (await client.patch(f"/api/home/{home_id}", headers=_hdr(kim), json={"name": "Mine now"})).status_code == 403
+    assert (await client.post(f"/api/home/{home_id}/members", headers=_hdr(kim), json={"username": user.username})).status_code == 403
+    assert (await client.delete(f"/api/home/{home_id}/boxes/{prepared['box']['id']}", headers=_hdr(kim))).status_code == 403
+    assert (await client.patch(f"/api/home/{home_id}", headers=_hdr(sam), json={"name": "Sam and Kim's"})).status_code == 200
+    # A member can add a second box to the home they're in.
     second = await _prepare(client, user)
-    r = await client.post("/api/home/claim", headers=_hdr(guest), json={"code": second["claim_code"], "home_id": home_id})
-    assert r.status_code == 403
+    r = await client.post("/api/home/claim", headers=_hdr(kim), json={"code": second["claim_code"], "home_id": home_id})
+    assert r.status_code == 200 and r.json()["home_id"] == home_id
     # They can leave; the owner can't.
     assert (await client.delete(f"/api/home/{home_id}/members/{sam.id}", headers=_hdr(sam))).status_code == 409
-    assert (await client.delete(f"/api/home/{home_id}/members/{guest.id}", headers=_hdr(guest))).status_code == 200
-    assert (await client.get("/api/home", headers=_hdr(guest))).json() == {"homes": []}
+    assert (await client.delete(f"/api/home/{home_id}/members/{kim.id}", headers=_hdr(kim))).status_code == 200
+    assert (await client.get("/api/home", headers=_hdr(kim))).json() == {"homes": []}
+    assert (await client.get(f"/api/home/{home_id}/state", headers=_hdr(kim))).status_code == 404
 
 
 # ------------------------------------------------------------------ moving and cutting off
@@ -369,6 +376,9 @@ def test_what_a_box_says_is_cut_to_what_we_know():
     long = relay.clean_entity({"id": "sensor.a", "domain": "sensor", "name": "n" * 500, "state": "s" * 500, "bri": 400})
     assert len(long["name"]) == 120 and len(long["state"]) == 64 and "bri" not in long
     assert "lock" not in relay.SWITCHABLE and "cover" not in relay.SWITCHABLE
+    # Extras are cut to the ones we know.
+    x = relay.clean_entity({"id": "light.a", "domain": "light", "name": "a", "state": "on", "x": {"k": 2700, "modes": ["color_temp", "xy"], "rgb": [255, 0, 0], "junk": "no", "title": 5}})["x"]
+    assert x == {"k": 2700, "modes": ["color_temp", "xy"], "rgb": [255, 0, 0]}
 
 
 def test_claim_codes_read_the_same_however_typed():
@@ -403,4 +413,175 @@ async def test_a_box_that_just_dialled_in_is_online_before_its_devices_are(user,
     home = (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]
     assert home["entities"][0]["online"] is True
     await again.hang_up()
+    await task
+
+
+# ------------------------------------------------------------------ more than on and off
+
+DOOR = {"id": "lock.front", "domain": "lock", "name": "Front door", "state": "locked"}
+GARAGE = {"id": "cover.garage", "domain": "cover", "name": "Garage", "state": "closed", "cls": "garage"}
+BLIND = {"id": "cover.blind", "domain": "cover", "name": "Blind", "state": "open", "x": {"pos": 100}}
+HEAT = {"id": "climate.hall", "domain": "climate", "name": "Hall", "state": "heat", "x": {"target": 20, "modes": ["off", "heat"], "min": 7, "max": 35}}
+BULB = {"id": "light.bulb", "domain": "light", "name": "Bulb", "state": "on", "bri": 50, "x": {"modes": ["color_temp"], "kmin": 2000, "kmax": 6500}}
+
+
+async def _home_with(client, admin, who, entities):
+    prepared = await _prepare(client, admin)
+    home_id = (await client.post("/api/home/claim", headers=_hdr(who), json={"code": prepared["claim_code"]})).json()["home_id"]
+    box, task = await _dial(prepared)
+    await box.say({"t": "snapshot", "areas": [], "entities": entities})
+    await _wait(lambda: _has_snapshot(prepared["box"]["id"]))
+    return prepared, home_id, box, task
+
+
+async def _answer(box, data=None, n=1):
+    """Say yes to the next ``n`` things the server asks, and return them."""
+    asked = []
+    for _ in range(n):
+        ask = await box.hear("req")
+        asked.append(ask)
+        await box.say({"t": "res", "id": ask["id"], "ok": True, "data": data})
+    return asked
+
+
+async def test_setting_a_value_is_checked_then_passed_to_the_box(user, client):
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home_with(client, user, user, [BULB, HEAT, BLIND])
+    url, base = f"/api/home/{home_id}/act", {"box_id": prepared["box"]["id"]}
+
+    side = asyncio.create_task(_answer(box, n=3))
+    for body in (
+        {"entity_id": "light.bulb", "action": "set", "value": {"bri": 30, "k": 2700, "nonsense": 1}},
+        {"entity_id": "climate.hall", "action": "temperature", "value": 21.5},
+        {"entity_id": "cover.blind", "action": "position", "value": 40},
+    ):
+        assert (await client.post(url, headers=_hdr(user), json={**base, **body})).status_code == 200
+    asked = [a["args"] for a in await side]
+    assert asked == [
+        {"entity": "light.bulb", "action": "set", "value": {"bri": 30, "k": 2700}},
+        {"entity": "climate.hall", "action": "temperature", "value": 21.5},
+        {"entity": "cover.blind", "action": "position", "value": 40},
+    ]
+    for bad in (
+        {"entity_id": "light.bulb", "action": "set", "value": {"bri": 400}},
+        {"entity_id": "climate.hall", "action": "mode", "value": "cool"},  # not one of its modes
+        {"entity_id": "cover.blind", "action": "position", "value": 140},
+        {"entity_id": "climate.hall", "action": "turn_on"},
+        {"entity_id": "light.bulb", "action": "unlock"},
+    ):
+        assert (await client.post(url, headers=_hdr(user), json={**base, **bad})).status_code == 400, bad
+    await box.hang_up()
+    await task
+
+
+async def test_a_lock_and_a_garage_door_want_a_yes_first(user, client):
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home_with(client, user, user, [DOOR, GARAGE, BLIND])
+    home = (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]
+    assert {e["id"]: e["careful"] for e in home["entities"]} == {"lock.front": True, "cover.garage": True, "cover.blind": False}
+    url, base = f"/api/home/{home_id}/act", {"box_id": prepared["box"]["id"]}
+    for body in ({"entity_id": "lock.front", "action": "unlock"}, {"entity_id": "cover.garage", "action": "open"}):
+        assert (await client.post(url, headers=_hdr(user), json={**base, **body})).status_code == 428
+    # Locking, closing, and an ordinary blind need no asking.
+    side = asyncio.create_task(_answer(box, n=5))
+    for body in (
+        {"entity_id": "lock.front", "action": "lock"},
+        {"entity_id": "cover.garage", "action": "close"},
+        {"entity_id": "cover.blind", "action": "open"},
+        {"entity_id": "lock.front", "action": "unlock", "confirm": True},
+        {"entity_id": "cover.garage", "action": "open", "confirm": True},
+    ):
+        assert (await client.post(url, headers=_hdr(user), json={**base, **body})).status_code == 200, body
+    assert [a["args"]["action"] for a in await side] == ["lock", "close", "open", "unlock", "open"]
+    await box.hang_up()
+    await task
+
+
+# ------------------------------------------------------------------ adding a device
+
+
+async def test_set_up_steps_go_straight_through_to_the_box(user, client, db, caplog):
+    """What's typed into a step reaches the box as typed, and stays nowhere here."""
+    import logging
+
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home_with(client, user, user, [])
+    base = f"/api/home/{home_id}/boxes/{prepared['box']['id']}"
+    secret = "hunter2-" + uuid.uuid4().hex
+    caplog.set_level(logging.DEBUG)
+
+    step = {"kind": "form", "flow": "f1", "brand": "tuya", "fields": [{"name": "password", "type": "password", "label": "Password"}]}
+    side = asyncio.create_task(_answer(box, data=step))
+    assert (await client.post(f"{base}/setup", headers=_hdr(user), json={"brand": "tuya"})).json() == step
+    assert [(a["op"], a["args"]) for a in await side] == [("flows.start", {"brand": "tuya"})]
+
+    side = asyncio.create_task(_answer(box, data={"kind": "done", "flow": "f1", "title": "Tuya", "devices": []}))
+    r = await client.post(f"{base}/setup/f1", headers=_hdr(user), json={"input": {"username": "sam@example.com", "password": secret}})
+    assert r.json()["kind"] == "done"
+    (asked,) = await side
+    assert (asked["op"], asked["args"]) == ("flows.step", {"flow": "f1", "input": {"username": "sam@example.com", "password": secret}})
+
+    assert secret not in caplog.text
+    from sqlalchemy import text
+
+    for table in ("home_boxes", "homes", "home_members"):
+        rows = (await db.execute(text(f"select row_to_json(t)::text from {table} t"))).scalars().all()
+        assert not any(secret in row for row in rows)
+    await box.hang_up()
+    await task
+
+
+async def test_rooms_names_and_removing_reach_the_box(user, client):
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home_with(client, user, user, [BULB])
+    base = f"/api/home/{home_id}/boxes/{prepared['box']['id']}"
+    side = asyncio.create_task(_answer(box, data={"id": "study", "name": "Study"}, n=5))
+    assert (await client.post(f"{base}/rooms", headers=_hdr(user), json={"name": " Study "})).json() == {"id": "study", "name": "Study"}
+    assert (await client.patch(f"{base}/rooms/study", headers=_hdr(user), json={"name": "Office"})).status_code == 200
+    assert (await client.patch(f"{base}/devices", headers=_hdr(user), json={"entity_id": "light.bulb", "name": "Desk lamp", "area": "study"})).status_code == 200
+    assert (await client.delete(f"{base}/connected/abc123", headers=_hdr(user))).status_code == 200
+    assert (await client.delete(f"{base}/setup/f9", headers=_hdr(user))).status_code == 200
+    assert [(a["op"], a["args"]) for a in await side] == [
+        ("areas.create", {"name": "Study"}),
+        ("areas.rename", {"area": "study", "name": "Office"}),
+        ("device.update", {"entity_id": "light.bulb", "name": "Desk lamp", "area": "study"}),
+        ("entries.remove", {"entry": "abc123"}),
+        ("flows.abort", {"flow": "f9"}),
+    ]
+    assert (await client.patch(f"{base}/devices", headers=_hdr(user), json={"name": "x"})).status_code == 400
+    await box.hang_up()
+    await task
+
+
+async def test_nobody_outside_the_home_reaches_its_set_up(user, client, db):
+    """``user`` is the admin who prepared the box; Ann has a home of her own."""
+    await _turn_on(client, user)
+    sam, ann = await _other(db), await _other(db)
+    prepared, home_id, box, task = await _home_with(client, user, sam, [BULB])
+    await box.hear("welcome")
+    p2 = await _prepare(client, user)
+    ann_home = (await client.post("/api/home/claim", headers=_hdr(ann), json={"code": p2["claim_code"]})).json()["home_id"]
+    bid = prepared["box"]["id"]
+    for who in (ann, user):
+        for home in (home_id, ann_home):  # not through her own home either
+            if who is user and home == ann_home:
+                continue  # the admin isn't in it at all
+            base = f"/api/home/{home}/boxes/{bid}"
+            calls = [
+                client.get(f"{base}/setup/found", headers=_hdr(who)),
+                client.get(f"{base}/setup/brands", headers=_hdr(who)),
+                client.post(f"{base}/setup", headers=_hdr(who), json={"brand": "hue"}),
+                client.get(f"{base}/setup/f1", headers=_hdr(who)),
+                client.post(f"{base}/setup/f1", headers=_hdr(who), json={"input": {}}),
+                client.delete(f"{base}/setup/f1", headers=_hdr(who)),
+                client.get(f"{base}/connected", headers=_hdr(who)),
+                client.delete(f"{base}/connected/e1", headers=_hdr(who)),
+                client.post(f"{base}/rooms", headers=_hdr(who), json={"name": "x"}),
+                client.patch(f"{base}/rooms/a", headers=_hdr(who), json={"name": "x"}),
+                client.delete(f"{base}/rooms/a", headers=_hdr(who)),
+                client.patch(f"{base}/devices", headers=_hdr(who), json={"entity_id": "light.bulb", "name": "x"}),
+            ]
+            assert {(await c).status_code for c in calls} == {404}, (who.username, home)
+    assert box.from_server.empty()  # nothing was asked of the box
+    await box.hang_up()
     await task

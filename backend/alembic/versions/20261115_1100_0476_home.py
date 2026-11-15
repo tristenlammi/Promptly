@@ -1,7 +1,6 @@
 """Promptly Home: homes, their members and their boxes.
 
-``homes`` / ``home_members``: a household and who is in it (owner, adult,
-guest). ``home_boxes``: the small computer in a home that runs Home Assistant
+``homes`` / ``home_members``: a household and who is in it (owner, member). ``home_boxes``: the small computer in a home that runs Home Assistant
 and dials out to this server (``app/home/relay.py``); prepared by an admin,
 claimed into a home with the code on its card. Only hashes of a box's key and
 claim code are kept. ``app_settings.home_enabled``: the whole feature, off
@@ -34,7 +33,7 @@ def upgrade() -> None:
         "home_members",
         sa.Column("home_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("homes.id", ondelete="CASCADE"), primary_key=True),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("role", sa.String(8), nullable=False, server_default="adult"),
+        sa.Column("role", sa.String(8), nullable=False, server_default="member"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.create_index("ix_home_members_user_id", "home_members", ["user_id"])

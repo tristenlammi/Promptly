@@ -13,15 +13,23 @@ Protocol (JSON text frames, each with a ``t``)::
     box  -> {"t":"snapshot","areas":[{"id","name"}],"entities":[Entity...]}
     box  -> {"t":"state","e":Entity}            one entity changed
     box  -> {"t":"gone","id":"light.x"}         one entity removed
-    srv  -> {"t":"call","id":"<req>","entity":"light.x","action":"turn_on"|"turn_off"|"toggle"}
-    box  -> {"t":"result","id":"<req>","ok":true} | {"ok":false,"error":"..."}
+    srv  -> {"t":"req","id":"<req>","op":"<what>","args":{...}}
+    box  -> {"t":"res","id":"<req>","ok":true,"data":...} | {"ok":false,"error":"..."}
     srv  -> {"t":"ping"}   box -> {"t":"pong"}  (either side may send either)
     srv  -> {"t":"claimed"} | {"t":"released"}  told when it joins or leaves a home
 
-    Entity = {"id","domain","name","state","area"?,"unit"?,"cls"?,"bri"?}
+    Entity = {"id","domain","name","state","area"?,"unit"?,"cls"?,"bri"?,"x"?}
 
-The box does the Home Assistant work and sends plain entities; the server
-never speaks Home Assistant.
+``op`` is one of: ``do`` (switch or set one device), ``flows.found``,
+``brands``, ``flows.start``, ``flows.get``, ``flows.step``, ``flows.abort``
+(adding a device: Home Assistant's own set-up steps, in plain shapes),
+``entries.list``, ``entries.remove``, ``areas.create``, ``areas.rename``,
+``areas.delete``, ``device.update``.
+
+The box does the Home Assistant work and sends plain shapes; the server
+never speaks Home Assistant. What someone types into a set-up step (a
+password, a key) goes straight through to the box: it is not stored or
+logged here.
 """
 from __future__ import annotations
 
@@ -42,6 +50,9 @@ PING_S = 25.0
 SILENT_S = 70.0  # nothing heard for this long: the line is dead
 HELLO_S = 10.0
 CALL_S = 8.0
+# Setting a device up can mean the box talking to it, or to its maker's cloud.
+SETUP_S = 45.0
+MAX_ANSWER = 512 * 1024
 MAX_FRAME = 512 * 1024
 MAX_ENTITIES = 3000
 MAX_AREAS = 300
@@ -59,7 +70,63 @@ SHOWN = frozenset(
     {"light", "switch", "input_boolean", "fan", "sensor", "binary_sensor", "climate", "cover", "lock", "media_player"}
 )
 SWITCHABLE = frozenset({"light", "switch", "input_boolean", "fan"})
-ACTIONS = frozenset({"turn_on", "turn_off", "toggle"})
+# What each kind of device can be asked to do, and the value that goes with it.
+ACTIONS: dict[str, frozenset[str]] = {
+    "light": frozenset({"turn_on", "turn_off", "toggle", "set"}),
+    "switch": frozenset({"turn_on", "turn_off", "toggle"}),
+    "input_boolean": frozenset({"turn_on", "turn_off", "toggle"}),
+    "fan": frozenset({"turn_on", "turn_off", "toggle", "speed"}),
+    "cover": frozenset({"open", "close", "stop", "position"}),
+    "climate": frozenset({"temperature", "mode"}),
+    "media_player": frozenset({"play", "pause", "volume"}),
+    "lock": frozenset({"lock", "unlock"}),
+}
+# A door that lets someone in: the page asks "are you sure?" and says so here.
+ENTRANCES = frozenset({"garage", "door", "gate"})
+# Extras an entity may carry (``x``), by kind of value.
+_X_NUM = frozenset({"k", "kmin", "kmax", "pct", "pos", "target", "cur", "min", "max", "step", "vol"})
+_X_TEXT = frozenset({"title"})
+_X_BOOL = frozenset({"muted"})
+_X_LISTS = frozenset({"modes", "colours"})
+
+
+def needs_confirm(entity: dict[str, Any], action: str) -> bool:
+    if entity.get("domain") == "lock":
+        return action == "unlock"
+    return entity.get("domain") == "cover" and entity.get("cls") in ENTRANCES and action in ("open", "position")
+
+
+def clean_value(domain: str, action: str, value: Any, entity: dict[str, Any]) -> Any:
+    """The value for an action, checked; raises ValueError when it won't do."""
+    num = isinstance(value, (int, float)) and not isinstance(value, bool)
+    if (domain, action) in (("fan", "speed"), ("cover", "position"), ("media_player", "volume")):
+        if not num or not 0 <= value <= 100:
+            raise ValueError("0 to 100")
+        return int(value)
+    if (domain, action) == ("climate", "temperature"):
+        if not num or not -50 <= value <= 100:
+            raise ValueError("a temperature")
+        return float(value)
+    if (domain, action) == ("climate", "mode"):
+        modes = (entity.get("x") or {}).get("modes") or []
+        if not isinstance(value, str) or value not in modes:
+            raise ValueError("one of its modes")
+        return value
+    if (domain, action) == ("light", "set"):
+        if not isinstance(value, dict):
+            raise ValueError("what to set")
+        out: dict[str, Any] = {}
+        bri, k, rgb = value.get("bri"), value.get("k"), value.get("rgb")
+        if isinstance(bri, (int, float)) and not isinstance(bri, bool) and 1 <= bri <= 100:
+            out["bri"] = int(bri)
+        if isinstance(k, (int, float)) and not isinstance(k, bool) and 1000 <= k <= 12000:
+            out["k"] = int(k)
+        if isinstance(rgb, list) and len(rgb) == 3 and all(isinstance(c, int) and not isinstance(c, bool) and 0 <= c <= 255 for c in rgb):
+            out["rgb"] = rgb
+        if not out:
+            raise ValueError("a brightness, warmth or colour")
+        return out
+    return None
 
 
 @dataclass
@@ -140,6 +207,27 @@ def clean_entity(raw: Any) -> dict[str, Any] | None:
     bri = raw.get("bri")
     if isinstance(bri, (int, float)) and not isinstance(bri, bool) and 0 <= bri <= 100:
         out["bri"] = int(bri)
+    x = _clean_x(raw.get("x"))
+    if x:
+        out["x"] = x
+    return out
+
+
+def _clean_x(raw: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, v in raw.items():
+        if key in _X_NUM and isinstance(v, (int, float)) and not isinstance(v, bool) and -100_000 <= v <= 100_000:
+            out[key] = round(v, 2)
+        elif key in _X_TEXT and isinstance(v, str) and v:
+            out[key] = v[:120]
+        elif key in _X_BOOL and isinstance(v, bool):
+            out[key] = v
+        elif key in _X_LISTS and isinstance(v, list):
+            out[key] = [str(i)[:24] for i in v[:16] if isinstance(i, (str, int))]
+        elif key == "rgb" and isinstance(v, list) and len(v) == 3 and all(isinstance(c, int) and 0 <= c <= 255 for c in v):
+            out[key] = v
     return out
 
 
@@ -178,8 +266,8 @@ class BoxSaidNo(Exception):
     pass
 
 
-async def call(box_id: uuid.UUID, entity_id: str, action: str) -> None:
-    """Ask the box to do one thing and wait for its answer."""
+async def request(box_id: uuid.UUID, op: str, args: dict[str, Any] | None = None, *, timeout: float = CALL_S) -> Any:
+    """Ask the box for one thing and wait for its answer."""
     live = _links.get(box_id)
     if live is None:
         raise BoxOffline()
@@ -187,14 +275,15 @@ async def call(box_id: uuid.UUID, entity_id: str, action: str) -> None:
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     live.pending[rid] = fut
     try:
-        await live.send({"t": "call", "id": rid, "entity": entity_id, "action": action})
-        answer = await asyncio.wait_for(fut, timeout=CALL_S)
+        await live.send({"t": "req", "id": rid, "op": op, "args": args or {}})
+        answer = await asyncio.wait_for(fut, timeout=timeout)
     except (asyncio.TimeoutError, WebSocketDisconnect, RuntimeError) as e:
         raise BoxOffline() from e
     finally:
         live.pending.pop(rid, None)
     if not (isinstance(answer, dict) and answer.get("ok") is True):
-        raise BoxSaidNo(_text((answer or {}).get("error"), 200) or "The box couldn't do that.")
+        raise BoxSaidNo(_text((answer or {}).get("error"), 300) or "The box couldn't do that.")
+    return answer.get("data")
 
 
 async def tell(box_id: uuid.UUID, home_id: uuid.UUID | None) -> None:
@@ -384,7 +473,7 @@ async def _from_box(live: Link, msg: dict[str, Any]) -> None:
     elif t == "gone":
         if live.entities.pop(_text(msg.get("id"), 200), None) is not None:
             bump(live.home_id)
-    elif t == "result":
+    elif t == "res":
         fut = live.pending.get(_text(msg.get("id"), 64))
         if fut is not None and not fut.done():
             fut.set_result(msg)

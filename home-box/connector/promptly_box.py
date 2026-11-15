@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import random
+import re
 import secrets
 import signal
 from pathlib import Path
@@ -38,12 +39,45 @@ from typing import Any
 
 import aiohttp
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 log = logging.getLogger("promptly-box")
 
 SHOWN = {"light", "switch", "input_boolean", "fan", "sensor", "binary_sensor", "climate", "cover", "lock", "media_player"}
-SWITCHABLE = {"light", "switch", "input_boolean", "fan"}
-ACTIONS = {"turn_on", "turn_off", "toggle"}
+# What each kind of device can be asked to do -> the Home Assistant service.
+SERVICES: dict[tuple[str, str], tuple[str, str]] = {
+    ("fan", "speed"): ("fan", "set_percentage"),
+    ("cover", "open"): ("cover", "open_cover"),
+    ("cover", "close"): ("cover", "close_cover"),
+    ("cover", "stop"): ("cover", "stop_cover"),
+    ("cover", "position"): ("cover", "set_cover_position"),
+    ("climate", "temperature"): ("climate", "set_temperature"),
+    ("climate", "mode"): ("climate", "set_hvac_mode"),
+    ("media_player", "play"): ("media_player", "media_play"),
+    ("media_player", "pause"): ("media_player", "media_pause"),
+    ("media_player", "volume"): ("media_player", "volume_set"),
+    ("lock", "lock"): ("lock", "lock"),
+    ("lock", "unlock"): ("lock", "unlock"),
+    ("light", "set"): ("light", "turn_on"),
+}
+ON_OFF = {"light", "switch", "input_boolean", "fan"}
+
+# "Add by brand": the ones offered first. (id, name, note). Everything else
+# Home Assistant can set up is found by searching.
+BRANDS: list[tuple[str, str, str]] = [
+    ("hue", "Philips Hue", "Needs the Hue Bridge. You'll press the button on it."),
+    ("lifx", "LIFX", ""),
+    ("tplink", "TP-Link Kasa and Tapo", ""),
+    ("shelly", "Shelly", ""),
+    ("wiz", "WiZ", ""),
+    ("tuya", "Tuya and Smart Life", "Works through Tuya's cloud: you sign in to your Tuya account."),
+    ("sonos", "Sonos", ""),
+    ("cast", "Google Cast and Chromecast", ""),
+    ("esphome", "ESPHome", ""),
+    ("matter", "Matter", "Needs a Matter server on the box, which isn't set up yet."),
+]
+# Set-up steps that aren't a device in anyone's home, or that Promptly does itself.
+NOT_BRANDS = {"sun", "backup", "hassio", "cloud", "analytics", "mobile_app", "person", "zone", "homeassistant", "onboarding", "go2rtc", "radio_browser", "shopping_list", "met", "google_translate"}
+SECRET_NAMES = ("password", "token", "api_key", "apikey", "secret", "passcode", "access_key", "pin", "psk")
 # Home Assistant's own housekeeping, which isn't a device in anyone's home.
 NOT_DEVICES = {"sun", "backup", "hassio", "update", "analytics", "cloud", "person", "zone", "shopping_list", "tts", "stt"}
 CLIENT_ID = "http://promptly-box.local/"
@@ -65,15 +99,276 @@ def read_setup() -> dict[str, str]:
     body = raw[len("pbox1.") :]
     try:
         cfg = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
-        return {"server": str(cfg["s"]).rstrip("/"), "box": str(cfg["b"]), "key": str(cfg["k"])}
+        setup = {"server": str(cfg["s"]).rstrip("/"), "box": str(cfg["b"]), "key": str(cfg["k"])}
     except Exception as e:  # noqa: BLE001
         raise SystemExit("That setup string is damaged. Copy it again from Admin → Home.") from e
+    setup["server"] = server_from_here(os.environ.get("PROMPTLY_SERVER", "").strip() or setup["server"], in_container=Path("/.dockerenv").exists())
+    return setup
+
+
+def server_from_here(server: str, *, in_container: bool) -> str:
+    """Promptly on this same computer is "localhost" to the person who
+    prepared the box, but not to a container: from in there it's the host."""
+    if not in_container:
+        return server
+    for local in ("//localhost", "//127.0.0.1", "//[::1]"):
+        if local in server:
+            return server.replace(local, "//" + os.environ.get("PROMPTLY_HOST_NAME", "host.docker.internal"), 1)
+    return server
 
 
 def backoff(attempt: int) -> float:
     """1 s, 2 s, 4 s … capped at a minute, with jitter so a street of boxes
     doesn't come back in step after an outage."""
     return min(60.0, 2.0 ** min(attempt, 6)) * (0.7 + random.random() * 0.6)
+
+
+# ------------------------------------------------------------------ plain shapes
+#
+# Pure functions: Home Assistant's answers in, what Promptly shows out.
+
+
+def extras(domain: str, attrs: dict[str, Any]) -> dict[str, Any]:
+    """What a device's controls need beyond on and off."""
+
+    def num(key: str) -> float | None:
+        v = attrs.get(key)
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    x: dict[str, Any] = {}
+    if domain == "light":
+        modes = [m for m in attrs.get("supported_color_modes") or [] if isinstance(m, str)]
+        if modes:
+            x["modes"] = modes
+        for ours, theirs in (("k", "color_temp_kelvin"), ("kmin", "min_color_temp_kelvin"), ("kmax", "max_color_temp_kelvin")):
+            if num(theirs) is not None:
+                x[ours] = num(theirs)
+        rgb = attrs.get("rgb_color")
+        if isinstance(rgb, (list, tuple)) and len(rgb) == 3:
+            x["rgb"] = [int(c) for c in rgb]
+    elif domain == "fan" and num("percentage") is not None:
+        x["pct"] = num("percentage")
+    elif domain == "cover" and num("current_position") is not None:
+        x["pos"] = num("current_position")
+    elif domain == "climate":
+        for ours, theirs in (("target", "temperature"), ("cur", "current_temperature"), ("min", "min_temp"), ("max", "max_temp"), ("step", "target_temp_step")):
+            if num(theirs) is not None:
+                x[ours] = num(theirs)
+        modes = [m for m in attrs.get("hvac_modes") or [] if isinstance(m, str)]
+        if modes:
+            x["modes"] = modes
+    elif domain == "media_player":
+        if num("volume_level") is not None:
+            x["vol"] = round(num("volume_level") * 100)
+        if isinstance(attrs.get("media_title"), str):
+            x["title"] = attrs["media_title"]
+        if isinstance(attrs.get("is_volume_muted"), bool):
+            x["muted"] = attrs["is_volume_muted"]
+    return x
+
+
+def service_for(domain: str, action: str, value: Any) -> tuple[str, str, dict[str, Any]] | None:
+    """``(domain, service, data)`` for one of our actions, or None."""
+    if action in ("turn_on", "turn_off", "toggle"):
+        return ("homeassistant", action, {}) if domain in ON_OFF else None
+    call = SERVICES.get((domain, action))
+    if call is None:
+        return None
+    data: dict[str, Any] = {}
+    if (domain, action) == ("light", "set") and isinstance(value, dict):
+        if "bri" in value:
+            data["brightness_pct"] = value["bri"]
+        if "k" in value:
+            data["color_temp_kelvin"] = value["k"]
+        if "rgb" in value:
+            data["rgb_color"] = value["rgb"]
+    elif action == "speed":
+        data["percentage"] = value
+    elif action == "position":
+        data["position"] = value
+    elif action == "temperature":
+        data["temperature"] = value
+    elif action == "mode":
+        data["hvac_mode"] = value
+    elif action == "volume":
+        data["volume_level"] = round(float(value) / 100, 2)
+    return (call[0], call[1], data)
+
+
+def brands_for(manifests: dict[str, dict[str, Any]], can_set_up: set[str], q: str) -> list[dict[str, Any]]:
+    """The brands offered: the well-known ones first; with a search, every
+    brand this Home Assistant can set up whose name matches."""
+    out: list[dict[str, Any]] = []
+    q = q.strip().lower()
+
+    def one(domain: str, name: str, note: str, featured: bool) -> dict[str, Any]:
+        m = manifests.get(domain) or {}
+        cloud = str(m.get("iot_class") or "").startswith("cloud")
+        return {"id": domain, "name": name, "note": note, "cloud": cloud, "featured": featured}
+
+    featured = {b[0] for b in BRANDS}
+    for domain, name, note in BRANDS:
+        if domain in can_set_up and (not q or q in name.lower() or q in domain):
+            out.append(one(domain, name, note, True))
+    if q:
+        rest = [
+            one(d, str((manifests.get(d) or {}).get("name") or d), "", False)
+            for d in can_set_up
+            if d not in featured and d not in NOT_BRANDS and (manifests.get(d) or {}).get("integration_type") not in ("system", "entity", "helper")
+            and (q in d or q in str((manifests.get(d) or {}).get("name") or "").lower())
+        ]
+        out += sorted(rest, key=lambda b: b["name"].lower())[:40]
+    return out
+
+
+def _fill(text: str, values: dict[str, Any] | None) -> str:
+    """Home Assistant's "{name}" placeholders, without str.format's risks."""
+    for k, v in (values or {}).items():
+        text = text.replace("{" + str(k) + "}", str(v))
+    return text
+
+
+def _say(text: str, values: dict[str, Any] | None = None) -> str:
+    """Home Assistant's wording, made ours: placeholders filled, pictures
+    and link targets dropped, and its own name swapped for Promptly's (the
+    person never meets Home Assistant)."""
+    text = _fill(text or "", values)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = text.replace("Home Assistant", "Promptly")
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def found_one(flow: dict[str, Any], manifests: dict[str, dict[str, Any]], words: dict[str, str]) -> dict[str, Any]:
+    brand = str(flow.get("handler") or "")
+    brand_name = str((manifests.get(brand) or {}).get("name") or brand)
+    places = (flow.get("context") or {}).get("title_placeholders") or {}
+    title = words.get(f"component.{brand}.config.flow_title")
+    name = _say(title, places) if title else str(places.get("name") or places.get("host") or "")
+    return {"flow": flow.get("flow_id"), "brand": brand, "brand_name": brand_name, "name": name.strip() or brand_name}
+
+
+def shape_field(f: dict[str, Any], label: str, hint: str) -> dict[str, Any]:
+    """One field of a Home Assistant form, as something to draw."""
+    name = str(f.get("name") or "")
+    out: dict[str, Any] = {"name": name, "label": label or name.replace("_", " ").capitalize(), "required": bool(f.get("required")), "type": "unsupported"}
+    if hint:
+        out["hint"] = hint
+    default = f.get("default")
+    suggested = (f.get("description") or {}).get("suggested_value") if isinstance(f.get("description"), dict) else None
+    if suggested is not None:
+        default = suggested
+    secret = any(part in name.lower() for part in SECRET_NAMES)
+
+    def options(raw: Any) -> list[dict[str, str]]:
+        opts = []
+        for o in raw or []:
+            if isinstance(o, dict):
+                opts.append({"value": str(o.get("value")), "label": str(o.get("label") or o.get("value"))})
+            elif isinstance(o, (list, tuple)) and len(o) == 2:
+                opts.append({"value": str(o[0]), "label": str(o[1])})
+            else:
+                opts.append({"value": str(o), "label": str(o)})
+        return opts
+
+    sel = f.get("selector") if isinstance(f.get("selector"), dict) else None
+    kind = str(f.get("type") or "")
+    if sel:
+        key = next(iter(sel), "")
+        conf = sel.get(key) or {}
+        if key == "text":
+            out["type"] = "password" if conf.get("type") == "password" or secret else "text"
+        elif key == "number":
+            out["type"] = "number"
+            for k in ("min", "max", "step"):
+                if isinstance(conf.get(k), (int, float)):
+                    out[k] = conf[k]
+        elif key == "boolean":
+            out["type"] = "bool"
+        elif key == "select":
+            out["type"] = "multiselect" if conf.get("multiple") else "select"
+            out["options"] = options(conf.get("options"))
+    elif kind == "string":
+        out["type"] = "password" if secret else "text"
+    elif kind in ("integer", "float", "positive_int"):
+        out["type"] = "number"
+        for ours, theirs in (("min", "valueMin"), ("max", "valueMax")):
+            if isinstance(f.get(theirs), (int, float)):
+                out[ours] = f[theirs]
+        if kind != "float":
+            out["step"] = 1
+    elif kind == "boolean":
+        out["type"] = "bool"
+    elif kind == "select":
+        out["type"] = "select"
+        out["options"] = options(f.get("options"))
+    elif kind == "multi_select":
+        out["type"] = "multiselect"
+        raw = f.get("options")
+        out["options"] = options(list(raw.items()) if isinstance(raw, dict) else raw)
+    if default is not None and out["type"] != "password" and isinstance(default, (str, int, float, bool, list)):
+        out["default"] = default
+    return out
+
+
+def shape_flow(r: dict[str, Any], words: dict[str, str], brand_name: str) -> dict[str, Any]:
+    """One answer from a Home Assistant set-up flow, as a step to show.
+
+    kind: form (fields to fill, or none: "press the button, then Continue"),
+    menu (pick one), wait (it's working: ask again), done, stopped (with the
+    reason in words), elsewhere (needs a sign-in on the maker's own site:
+    not supported yet).
+    """
+    brand = str(r.get("handler") or "")
+    step = str(r.get("step_id") or "")
+    base = f"component.{brand}.config"
+    places = r.get("description_placeholders") or {}
+    out: dict[str, Any] = {"flow": r.get("flow_id"), "brand": brand, "brand_name": brand_name, "step": step}
+    kind = r.get("type")
+    if kind == "create_entry":
+        entry = r.get("result") if isinstance(r.get("result"), dict) else {}
+        out.update(kind="done", title=str(r.get("title") or entry.get("title") or brand_name), entry_id=entry.get("entry_id"))
+        return out
+    if kind == "abort":
+        reason = str(r.get("reason") or "")
+        text = words.get(f"{base}.abort.{reason}") or {
+            "already_configured": "This is already set up.",
+            "already_in_progress": "This is already being set up.",
+            "no_devices_found": "Nothing was found on your network.",
+            "single_instance_allowed": "This is already set up, and there can only be one.",
+            "cannot_connect": "Couldn't reach it.",
+        }.get(reason) or "This couldn't be set up."
+        out.update(kind="stopped", reason=reason, text=_say(text, places))
+        return out
+    if kind in ("external", "external_done"):
+        out.update(kind="elsewhere", text="This one is finished on the maker's own website, which Promptly can't do for you yet.")
+        return out
+    if kind in ("show_progress", "show_progress_done"):
+        action = str(r.get("progress_action") or "")
+        out.update(kind="wait", text=_say(words.get(f"{base}.progress.{action}") or "Working on it…", places))
+        return out
+    out["title"] = _say(words.get(f"{base}.step.{step}.title") or brand_name, places)
+    described = words.get(f"{base}.step.{step}.description")
+    if described:
+        out["text"] = _say(described, places)
+    if kind == "menu":
+        raw = r.get("menu_options")
+        ids = list(raw.keys()) if isinstance(raw, dict) else list(raw or [])
+        out.update(kind="menu", options=[
+            {"value": str(i), "label": _say((raw.get(i) if isinstance(raw, dict) else None) or words.get(f"{base}.step.{step}.menu_options.{i}") or str(i).replace("_", " ").capitalize(), places)}
+            for i in ids
+        ])
+        return out
+    fields = [
+        shape_field(f, words.get(f"{base}.step.{step}.data.{f.get('name')}") or "", words.get(f"{base}.step.{step}.data_description.{f.get('name')}") or "")
+        for f in r.get("data_schema") or []
+        if isinstance(f, dict) and f.get("type") != "constant"
+    ]
+    errors = {}
+    for field, code in (r.get("errors") or {}).items():
+        errors[str(field)] = _say(words.get(f"{base}.error.{code}") or {"cannot_connect": "Couldn't reach it. Check the address and that it's switched on.", "invalid_auth": "That sign-in wasn't accepted.", "unknown": "Something went wrong. Try again."}.get(str(code)) or str(code).replace("_", " ").capitalize(), places)
+    out.update(kind="form", fields=fields, errors=errors, last=bool(r.get("last_step")))
+    return out
 
 
 # ------------------------------------------------------------------ Home Assistant
@@ -96,6 +391,8 @@ class HomeAssistant:
         # Told to the server: ("snapshot", None) | ("state", id) | ("gone", id)
         self.changes: asyncio.Queue = asyncio.Queue()
         self._resnap: asyncio.Task | None = None
+        self._words: dict[str, dict[str, str]] = {}
+        self._manifests: dict[str, dict[str, Any]] = {}
 
     # -- signing in
 
@@ -295,13 +592,137 @@ class HomeAssistant:
             out["cls"] = str(attrs["device_class"])
         if domain == "light" and isinstance(attrs.get("brightness"), (int, float)):
             out["bri"] = round(attrs["brightness"] / 255 * 100)
+        x = extras(domain, attrs)
+        if x:
+            out["x"] = x
         return out
 
-    async def switch(self, entity_id: str, action: str) -> None:
+    async def do(self, entity_id: str, action: str, value: Any) -> None:
+        """Switch or set one device."""
         domain = entity_id.split(".", 1)[0]
-        if domain not in SWITCHABLE or action not in ACTIONS or entity_id not in self.entities:
-            raise RuntimeError("That can't be switched.")
-        await self.ask({"type": "call_service", "domain": "homeassistant", "service": action, "target": {"entity_id": entity_id}})
+        if entity_id not in self.entities:
+            raise RuntimeError("That device isn't here any more.")
+        call = service_for(domain, action, value)
+        if call is None:
+            raise RuntimeError("That can't be done.")
+        await self.ask({"type": "call_service", "domain": call[0], "service": call[1], "service_data": call[2], "target": {"entity_id": entity_id}})
+
+    # -- Home Assistant's REST API (set-up steps live there)
+
+    async def rest(self, method: str, path: str, body: Any = None) -> Any:
+        token = await self.token()
+        async with self.session.request(method, f"{self.base}/api{path}", json=body, headers={"Authorization": f"Bearer {token}"}, timeout=aiohttp.ClientTimeout(total=40)) as r:
+            text = await r.text()
+            if r.status >= 400:
+                try:
+                    said = json.loads(text).get("message")
+                except Exception:  # noqa: BLE001
+                    said = None
+                raise RuntimeError(str(said or f"Home Assistant said {r.status}.")[:200])
+            return json.loads(text) if text else None
+
+    async def words(self, brand: str) -> dict[str, str]:
+        """Home Assistant's own wording for a brand's set-up steps."""
+        if brand not in self._words:
+            try:
+                got = await self.ask({"type": "frontend/get_translations", "language": "en", "category": "config", "integration": [brand], "config_flow": True})
+                self._words[brand] = dict((got or {}).get("resources") or {})
+            except Exception:  # noqa: BLE001
+                self._words[brand] = {}
+        return self._words[brand]
+
+    async def brand_names(self) -> dict[str, dict[str, Any]]:
+        if not self._manifests:
+            for m in await self.ask({"type": "manifest/list"}) or []:
+                self._manifests[m["domain"]] = m
+        return self._manifests
+
+    async def op(self, op: str, a: dict[str, Any]) -> Any:
+        """One thing the server asked for. Returns plain data."""
+        if op == "do":
+            await self.do(str(a.get("entity") or ""), str(a.get("action") or ""), a.get("value"))
+            return None
+        if op == "brands":
+            return brands_for(await self.brand_names(), set(await self.rest("GET", "/config/config_entries/flow_handlers") or []), str(a.get("q") or ""))
+        if op == "flows.found":
+            names = await self.brand_names()
+            out = []
+            for f in await self.ask({"type": "config_entries/flow/progress"}) or []:
+                ctx = f.get("context") or {}
+                if ctx.get("source") in (None, "user", "reauth", "reconfigure", "import", "system") or f.get("handler") in NOT_BRANDS:
+                    continue
+                out.append(found_one(f, names, await self.words(str(f.get("handler")))))
+            return out
+        if op == "flows.start":
+            brand = str(a.get("brand") or "")
+            return await self._shaped(await self.rest("POST", "/config/config_entries/flow", {"handler": brand, "show_advanced_options": False}))
+        if op == "flows.get":
+            return await self._shaped(await self.rest("GET", f"/config/config_entries/flow/{a.get('flow')}"))
+        if op == "flows.step":
+            given = a.get("input") if isinstance(a.get("input"), dict) else {}
+            return await self._shaped(await self.rest("POST", f"/config/config_entries/flow/{a.get('flow')}", given))
+        if op == "flows.abort":
+            try:
+                await self.rest("DELETE", f"/config/config_entries/flow/{a.get('flow')}")
+            except RuntimeError:
+                pass  # already finished
+            return None
+        if op == "entries.list":
+            names = await self.brand_names()
+            return [
+                {"id": e["entry_id"], "brand": e["domain"], "brand_name": (names.get(e["domain"]) or {}).get("name") or e["domain"], "title": e.get("title") or "", "state": e.get("state") or ""}
+                for e in await self.rest("GET", "/config/config_entries/entry") or []
+                if e.get("domain") not in NOT_BRANDS and e.get("source") not in ("system", "ignore")
+            ]
+        if op == "entries.remove":
+            await self.rest("DELETE", f"/config/config_entries/entry/{a.get('entry')}")
+            return None
+        if op == "areas.create":
+            made = await self.ask({"type": "config/area_registry/create", "name": str(a.get("name") or "")[:60]})
+            return {"id": made["area_id"], "name": made["name"]}
+        if op == "areas.rename":
+            await self.ask({"type": "config/area_registry/update", "area_id": str(a.get("area")), "name": str(a.get("name") or "")[:60]})
+            return None
+        if op == "areas.delete":
+            await self.ask({"type": "config/area_registry/delete", "area_id": str(a.get("area"))})
+            return None
+        if op == "device.update":
+            await self._device_update(a)
+            return None
+        raise RuntimeError("This box doesn't know how to do that yet. It may need updating.")
+
+    async def _device_update(self, a: dict[str, Any]) -> None:
+        device = a.get("device_id")
+        entity = a.get("entity_id")
+        if not device and entity:
+            for e in await self.ask({"type": "config/entity_registry/list"}) or []:
+                if e["entity_id"] == entity:
+                    device = e.get("device_id")
+                    break
+        change: dict[str, Any] = {}
+        if "area" in a:
+            change["area_id"] = a["area"] or None
+        if device:
+            if a.get("name"):
+                change["name_by_user"] = str(a["name"])[:80]
+            await self.ask({"type": "config/device_registry/update", "device_id": device, **change})
+        elif entity:
+            if a.get("name"):
+                change["name"] = str(a["name"])[:80]
+            await self.ask({"type": "config/entity_registry/update", "entity_id": entity, **change})
+        else:
+            raise RuntimeError("Which device?")
+
+    async def _shaped(self, result: dict[str, Any]) -> dict[str, Any]:
+        brand = str(result.get("handler") or "")
+        names = await self.brand_names()
+        out = shape_flow(result, await self.words(brand), (names.get(brand) or {}).get("name") or brand)
+        if out["kind"] == "done":
+            # What it brought, so the page can ask for a name and a room.
+            entry = out.get("entry_id")
+            devices = [d for d in await self.ask({"type": "config/device_registry/list"}) or [] if entry and entry in (d.get("config_entries") or [])]
+            out["devices"] = [{"device_id": d["id"], "name": d.get("name_by_user") or d.get("name") or "Device", "area": d.get("area_id") or ""} for d in devices[:12]]
+        return out
 
 
 # ------------------------------------------------------------------ the Promptly server
@@ -353,8 +774,8 @@ class Server:
                 t = msg.get("t")
                 if t == "ping":
                     await ws.send_json({"t": "pong"})
-                elif t == "call":
-                    asyncio.create_task(self._call(ws, msg))
+                elif t == "req":
+                    asyncio.create_task(self._req(ws, msg))
                 elif t in ("claimed", "released"):
                     log.info("the server says this box was %s", "claimed into a home" if t == "claimed" else "released from its home")
         except asyncio.TimeoutError:
@@ -362,13 +783,16 @@ class Server:
         finally:
             sender.cancel()
 
-    async def _call(self, ws: aiohttp.ClientWebSocketResponse, msg: dict[str, Any]) -> None:
-        answer: dict[str, Any] = {"t": "result", "id": msg.get("id")}
+    async def _req(self, ws: aiohttp.ClientWebSocketResponse, msg: dict[str, Any]) -> None:
+        answer: dict[str, Any] = {"t": "res", "id": msg.get("id")}
         try:
-            await self.ha.switch(str(msg.get("entity") or ""), str(msg.get("action") or ""))
+            args = msg.get("args") if isinstance(msg.get("args"), dict) else {}
+            answer["data"] = await self.ha.op(str(msg.get("op") or ""), args)
             answer["ok"] = True
         except Exception as e:  # noqa: BLE001
-            answer.update(ok=False, error=str(e)[:200])
+            # Never what was typed: only what went wrong.
+            answer.update(ok=False, error=str(e)[:200] or "That didn't work.")
+            answer.pop("data", None)
         try:
             await ws.send_json(answer)
         except Exception:  # noqa: BLE001
