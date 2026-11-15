@@ -14,6 +14,10 @@
 #                API key and secret; without it a restore can't use them
 #   config.tar   nginx/ssl, nginx/local and docker-compose.override.yml, if
 #                you have them: your certificates and local settings
+#   home.tar     data/home, if Promptly Home is in use: what its Home
+#                Assistant knows about your devices and bridges (pairings),
+#                without its history and logs. Small. Without it a restore
+#                works, and every device has to be added again.
 #   MANIFEST     version, git commit and schema revision
 #
 # Copying ./data while Postgres is running is NOT a backup (the files can
@@ -85,6 +89,18 @@ PARTS=(MANIFEST db.dump files.tar env)
 if ((${#CONFIG[@]})); then
   tar -cf "$WORK/config.tar" "${CONFIG[@]}"
   PARTS+=(config.tar)
+fi
+
+# Promptly Home's pairings. Read while it runs: these are small settings
+# files, rewritten whole, not a database mid-write (its history database and
+# logs are left out).
+if [[ -d data/home ]]; then
+  if tar --exclude='home-assistant_v2.db*' --exclude='*.log*' --exclude='ha/tts' --exclude='ha/deps' -cf "$WORK/home.tar" -C data home 2>/dev/null; then
+    PARTS+=(home.tar)
+  else
+    rm -f "$WORK/home.tar"
+    printf '\033[33m%s\033[0m\n' "  Promptly Home's device pairings couldn't be read, so they aren't in this backup."
+  fi
 fi
 
 say "4/4  Writing the archive"

@@ -40,13 +40,15 @@ param(
     [switch]$NoSearch,
     [switch]$NoMaps,
     [switch]$NoCalls,
+    # Skip Promptly Home's bundled Home Assistant (smart devices; about 3.5 GB).
+    [switch]$NoHome,
     # Back-compat: -NoOllama is now the default, -Minimal == -NoSearch.
     [switch]$NoOllama,
     [switch]$Minimal
 )
 
 if ($Minimal) { $NoSearch = $true }
-$ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoMaps -or $NoCalls -or $NoOllama -or $Minimal
+$ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoMaps -or $NoCalls -or $NoHome -or $NoOllama -or $Minimal
 
 $ErrorActionPreference = "Stop"
 
@@ -122,6 +124,16 @@ foreach ($k in @("TUS_HOOK_SECRET")) {
     }
 }
 Set-IfPlaceholder ([ref]$envText) "TUS_HOOK_SECRET"   (New-HexSecret 32)
+# Promptly Home: what its bundled home box proves itself with. Not made with
+# -NoHome, so a later update still offers it.
+if (-not $NoHome) {
+    if ($envText -notmatch "(?m)^HOME_BOX_SECRET=.") {
+        $envText = [regex]::Replace($envText, "(?m)^HOME_BOX_SECRET=\s*\r?\n", "")
+        if ($envText -and -not $envText.EndsWith("`n")) { $envText += "`n" }
+        $envText += "HOME_BOX_SECRET=change-me`n"
+    }
+    Set-IfPlaceholder ([ref]$envText) "HOME_BOX_SECRET" (New-HexSecret 32)
+}
 # Calls (LiveKit). An .env from before Calls has no such lines: add them.
 foreach ($k in @("LIVEKIT_API_KEY", "LIVEKIT_API_SECRET")) {
     if ($envText -notmatch "(?m)^$k=") {
@@ -198,6 +210,9 @@ if (-not $NoMaps) { $profiles += "maps" }
 # Calls: Docker Desktop has no host networking, so the bridged LiveKit
 # variant runs (media ports published, this PC's LAN address advertised).
 if (-not $NoCalls) { $profiles += "calls-desktop" }
+# Promptly Home: the bridged variant (Docker Desktop can't share the host's
+# network, so devices are added by brand with their address).
+if (-not $NoHome) { $profiles += "home-desktop" }
 $profilesCsv = $profiles -join ","
 
 if ($ProfileFlagsGiven -or $FreshEnv -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {

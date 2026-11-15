@@ -24,6 +24,8 @@
 #   ./install.sh --no-calls     # skip the calls server (LiveKit) behind voice
 #                               # channels in Rooms. On by default; voice stays
 #                               # off for people until an admin turns it on.
+#   ./install.sh --no-home      # skip Promptly Home's bundled Home Assistant
+#                               # (smart devices; about 3.5 GB of disk).
 #
 # The choice persists in COMPOSE_PROFILES in .env, so a plain
 # `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
@@ -46,6 +48,7 @@ WITH_OLLAMA=false
 NO_SEARCH=false
 NO_MAPS=false
 NO_CALLS=false
+NO_HOME=false
 PROFILE_FLAGS_GIVEN=false
 for arg in "$@"; do
   case "$arg" in
@@ -53,10 +56,11 @@ for arg in "$@"; do
     --no-search)   NO_SEARCH=true;   PROFILE_FLAGS_GIVEN=true ;;
     --no-maps)     NO_MAPS=true;     PROFILE_FLAGS_GIVEN=true ;;
     --no-calls)    NO_CALLS=true;    PROFILE_FLAGS_GIVEN=true ;;
+    --no-home)     NO_HOME=true;     PROFILE_FLAGS_GIVEN=true ;;
     # Back-compat: --no-ollama is now the default; accept it silently.
     --no-ollama)   PROFILE_FLAGS_GIVEN=true ;;
     -h|--help)
-      sed -n '2,31p' "$0" | sed 's/^# //; s/^#//'
+      sed -n '2,33p' "$0" | sed 's/^# //; s/^#//'
       exit 0
       ;;
     *)
@@ -129,6 +133,12 @@ for k in TUS_HOOK_SECRET; do
   grep -qE "^${k}=." .env || { sed -i.bak "/^${k}=\$/d" .env; rm -f .env.bak; printf '%s=change-me\n' "$k" >> .env; }
 done
 seed_secret TUS_HOOK_SECRET   "$(openssl rand -hex 32)"
+# Promptly Home: what its bundled home box proves itself with. Not made with
+# --no-home, so a later update still offers it.
+if ! $NO_HOME; then
+  grep -qE "^HOME_BOX_SECRET=." .env || { sed -i.bak "/^HOME_BOX_SECRET=\$/d" .env; rm -f .env.bak; printf 'HOME_BOX_SECRET=change-me\n' >> .env; }
+  seed_secret HOME_BOX_SECRET "$(openssl rand -hex 32)"
+fi
 # Calls (LiveKit). An .env from before Calls has no such lines: add them.
 for k in LIVEKIT_API_KEY LIVEKIT_API_SECRET; do
   grep -qE "^${k}=" .env || printf '%s=change-me\n' "$k" >> .env
@@ -219,6 +229,11 @@ DOCKER_DESKTOP=false
 docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -qi 'docker desktop' && DOCKER_DESKTOP=true
 if ! $NO_CALLS; then
   if $DOCKER_DESKTOP; then profiles+=("calls-desktop"); else profiles+=("calls"); fi
+fi
+# Promptly Home: on the host's network on Linux (devices are found by
+# broadcast); bridged on Docker Desktop (docker-compose.yml, "Promptly Home").
+if ! $NO_HOME; then
+  if $DOCKER_DESKTOP; then profiles+=("home-desktop"); else profiles+=("home"); fi
 fi
 profiles_csv=$(IFS=,; printf '%s' "${profiles[*]-}")
 

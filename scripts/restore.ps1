@@ -97,6 +97,11 @@ try {
         if ($LASTEXITCODE -ne 0) { Fail "Couldn't unpack the files." }
         Move-Item (Join-Path $unpacked "uploads") $uploads
         Move-Item (Join-Path $unpacked "whiteboard") "data\whiteboard"
+        # Promptly Home's device pairings, if the backup has them.
+        if (Test-Path (Join-Path $work "home.tar")) {
+            if (Test-Path "data\home") { Move-Item "data\home" "data\home.before-restore-$ts" }
+            tar -C data -xf (Join-Path $work "home.tar")
+        }
         if ($WithEnv -and (Test-Path (Join-Path $work "env"))) {
             if (Test-Path .env) { Copy-Item .env ".env.before-restore-$ts" }
             Copy-Item (Join-Path $work "env") .env -Force

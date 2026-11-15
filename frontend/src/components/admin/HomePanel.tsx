@@ -41,7 +41,12 @@ async function copy(text: string, what: string) {
 
 export function HomePanel() {
   const qc = useQueryClient();
-  const { data: settings } = useQuery({ queryKey: [...KEY, "settings"], queryFn: homeAdminApi.settings });
+  // Asked again every few seconds until this server's own box is up.
+  const { data: settings } = useQuery({
+    queryKey: [...KEY, "settings"],
+    queryFn: homeAdminApi.settings,
+    refetchInterval: (q) => (q.state.data?.bundled && !q.state.data.box_ready ? 4000 : false),
+  });
   const { data: boxes, isError, refetch } = useQuery({ queryKey: [...KEY, "boxes"], queryFn: homeAdminApi.boxes, refetchInterval: 15_000 });
   const [label, setLabel] = useState("");
   // Where boxes dial: this server as the outside world reaches it.
@@ -79,9 +84,25 @@ export function HomePanel() {
           <span className="text-sm">
             <span className="font-medium text-[var(--text)]">Turn on Promptly Home</span>
             <span className="mt-0.5 block text-[var(--text-muted)]">
-              People get a Home page where they add a home box with the code on its card, then see and switch the devices in their own home.
-              Nobody else sees a home's devices, admins included.
+              {settings?.bundled
+                ? "Your smart devices, in Promptly. Turn this on, then open Home: your home is there, ready for \"Add a device\". You add the rest of your household from Home's settings. Nobody outside a home sees its devices, admins included."
+                : "People get a Home page for the smart devices in their own home. Nobody outside a home sees its devices, admins included."}
             </span>
+            {settings?.bundled && (
+              <span role="status" className="mt-2 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", settings.box_ready ? "bg-[var(--success)]" : "animate-pulse bg-[var(--warning)]")} aria-hidden />
+                {settings.box_ready
+                  ? "This server's home box is running."
+                  : settings.box_online
+                    ? "This server's home box is setting itself up. A minute or two."
+                    : "This server's home box is starting. If this hasn't changed in ten minutes, check the Promptly-Home containers are running."}
+              </span>
+            )}
+            {settings && !settings.bundled && (
+              <span className="mt-2 block text-xs text-[var(--text-muted)]">
+                This server doesn't have its own home box. Run Promptly's update to add it (it's bundled from this version on), or use a separate box below.
+              </span>
+            )}
           </span>
           <input
             type="checkbox"
@@ -95,6 +116,12 @@ export function HomePanel() {
         </label>
       </SettingsCard>
 
+      <details className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-[var(--text)]">
+          Other homes (advanced)
+          <span className="ml-2 font-normal text-[var(--text-muted)]">A separate box, for a home that isn't where this server is.</span>
+        </summary>
+        <div className="flex flex-col gap-5 border-t border-[var(--border)] p-4">
       <SettingsCard title="How it works">
         <div className="flex flex-col gap-3 text-sm text-[var(--text)]">
           <p className="text-[var(--text-muted)]">
@@ -194,6 +221,8 @@ export function HomePanel() {
           ))}
         </ul>
       </SettingsCard>
+        </div>
+      </details>
     </div>
   );
 }

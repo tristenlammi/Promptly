@@ -47,11 +47,14 @@ EXTRAS = {
     # Calls (voice channels): the bridged LiveKit variant. Its media ports
     # aren't published (only nginx is); a browser on this PC still connects.
     "calls": ["livekit-desktop"],
+    # Promptly Home: the bundled Home Assistant and its connector, bridged
+    # (the image is about 3.5 GB; pulled once).
+    "home": ["home-assistant-desktop", "home-connector-desktop"],
 }
 # What `--e2e` adds: what the e2e suite exercises beyond the core.
 E2E_EXTRAS = ["media", "photos-ml", "maps", "convert"]
 # Services the stack builds from this worktree, always.
-OWN_BUILDS = {"backend", "frontend", "collab"}
+OWN_BUILDS = {"backend", "frontend", "collab", "home-connector-desktop"}
 FIRST_PORT = 8093
 RESERVED_PORTS = {8091, 8092}  # the main app, the Passwords stack
 MAIN_BACKEND_IMAGE = "promptly-backend:local"
@@ -154,6 +157,8 @@ def write_env(path: Path) -> dict[str, str]:
         # Calls: the LiveKit key pair (the backend and livekit-desktop read it).
         "LIVEKIT_API_KEY": "API" + secrets.token_hex(8),
         "LIVEKIT_API_SECRET": secrets.token_hex(32),
+        # Promptly Home: what the bundled home box proves itself with.
+        "HOME_BOX_SECRET": secrets.token_hex(32),
     }
     add = {k: v for k, v in later.items() if not env.get(k)}
     if add:
@@ -232,6 +237,9 @@ def transform(cfg: dict, opts, env: dict[str, str]) -> dict:
         spec.pop("profiles", None)
         spec.pop("env_file", None)
         spec.pop("ports", None)
+        # Without --with home there's no bundled box: the backend mustn't wait for one.
+        if "home" not in extras and isinstance(spec.get("environment"), dict) and "HOME_BOX_SECRET" in spec["environment"]:
+            spec["environment"]["HOME_BOX_SECRET"] = ""
 
         # Container name: Promptly-Backend -> PromptlyNotes-Backend.
         orig = spec.get("container_name") or f"Promptly-{svc}"

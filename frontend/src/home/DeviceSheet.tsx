@@ -31,17 +31,40 @@ const COLOURS: [string, [number, number, number]][] = [
 const MODE_WORDS: Record<string, string> = { off: "Off", heat: "Heat", cool: "Cool", heat_cool: "Heat and cool", auto: "Auto", dry: "Dry", fan_only: "Fan" };
 const NEW_ROOM = "__new__";
 
-/** A slider that shows the number as you drag and sends it when you let go. */
+/**
+ * A slider that shows the number as you drag and sends it when you let go.
+ *
+ * While you're holding it, and for a moment after you let go, what the
+ * device reports is ignored: a light answers a change with a burst of its
+ * own updates (and the page hears about other changes every couple of
+ * seconds), and any of them used to snap the thumb back mid-drag, so letting
+ * go sent nothing.
+ */
 function Slide({ label, value, min, max, step = 1, unit = "", disabled, onSet }: { label: string; value: number; min: number; max: number; step?: number; unit?: string; disabled?: boolean; onSet: (v: number) => void }) {
   const [at, setAt] = useState(value);
-  // The latest position, even if you let go before the page has redrawn.
   const latest = useRef(value);
+  const held = useRef(false);
+  const settle = useRef(0);
   useEffect(() => {
+    if (held.current) return;
     setAt(value);
     latest.current = value;
   }, [value]);
+  useEffect(() => () => window.clearTimeout(settle.current), []);
+  const move = (v: number) => {
+    held.current = true;
+    window.clearTimeout(settle.current);
+    latest.current = v;
+    setAt(v);
+  };
   const send = () => {
-    if (latest.current !== value) onSet(latest.current);
+    if (!held.current) return;
+    onSet(latest.current);
+    // Keep showing what was asked for until the device has had time to say so itself.
+    window.clearTimeout(settle.current);
+    settle.current = window.setTimeout(() => {
+      held.current = false;
+    }, 2500);
   };
   return (
     <label className="flex flex-col gap-1.5">
@@ -49,7 +72,7 @@ function Slide({ label, value, min, max, step = 1, unit = "", disabled, onSet }:
         {label}
         <span className="font-normal tabular-nums text-[var(--text-muted)]">{at}{unit}</span>
       </span>
-      <input type="range" min={min} max={max} step={step} value={at} disabled={disabled} onChange={(e) => { latest.current = Number(e.target.value); setAt(latest.current); }} onPointerUp={send} onKeyUp={send} onBlur={send} className="h-11 w-full accent-[var(--accent)]" />
+      <input type="range" min={min} max={max} step={step} value={at} disabled={disabled} onChange={(e) => move(Number(e.target.value))} onPointerUp={send} onKeyUp={send} onBlur={send} className="h-11 w-full accent-[var(--accent)]" />
     </label>
   );
 }

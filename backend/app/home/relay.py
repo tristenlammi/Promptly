@@ -336,9 +336,21 @@ async def _known_box(box_id: uuid.UUID, key: str) -> tuple[str, uuid.UUID | None
     """``("ok" | "bad" | "revoked", home_id)``. Its own short session."""
     from app.database import SessionLocal
 
-    from . import codes
+    from . import builtin, codes
     from .models import HomeBox
 
+    if builtin.is_builtin(box_id):
+        # This server's own box: no row to prepare, no code to claim.
+        if not builtin.key_ok(key):
+            return "bad", None
+        from .router import enabled
+
+        async with SessionLocal() as db:
+            box = await builtin.ensure_box(db)
+            if box.home_id is None and await enabled(db):
+                await builtin.ensure_home(db)  # Home was on before the box first dialled in
+            await db.commit()
+            return "ok", box.home_id
     async with SessionLocal() as db:
         box = await db.get(HomeBox, box_id)
         if box is None or not codes.same(box.key_hash, codes.digest(key)):

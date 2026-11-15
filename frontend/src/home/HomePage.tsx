@@ -68,6 +68,7 @@ export function HomePage() {
   const qc = useQueryClient();
   const { data: on, isLoading: checking } = useQuery({ queryKey: ["home", "available"], queryFn: homeApi.available, staleTime: 5 * 60_000 });
   const { data: homes, isLoading, isError, refetch } = useQuery({ queryKey: KEY, queryFn: homeApi.homes, enabled: on === true });
+  const { data: bundled } = useQuery({ queryKey: ["home", "bundled"], queryFn: homeApi.bundled, enabled: on === true, staleTime: 5 * 60_000 });
   const [picked, setPicked] = useState<string | null>(null);
   const [adding, setAdding] = useState(() => codeFromAddress() !== "");
   const [addingDevice, setAddingDevice] = useState(false);
@@ -103,7 +104,7 @@ export function HomePage() {
         actions={
           home && (
             <div className="flex items-center gap-2">
-              {home.boxes.length > 0 && (
+              {home.boxes.some((b) => b.ready) && (
                 <button type="button" onClick={() => setAddingDevice(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-3 text-xs font-medium text-white hover:opacity-90">
                   <Plus className="h-3.5 w-3.5" /> Add a device
                 </button>
@@ -130,28 +131,25 @@ export function HomePage() {
             ))}
           </div>
         )}
-        {homes && !home && (
+        {homes && !home && bundled !== false && (
+          <div className="flex flex-col items-center gap-4">
+            <EmptyState
+              icon={<Router className="h-5 w-5" />}
+              title="You're not in a home yet"
+              description="Ask whoever set up Home on this Promptly to add you. They open Home, tap the settings button, and add your username under People."
+            />
+            <button type="button" className="text-xs text-[var(--text-muted)] underline-offset-2 hover:underline" onClick={() => setAdding(true)}>I have a separate home box with a code</button>
+          </div>
+        )}
+        {homes && !home && bundled === false && (
           <div className="flex flex-col gap-5">
             <EmptyState
               icon={<Router className="h-5 w-5" />}
               title="Add your home box"
-              description="A home box is a small computer that lives in your home and connects your lights, plugs and other devices to Promptly."
+              description="A home box is a small computer that lives in your home and connects your lights, plugs and other devices to Promptly. Plug it in, then type the code from its card."
               action={<button type="button" className={primary} onClick={() => setAdding(true)}><Plus className="h-4 w-4" /> Add a home box</button>}
             />
-            <ol className="mx-auto flex w-full max-w-md flex-col gap-3 text-sm text-[var(--text)]">
-              {[
-                ["Plug it in.", "Power, and a network cable from the box to your router. Give it a few minutes to start."],
-                ["Find its card.", "The card that came with the box has a code like ABCD-EFGH-JKMN and a square QR code."],
-                ["Scan or type.", "Point your phone's camera at the QR code, or tap Add a home box and type the code."],
-                ["Add your devices.", "Your home appears here. Tap Add a device to bring in your lights, plugs and bridges."],
-              ].map(([head, body], i) => (
-                <li key={head} className="flex gap-3">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/15 text-sm font-semibold text-[var(--accent-text,var(--accent))]">{i + 1}</span>
-                  <span><span className="font-medium">{head}</span> <span className="text-[var(--text-muted)]">{body}</span></span>
-                </li>
-              ))}
-            </ol>
-            <p className="mx-auto max-w-md text-center text-xs text-[var(--text-muted)]">No box? Ask whoever looks after this Promptly: they prepare one in Admin → Home.</p>
+            <p className="mx-auto max-w-md text-center text-xs text-[var(--text-muted)]">No box? Ask whoever looks after this Promptly.</p>
           </div>
         )}
         {home && <Devices home={home} onAddDevice={() => setAddingDevice(true)} />}
@@ -222,7 +220,10 @@ function useLive(home: Home | null) {
 }
 
 function Devices({ home, onAddDevice }: { home: Home; onAddDevice: () => void }) {
-  const offline = home.boxes.filter((b) => !b.online);
+  // This server's own box takes a minute or two to come up (longer the first
+  // time, while it sets itself up): that's "starting", not "offline".
+  const starting = home.boxes.filter((b) => b.builtin && !b.ready);
+  const offline = home.boxes.filter((b) => !b.online && !b.builtin);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const keyOf = (e: HomeEntity) => `${e.box_id}/${e.id}`;
   const opened = openKey ? home.entities.find((e) => keyOf(e) === openKey) ?? null : null;
@@ -250,7 +251,19 @@ function Devices({ home, onAddDevice }: { home: Home; onAddDevice: () => void })
           </div>
         </div>
       )}
-      {home.entities.length === 0 && offline.length === 0 && (
+      {starting.length > 0 && (
+        <div role="status" className="flex items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+          <Router className="mt-0.5 h-5 w-5 shrink-0 animate-pulse text-[var(--accent-text,var(--accent))]" aria-hidden />
+          <div className="min-w-0 text-sm">
+            <p className="font-medium text-[var(--text)]">Home is starting up</p>
+            <p className="text-[var(--text-muted)]">
+              This takes a minute or two, a little longer the very first time. This page fills in by itself.
+              {home.entities.length > 0 ? " What you see below is from last time." : ""}
+            </p>
+          </div>
+        </div>
+      )}
+      {home.entities.length === 0 && offline.length === 0 && starting.length === 0 && (
         <EmptyState
           icon={<Lightbulb className="h-5 w-5" />}
           title="No devices yet"

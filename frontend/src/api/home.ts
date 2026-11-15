@@ -111,6 +111,10 @@ export interface HomeBox {
   last_seen_at: string | null;
   version: string | null;
   added_at: string | null;
+  /** This server's own box: nothing to plug in, and it can't be moved. */
+  builtin: boolean;
+  /** It has said what devices it has (a fresh one takes a minute or two). */
+  ready: boolean;
 }
 
 export interface HomeDevices {
@@ -132,6 +136,8 @@ export type HomeState = ({ changed: true } & HomeDevices) | { changed: false; re
 export const homeApi = {
   available: () => apiClient.get<{ available: boolean }>("/home/available").then((r) => r.data.available === true).catch(() => false),
   homes: () => apiClient.get<{ homes: Home[] }>("/home").then((r) => r.data.homes),
+  /** This server has its own home box (bundled with Promptly): nothing to plug in. */
+  bundled: () => apiClient.get<{ bundled: boolean }>("/home").then((r) => r.data.bundled === true).catch(() => false),
   state: (homeId: string, after: number) => apiClient.get<HomeState>(`/home/${homeId}/state`, { params: { after } }).then((r) => r.data),
   claim: (body: { code: string; home_id?: string; home_name?: string }) =>
     apiClient.post<{ home_id: string; box_id: string; online: boolean }>("/home/claim", body).then((r) => r.data),
@@ -176,6 +182,15 @@ export interface AdminBox {
   created_at: string | null;
 }
 
+export interface AdminHomeSettings {
+  enabled: boolean;
+  /** Home Assistant is bundled with this server. */
+  bundled: boolean;
+  /** This server's own box has connected, and has said what devices it has. */
+  box_online: boolean;
+  box_ready: boolean;
+}
+
 export interface PreparedBox {
   box: AdminBox;
   /** Goes into the box. Shown once. */
@@ -188,8 +203,8 @@ export interface PreparedBox {
 }
 
 export const homeAdminApi = {
-  settings: () => apiClient.get<{ enabled: boolean }>("/admin/home/settings").then((r) => r.data),
-  setEnabled: (enabled: boolean) => apiClient.patch<{ enabled: boolean }>("/admin/home/settings", { enabled }).then((r) => r.data),
+  settings: () => apiClient.get<AdminHomeSettings>("/admin/home/settings").then((r) => r.data),
+  setEnabled: (enabled: boolean) => apiClient.patch<AdminHomeSettings>("/admin/home/settings", { enabled }).then((r) => r.data),
   boxes: () => apiClient.get<{ boxes: AdminBox[] }>("/admin/home/boxes").then((r) => r.data.boxes),
   prepare: (label: string, server_url: string) => apiClient.post<PreparedBox>("/admin/home/boxes", { label, server_url }).then((r) => r.data),
   newCode: (id: string) => apiClient.post<{ claim_code: string; claim_url: string }>(`/admin/home/boxes/${id}/claim-code`).then((r) => r.data),

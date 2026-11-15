@@ -242,6 +242,9 @@ services:
       - LIVEKIT_METRICS_PORT=${LIVEKIT_METRICS_PORT:-6789}
       - LIVEKIT_UDP_PORT=${LIVEKIT_UDP_PORT:-7882}
       - LIVEKIT_TCP_PORT=${LIVEKIT_TCP_PORT:-7881}
+      # Promptly Home: what the bundled home box (home-connector below)
+      # proves itself with. Made by install/update; empty = not bundled.
+      - HOME_BOX_SECRET=${HOME_BOX_SECRET:-}
     # Uncomment to let Home Assistant reach the Wyoming bridge. Left
     # commented so enabling voice satellites is a deliberate act rather
     # than a port that quietly appears on your network — see
@@ -1121,6 +1124,130 @@ services:
       promptly:
         # nginx and the backend find either variant as "livekit".
         aliases: [livekit]
+
+  # ============================================================
+  # Promptly Home: this server's own home box.
+  # ============================================================
+  # Home Assistant (Apache-2.0) knows how to talk to thousands of smart
+  # devices; nobody ever sees it. The connector next to it sets a fresh one
+  # up by itself and links it to the backend, so the whole of "set-up" is
+  # the switch in Admin -> Home. Nothing to prepare, no code to type: the
+  # connector proves itself with HOME_BOX_SECRET, which install.sh|ps1 /
+  # update.sh|ps1 generate into .env and nobody is shown.
+  #
+  # The Home Assistant image is PINNED. The connector sets a fresh one up
+  # through the calls Home Assistant's own first-run screens make, which
+  # aren't a promised interface: bump the tag on purpose, on a test copy
+  # first (scripts/stack.sh up <name> --with home), and bump both variants.
+  # It is a big image (about 3.5 GB on disk) and uses roughly 400-600 MB of
+  # memory. Leave it out by taking the home token out of COMPOSE_PROFILES
+  # (or install with --no-home).
+  #
+  # Two variants, one per host type, chosen by COMPOSE_PROFILES (the
+  # installer and updater write the right one; only one may run):
+  #   home          Linux / Unraid: Home Assistant shares the host's network,
+  #                 because devices announce themselves by broadcast and
+  #                 that doesn't reach Docker's private network. Its own web
+  #                 screens listen on 127.0.0.1 only (home-box/ha_config.py),
+  #                 so nothing on your home network can open them. The
+  #                 connector shares the host's network too: it talks to
+  #                 Home Assistant on 127.0.0.1 and to Promptly through
+  #                 nginx's port on this machine.
+  #   home-desktop  Docker Desktop (Windows / macOS), where sharing the
+  #                 host's network isn't possible: both on the promptly
+  #                 network, no port published. Devices aren't found by
+  #                 themselves there; add them by brand with their address.
+  # Its data is ./data/home (Home Assistant's settings and what it has
+  # learned about your devices, and the connector's token for it).
+  home-assistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.11.1
+    container_name: Promptly-Home
+    profiles: ["home"]
+    logging: *default-logging
+    network_mode: host
+    # Writes configuration.yaml (where it listens), then starts as usual.
+    entrypoint: ["/bin/sh", "-c", "python3 /promptly/ha_config.py /config && exec /init"]
+    environment:
+      - TZ=${TZ:-UTC}
+      - HOME_HA_BIND=127.0.0.1
+      # Change it in .env if something else on this machine has 8123.
+      - HOME_HA_PORT=${HOME_HA_PORT:-8123}
+    volumes:
+      - ./data/home/ha:/config
+      - ./home-box/ha_config.py:/promptly/ha_config.py:ro
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    restart: unless-stopped
+
+  home-connector:
+    build:
+      context: ./home-box/connector
+    image: promptly-home-connector:local
+    container_name: Promptly-HomeConnector
+    profiles: ["home"]
+    logging: *default-logging
+    network_mode: host
+    environment:
+      - PROMPTLY_BUILTIN_KEY=${HOME_BOX_SECRET:-}
+      # nginx on this host: wherever NGINX_BIND opened it (loopback when unset).
+      - PROMPTLY_SERVER=http://${NGINX_BIND:-127.0.0.1}:${NGINX_HTTP_PORT:-8087}
+      - HA_URL=http://127.0.0.1:${HOME_HA_PORT:-8123}
+    volumes:
+      - ./data/home/box:/data
+    <<: *hardened
+    user: "0:0"
+    mem_limit: 128m
+    restart: unless-stopped
+    depends_on:
+      - home-assistant
+
+  home-assistant-desktop:
+    image: ghcr.io/home-assistant/home-assistant:2026.11.1
+    container_name: Promptly-Home-Desktop
+    profiles: ["home-desktop"]
+    logging: *default-logging
+    entrypoint: ["/bin/sh", "-c", "python3 /promptly/ha_config.py /config && exec /init"]
+    environment:
+      - TZ=${TZ:-UTC}
+      # Docker's private network only: no port is published.
+      - HOME_HA_BIND=0.0.0.0
+      - HOME_HA_PORT=8123
+    volumes:
+      - ./data/home/ha:/config
+      - ./home-box/ha_config.py:/promptly/ha_config.py:ro
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    restart: unless-stopped
+    networks:
+      promptly:
+        aliases:
+          - home-assistant
+
+  home-connector-desktop:
+    build:
+      context: ./home-box/connector
+    image: promptly-home-connector:local
+    container_name: Promptly-HomeConnector-Desktop
+    profiles: ["home-desktop"]
+    logging: *default-logging
+    environment:
+      - PROMPTLY_BUILTIN_KEY=${HOME_BOX_SECRET:-}
+      # Straight to the backend inside the deployment, not out and back in.
+      - PROMPTLY_SERVER=http://backend:8000
+      - HA_URL=http://home-assistant:8123
+    volumes:
+      - ./data/home/box:/data
+    <<: *hardened
+    user: "0:0"
+    mem_limit: 128m
+    restart: unless-stopped
+    depends_on:
+      - home-assistant-desktop
+      - backend
+    networks:
+      - promptly
 
 networks:
   promptly:

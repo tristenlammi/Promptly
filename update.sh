@@ -133,6 +133,42 @@ setup_calls() {
   green "  UDP 7882 and TCP 7881 on your router to this machine."
 }
 
+# Promptly Home (smart devices): the first update that has it makes the
+# secret its bundled home box proves itself with, and turns the two
+# containers on (docker-compose.yml, "Promptly Home"): on the host's network
+# on Linux so devices are found, bridged on Docker Desktop. Later updates see
+# the secret and leave both alone, so taking the token out of
+# COMPOSE_PROFILES sticks. Nobody sees devices until an admin turns Promptly
+# Home on in Admin -> Home.
+setup_home() {
+  [[ -f .env ]] || return 0
+  grep -qE '^HOME_BOX_SECRET=.' .env && return 0
+  command -v openssl >/dev/null 2>&1 || { yellow "  Home: openssl isn't installed, so it wasn't turned on (see .env.example)"; return 0; }
+  [[ -n "$(tail -c1 .env)" ]] && printf '\n' >> .env
+  sed -i.bak '/^HOME_BOX_SECRET=$/d' .env && rm -f .env.bak
+  printf 'HOME_BOX_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+  local variant=home
+  if docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -qi 'docker desktop'; then
+    variant=home-desktop
+  elif ! grep -qE '^HOME_HA_PORT=' .env && command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -qE '[:.]8123[[:space:]]'; then
+    # Something here already has Home Assistant's usual port: take the next free one.
+    local port=8124
+    while ss -ltn 2>/dev/null | grep -qE "[:.]${port}[[:space:]]"; do port=$((port + 1)); done
+    printf 'HOME_HA_PORT=%s\n' "$port" >> .env
+    yellow "  Home: port 8123 is taken on this machine, so its Home Assistant uses ${port}."
+  fi
+  if grep -qE '^COMPOSE_PROFILES=' .env; then
+    if ! grep -qE '^COMPOSE_PROFILES=(.*,)?home(-desktop)?(,|$)' .env; then
+      sed -i.bak -E "s/^COMPOSE_PROFILES=(.*)$/COMPOSE_PROFILES=\1,${variant}/; s/^COMPOSE_PROFILES=,/COMPOSE_PROFILES=/" .env
+      rm -f .env.bak
+    fi
+  else
+    printf 'COMPOSE_PROFILES=%s\n' "$variant" >> .env
+  fi
+  green "  Home: smart devices are bundled in now ($variant; about 3.5 GB to download this once)."
+  green "  Turn Promptly Home on in Admin -> Home, then open Home."
+}
+
 # Shared secrets that later versions need and older .env files lack (or
 # still hold the .env.example placeholder for): make them once. Lines with
 # a real value are left alone. Runs before anything is rebuilt, so the new
@@ -254,6 +290,7 @@ else
   git checkout --quiet "$TARGET"
 fi
 setup_calls
+setup_home
 ensure_secrets
 # Refresh third-party images (nginx, postgres, redis…) and the base images
 # ours build FROM, so security fixes in them actually arrive.

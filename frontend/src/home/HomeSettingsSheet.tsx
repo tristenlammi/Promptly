@@ -109,7 +109,10 @@ export function HomeSettingsSheet({ open, home, onClose, onAddBox, onLeft }: { o
               <code className="mt-2 block select-all rounded-lg bg-[var(--hover)] px-3 py-2 text-center font-mono text-lg tracking-widest text-[var(--text)]">{code}</code>
             </div>
           )}
-          <button type="button" className={cn(btn, "mt-3")} onClick={onAddBox}>Add another box</button>
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs text-[var(--text-muted)]">Have a separate home box with a code?</summary>
+            <button type="button" className={cn(btn, "mt-2")} onClick={onAddBox}>Add a box with its code</button>
+          </details>
         </section>
       </div>
     </Sheet>
@@ -133,9 +136,13 @@ function BoxRow({ home, box, owner, busy, onRelease }: { home: Home; box: HomeBo
         <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", box.online ? "bg-[var(--success)]" : "bg-[var(--border)]")} aria-hidden />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-[var(--text)]">{box.name}</span>
-          <span className="block text-xs text-[var(--text-muted)]">{box.online ? "Online" : `Offline · last seen ${ago(box.last_seen_at)}`}{box.version ? ` · version ${box.version}` : ""}</span>
+          <span className="block text-xs text-[var(--text-muted)]">
+            {box.builtin ? "Part of this Promptly · " : ""}
+            {box.online ? (box.ready ? "Online" : "Starting up") : box.builtin && !box.last_seen_at ? "Starting up" : `Offline · last seen ${ago(box.last_seen_at)}`}
+            {box.version ? ` · version ${box.version}` : ""}
+          </span>
         </span>
-        {owner && (
+        {owner && !box.builtin && (
           <button type="button" className={btn} disabled={busy} onClick={() => { if (window.confirm("Take this box out of your home? Its devices will go from your Home page, and you'll get a code for whoever has it next.")) onRelease(); }}>
             Move or give away
           </button>

@@ -39,7 +39,7 @@ from typing import Any
 
 import aiohttp
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 log = logging.getLogger("promptly-box")
 
 SHOWN = {"light", "switch", "input_boolean", "fan", "sensor", "binary_sensor", "climate", "cover", "lock", "media_player"}
@@ -89,7 +89,20 @@ CLOSE_BAD, CLOSE_REVOKED = 4401, 4403
 # ------------------------------------------------------------------ configuration
 
 
+# This server's own box (bundled with Promptly's deployment): always this id,
+# and it proves itself with the deployment's HOME_BOX_SECRET, not a setup
+# string. The same value as backend/app/home/builtin.py::BOX_ID.
+BUILTIN_BOX = "b0000000-0000-4000-8000-00000000b0c5"
+
+
 def read_setup() -> dict[str, str]:
+    if "PROMPTLY_BUILTIN_KEY" in os.environ:
+        key = os.environ["PROMPTLY_BUILTIN_KEY"].strip()
+        server = os.environ.get("PROMPTLY_SERVER", "").strip().rstrip("/")
+        if len(key) < 16 or not server:
+            raise SystemExit("HOME_BOX_SECRET isn't set in .env. Run Promptly's update script: it makes one.")
+        # Exactly where it's told: inside the deployment, or this machine's own port.
+        return {"server": server, "box": BUILTIN_BOX, "key": key}
     raw = os.environ.get("PROMPTLY_SETUP", "").strip()
     options = DATA_DIR / "options.json"
     if not raw and options.exists():

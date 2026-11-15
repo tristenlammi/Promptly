@@ -82,7 +82,7 @@ async def client(db):
 
 async def _turn_on(client, admin) -> None:
     r = await client.patch("/api/admin/home/settings", headers=_hdr(admin), json={"enabled": True})
-    assert r.json() == {"enabled": True}
+    assert r.json()["enabled"] is True
 
 
 async def _prepare(client, admin, label="Sam's box") -> dict:
@@ -129,7 +129,7 @@ async def test_off_until_an_admin_turns_it_on(user, client):
     assert (await client.get("/api/home", headers=_hdr(user))).status_code == 404
     assert (await client.post("/api/home/claim", headers=_hdr(user), json={"code": "ABCD-EFGH-JKMN"})).status_code == 404
     await _turn_on(client, user)
-    assert (await client.get("/api/home", headers=_hdr(user))).json() == {"homes": []}
+    assert (await client.get("/api/home", headers=_hdr(user))).json()["homes"] == []
 
 
 async def test_only_an_admin_prepares_boxes(user, client, db):
@@ -307,7 +307,7 @@ async def test_members_use_the_home_and_only_the_owner_runs_it(user, client, db)
     # They can leave; the owner can't.
     assert (await client.delete(f"/api/home/{home_id}/members/{sam.id}", headers=_hdr(sam))).status_code == 409
     assert (await client.delete(f"/api/home/{home_id}/members/{kim.id}", headers=_hdr(kim))).status_code == 200
-    assert (await client.get("/api/home", headers=_hdr(kim))).json() == {"homes": []}
+    assert (await client.get("/api/home", headers=_hdr(kim))).json()["homes"] == []
     assert (await client.get(f"/api/home/{home_id}/state", headers=_hdr(kim))).status_code == 404
 
 

@@ -317,6 +317,10 @@ class Settings(BaseSettings):
     # ---- Calls (voice channels; LiveKit) ----
     # The key pair shared with the livekit service (install.sh makes it).
     # Empty or a "change-me" placeholder = calls aren't set up.
+    # Promptly Home: what the bundled home box proves itself with
+    # (app/home/builtin.py). Generated into .env by install/update; empty =
+    # Home Assistant isn't bundled with this deployment.
+    HOME_BOX_SECRET: str = ""
     LIVEKIT_API_KEY: str = ""
     LIVEKIT_API_SECRET: str = ""
     # Where the backend reaches LiveKit's API. Empty = find it: the

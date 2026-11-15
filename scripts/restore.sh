@@ -94,6 +94,11 @@ if ! $DB_ONLY; then
   tar -C "$WORK/files" -xf "$WORK/files.tar"
   mv "$WORK/files/uploads" "$UPLOADS_DIR"
   mv "$WORK/files/whiteboard" data/whiteboard
+  # Promptly Home's device pairings, if the backup has them.
+  if [[ -f "$WORK/home.tar" ]]; then
+    [[ -e data/home ]] && mv data/home "data/home.before-restore-$TS"
+    tar -C data -xf "$WORK/home.tar"
+  fi
   if $WITH_ENV && [[ -f "$WORK/env" ]]; then
     [[ -f .env ]] && cp .env ".env.before-restore-$TS"
     cp "$WORK/env" .env && chmod 600 .env

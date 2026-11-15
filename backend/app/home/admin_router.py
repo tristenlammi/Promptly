@@ -22,7 +22,7 @@ from app.auth.deps import require_admin
 from app.auth.models import User
 from app.database import get_db
 
-from . import codes, relay
+from . import builtin, codes, relay
 from .models import HomeBox
 from .router import enabled
 
@@ -45,9 +45,22 @@ def _box_out(box: HomeBox) -> dict[str, Any]:
     }
 
 
+async def _settings_out(db: AsyncSession, on: bool) -> dict[str, Any]:
+    """The switch, and how this server's own box is doing: whether Home
+    Assistant is bundled here, whether it has dialled in, whether it has said
+    what devices it has. Not whose home it's in, or what's in it."""
+    live = relay.link(builtin.BOX_ID)
+    return {
+        "enabled": on,
+        "bundled": builtin.deployed(),
+        "box_online": live is not None,
+        "box_ready": live is not None and live.got_snapshot,
+    }
+
+
 @router.get("/settings")
-async def get_settings(db: AsyncSession = Depends(get_db), _admin: User = Depends(require_admin)) -> dict[str, bool]:
-    return {"enabled": await enabled(db)}
+async def get_settings(db: AsyncSession = Depends(get_db), _admin: User = Depends(require_admin)) -> dict[str, Any]:
+    return await _settings_out(db, await enabled(db))
 
 
 class SettingsPatch(BaseModel):
@@ -55,7 +68,7 @@ class SettingsPatch(BaseModel):
 
 
 @router.patch("/settings")
-async def patch_settings(body: SettingsPatch, request: Request, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)) -> dict[str, bool]:
+async def patch_settings(body: SettingsPatch, request: Request, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)) -> dict[str, Any]:
     from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 
     row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
@@ -64,13 +77,21 @@ async def patch_settings(body: SettingsPatch, request: Request, db: AsyncSession
         db.add(row)
     row.home_enabled = body.enabled
     await record_event(db, event_type=EVENT_APP_SETTINGS_CHANGED, request=request, user_id=admin.id, identifier=admin.username, detail=f"home_enabled={body.enabled}")
+    home = None
+    if body.enabled and builtin.deployed():
+        # This server's own box goes straight into a home the admin who
+        # turned it on owns. Nothing to prepare, nothing to claim.
+        home = await builtin.ensure_home(db, admin)
     await db.commit()
-    return {"enabled": body.enabled}
+    if home is not None:
+        await relay.tell(builtin.BOX_ID, home.id)
+    return await _settings_out(db, body.enabled)
 
 
 @router.get("/boxes")
 async def list_boxes(db: AsyncSession = Depends(get_db), _admin: User = Depends(require_admin)) -> dict[str, Any]:
-    rows = (await db.execute(select(HomeBox).order_by(HomeBox.created_at.desc()))).scalars().all()
+    # Boxes prepared for other homes. This server's own box isn't one of them.
+    rows = (await db.execute(select(HomeBox).where(HomeBox.id != builtin.BOX_ID).order_by(HomeBox.created_at.desc()))).scalars().all()
     return {"boxes": [_box_out(b) for b in rows]}
 
 
@@ -120,8 +141,10 @@ async def prepare_box(body: NewBox, request: Request, db: AsyncSession = Depends
 
 
 async def _box(db: AsyncSession, box_id: uuid.UUID) -> HomeBox:
+    """A box an admin prepared. This server's own box isn't managed here:
+    it has no card, no setup string, and can't be cut off or deleted."""
     box = await db.get(HomeBox, box_id)
-    if box is None:
+    if box is None or builtin.is_builtin(box_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Box not found")
     return box
 

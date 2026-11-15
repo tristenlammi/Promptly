@@ -20,7 +20,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 
-from . import codes, relay
+from . import builtin, codes, relay
 from .models import Home, HomeBox, HomeMember
 
 router = APIRouter()
@@ -94,11 +94,16 @@ async def _devices(db: AsyncSession, home_id: uuid.UUID) -> dict[str, Any]:
         out_boxes.append(
             {
                 "id": str(box.id),
-                "name": box.name or (f"Box {n}" if len(boxes) > 1 else "Home box"),
+                "name": box.name or ("This server" if builtin.is_builtin(box.id) else f"Box {n}" if len(boxes) > 1 else "Home box"),
                 "online": is_on,
                 "last_seen_at": box.last_seen_at.isoformat() if box.last_seen_at else None,
                 "version": box.version,
                 "added_at": box.claimed_at.isoformat() if box.claimed_at else None,
+                # This server's own box: nothing to plug in, and it can't be moved.
+                "builtin": builtin.is_builtin(box.id),
+                # It has said what devices it has (a box is online a moment
+                # before that; a fresh one takes a minute or two to set up).
+                "ready": is_live,
             }
         )
         for a in box_areas:
@@ -120,6 +125,13 @@ async def _devices(db: AsyncSession, home_id: uuid.UUID) -> dict[str, Any]:
 
 @router.get("", dependencies=[Depends(_on)])
 async def my_homes(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    if builtin.deployed() and user.role == "admin":
+        # Home was turned on before this server had its own box (or its
+        # home's owner is gone): the first admin to look gets it going.
+        box = await db.get(HomeBox, builtin.BOX_ID)
+        if box is None or box.home_id is None:
+            await builtin.ensure_home(db, user)
+            await db.commit()
     mine = (
         await db.execute(
             select(Home, HomeMember.role)
@@ -147,7 +159,8 @@ async def my_homes(db: AsyncSession = Depends(get_db), user: User = Depends(get_
                 **await _devices(db, home.id),
             }
         )
-    return {"homes": homes}
+    # ``bundled``: this server has its own box, so there's nothing to plug in.
+    return {"homes": homes, "bundled": builtin.deployed()}
 
 
 @router.get("/{home_id}/state", dependencies=[Depends(_on)])
@@ -346,6 +359,8 @@ async def release_box(home_id: uuid.UUID, box_id: uuid.UUID, db: AsyncSession = 
     box = await db.get(HomeBox, box_id)
     if box is None or box.home_id != home_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Box not found")
+    if builtin.is_builtin(box.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This box is part of the server, so it stays in this home.")
     code = codes.new_claim_code()
     box.home_id = None
     box.name = None
