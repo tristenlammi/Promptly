@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-11-15
+
 ### Added
 
 - Promptly Home is bundled in. An update adds Home Assistant (out of sight) and Promptly's connector to it as part of Promptly itself, and they connect by themselves: no box to prepare, no setup string, no code. Turn Promptly Home on in Admin → Home and open Home: your home is there, ready for "Add a device"; add the rest of your household from Home's settings. About 3.5 GB of disk and roughly half a gigabyte of memory; take `home` out of COMPOSE_PROFILES to leave it out.
