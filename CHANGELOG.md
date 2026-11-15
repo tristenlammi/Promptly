@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-16
+
 ### Added
 
 - Rooms camera: "Phone camera" hands over to your phone's own camera app in one tap, for a sharper photo than a camera inside a web page can take (the camera app merges frames, balances light and sharpens). The photo comes back to the same Retake / Send screen. It's also offered when Promptly isn't allowed to use the camera.
