@@ -118,6 +118,10 @@ if ($Rollback) {
 }
 
 # ------------------------------------------------------------------ update
+# Steps 1-3 and the checkout happen once. If the update brought a newer
+# update.ps1, this run (still the old script, already in memory) hands the
+# rest over to it below, and the new script picks up here.
+if (-not $env:PROMPTLY_UPDATE_RESUME) {
 Write-Section "1/6  Checking for local changes"
 git diff --quiet HEAD -- 2>$null
 if (-not $AllowDirty -and $LASTEXITCODE -ne 0) {
@@ -177,6 +181,22 @@ if ($target -eq "origin/main") {
     git checkout --quiet $target
 }
 if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
+# A newer update.ps1 can have one-time set-up steps this run doesn't know
+# (the first update with Promptly Home ran the old script, so Home's
+# containers were never added). Let the new script do the rest.
+git diff --quiet $prevSha HEAD -- update.ps1 2>$null
+if ($LASTEXITCODE -ne 0) {
+    $env:PROMPTLY_UPDATE_RESUME = "1"
+    $env:PROMPTLY_UPDATE_PREV_REF = "$prevRef"
+    $env:PROMPTLY_UPDATE_TARGET = "$target"
+    & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $ScriptDir "update.ps1")
+    exit $LASTEXITCODE
+}
+} else {
+    $prevRef = if ($env:PROMPTLY_UPDATE_PREV_REF) { $env:PROMPTLY_UPDATE_PREV_REF } else { "the previous version" }
+    $target = if ($env:PROMPTLY_UPDATE_TARGET) { $env:PROMPTLY_UPDATE_TARGET } else { "the new version" }
+    Write-Section "4/6  Applying the update (continuing with the new update script)"
+}
 # Calls (voice channels, LiveKit): the first update that has them makes the
 # key pair and turns the calls service on (Docker Desktop: the bridged
 # variant, with this PC's LAN address). Later updates see the key and leave

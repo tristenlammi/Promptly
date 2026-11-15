@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Updating: an update that brings a newer update script now hands the rest of the update over to it. Before, the old script finished the job, so a one-time set-up step that arrived with the update (Promptly Home's containers in v0.44.0) only happened on the update after.
+
 ## [0.44.0] - 2026-11-15
 
 ### Added

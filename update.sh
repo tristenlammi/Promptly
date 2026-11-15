@@ -235,6 +235,10 @@ if $ROLLBACK; then
 fi
 
 # ------------------------------------------------------------------ update
+# Steps 1-3 and the checkout happen once. If the update brought a newer
+# update.sh, this run (still the old script, already in memory) hands the
+# rest over to it below, and the new script picks up here.
+if [[ -z "${PROMPTLY_UPDATE_RESUME:-}" ]]; then
 bold "1/6  Checking for local changes"
 if ! $ALLOW_DIRTY && ! git diff --quiet HEAD -- 2>/dev/null; then
   red "These tracked files have local edits, which an update would overwrite or fail on:"
@@ -288,6 +292,18 @@ if [[ "$TARGET" == "origin/main" ]]; then
   git checkout --quiet main && git merge --ff-only --quiet origin/main
 else
   git checkout --quiet "$TARGET"
+fi
+# A newer update.sh can have one-time set-up steps this run doesn't know
+# (the first update with Promptly Home ran the old script, so Home's
+# containers were never added). Let the new script do the rest.
+if ! git diff --quiet "$PREV_SHA" HEAD -- update.sh 2>/dev/null; then
+  export PROMPTLY_UPDATE_RESUME=1 PROMPTLY_UPDATE_PREV_REF="$PREV_REF" PROMPTLY_UPDATE_TARGET="$TARGET"
+  exec bash "$ROOT_DIR/update.sh"
+fi
+else
+  PREV_REF="${PROMPTLY_UPDATE_PREV_REF:-the previous version}"
+  TARGET="${PROMPTLY_UPDATE_TARGET:-the new version}"
+  bold "4/6  Applying the update (continuing with the new update script)"
 fi
 setup_calls
 setup_home
