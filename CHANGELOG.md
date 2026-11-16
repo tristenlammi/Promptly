@@ -28,6 +28,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Fixed
 
 - Chat on a phone in plain Chrome: the message box is no longer cut off at the bottom. The main layout now sizes itself to the part of the screen the browser actually shows, as the other apps already did.
+- P Maps: the message for a phone app that gives no location no longer tells an admin to add a Google Play key; it says to update the app and allow Location.
 
 ## [0.46.0] - 2026-11-16
 
