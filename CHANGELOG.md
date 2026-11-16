@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-17
+
 ### Added
 
 - Voice rooms on Android: a Sound button on the channel page opens a list on the phone to send the sound to the phone, its speaker, wired headphones or a Bluetooth device by name. Needs the next phone app; the list stays on the phone.
