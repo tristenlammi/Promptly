@@ -129,6 +129,22 @@ ADMIN_ROUTES: dict[str, str] = {
     "PUT /api/items/store/admin": "config",
     "GET /api/admin/porch": "config",
     "PATCH /api/admin/porch": "config",
+    # Rooms: server-wide switches (GIF search, previews, receipts, voice
+    # messages, polls). The GIF key is stored encrypted and never sent back.
+    "GET /api/admin/rooms/settings": "config",
+    "PATCH /api/admin/rooms/settings": "config",
+    # Promptly Home: the switch, and the boxes an admin prepares for other
+    # homes. A box's row here is its label, whether it's claimed and online,
+    # its version: never the home it's in, its name, its people or its
+    # devices (tests/test_home.py checks the list for those).
+    "GET /api/admin/home/settings": "config",
+    "PATCH /api/admin/home/settings": "config",
+    "GET /api/admin/home/boxes": "config",
+    "POST /api/admin/home/boxes": "config",
+    "POST /api/admin/home/boxes/{box_id}/claim-code": "config",
+    "POST /api/admin/home/boxes/{box_id}/setup": "config",
+    "POST /api/admin/home/boxes/{box_id}/revoke": "config",
+    "DELETE /api/admin/home/boxes/{box_id}": "config",
     "PATCH /api/admin/forms/settings": "config",
     # --- the admin's own knowledge bases (own files only, AP3)
     "GET /api/admin/custom-models": "own",

@@ -6,9 +6,19 @@ name: CI
 #
 # Deliberately kept to checks that pass today, so a red run always means a real
 # regression rather than pre-existing debt:
-#   - backend  : pytest (the full suite, ~1000 tests)
-#   - frontend : eslint (errors only — warnings are tracked debt), then the
-#                full production build, which is `tsc -b` + `vite build`.
+#   - static   : the compose file loads, the shell and PowerShell scripts
+#                parse, and there is exactly one Alembic head with ids that fit
+#                (`scripts/check.mjs --only static`, the same step a release runs).
+#   - backend  : pytest, the full suite, several tests at a time (each worker
+#                on a database of its own: tests/conftest.py). A test that
+#                hangs fails after five minutes with a stack, instead of the
+#                job running into its time limit and saying nothing.
+#   - frontend : eslint (errors only — warnings are tracked debt), the unit
+#                tests (vitest), then the full production build, which is
+#                `tsc -b` + `vite build`.
+#
+# Not here: the Android unit tests and the browser suite. Those run locally
+# with `scripts/check` (`--with e2e` for the browser suite).
 #
 # The full build matters more than a bare typecheck here: the PWA precache step
 # (injectManifest) hard-fails when a large lazy chunk isn't listed in
@@ -29,10 +39,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Compose file, script syntax, one Alembic head
+        run: node scripts/check.mjs --only static
+
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
 
     # The chat/streaming tests need a real database and Redis — that path
     # can't be meaningfully faked, which is why it had no coverage for so
@@ -103,10 +125,19 @@ jobs:
           pip install -r requirements.txt
 
       # -rs reports skip reasons, so a skipped test is visible in the log
-      # rather than hiding inside a dot.
+      # rather than hiding inside a dot. -n auto: one worker per core, each
+      # on its own database copied from one migrated template.
       - name: Run tests
         working-directory: backend
-        run: python -m pytest -q -rs
+        run: python -m pytest -n auto --dist loadfile -q -rs --junitxml=junit.xml
+
+      - name: Keep the result file
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: backend/junit.xml
+          if-no-files-found: ignore
 
       # WebDAV conformance (WP-8.4): the litmus suite against the real backend
       # on a scratch database. scripts/dav_litmus_harness.py relaxes only the
@@ -152,6 +183,10 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npx vitest run
 
       # `tsc -b` + `vite build` + PWA precache generation.
       - name: Build

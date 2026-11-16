@@ -160,7 +160,12 @@ async def test_room_pushes_dropped_for_blocked_sender_in_a_space(client, db, sen
     async def notify_now(**kw):  # run the dispatch inline, not as a background task
         payload = d.PushPayload(title=kw.pop("title"), body=kw.pop("body"), url=kw.pop("url", None), tag=kw.pop("tag", None),
                                 category=kw["category"], extra=kw.pop("extra", None))
-        await d._dispatch(payload=payload, **kw)
+        # What notify_user does with the rest: how it's delivered, and who is told the outcome.
+        payload.ttl, payload.urgency = kw.pop("ttl", None), kw.pop("urgency", None)
+        done = kw.pop("done", None)
+        outcome = await d._dispatch(payload=payload, **kw)
+        if done is not None:
+            await done(outcome)
 
     monkeypatch.setattr(d, "notify_user", notify_now)
     ann, bob, cat = people

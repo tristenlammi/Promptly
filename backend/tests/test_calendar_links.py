@@ -58,7 +58,12 @@ async def test_members_get_reminders_and_their_own_settings(client, db, people, 
     assert r.json()["event"]["reminders"] == [60]
 
 
-async def test_plan_in_a_room_invites_everyone_and_posts_a_card(client, db, people, pushes):
+async def test_plan_in_a_room_invites_everyone_and_posts_a_card(client, db, people, pushes, monkeypatch):
+    # "Upcoming in this room" means after now: pin now to before the BBQ, or
+    # the test only passes until 14 November 2026 (it failed from then on).
+    import app.calendars.core as cal_core
+
+    monkeypatch.setattr(cal_core, "now", lambda: datetime(2026, 11, 10, 0, 0, tzinfo=UTC))
     ann, bob, cat = people
     dan = await mk_user(db, "dan")
     _sid, rid = await make_space(client, ann, bob, cat)

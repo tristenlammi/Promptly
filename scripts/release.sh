@@ -5,6 +5,10 @@
 #
 #   scripts/release.sh 0.1.1
 #
+# It refuses unless scripts/check passed on exactly this code (the last
+# result is in .check/last.json). SKIP_CHECKS=1 cuts the version anyway and
+# says what wasn't checked.
+#
 # It updates:
 #   * VERSION                  (repo-root canonical marker)
 #   * frontend/package.json    (the value injected into the in-app version tag)
@@ -31,6 +35,21 @@ changelog_file="$root/CHANGELOG.md"
 for f in "$version_file" "$pkg_file" "$changelog_file"; do
   [ -f "$f" ] || { echo "error: missing $f" >&2; exit 1; }
 done
+
+# The tests have to have passed on this code. A real bug sat live for three
+# releases because the suites weren't being run.
+if command -v node >/dev/null 2>&1; then
+  if ! node "$script_dir/check.mjs" --gate; then
+    if [ "${SKIP_CHECKS:-}" = "1" ]; then
+      echo "  !! SKIP_CHECKS=1: cutting $version WITHOUT a passing check." >&2
+    else
+      echo "error: not cutting $version. Run scripts/check.sh, or SKIP_CHECKS=1 to cut it unchecked." >&2
+      exit 1
+    fi
+  fi
+else
+  echo "  !! node isn't installed, so the checks can't be confirmed. Cutting $version unchecked." >&2
+fi
 
 # The Android app people download from this server has to be this source's app.
 # SKIP_ANDROID_CHECK=1 skips it.

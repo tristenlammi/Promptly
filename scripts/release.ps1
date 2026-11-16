@@ -5,6 +5,10 @@
 #
 #   scripts/release.ps1 0.1.1
 #
+# It refuses unless scripts/check passed on exactly this code (the last
+# result is in .check/last.json). -SkipChecks cuts the version anyway and
+# says what wasn't checked.
+#
 # It updates:
 #   * VERSION                  (repo-root canonical marker)
 #   * frontend/package.json    (the value injected into the in-app version tag)
@@ -13,7 +17,8 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$Version,
-    [switch]$SkipAndroidCheck
+    [switch]$SkipAndroidCheck,
+    [switch]$SkipChecks
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,6 +35,22 @@ $changelogFile = Join-Path $root 'CHANGELOG.md'
 
 foreach ($f in @($versionFile, $pkgFile, $changelogFile)) {
     if (-not (Test-Path $f)) { Write-Error "Missing $f" }
+}
+
+# The tests have to have passed on this code. A real bug sat live for three
+# releases because the suites weren't being run.
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    & node (Join-Path $PSScriptRoot 'check.mjs') --gate
+    if ($LASTEXITCODE -ne 0) {
+        if ($SkipChecks) {
+            Write-Host "  !! -SkipChecks: cutting $Version WITHOUT a passing check." -ForegroundColor Yellow
+        } else {
+            Write-Host "Not cutting $Version. Run scripts\check.ps1, or pass -SkipChecks to cut it unchecked." -ForegroundColor Red
+            exit 1
+        }
+    }
+} else {
+    Write-Host "  !! node isn't installed, so the checks can't be confirmed. Cutting $Version unchecked." -ForegroundColor Yellow
 }
 
 # The Android app people download from this server has to be this source's app.

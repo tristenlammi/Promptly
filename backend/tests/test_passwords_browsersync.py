@@ -321,7 +321,7 @@ async def test_a_deleted_user_takes_everything_with_them(client, db):
     assert (await db.execute(select(PwSyncState))).all() == []
 
 
-@pytest.mark.parametrize("path", ["/browser-sync/tabs", "/browser-sync/reading/" + str(uuid.uuid4()), "/browser-sync/history/2026-01-01"])
+@pytest.mark.parametrize("path", ["/browser-sync/tabs", "/browser-sync/reading/5f0c1e1a-6d2b-4c8e-9a3f-2b7d4e9c1a10", "/browser-sync/history/2026-01-01"])
 async def test_bodies_arent_logged(client, db, caplog, path):
     """The access log has method, path and status. A blob never reaches a log."""
     import logging

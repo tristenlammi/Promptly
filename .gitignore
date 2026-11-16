@@ -29,6 +29,8 @@ __pycache__/
 venv/
 env/
 .pytest_cache/
+# scripts/check: each run's logs and the last result
+.check/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
