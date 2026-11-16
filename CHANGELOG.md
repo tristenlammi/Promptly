@@ -28,6 +28,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Changed
 
 - Passwords extension 0.2.3: when a passkey is wanted and your vault is locked, the passkey window asks for your master password and nothing after it; the passkey PIN is only asked when the vault is already open (D139).
+- Workout on a phone: the set type is a small chip that opens the four choices, next to "Last" and Use; hold − or + to keep stepping; a second Finish button appears under the last exercise once every set is ticked; tap the rest countdown to fill the screen with it.
 
 ### Fixed
 

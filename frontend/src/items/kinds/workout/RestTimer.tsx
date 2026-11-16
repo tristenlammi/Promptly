@@ -1,5 +1,6 @@
-import { Bell, BellOff, Minus, Plus, SkipForward, Timer } from "lucide-react";
+import { Bell, BellOff, Minimize2, Minus, Plus, SkipForward, Timer } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { ItemHandle } from "@/items/useItem";
 import { fmtDuration } from "@/items/ui";
@@ -159,6 +160,8 @@ export function RestTimer({ item }: { item: ItemHandle<WorkoutData> }) {
   const hiddenSince = useRef<number | null>(null);
   const [notify, setNotify] = useState(restNotifyOn);
   const [returned, setReturned] = useState(0);
+  /** The countdown over the whole screen, to read from across the room. */
+  const [big, setBig] = useState(false);
   const until = a?.rest_until ? new Date(a.rest_until).getTime() : 0;
   const total = a?.rest_total_s ?? 0;
   const left = Math.max(0, Math.ceil((until - now) / 1000));
@@ -225,6 +228,19 @@ export function RestTimer({ item }: { item: ItemHandle<WorkoutData> }) {
     setNotify(on);
   };
 
+  // The full screen goes with the rest it was showing.
+  useEffect(() => {
+    if (!running) setBig(false);
+  }, [running]);
+  useEffect(() => {
+    if (!big) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBig(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [big]);
+
   if (!running) return <span className="sr-only" aria-live="polite">{a?.rest_until && left === 0 ? "Rest over" : ""}</span>;
   const pct = total ? Math.min(1, Math.max(0, 1 - left / total)) : 0;
   const denied = notificationsSupported() && Notification.permission === "denied";
@@ -238,7 +254,8 @@ export function RestTimer({ item }: { item: ItemHandle<WorkoutData> }) {
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)]">
         <div className="absolute inset-y-0 left-0 bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] transition-[width] duration-300" style={{ width: `${pct * 100}%` }} />
         <div className="relative flex items-center gap-1.5 py-2 pl-4 pr-2">
-          <div className="min-w-0 flex-1">
+          {/* Tap the countdown to fill the screen with it. */}
+          <button type="button" onClick={() => setBig(true)} aria-label="Show the rest timer full screen" data-testid="rest-expand" className="-my-1 min-w-0 flex-1 rounded-xl py-1 text-left active:bg-[var(--hover)]">
             <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               <Timer className="h-3.5 w-3.5 text-[var(--item-accent)]" aria-hidden /> Rest
             </div>
@@ -246,7 +263,7 @@ export function RestTimer({ item }: { item: ItemHandle<WorkoutData> }) {
             <div className="text-[32px] font-semibold leading-none tabular-nums text-[var(--text)]" role="timer" aria-live={left <= 10 ? "assertive" : "off"} aria-atomic>
               {fmtDuration(left)}
             </div>
-          </div>
+          </button>
           {notificationsSupported() && !denied && (
             <button
               type="button"
@@ -273,6 +290,38 @@ export function RestTimer({ item }: { item: ItemHandle<WorkoutData> }) {
       <span className="sr-only" aria-live="polite">
         {left === 30 || left === 10 ? `${left} seconds of rest left` : ""}
       </span>
+      {big &&
+        createPortal(
+          <div role="dialog" aria-modal="true" aria-label="Rest timer" data-testid="rest-full" className="fixed inset-0 z-[90] flex flex-col bg-[var(--bg)] pb-safe pl-safe pr-safe pt-safe text-[var(--text)]">
+            <div className="flex justify-end p-3">
+              <button type="button" autoFocus onClick={() => setBig(false)} aria-label="Back to the workout" className="flex h-12 w-12 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] active:bg-[var(--hover)]">
+                <Minimize2 className="h-5 w-5" />
+              </button>
+            </div>
+            {/* Tapping the countdown goes back too: the same place that opened it. */}
+            <button type="button" onClick={() => setBig(false)} aria-label="Back to the workout" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 px-6">
+              <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                <Timer className="h-4 w-4 text-[var(--item-accent)]" aria-hidden /> Rest
+              </span>
+              <span className="text-[min(30vw,168px)] font-semibold leading-none tabular-nums">{fmtDuration(left)}</span>
+              <span className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-[var(--surface-2)]">
+                <span className="block h-full rounded-full bg-[var(--item-accent-fill)] transition-[width] duration-300" style={{ width: `${pct * 100}%` }} />
+              </span>
+            </button>
+            <div className="flex items-center justify-center gap-3 px-4 pb-6 pt-2">
+              <button type="button" onClick={() => adjust(-15)} aria-label="15 seconds less rest" className="flex h-14 min-w-[72px] items-center justify-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-base font-semibold tabular-nums active:bg-[var(--hover)]">
+                <Minus className="h-4 w-4" />15
+              </button>
+              <button type="button" onClick={skip} aria-label="Skip rest" className="flex h-14 flex-1 max-w-[200px] items-center justify-center gap-2 rounded-2xl bg-[var(--item-accent-fill)] text-base font-semibold text-white active:opacity-90">
+                <SkipForward className="h-5 w-5" /> Skip
+              </button>
+              <button type="button" onClick={() => adjust(15)} aria-label="15 seconds more rest" className="flex h-14 min-w-[72px] items-center justify-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-base font-semibold tabular-nums active:bg-[var(--hover)]">
+                <Plus className="h-4 w-4" />15
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
