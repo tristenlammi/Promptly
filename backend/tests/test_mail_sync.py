@@ -199,3 +199,47 @@ async def test_a_label_says_when_its_mail_is_still_coming_and_shows_it_after(db,
     shown = (await client.get("/api/mail/threads", headers=h, params={"label": str(label.id)})).json()["threads"]
     assert sorted(t["subject"] for t in shown) == ["Work 1", "Work 2"]
     assert await _count(db, work) == 2
+
+
+async def test_new_gmail_mail_seen_in_all_mail_first_reaches_the_inbox(db, user, monkeypatch):  # noqa: F811
+    """Gmail keeps one copy of every email in All Mail. If that folder is
+    read first, the Inbox pass finds the same email already here and moves
+    it, and it's still new mail: told about, and checked against aliases.
+    That check used to fail (a KeyError) and take the whole batch with it;
+    the tests that covered it need a real mail server and weren't being run."""
+    from datetime import datetime, timezone
+    from email.utils import format_datetime
+
+    told: list[str] = []
+
+    async def noting(account_id, messages):
+        told.extend(m.subject for m in messages)
+
+    monkeypatch.setattr(worker, "_announce", noting)
+    account = await mk_account(db, user)
+    everything = MailFolder(account_id=account.id, path="[Gmail]/All Mail", name="All Mail", role="all")
+    inbox = MailFolder(account_id=account.id, path="INBOX", name="Inbox", role="inbox")
+    db.add_all([everything, inbox])
+    await db.commit()
+
+    m = EmailMessage()
+    m["Message-ID"] = "<just-arrived@example.com>"
+    m["From"] = "Sam <sam@example.com>"
+    m["To"] = "me@example.com"
+    m["Subject"] = "Just arrived"
+    m["Date"] = format_datetime(datetime.now(timezone.utc))
+    m.set_content("Hello")
+    other = EmailMessage()
+    other["Message-ID"] = "<with-it@example.com>"
+    other["From"] = "Jo <jo@example.com>"
+    other["To"] = "me@example.com"
+    other["Subject"] = "Arrived with it"
+    other["Date"] = format_datetime(datetime.now(timezone.utc))
+    other.set_content("Hi")
+
+    await worker._store(account.id, everything.id, [(41, [], m.as_bytes())])
+    await worker._store(account.id, inbox.id, [(7, [], m.as_bytes()), (8, [], other.as_bytes())], announce=True)
+
+    rows = (await db.execute(select(MailMessage.subject, MailMessage.folder_id, MailMessage.uid).order_by(MailMessage.subject))).all()
+    assert rows == [("Arrived with it", inbox.id, 8), ("Just arrived", inbox.id, 7)]  # one copy each, in the Inbox
+    assert sorted(told) == ["Arrived with it", "Just arrived"]
