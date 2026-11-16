@@ -8,11 +8,15 @@ import { fillField, fillFields, type FillValues } from "../../../frontend/src/pa
 import { checkAtClick, fieldIsClear, fieldIsFillable, type GuardState, inViewport, visibilityV2 } from "../../../frontend/src/passwords/core/autofill/guard";
 import { applyRule, describeForm, selectorFor } from "../../../frontend/src/passwords/core/autofill/rules";
 import type { SiteRule } from "../../../frontend/src/passwords/core/model";
-import { ext, type PageReport, type ToContent } from "./rpc";
+import { ext, type FrameRect, type FrameRef, type PageReport, type ToContent } from "./rpc";
 
 /** The inline menu starts this tall and then fits its rows, up to the most. */
 const MENU_START_H = 48;
 const MENU_MAX_H = 240;
+/** A frame smaller than this can't show the menu whole (a hosted card box is often 40 to
+ *  70 px tall): the frame around it draws the menu instead (D137). */
+const MENU_ROOM_H = 180;
+const MENU_ROOM_W = 330;
 
 const w = window as unknown as { __promptlyContent?: boolean };
 // A document with an opaque origin (a site's sandboxed uploads, say) isn't the site its
@@ -205,7 +209,7 @@ function main() {
       // A box that took focus before it was ready: if it still has focus, now's its turn.
       const waiting = focusWaiting;
       focusWaiting = null;
-      if (waiting && inlineMenu && !host && waiting.isConnected && focusedBox(document.activeElement) === waiting && roleOf(waiting)?.el === waiting && fieldIsFillable(waiting).ok) openMenu(waiting);
+      if (waiting && inlineMenu && !host && !liftedFor && waiting.isConnected && focusedBox(document.activeElement) === waiting && roleOf(waiting)?.el === waiting && fieldIsFillable(waiting).ok) openMenu(waiting);
     }, wait);
   };
 
@@ -289,6 +293,14 @@ function main() {
   let ioReading: boolean | undefined;
   // Names this menu. Only the frame holding it speaks for the menu the click landed on.
   let menuToken: string | null = null;
+  // Where the menu goes: under a box of ours, or under a box in a frame inside this one.
+  let menuAnchor: (() => FrameRect) | null = null;
+  // This frame drew the menu for a box in that frame (D137). Such a menu only suggests.
+  let relayFor: FrameRef | null = null;
+  // The other side: our box, whose menu a bigger frame is drawing.
+  let liftedFor: Element | null = null;
+
+  const frameTooSmall = () => window.innerHeight < MENU_ROOM_H || window.innerWidth < MENU_ROOM_W;
 
   const newToken = () => {
     const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -308,12 +320,38 @@ function main() {
     menuField = null;
     closedRoot = null;
     menuToken = null;
+    menuAnchor = null;
+    relayFor = null;
+    if (liftedFor) {
+      liftedFor = null;
+      void send({ t: "menuUpClose" });
+    }
   }
 
+  /** The menu for a box of ours. In a frame too small to show it, the frame around this
+   *  one draws it; if that can't be done, it's drawn here after all. */
   function openMenu(field: Element) {
+    if (window !== window.top && frameTooSmall()) {
+      closeMenu();
+      liftedFor = field;
+      const r = field.getBoundingClientRect();
+      void send({ t: "menuUp", rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom } }).then((out) => {
+        if (liftedFor !== field) return;
+        if ((out as { r?: unknown } | null)?.r === true) return;
+        liftedFor = null;
+        if (focusedBox(document.activeElement) === field) drawMenu(field);
+      });
+      return;
+    }
+    drawMenu(field);
+  }
+
+  function drawMenu(field: Element, anchor?: () => FrameRect, source?: FrameRef) {
     closeMenu();
     tampered = false;
     menuField = field;
+    menuAnchor = anchor ?? (() => field.getBoundingClientRect());
+    relayFor = source ?? null;
     host = document.createElement("div");
     // No id, class or data attribute: nothing a script can read to learn about us.
     const shadow = host.attachShadow({ mode: "closed" });
@@ -326,8 +364,8 @@ function main() {
     // part as a solid block.
     frame.setAttribute("style", `all:initial;display:block;width:320px;height:${MENU_START_H}px;border:0;background:transparent;color-scheme:light dark`);
     shadow.appendChild(frame);
-    const r = field.getBoundingClientRect();
-    const top = Math.min(r.bottom + 4, window.innerHeight - MENU_START_H - 8);
+    const r = menuAnchor();
+    const top = Math.max(4, Math.min(r.bottom + 4, window.innerHeight - MENU_START_H - 8));
     const left = Math.max(4, Math.min(r.left, window.innerWidth - 328));
     host.setAttribute(
       "style",
@@ -369,9 +407,9 @@ function main() {
    *  block over the page. Ours to do, so it isn't tampering; if the box has to move up to
    *  stay on screen, the wait before a click counts starts again. */
   function resizeMenu(h: number) {
-    if (!host || !frame || !guard || !menuField) return;
+    if (!host || !frame || !guard || !menuField || !menuAnchor) return;
     const height = Math.max(24, Math.min(MENU_MAX_H, Math.ceil(h)));
-    const r = menuField.getBoundingClientRect();
+    const r = menuAnchor();
     const top = Math.max(4, Math.min(r.bottom + 4, window.innerHeight - height - 8));
     frame.style.setProperty("height", `${height}px`);
     host.style.setProperty("height", `${height}px`, "important");
@@ -380,6 +418,44 @@ function main() {
     hostObserver?.takeRecords();
     const b = host.getBoundingClientRect();
     guard = { shownAt: moved ? performance.now() : guard.shownAt, rect: { left: b.left, top: b.top, width: b.width, height: b.height } };
+  }
+
+  /** The frame element that has focus here: when a box inside one of our iframes has
+   *  focus, this document's active element is that iframe. Read from the browser, so the
+   *  page has no say in which frame it is. */
+  function focusedFrame(): HTMLIFrameElement | null {
+    let a: Element | null = document.activeElement;
+    for (let i = 0; i < 8 && a; i++) {
+      const inner: Element | null = dom.shadowRoot?.(a)?.activeElement ?? null;
+      if (!inner) break;
+      a = inner;
+    }
+    return a && (a.tagName === "IFRAME" || a.tagName === "FRAME") ? (a as HTMLIFrameElement) : null;
+  }
+
+  /** Our own iframe element for a frame id, in the page or a shadow root we can reach.
+   *  Firefox can name a frame element's id. Chromium can't from a content script, so
+   *  there it's the frame that has focus, which is where the box that asked is. */
+  function childFrame(frameId: number): HTMLIFrameElement | null {
+    const idOf = (ext.runtime as unknown as { getFrameId?: (el: Element) => number }).getFrameId;
+    if (typeof idOf !== "function") return focusedFrame();
+    const walk = (root: Document | ShadowRoot, depth: number): HTMLIFrameElement | null => {
+      for (const el of Array.from(root.querySelectorAll("iframe, frame"))) {
+        try {
+          if (idOf.call(ext.runtime, el) === frameId) return el as HTMLIFrameElement;
+        } catch {
+          /* not a frame the browser will name */
+        }
+      }
+      if (depth >= 4) return null;
+      for (const el of Array.from(root.querySelectorAll("*"))) {
+        const inner = dom.shadowRoot?.(el);
+        const found = inner ? walk(inner, depth + 1) : null;
+        if (found) return found;
+      }
+      return null;
+    };
+    return walk(document, 0);
   }
 
   /** The box that really has focus. From out here a closed shadow root shows only its
@@ -410,6 +486,7 @@ function main() {
     }
     focusWaiting = null;
     if (host && menuField === target) return;
+    if (liftedFor === target) return;
     // Only into visible fields a person could have chosen.
     if (!fieldIsFillable(target).ok) return;
     openMenu(target);
@@ -426,7 +503,7 @@ function main() {
   /** A press on the box that already has focus fires no focus event: a page that focused
    *  its own box first would otherwise never get the menu. */
   function onPress(e: Event) {
-    if (!e.isTrusted || !inlineMenu || host) return;
+    if (!e.isTrusted || !inlineMenu || host || liftedFor) return;
     const target = focusedBox((e.composedPath()[0] ?? e.target) as Element);
     if (!target || focusedBox(document.activeElement) !== target) return;
     menuFor(target);
@@ -884,7 +961,50 @@ function main() {
         doFill(msg.values, msg.origin).then(reply);
         return true;
       case "ownsMenu":
-        reply(host && menuToken && msg.token === menuToken ? { origin: self.origin, url: location.href } : false);
+        reply(host && menuToken && msg.token === menuToken ? { origin: self.origin, url: location.href, ...(relayFor ? { relayed: relayFor } : {}) } : false);
+        return false;
+      case "openMenuFor": {
+        // A box in one of our own iframes, too small to show the menu itself (D137).
+        if (!inlineMenu) {
+          reply(false);
+          return false;
+        }
+        const el = childFrame(msg.child);
+        if (!el || !isVisible(el)) {
+          reply(false);
+          return false;
+        }
+        const inner = msg.rect;
+        const anchor = (): FrameRect => {
+          const b = el.getBoundingClientRect();
+          const x = b.left + el.clientLeft;
+          const y = b.top + el.clientTop;
+          // Never outside the frame's own box here: a framed page can put its box anywhere
+          // in its own document, and that mustn't move our menu about over this one.
+          const cx = (v: number) => Math.max(b.left, Math.min(b.right, v));
+          const cy = (v: number) => Math.max(b.top, Math.min(b.bottom, v));
+          return { left: cx(x + inner.left), top: cy(y + inner.top), right: cx(x + inner.right), bottom: cy(y + inner.bottom) };
+        };
+        if (window !== window.top && frameTooSmall()) {
+          // Not here either: further up, still for the same box.
+          send({ t: "menuUp", rect: anchor(), source: msg.source }).then((out) => reply((out as { r?: unknown } | null)?.r === true));
+          return true;
+        }
+        drawMenu(el, anchor, msg.source);
+        reply({ token: menuToken });
+        return false;
+      }
+      case "closeMenuFor":
+        // The box lost focus. That's also what a press on the menu does, so wait and see
+        // whether focus came to the menu.
+        // Only the frame this menu was drawn for can take it down.
+        if (host && relayFor && relayFor.frameId === msg.from) {
+          const mine = menuToken;
+          setTimeout(() => {
+            if (host && relayFor && menuToken === mine && document.activeElement !== host) closeMenu();
+          }, 200);
+        }
+        reply(true);
         return false;
       case "ownsSave":
         reply(saveHost && saveToken && msg.token === saveToken ? { origin: self.origin, url: location.href } : false);

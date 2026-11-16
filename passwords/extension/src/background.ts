@@ -1496,6 +1496,41 @@ async function handleContent(m: ContentRequest, sender: chrome.runtime.MessageSe
       if (senderOrigin(sender) !== "null") await maybeAutofillOnLoad(tabId, sender.frameId ?? 0, m.report.kinds ?? [], sender.url);
       if ((await getFlows())[String(tabId)]) scheduleCodeStep(tabId);
       return null;
+    case "menuUp": {
+      // A box in a frame too small for a menu (D137): the frame around it draws one.
+      const fid = sender.frameId ?? 0;
+      if (fid === 0 || (await fillsOnClickOnly())) return false;
+      const list = await frames(tabId);
+      const me = list.find((x) => x.frameId === fid);
+      const parent = me && me.parentFrameId >= 0 ? list.find((x) => x.frameId === me.parentFrameId) : undefined;
+      if (!me || !parent) return false;
+      const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(-100_000, Math.min(100_000, v)) : 0);
+      const rect = { left: n(m.rect?.left), top: n(m.rect?.top), right: n(m.rect?.right), bottom: n(m.rect?.bottom) };
+      // The frame the box is in: the sender, unless a frame in between is passing it up,
+      // and then only a frame that's really inside the sender.
+      let source: FrameRefLike = { frameId: fid, documentId: (sender as unknown as { documentId?: string }).documentId };
+      if (m.source && Number.isInteger(m.source.frameId) && m.source.frameId !== fid) {
+        let up = list.find((x) => x.frameId === m.source!.frameId);
+        let inside = false;
+        for (let i = 0; i < 12 && up && up.parentFrameId >= 0; i++) {
+          if (up.parentFrameId === fid) {
+            inside = true;
+            break;
+          }
+          up = list.find((x) => x.frameId === up!.parentFrameId);
+        }
+        if (!inside) return false;
+        source = { frameId: m.source.frameId, documentId: m.source.documentId };
+      }
+      const out = await inTime(send<{ token?: string } | boolean>(tabId, parent.frameId, { t: "openMenuFor", child: fid, rect, source }, parent.documentId), 2500);
+      return out === true || (!!out && typeof out === "object" && typeof out.token === "string");
+    }
+    case "menuUpClose": {
+      const from = sender.frameId ?? 0;
+      if (from === 0) return null;
+      for (const x of await frames(tabId)) if (x.frameId !== from) void send(tabId, x.frameId, { t: "closeMenuFor", from }, x.documentId);
+      return null;
+    }
     case "hello": {
       const host = hostOf(m.url) ?? "";
       const rule = await findRule(host);
@@ -1691,13 +1726,16 @@ async function maybeAutofillOnLoad(tabId: number, frameId: number, kinds: string
 
 /** The frame holding this token, and only that one: a page can open a second menu of its
  *  own in another frame, and "the first frame with a menu" would be the wrong one. */
-async function tokenOwner(tabId: number, kind: "ownsMenu" | "ownsSave", token: unknown): Promise<(FrameRow & { origin: string }) | null> {
+async function tokenOwner(tabId: number, kind: "ownsMenu" | "ownsSave", token: unknown): Promise<(FrameRow & { origin: string; relayed?: FrameRefLike }) | null> {
   if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token)) return null;
   const list = await frames(tabId);
-  const answers = await Promise.all(list.map((f) => inTime(send<{ origin: string; url: string } | false>(tabId, f.frameId, { t: kind, token }, f.documentId), REPORT_MS)));
+  const answers = await Promise.all(list.map((f) => inTime(send<{ origin: string; url: string; relayed?: FrameRefLike } | false>(tabId, f.frameId, { t: kind, token }, f.documentId), REPORT_MS)));
   const owners = list.flatMap((f, i) => {
     const a = answers[i];
-    return a ? [{ ...f, url: a.url, origin: a.origin }] : [];
+    // `relayed`: this frame drew the menu for a box in a smaller frame inside it (D137).
+    // Only for a frame that is really inside the one that drew it.
+    const relayed = a && a.relayed && Number.isInteger(a.relayed.frameId) && isInside(list, a.relayed.frameId, f.frameId) ? { frameId: a.relayed.frameId, documentId: a.relayed.documentId } : undefined;
+    return a ? [{ ...f, url: a.url, origin: a.origin, ...(relayed ? { relayed } : {}) }] : [];
   });
   return owners.length === 1 && owners[0].origin !== "null" ? owners[0] : null;
 }
@@ -1714,7 +1752,40 @@ const HANDOFF_MS = 60_000;
  *  deliberate press (D79). Generous: a person takes a second or two at most. */
 const PAGE_OPENED_MS = 10_000;
 
-type Handoff = { itemId: string | null; host: string; at: number };
+type Handoff = { itemId: string | null; host: string; at: number; siteless?: boolean };
+type FrameRefLike = { frameId: number; documentId?: string };
+
+/** Whether frame `inner` is somewhere inside frame `outer` in this tab. */
+function isInside(list: FrameRow[], inner: number, outer: number): boolean {
+  let up = list.find((x) => x.frameId === inner);
+  for (let i = 0; i < 12 && up && up.parentFrameId >= 0; i++) {
+    if (up.parentFrameId === outer) return true;
+    up = list.find((x) => x.frameId === up!.parentFrameId);
+  }
+  return false;
+}
+
+/** A card or an address isn't tied to a site: a row for the menu and the panel. A card
+ *  shows its brand and last four digits, never more. */
+function sitelessRow(item: Item): Candidate {
+  const b = item.body;
+  const digits = (b.cardNumber ?? "").replace(/\D/g, "");
+  const hint = b.kind === "card" ? [b.cardBrand ?? "", digits.length >= 8 ? `ending ${digits.slice(-4)}` : ""].filter(Boolean).join(" ") : [b.firstName ?? "", b.lastName ?? ""].filter(Boolean).join(" ");
+  return { id: item.id, title: b.title, username: hint, hasTotp: false, kind: b.kind, downgrade: false, reprompt: !!b.reprompt };
+}
+
+/** Cards for a frame with a card form, addresses for one with an address form. */
+function sitelessRows(kinds: string[]): Candidate[] {
+  const c = client;
+  if (!c?.unlocked) return [];
+  const want = new Set<string>(kinds.filter((k) => k === "card" || k === "identity"));
+  if (!want.size) return [];
+  return c
+    .search("")
+    .filter((i) => want.has(i.body.kind) && !i.body.archived)
+    .slice(0, 6)
+    .map(sitelessRow);
+}
 /** Per tab, as a promise, so a panel that opens before the check's done waits for it. */
 const handoffs = new Map<number, Promise<Handoff | null>>();
 /** When a page last got the panel opened, from any tab. Set before anything's checked, so
@@ -1729,6 +1800,24 @@ function startHandoff(tabId: number, m: { token: string; itemId?: string }): Pro
     if (await fillsOnClickOnly()) return null;
     const owner = await tokenOwner(tabId, "ownsMenu", m.token);
     if (!owner) return null;
+    // A card or an address (D137): only one the menu could have shown, which is one whose
+    // kind of form is in the frame the box is in. It isn't tied to a site, so what's
+    // remembered is the page the tab is on.
+    const item = typeof m.itemId === "string" && client?.unlocked ? client.get(m.itemId) : undefined;
+    if (item && (item.body.kind === "card" || item.body.kind === "identity")) {
+      const at = owner.relayed ?? owner;
+      const report = await inTime(send<PageReport>(tabId, at.frameId, { t: "report" }, at.documentId), REPORT_MS);
+      if (!report?.kinds?.includes(item.body.kind)) return null;
+      let top = "";
+      try {
+        top = (await ext.tabs.get(tabId)).url ?? "";
+      } catch {
+        /* the tab's gone */
+      }
+      return { itemId: item.id, host: hostOf(top) ?? "", at: Date.now(), siteless: true };
+    }
+    // A login is handed to the panel on Firefox only (D78); elsewhere the menu fills it.
+    if (__ENGINE__ !== "firefox") return null;
     // Only a login the menu could have shown for that frame.
     const known = typeof m.itemId === "string" && !!client?.unlocked && (await orderedCandidates(tabId, owner.url)).some((c) => c.id === m.itemId);
     return { itemId: known ? m.itemId! : null, host: hostOf(owner.url) ?? "", at: Date.now() };
@@ -1761,13 +1850,18 @@ async function handoffFor(tabId: number): Promise<{ item: Candidate | null; page
     /* the tab's gone */
   }
   if (hostOf(url) !== h.host) return { item: null, pageOpened };
+  if (h.siteless) {
+    const it = client.get(h.itemId);
+    return { item: it && (it.body.kind === "card" || it.body.kind === "identity") ? sitelessRow(it) : null, pageOpened };
+  }
   const item = (await orderedCandidates(tabId, url)).find((c) => c.id === h.itemId) ?? null;
   return { item, pageOpened };
 }
 
 async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
   // Before anything that waits, so a panel opening right now finds it.
-  if (__ENGINE__ === "firefox" && m.t === "menuHandoff" && sender.tab?.id !== undefined) {
+  // Every browser now: a card or an address is handed to the panel everywhere (D137).
+  if (m.t === "menuHandoff" && sender.tab?.id !== undefined) {
     await startHandoff(sender.tab.id, m);
     return { ok: true };
   }
@@ -1791,18 +1885,30 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
   const hostFrame = owner.frameId;
   const url = owner.url;
   const inFrame = <T>(msg: ToContent) => send<T>(tabId, hostFrame, msg, owner.documentId);
+  // A menu a bigger frame drew for a box in a small one (D137) only suggests: it lists the
+  // cards and addresses for that box's frame, opens the panel, and does nothing else. No
+  // login, passkey, code or new password goes anywhere from it.
+  const relayed = owner.relayed;
+  if (relayed && m.t !== "menuList" && m.t !== "menuOpenPopup" && m.t !== "menuClose") return { ok: false, reason: "popup", locked: false, candidates: [] };
+  const kindsOf = async (): Promise<string[]> => {
+    const report = relayed ? await inTime(send<PageReport>(tabId, relayed.frameId, { t: "report" }, relayed.documentId), REPORT_MS) : await inFrame<PageReport>({ t: "report" });
+    return report?.kinds ?? [];
+  };
   const checked = async (itemId: string) => (await inFrame<{ ok: boolean; reason?: string }>({ t: "menuCheck", itemId, token: m.token })) ?? { ok: false };
   switch (m.t) {
     case "menuList": {
       if (!client?.unlocked) return { locked: true, candidates: [] };
+      const kinds = await kindsOf();
+      // Cards and addresses for a box of theirs: a title and a card's last four digits, in
+      // a frame the page can't read. Picking one opens the panel, which asks (D137).
+      const cards = sitelessRows(kinds);
+      if (relayed) return { locked: false, candidates: [], kinds, cards, relayed: true, handoff: __ENGINE__ === "firefox" };
       const list = await orderedCandidates(tabId, url);
       // Titles and usernames only, in a frame the page can't read. Picking one opens the panel.
-      if (__ENGINE__ === "firefox") return { locked: false, candidates: list, handoff: true };
-      const report = await inFrame<PageReport>({ t: "report" });
-      const kinds = report?.kinds ?? [];
+      if (__ENGINE__ === "firefox") return { locked: false, candidates: list, handoff: true, kinds, cards };
       // Firefox's menu doesn't act on a click, so its passkeys are in the toolbar panel.
       const passkeys = __ENGINE__ === "firefox" ? [] : await offerRows(tabId, client, hostFrame);
-      return { locked: false, ...pageRows(list, url), kinds, url, passkeys, ...(await mailRows(kinds, url)) };
+      return { locked: false, ...pageRows(list, url), kinds, cards, url, passkeys, ...(await mailRows(kinds, url)) };
     }
     case "menuPick": {
       if (!client?.unlocked) return { ok: false, reason: "locked" };
@@ -2024,7 +2130,7 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   } else if (t === "saveOffer" || t === "saveAnswer" || t === "saveOpenPopup") {
     if (!isOurPage(sender, "/save.html")) return false;
     p = handleSave(msg as SaveRequest, sender);
-  } else if (t === "pageReport" || t === "hello" || t === "captured" || t === "capturedUser" || t === "submitFailed" || t === "teachResult") {
+  } else if (t === "pageReport" || t === "hello" || t === "captured" || t === "capturedUser" || t === "submitFailed" || t === "teachResult" || t === "menuUp" || t === "menuUpClose") {
     p = handleContent(msg as ContentRequest, sender);
   } else if (__TEST_BUILD__ && t === "test") {
     if (!isTrustedPage(sender)) return false;

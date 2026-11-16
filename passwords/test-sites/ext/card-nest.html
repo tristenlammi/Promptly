@@ -1,0 +1,12 @@
+<!doctype html>
+<html>
+  <head><title>Card widget</title></head>
+  <body style="margin: 0">
+    <!-- A payment widget that wraps its own box in one more frame. -->
+    <iframe id="inner" title="Card number" style="width: 340px; height: 70px; border: 0"></iframe>
+    <script>
+      const at = new URLSearchParams(location.search).get("at") || location.origin;
+      document.getElementById("inner").src = `${at}/card-frame.html?field=number`;
+    </script>
+  </body>
+</html>

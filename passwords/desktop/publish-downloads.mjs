@@ -21,8 +21,10 @@ function publish(from, name) {
 
 const write = (name, value) => fs.writeFileSync(path.join(out, name), JSON.stringify(value, null, 2) + "\n");
 
-const setup = publish(path.join(here, `target/release/bundle/nsis/Promptly Passwords_${version}_x64-setup.exe`), "PromptlyPasswords-Setup.exe");
-write("PromptlyPasswords.json", { version, ...setup });
+// `--extension`: only the extension's zips (a new extension version with no new Windows app).
+const extensionOnly = process.argv.includes("--extension");
+const setup = extensionOnly ? null : publish(path.join(here, `target/release/bundle/nsis/Promptly Passwords_${version}_x64-setup.exe`), "PromptlyPasswords-Setup.exe");
+if (setup) write("PromptlyPasswords.json", { version, ...setup });
 
 const chrome = publish(path.join(here, `../extension/dist/promptly-passwords-chrome-${extVersion}.zip`), "promptly-passwords-chrome.zip");
 const firefox = publish(path.join(here, `../extension/dist/promptly-passwords-firefox-${extVersion}.zip`), "promptly-passwords-firefox.zip");
@@ -35,6 +37,6 @@ if (!firefoxSigned) fs.rmSync(staleXpi, { force: true });
 write("PromptlyPasswordsExtension.json", { version: extVersion, chrome, firefox, ...(firefoxSigned ? { firefox_signed: firefoxSigned } : {}) });
 
 console.log(
-  `published installer ${version} (${setup.size_bytes} bytes), extension ${extVersion} (${chrome.size_bytes} and ${firefox.size_bytes} bytes)` +
+  `published ${setup ? `installer ${version} (${setup.size_bytes} bytes), ` : ""}extension ${extVersion} (${chrome.size_bytes} and ${firefox.size_bytes} bytes)` +
     (firefoxSigned ? `, signed Firefox add-on (${firefoxSigned.size_bytes} bytes)` : ", no signed Firefox add-on for this version"),
 );

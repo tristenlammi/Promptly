@@ -21,9 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Passwords extension 0.2.2: clicking a card box on a checkout lists your saved cards (name, brand and last four digits). Pick one and the toolbar panel opens with it at the top; Fill there asks once, then fills every card box on the page. Cards still never fill from one click on the page.
+
 ### Fixed
 
 - Mail with Gmail: a new email that Promptly saw in All Mail before it saw it in the Inbox made that Inbox check fail, over and over for up to half an hour. Until then the email sat under Archive, you weren't told about it, and anything else that arrived with it was held back too. (Since v0.31.0; the tests that would have caught it need a real mail server and weren't being run. `scripts/check` now starts one.)
+- Passwords extension: a card box no longer says "No saved logins for this site". With no cards saved it says "No saved cards".
+- Passwords extension: on checkouts that keep the card number in its own small frame, the menu was squeezed into that frame and cut off. The page around the frame now draws it, whole, under the box.
 
 ## [0.45.0] - 2026-11-16
 
