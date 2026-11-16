@@ -290,6 +290,24 @@ def transform(cfg: dict, opts, env: dict[str, str]) -> dict:
                 "WYOMING_ENABLED": "false",
                 "SINGLE_USER_MODE": "false",
             })
+            if opts.e2e:
+                # Same reason as nginx's roomier limit below: one address, many "people".
+                e["RATE_LIMIT_DEFAULT"] = "6000/minute"
+
+        if svc == "nginx" and opts.e2e:
+            # The e2e suite is one address standing in for a household: several
+            # people's pages load in the same second. nginx's per-address limit
+            # (30 a second) turned those into 429s that had nothing to do with
+            # the screen under test. This stack gets a roomier copy of the
+            # config; the limit itself is nginx's, and isn't what e2e checks.
+            conf = (worktree / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+            roomy, n = re.subn(r"(zone=api_rl:\S+\s+rate=)\d+r/s", r"\g<1>600r/s", conf)
+            if n == 1:
+                mine = state / "nginx.e2e.conf"
+                mine.write_text(roomy, encoding="utf-8", newline="\n")
+                for v in spec.get("volumes", []):
+                    if v.get("target") == "/etc/nginx/nginx.conf":
+                        v["source"] = str(mine)
 
         if svc == "nginx":
             spec["ports"] = [{"mode": "ingress", "host_ip": "127.0.0.1", "target": 80,

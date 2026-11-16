@@ -78,6 +78,9 @@
      read the same in both themes; the text/icon colours are tuned per
      theme below (darker on light, lighter on dark) for contrast. */
   --danger: #C81E1E;
+  /* A red to put white words on (count badges). In the dark theme --danger is a
+     light red for text, and white on it is 2.8:1. */
+  --danger-fill: #C81E1E;
   --danger-bg: rgba(220, 38, 38, 0.10);
   --danger-border: rgba(220, 38, 38, 0.38);
   --warning: #B45309;
@@ -127,6 +130,7 @@ html.dark {
   /* Lighter status text/icons for legibility on the dark surface; the
      `-bg`/`-border` alpha tints carry over from :root unchanged. */
   --danger: #F87171;
+  --danger-fill: #DC2626;
   --warning: #FBBF24;
   --success: #34D399;
   --success-text: var(--success);

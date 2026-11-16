@@ -59,6 +59,7 @@ test("Photos screens pass an accessibility scan", async ({ dana: page }) => {
   await ready(page);
   await page.getByRole("button", { name: "New smart album" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+  await page.waitForTimeout(600); // the dialog's fade-in, or axe measures half-faded text
   found.push(...(await scan(page, "smart album dialog", "[role=dialog]")));
 
   expect(found, found.join("\n")).toEqual([]);
