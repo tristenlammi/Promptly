@@ -45,6 +45,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import org.promptly.sync.BuildConfig
 import org.promptly.sync.R
+import org.promptly.sync.calls.AudioRoute
+import org.promptly.sync.calls.SwitchRoutes
 import java.io.IOException
 
 /**
@@ -96,6 +98,7 @@ class VoiceService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        current = this
         channels(this)
     }
 
@@ -357,6 +360,16 @@ class VoiceService : Service() {
 
     /** Publish / mute the microphone to match [mic]. Serialised, and always
      *  converging on the latest state. */
+    // ================================================================ where the sound goes
+
+    /** The phone, its speaker, wired headphones, each Bluetooth device by name. Null when not in a channel. */
+    fun soundRoutes(): List<AudioRoute>? = room?.audioSwitchHandler?.let { SwitchRoutes.of(it) }
+
+    /** The person picked one (the Sound button on the channel page opens the list). */
+    fun setRoute(routeId: String) {
+        room?.audioSwitchHandler?.let { SwitchRoutes.select(it, routeId) }
+    }
+
     private fun syncMic() {
         val r = room ?: return
         scope.launch {
@@ -549,6 +562,7 @@ class VoiceService : Service() {
     }
 
     override fun onDestroy() {
+        if (current === this) current = null
         if (!stopping) {
             // Killed while in a channel: leave properly so nobody waits for us.
             val s = session
@@ -693,6 +707,11 @@ class VoiceService : Service() {
 
     companion object {
         private const val TAG = "PromptlyVoice"
+        private var current: VoiceService? = null
+
+        /** For the sound picker ([VoiceHandoffActivity]). Null when this phone isn't in a channel. */
+        fun routes(): List<AudioRoute>? = current?.soundRoutes()
+        fun route(routeId: String) = current?.setRoute(routeId)
         const val ACTION_START = "org.promptly.voice.START"
         const val ACTION_MUTE = "org.promptly.voice.MUTE"
         const val ACTION_DEAFEN = "org.promptly.voice.DEAFEN"

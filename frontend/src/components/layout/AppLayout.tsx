@@ -196,7 +196,7 @@ export function AppLayout({ children }: { children?: ReactNode } = {}) {
   }, [isMobile, mobileNavOpen]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--text)]">
+    <div className="flex h-[100dvh] w-screen overflow-hidden bg-[var(--bg)] text-[var(--text)]">
       {/* Mobile-only backdrop. Inert (and hidden) on desktop. */}
       <div
         onClick={closeMobileNav}

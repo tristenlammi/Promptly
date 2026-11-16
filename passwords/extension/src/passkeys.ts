@@ -17,6 +17,8 @@ type Req = {
   crossOrigin: boolean;
   options: Record<string, unknown>;
   windowId?: number;
+  /** When the master password was typed in this request's own window (D139): the one proof. */
+  provedAt?: number;
   /** The frame it's for. Gone if that frame loads something else. */
   frameId?: number;
   /** Answering an offer: that offer has to still be there when it comes to signing. */
@@ -187,7 +189,10 @@ function loginFor(client: VaultClient, rpId: string, userName: string): Item | u
 
 /** Where wrong passkey PINs are counted (the extension's own IndexedDB, which no page and no
  *  content script can reach), and what five of them do: lock the vault. */
-export type PinGuard = { store: MetaStore; lockOut: () => Promise<void> };
+export type PinGuard = { store: MetaStore; lockOut: () => Promise<void>; unlock?: (password: string) => Promise<unknown> };
+
+/** How long a master password typed in the passkey window stands in for the PIN (D139). */
+export const PROOF_MS = 60_000;
 
 export async function handlePasskey(
   msg: { t: string; [k: string]: unknown },
@@ -312,7 +317,20 @@ export async function handlePasskey(
   if (!isPrompt) return null;
   const req = pending.get(msg.id as string);
   if (!req) return { gone: true };
+  // The vault was locked and the person opens it here with the master password: that's the
+  // proof for this one request, and no PIN is asked after it (D139). A wrong one throws.
+  if (msg.t === "pkUnlock") {
+    if (!guard?.unlock) throw new Error("Couldn't unlock");
+    req.provedAt = undefined;
+    await guard.unlock(typeof msg.password === "string" ? msg.password : "");
+    req.provedAt = Date.now();
+    return { unlocked: true };
+  }
+
   const c = client();
+  // A lock ends it: whatever opens the vault next has to be typed here to count.
+  if (!c?.unlocked) req.provedAt = undefined;
+  const proven = req.provedAt !== undefined && Date.now() - req.provedAt < PROOF_MS;
 
   if (msg.t === "pkPrompt") {
     const rp = req.options._rp as string;
@@ -326,7 +344,7 @@ export async function handlePasskey(
       pin = await passkeyPinOf(c);
     }
     const tries = guard ? await pinTries(guard.store) : 0;
-    Object.assign(base, { pin: pin ? "enter" : "choose", triesLeft: PIN_TRIES - tries });
+    Object.assign(base, { pin: proven ? "none" : pin ? "enter" : "choose", triesLeft: PIN_TRIES - tries });
     if (req.op === "get") {
       const only = req.options._only as string | undefined;
       const usable = usablePasskeys(allPasskeys(c), rp, (req.options.allow as { id: string }[]).map((x) => x.id)).filter((u) => !only || u.passkey.credentialId === only);
@@ -356,12 +374,15 @@ export async function handlePasskey(
     if (allPasskeys(c).some((p) => p.passkey.rpId === o._rp && excluded.includes(siteCredentialId(p.passkey.credentialId)))) return finish(fail("InvalidStateError", "That passkey is already saved here."));
   }
 
-  // The passkey PIN, every time (D86). Only after it's right does the site hear the person
-  // was verified. The window can't be reached by a page, and the count lives where a page can't
-  // reset it. No guard means no way to count, so nothing's signed.
+  // One proof (D139): the master password just typed in this window, or else the passkey PIN
+  // (D86). Only after it does the site hear the person was verified. The window can't be reached
+  // by a page, and the count lives where a page can't reset it. No guard means no way to count,
+  // so nothing's signed.
   if (!guard) return { error: "locked" };
-  const pin = await passkeyPinOf(c);
-  if (!pin) {
+  const pin = proven ? null : await passkeyPinOf(c);
+  if (proven) {
+    // Nothing more to ask.
+  } else if (!pin) {
     const chosen = typeof msg.newPin === "string" ? msg.newPin : "";
     if (!chosen) return { error: "choose" };
     const problem = pinProblem(chosen);
@@ -384,9 +405,10 @@ export async function handlePasskey(
   if (!c.unlocked) return { error: "locked" };
   const uv = true;
 
-  // Items marked to ask for the master password still ask, after the PIN.
+  // Items marked to ask for the master password still ask, after the PIN. A master password
+  // typed here a moment ago already answers that.
   const typed = typeof msg.verify === "string" ? msg.verify : "";
-  const proved = !!typed && (await isThePerson(c, typed));
+  const proved = proven || (!!typed && (await isThePerson(c, typed)));
   if (typed && !proved) return { error: "wrong" };
 
   if (req.op === "create") {

@@ -98,11 +98,14 @@ function unlockForm() {
   form.append(input, button("Unlock", () => form.requestSubmit(), true), err);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const r = (await ext.runtime.sendMessage({ t: "unlock", password: input.value })) as { ok: boolean; error?: string };
-    if (r.ok) {
+    // Typed here, it's also the proof for this request: no passkey PIN after it (D139).
+    try {
+      await call({ t: "pkUnlock", password: input.value });
       notice = "";
       void render();
-    } else err.textContent = r.error ?? "Couldn't unlock";
+    } catch (x) {
+      err.textContent = x instanceof Error ? x.message : "Couldn't unlock";
+    }
   });
   return form;
 }
@@ -121,9 +124,17 @@ function pinField(id: string, label: string): HTMLInputElement {
 
 /** The PIN box, and what it adds to an answer. Choosing one the first time is the same screen,
  *  with the box twice. Enter in a box sends the main answer. */
-function pinForm(mode: "enter" | "choose", triesLeft: number, go: (pin: Record<string, string>) => void): HTMLFormElement {
+function pinForm(mode: "enter" | "choose" | "none", triesLeft: number, go: (pin: Record<string, string>) => void): HTMLFormElement {
   const form = el("form") as HTMLFormElement;
   form.id = "pin-form";
+  if (mode === "none") {
+    // The master password was just typed in this window: nothing more to ask.
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      go({});
+    });
+    return form;
+  }
   const first = pinField("pin", mode === "choose" ? "Choose a passkey PIN" : "Passkey PIN");
   form.append(first);
   let again: HTMLInputElement | null = null;
@@ -173,7 +184,7 @@ async function render() {
     root.append(button("Use another device or security key", () => answer({ action: "native" })), button("Cancel", () => answer({ action: "cancel" })));
     return;
   }
-  const mode = p.pin === "choose" ? "choose" : "enter";
+  const mode = p.pin === "none" ? "none" : p.pin === "choose" ? "choose" : "enter";
   const triesLeft = Number(p.triesLeft ?? 5);
   if (p.op === "get") {
     const candidates = p.candidates as { itemId: string; credentialId: string; title: string; userName: string }[];

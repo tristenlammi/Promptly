@@ -208,12 +208,14 @@ public class SuiteLauncher extends LauncherActivity {
         // page gives its rings the answer token and leaves the ringing to it.
         // callout: Call / Video call on the page hands the call to this app too
         // (promptly://call/start, Calls WP-D5), with the phone's own camera.
+        // sound: this app has a sound picker for a voice channel it holds
+        // (promptly://voice/sound), so the channel page shows its Sound button.
         // np: this app shows Promptly's notifications itself (the app module's push
         // package), so the page keeps Chrome's own quiet on this phone. Its value says
         // which registration (the SHA-256 of its push address), nothing more.
         // #pl: the map page's key for this phone's GPS (above), after any fragment
         // the path already has.
-        String query = sep + "source=android&caps=voice,calls,callout" + nativePush();
+        String query = sep + "source=android&caps=voice,calls,callout,sound" + nativePush();
         String frag = "pl=" + pageLocationKey();
         int hash = path.indexOf('#');
         String url = hash < 0

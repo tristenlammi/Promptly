@@ -18,6 +18,7 @@ function isAndroid(): boolean {
   return typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
 }
 
+const SOUND_KEY = "promptly.android.sound";
 const CALLS_KEY = "promptly.android.calls";
 const CALLOUT_KEY = "promptly.android.callout";
 const NO_CALL_APP_HASH = "#call-no-app";
@@ -27,6 +28,11 @@ export function captureAppCaps(): void {
   try {
     const caps = (new URLSearchParams(window.location.search).get("caps") ?? "").split(",");
     if (caps.includes("voice")) window.localStorage.setItem(KEY, String(Date.now()));
+    // The app has a sound picker for the channel it holds (older apps don't).
+    if (caps.includes("voice")) {
+      if (caps.includes("sound")) window.localStorage.setItem(SOUND_KEY, "1");
+      else window.localStorage.removeItem(SOUND_KEY);
+    }
     // Calls WP-D3: the app rings DM calls itself.
     if (caps.includes("calls")) window.localStorage.setItem(CALLS_KEY, String(Date.now()));
     // Calls WP-D5: and calls you start go through it too.
@@ -129,6 +135,22 @@ export function hasAndroidVoiceApp(): boolean {
   } catch {
     return false;
   }
+}
+
+/** This phone's app can show where a channel's sound goes (the phone, its speaker,
+ *  wired headphones, each Bluetooth device). The list stays on the phone. */
+export function hasAndroidSoundPicker(): boolean {
+  if (!hasAndroidVoiceApp()) return false;
+  try {
+    return window.localStorage.getItem(SOUND_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Opens the app's sound picker over this page. */
+export function openSoundPicker(): void {
+  openHandoff("intent://voice/sound#Intent;scheme=promptly;package=org.promptly.app;end");
 }
 
 /** The hand-off didn't work (app removed or too old): stop trying. */

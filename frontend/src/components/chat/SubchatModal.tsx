@@ -274,7 +274,7 @@ export function SubchatModal({
         top: pos.y,
         width: size.w,
         height: size.h,
-        maxHeight: "calc(100vh - 16px)",
+        maxHeight: "calc(100dvh - 16px)",
         maxWidth: "calc(100vw - 16px)",
       }}
     >

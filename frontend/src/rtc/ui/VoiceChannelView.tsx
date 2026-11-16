@@ -37,6 +37,7 @@ import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 import { voice } from "../voice/actions";
+import { hasAndroidSoundPicker, openSoundPicker } from "../voice/androidApp";
 import { useVoice, useVoiceSettings } from "../voice/hooks";
 import { VideoTrackView } from "../voice/VideoTrackView";
 import { MemberIcons, SignalIcon, signalLevel, VoiceAvatar } from "./bits";
@@ -394,6 +395,11 @@ export function VoiceChannelView({
           className={cn(barBtn, s.live && "bg-[var(--danger)] text-white")}
         >
           {s.live ? <ScreenShareOff className="h-5 w-5" /> : <MonitorUp className="h-5 w-5" />}
+        </button>
+      )}
+      {isPhone && s.remote && s.status === "connected" && hasAndroidSoundPicker() && (
+        <button type="button" aria-label="Sound: phone, speaker or headset" title="Sound" onClick={openSoundPicker} className={barBtn} data-testid="voice-sound">
+          <Volume2 className="h-5 w-5" />
         </button>
       )}
       {isPhone && (

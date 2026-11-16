@@ -1152,15 +1152,8 @@ async function handlePage(m: PageRequest): Promise<unknown> {
   switch (m.t) {
     case "state":
       return state();
-    case "unlock": {
-      const locksBefore = locks;
-      const r = await c.unlock(m.password, undefined, { keepSecret: true });
-      await saveSecret(r.secret!, c.api.session, locksBefore);
-      startKeepAlive(true);
-      await touchLockTimer();
-      updateBadgeAll();
-      return { offline: r.offline };
-    }
+    case "unlock":
+      return unlockWithPassword(c, m.password);
     case "lock":
       await lock();
       return { ok: true };
@@ -1610,6 +1603,17 @@ const unlockPin = new UnlockPin({
   set: (r) => session.set({ pin: r }),
   remove: () => session.remove("pin"),
 });
+
+/** The master password, typed in the panel or in the passkey window. A wrong one throws. */
+async function unlockWithPassword(c: VaultClient, password: string): Promise<{ offline?: boolean }> {
+  const locksBefore = locks;
+  const r = await c.unlock(password, undefined, { keepSecret: true });
+  await saveSecret(r.secret!, c.api.session, locksBefore);
+  startKeepAlive(true);
+  await touchLockTimer();
+  updateBadgeAll();
+  return { offline: r.offline };
+}
 
 /** Is this the person? For a passkey prompt that has to say so to a site. Five wrong PINs
  *  wipe it, as they do at the unlock screen, and a master password has no such limit. */
@@ -2123,7 +2127,7 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   if (t === "vaultChanged" || t === "locked" || t === "offscreenClip") return false;
   let p: Promise<unknown>;
   if (t.startsWith("pk")) {
-    p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson, (tabId, url) => void updateBadge(tabId, url), { store, lockOut: lock }));
+    p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson, (tabId, url) => void updateBadge(tabId, url), { store, lockOut: lock, unlock: (password) => unlockWithPassword(client!, password) }));
   } else if (t === "menuList" || t === "menuPick" || t === "menuPasskey" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup" || t === "menuHandoff" || t === "menuSize") {
     if (!isOurPage(sender, "/menu.html")) return false;
     p = handleMenu(msg as MenuRequest, sender);

@@ -21,10 +21,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Voice rooms on Android: a Sound button on the channel page opens a list on the phone to send the sound to the phone, its speaker, wired headphones or a Bluetooth device by name. Needs the next phone app; the list stays on the phone.
+
+### Changed
+
+- Passwords extension 0.2.3: when a passkey is wanted and your vault is locked, the passkey window asks for your master password and nothing after it; the passkey PIN is only asked when the vault is already open (D139).
+- Workout on a phone: the set type is a small chip that opens the four choices, next to "Last" and Use; hold − or + to keep stepping; a second Finish button appears under the last exercise once every set is ticked; tap the rest countdown to fill the screen with it.
+
 ### Fixed
 
 - Promptly Home: "Add a device" only starts set-ups for the brands it offers. Home Assistant's general tools (fetch a web address, open a database, ping) could be started by anyone in a home by asking the server directly, and on this server's own box they would have run from the server's machine; they're now refused and never offered. An over-large set-up answer is refused before it can drop the box's connection.
 - Rooms: a file attached to a message and never sent is now wiped after a day (it used to stay on the server for good), and one person can have at most 30 files waiting to be sent, so the disk can't be filled that way.
+- Chat on a phone in plain Chrome: the message box is no longer cut off at the bottom. The main layout now sizes itself to the part of the screen the browser actually shows, as the other apps already did.
+- P Maps: the message for a phone app that gives no location no longer tells an admin to add a Google Play key; it says to update the app and allow Location.
 
 ## [0.46.0] - 2026-11-16
 

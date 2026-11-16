@@ -3,6 +3,7 @@ import {
   ArrowUp,
   Calculator,
   Check,
+  ChevronDown,
   Flame,
   LineChart,
   Minus,
@@ -15,7 +16,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { ItemHandle } from "@/items/useItem";
 import { Card, Chip, Field, ItemButton, Sheet, Stepper, TextArea, TextInput, fmtDay, fmtDuration, uid } from "@/items/ui";
@@ -253,6 +254,9 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
   const elapsed = a.started_at ? Math.max(0, (now - new Date(a.started_at).getTime()) / 1000) : 0;
   const allSets = a.exercises.flatMap((we) => we.sets);
   const done = allSets.filter((x) => x.done && setType(x) !== "warmup");
+  /** Every set that counts is ticked: Finish is offered again at the bottom, where the thumb is. */
+  const counted = allSets.filter((x) => setType(x) !== "warmup");
+  const allDone = counted.length > 0 && counted.every((x) => x.done);
   const volume = a.exercises.reduce(
     (n, we) => n + (lib.get(we.exercise_id).log === "weight_reps" ? we.sets.filter((x) => x.done && setType(x) !== "warmup").reduce((m, x) => m + (x.kg ?? 0) * (x.reps ?? 0), 0) : 0),
     0,
@@ -490,6 +494,11 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
         />
       ))}
 
+      {!ro && allDone && (
+        <ItemButton variant="primary" size="lg" block icon={<Check className="h-5 w-5" />} onClick={() => setFinishing(true)} data-testid="workout-finish-bottom">
+          Finish workout
+        </ItemButton>
+      )}
       {!ro && a.exercises.length > 0 && (
         <div className="flex flex-wrap gap-2">
           <ItemButton icon={<Plus className="h-4 w-4" />} onClick={() => setPicker({ mode: "add" })} className="flex-1">
@@ -981,6 +990,9 @@ function setGrid(n: number, prev = true): string {
  *  their greyed hint, so + on "last time 8" makes 9. */
 function FocusEditor({ st, ex, s, cols, prev, hint, onChange, onDone, onPlates, onDelete }: { st: SetLog; ex: Exercise; s: Settings; cols: Col[]; prev?: SetLog; hint: (c: Col) => number | null; onChange: (fn: (x: SetLog) => void) => void; onDone: () => void; onPlates?: () => void; onDelete: () => void }) {
   const t = setType(st);
+  // The set type is rarely changed: a chip that opens the four choices, not a row of them.
+  const [typeOpen, setTypeOpen] = useState(false);
+  const fillLast = () => onChange((x) => { if (!prev) return; x.kg = prev.kg ?? x.kg; x.reps = prev.reps ?? x.reps; x.seconds = prev.seconds ?? x.seconds; x.meters = prev.meters ?? x.meters; });
   return (
     <div
       className="mx-1 mb-2 mt-1 flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-3"
@@ -990,29 +1002,45 @@ function FocusEditor({ st, ex, s, cols, prev, hint, onChange, onDone, onPlates, 
       // A box that already has the cursor (keypad put away, then tapped again) gets no focus event.
       onClickCapture={(e) => followKeypad(e.currentTarget, e.target as HTMLElement)}
     >
-      <div className="grid grid-cols-4 gap-1 rounded-xl bg-[var(--surface-2)] p-1" role="radiogroup" aria-label="Set type">
-        {(["warmup", "working", "drop", "failure"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="radio"
-            aria-checked={t === k}
-            onClick={() => onChange((x) => { x.type = k; })}
-            className={cn("h-10 rounded-lg text-xs font-medium transition", t === k ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]")}
-          >
-            {SET_NAME[k]}
-          </button>
-        ))}
-      </div>
-      {prev && (
+      <div className="-my-1.5 flex min-h-11 items-center gap-2">
         <button
           type="button"
-          onClick={() => onChange((x) => { x.kg = prev.kg ?? x.kg; x.reps = prev.reps ?? x.reps; x.seconds = prev.seconds ?? x.seconds; x.meters = prev.meters ?? x.meters; })}
-          className="-my-1.5 flex min-h-11 items-center justify-between rounded-lg px-1 text-[13px] text-[var(--text-muted)] active:bg-[var(--hover)]"
+          aria-expanded={typeOpen}
+          aria-label={`Set type: ${SET_NAME[t]}. Change`}
+          onClick={() => setTypeOpen((o) => !o)}
+          data-testid="set-type-chip"
+          className="flex min-h-11 shrink-0 items-center active:opacity-80"
         >
-          <span>Last time: <span className="font-semibold tabular-nums text-[var(--text)]">{fmtSet(prev, ex, s)}</span></span>
-          <span className="rounded-full bg-[var(--surface-2)] px-3 py-1 text-xs font-semibold text-[var(--text)]">Use</span>
+          <span className={cn("flex h-8 items-center gap-1 rounded-full border px-3 text-xs font-semibold", t === "working" ? "border-[var(--border)] text-[var(--text-muted)]" : "border-[var(--item-accent)] text-[var(--item-accent)]")}>
+            {SET_NAME[t]}
+            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", typeOpen && "rotate-180")} aria-hidden />
+          </span>
         </button>
+        {prev && (
+          <button type="button" onClick={fillLast} className="flex min-h-11 min-w-0 flex-1 items-center justify-end gap-2 rounded-lg px-1 text-[13px] text-[var(--text-muted)] active:bg-[var(--hover)]">
+            <span className="min-w-0 truncate">Last: <span className="font-semibold tabular-nums text-[var(--text)]">{fmtSet(prev, ex, s)}</span></span>
+            <span className="shrink-0 rounded-full bg-[var(--surface-2)] px-3 py-1 text-xs font-semibold text-[var(--text)]">Use</span>
+          </button>
+        )}
+      </div>
+      {typeOpen && (
+        <div className="grid grid-cols-4 gap-1 rounded-xl bg-[var(--surface-2)] p-1" role="radiogroup" aria-label="Set type">
+          {(["warmup", "working", "drop", "failure"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={t === k}
+              onClick={() => {
+                onChange((x) => { x.type = k; });
+                setTypeOpen(false);
+              }}
+              className={cn("h-10 rounded-lg text-xs font-medium transition", t === k ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]")}
+            >
+              {SET_NAME[k]}
+            </button>
+          ))}
+        </div>
       )}
       <div className={cn("grid gap-2", cols.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
         {cols.map((c, ci) => {
@@ -1033,9 +1061,9 @@ function FocusEditor({ st, ex, s, cols, prev, hint, onChange, onDone, onPlates, 
             <div key={c} className="flex min-w-0 flex-col gap-1">
               <span className="text-xs font-medium text-[var(--text-muted)]">{label}</span>
               <div className="flex items-stretch overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] focus-within:border-[var(--item-accent)]">
-                <button type="button" aria-label={c === "kg" ? "Lighter" : `Less ${label}`} onClick={() => nudge(-1)} className={STEP_BTN}>
+                <HoldButton label={c === "kg" ? "Lighter" : `Less ${label}`} onStep={() => nudge(-1)}>
                   <Minus className="h-5 w-5" />
-                </button>
+                </HoldButton>
                 <NumBox
                   dataKey={`${st.id}-big-${c}`}
                   label={label}
@@ -1052,9 +1080,9 @@ function FocusEditor({ st, ex, s, cols, prev, hint, onChange, onDone, onPlates, 
                   }}
                   className="h-[52px] flex-1 rounded-none border-0 bg-transparent px-0 text-lg focus:bg-transparent min-[390px]:text-xl"
                 />
-                <button type="button" aria-label={c === "kg" ? "Heavier" : `More ${label}`} onClick={() => nudge(1)} className={STEP_BTN}>
+                <HoldButton label={c === "kg" ? "Heavier" : `More ${label}`} onStep={() => nudge(1)}>
                   <Plus className="h-5 w-5" />
-                </button>
+                </HoldButton>
               </div>
             </div>
           );
@@ -1120,6 +1148,53 @@ function revealAboveKeypad(editor: HTMLElement, box: HTMLElement) {
  *  "102.5" still fits between them. */
 const STEP_BTN =
   "flex w-10 shrink-0 items-center justify-center text-[var(--text-muted)] hover:bg-[var(--hover)] active:bg-[var(--hover-strong)] active:text-[var(--text)] min-[390px]:w-12";
+
+/** How long a press is held before it starts repeating, and how fast it then goes. */
+const HOLD_START_MS = 420;
+const HOLD_EVERY_MS = 110;
+
+/** A - / + button: a tap is one step; keep it held and it keeps stepping, for big jumps. */
+function HoldButton({ label, onStep, children }: { label: string; onStep: () => void; children: ReactNode }) {
+  const step = useRef(onStep);
+  step.current = onStep;
+  const timers = useRef<{ wait?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setInterval> }>({});
+  /** The hold already stepped, so the click that ends it mustn't step once more. */
+  const held = useRef(false);
+  const stop = () => {
+    clearTimeout(timers.current.wait);
+    clearInterval(timers.current.every);
+    timers.current = {};
+  };
+  useEffect(() => stop, []);
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className={cn(STEP_BTN, "touch-manipulation select-none")}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        held.current = false;
+        stop();
+        timers.current.wait = setTimeout(() => {
+          held.current = true;
+          step.current();
+          timers.current.every = setInterval(() => step.current(), HOLD_EVERY_MS);
+        }, HOLD_START_MS);
+      }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      // A long press on a phone would otherwise open the browser's menu.
+      onContextMenu={(e) => e.preventDefault()}
+      onClick={() => {
+        if (held.current) held.current = false;
+        else step.current();
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 function MenuBtn({ icon: Icon, label, onClick, danger }: { icon: typeof Plus; label: string; onClick: () => void; danger?: boolean }) {
   return (

@@ -65,10 +65,11 @@ const asStop = (s: Spot): StopRow => ({ lat: s.lat, lon: s.lon, name: s.name, ad
 /** What to tell someone whose phone hasn't given a location, with the phone's own
  *  words, so a problem report says what actually happened. */
 function locationProblemText(e: GeolocationPositionError): string {
-  // Chrome asks the Promptly phone app for the location, and couldn't find one it
-  // trusts for this server: a server setting, not the phone's Location switch.
+  // Chrome asked the Promptly phone app for the location and got none. The app sends
+  // its own location to the page these days, so this is an old app or a permission
+  // that's off, not something for an admin to set on the server.
   if (/NoTwaFound|TwaNotFound|Delegation/i.test(e.message ?? "")) {
-    return "Location comes through the Promptly phone app, and Chrome couldn't confirm the app belongs to this server. An admin needs to add the app's Google Play key to the server.";
+    return "Chrome couldn't get a location from the Promptly phone app. Update the app, then check it's allowed to use your location: Settings, Apps, Promptly, Permissions, Location.";
   }
   return e.code === e.TIMEOUT ? "Can't find your location yet. Check Location is on, or move near a window." : "Your phone isn't giving a location. Check Location is on in its settings.";
 }
