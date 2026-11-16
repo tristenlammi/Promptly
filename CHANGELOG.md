@@ -25,6 +25,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 - Passwords extension 0.2.3: when a passkey is wanted and your vault is locked, the passkey window asks for your master password and nothing after it; the passkey PIN is only asked when the vault is already open (D139).
 
+### Fixed
+
+- Chat on a phone in plain Chrome: the message box is no longer cut off at the bottom. The main layout now sizes itself to the part of the screen the browser actually shows, as the other apps already did.
+
 ## [0.46.0] - 2026-11-16
 
 ### Changed

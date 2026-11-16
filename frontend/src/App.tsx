@@ -500,7 +500,7 @@ function photoPageRoutes() {
  *  cold load doesn't visibly change shape. */
 function FullScreenLoading() {
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--text-muted)]">
+    <div className="flex h-[100dvh] w-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--text-muted)]">
       Loading Promptly...
     </div>
   );
@@ -687,7 +687,7 @@ export default function App() {
 
   if (status === "reconnecting") {
     return (
-      <div className="flex h-screen w-screen flex-col items-center justify-center gap-1 bg-[var(--bg)] text-sm text-[var(--text-muted)]">
+      <div className="flex h-[100dvh] w-screen flex-col items-center justify-center gap-1 bg-[var(--bg)] text-sm text-[var(--text-muted)]">
         <div className="text-[var(--text)]">Can&apos;t reach Promptly right now.</div>
         <div>It may be restarting after an update. Reconnecting…</div>
       </div>
@@ -696,7 +696,7 @@ export default function App() {
 
   if (status === "idle" || status === "loading") {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--text-muted)]">
+      <div className="flex h-[100dvh] w-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--text-muted)]">
         Loading Promptly...
       </div>
     );
