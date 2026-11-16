@@ -489,8 +489,15 @@ test.describe("voice channels", () => {
     // Ctrl+K: join a channel by name.
     await alice.keyboard.press("Control+k");
     await alice.keyboard.type(`join ${lounge.toLowerCase()}`);
-    await expect(alice.getByRole("button", { name: new RegExp(`Join ${lounge}.*Lads`) })).toBeVisible();
-    await alice.keyboard.press("Enter");
+    const joinRow = alice.getByRole("button", { name: new RegExp(`Join ${lounge}.*Lads`) });
+    await expect(joinRow).toBeVisible();
+    // The list is still settling when the row first shows (the ranked results
+    // land a moment after the keyword ones), and an Enter in that moment is
+    // lost: press until the palette has taken it.
+    await expect(async () => {
+      if (await joinRow.isVisible()) await alice.keyboard.press("Enter");
+      await expect(joinRow).toBeHidden({ timeout: 1500 });
+    }).toPass({ timeout: 15_000 });
     await expect(panel(alice).getByTestId("voice-status")).toHaveText("Voice connected", { timeout: 30_000 });
     await alice.keyboard.press("Control+k");
     await alice.keyboard.type("leave");

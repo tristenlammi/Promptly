@@ -30,7 +30,7 @@ test.describe("notes on a phone", () => {
     expect(width).toBeLessThanOrEqual(390);
 
     // New list from the bottom bar.
-    const list = `Hardware ${stamp}`;
+    const list = `Hardware shop ${stamp}`; // (notes-across has a "Hardware <stamp>" of its own)
     await page.getByRole("button", { name: "New list" }).click();
     await page.getByRole("textbox", { name: "Title" }).fill(list);
     await page.getByRole("textbox", { name: "New list item" }).click();
