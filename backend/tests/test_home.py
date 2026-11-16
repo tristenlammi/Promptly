@@ -651,3 +651,57 @@ def test_a_device_id_and_a_speaker_group_come_through_and_nothing_else_new():
     assert got == {"id": "media_player.downstairs", "domain": "media_player", "name": "Downstairs", "state": "off", "dev": "abc123", "grp": True, "cls": "speaker"}
     assert "grp" not in relay.clean_entity({"id": "light.a", "domain": "light", "name": "A", "state": "on", "grp": "yes"})
     assert relay.clean_note({"n": "3"}) is None and relay.clean_note({"n": 0, "brands": []}) is None
+
+
+# ------------------------------------------------------------------ security review 2026-11
+
+
+class _Peer:
+    def __init__(self, host: str) -> None:
+        self.host = host
+
+
+class ProxiedBox(FakeBox):
+    """A box dialling in through nginx: the socket's peer is the proxy, and
+    the real caller is in X-Real-IP."""
+
+    def __init__(self, real_ip: str) -> None:
+        super().__init__()
+        self.client = _Peer("172.18.0.5")
+        self.headers = {"X-Real-IP": real_ip}
+
+
+async def test_wrong_hellos_from_one_address_do_not_shut_every_box_out(user, client):
+    """Behind nginx every caller used to be counted as nginx: ten wrong
+    hellos from anyone turned every box away, this server's own included."""
+    from app.home import relay
+
+    admin = user
+    await _turn_on(client, admin)
+    prepared = await _prepare(client, admin)
+    s = _setup(prepared)
+
+    for _ in range(relay.MAX_BAD_HELLOS + 2):
+        stranger = ProxiedBox("203.0.113.9")
+        task = asyncio.create_task(relay.serve(stranger))
+        await stranger.say({"t": "hello", "box": s["b"], "key": "x" * 40, "v": "test"})
+        await asyncio.wait_for(task, timeout=5)
+        assert stranger.closed in (relay.CLOSE_BAD, relay.CLOSE_BUSY)
+    assert stranger.closed == relay.CLOSE_BUSY  # the stranger is turned away...
+
+    box = ProxiedBox("198.51.100.20")  # ...the real box, from its own address, is not
+    task = asyncio.create_task(relay.serve(box))
+    await box.say({"t": "hello", "box": s["b"], "key": s["k"], "v": "test"})
+    assert (await box.hear("welcome"))["claimed"] is False
+    await box.hang_up()
+    await asyncio.wait_for(task, timeout=5)
+
+
+@pytest.mark.parametrize("bad", ["..", ".", ".hidden", "a/b", ""])
+async def test_ids_sent_on_to_the_box_are_never_dot_segments(bad):
+    import re
+
+    from app.home.router import _ID
+
+    assert not re.match(_ID, bad)
+    assert re.match(_ID, "01JABCDEF") and re.match(_ID, "living_room") and re.match(_ID, "a.b-c")
