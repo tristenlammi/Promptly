@@ -606,10 +606,34 @@ data class CallNote(val title: String, val text: String, val muteLabel: String, 
     }
 }
 
+/** One place the call's sound can go (the earpiece, the speaker, a headset, the car). */
+data class AudioRoute(val id: String, val kind: Routing.Kind, val name: String, val current: Boolean = false)
+
 /** Speaker or not: calls start on the earpiece (a phone call held to your
  *  ear), video calls on the loudspeaker; a headset or the car always wins. */
 object Routing {
     enum class Kind { EARPIECE, SPEAKER, WIRED, BLUETOOTH, OTHER }
+
+    /** What the picker calls a place the sound can go: a Bluetooth headset or car by its own name. */
+    fun label(kind: Kind, name: String?): String {
+        val own = name?.trim()?.takeIf { it.isNotEmpty() }
+        return when (kind) {
+            Kind.EARPIECE -> "Phone"
+            Kind.SPEAKER -> "Speaker"
+            Kind.WIRED -> "Headphones"
+            Kind.BLUETOOTH -> own ?: "Bluetooth"
+            Kind.OTHER -> own ?: "Other"
+        }
+    }
+
+    /** The picker's list: Bluetooth first, then wired, the phone, the speaker; each once. */
+    fun options(routes: List<AudioRoute>): List<AudioRoute> {
+        val order = listOf(Kind.BLUETOOTH, Kind.WIRED, Kind.OTHER, Kind.EARPIECE, Kind.SPEAKER)
+        return routes.distinctBy { it.id }.sortedBy { order.indexOf(it.kind) }
+    }
+
+    /** Only the phone and its speaker is a plain switch; anything more needs the list. */
+    fun needsList(routes: List<AudioRoute>): Boolean = routes.any { it.kind != Kind.EARPIECE && it.kind != Kind.SPEAKER }
 
     /** The route to pick from [available], given whether the speaker is wanted. */
     fun pick(available: List<Kind>, speaker: Boolean): Kind? {

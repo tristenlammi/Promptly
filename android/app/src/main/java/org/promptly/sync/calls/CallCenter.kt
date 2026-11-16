@@ -47,6 +47,8 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
         val status: CallNote.Status = CallNote.Status.CONNECTING,
         val muted: Boolean = false,
         val speaker: Boolean = false,
+        /** Where the sound can go when Android's call system isn't routing it (else see [audio]). */
+        val routes: List<AudioRoute> = emptyList(),
         val others: Int = 0,
         val group: Boolean = false,
         /** You started it and nobody's answered yet (Calls WP-D5). */
@@ -190,6 +192,9 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
 
     /** Speaker on or off. False when Telecom doesn't hold the call (the service routes it). */
     fun telecomSpeaker(callId: String, on: Boolean): Boolean = telecom.setSpeaker(callId, on)
+
+    /** One picked place for the sound. False when Telecom doesn't hold the call. */
+    fun telecomRoute(callId: String, routeId: String): Boolean = telecom.setRoute(callId, routeId)
 
     fun telecomHolds(callId: String): Boolean = telecom.holds(callId)
 

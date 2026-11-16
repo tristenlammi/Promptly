@@ -39,12 +39,19 @@ class CallTelecom(context: Context, private val scope: CoroutineScope, private v
     }
 
     /** Where the audio goes now, and where it could go (for the Speaker button). */
-    data class Audio(val current: Routing.Kind? = null, val available: List<Routing.Kind> = emptyList(), val muted: Boolean = false)
+    data class Audio(
+        val current: Routing.Kind? = null,
+        val available: List<Routing.Kind> = emptyList(),
+        val muted: Boolean = false,
+        /** Every place the sound can go, by name (two Bluetooth devices are two entries). */
+        val routes: List<AudioRoute> = emptyList(),
+    )
 
     private class Held(val job: Job) {
         var control: CallControlScope? = null
         var endpoints: List<CallEndpointCompat> = emptyList()
         var current: Routing.Kind? = null
+        var currentId: String? = null
         /** A request that came before Telecom handed us the call's controls. */
         var pending: (suspend CallControlScope.() -> Unit)? = null
     }
@@ -102,7 +109,7 @@ class CallTelecom(context: Context, private val scope: CoroutineScope, private v
                 ) {
                     held.control = this
                     launch { availableEndpoints.collect { list -> held.endpoints = list; publish(id) } }
-                    launch { currentCallEndpoint.collect { e -> held.current = kindOf(e); publish(id) } }
+                    launch { currentCallEndpoint.collect { e -> held.current = kindOf(e); held.currentId = e.identifier.toString(); publish(id) } }
                     launch { isMuted.collect { m -> if (calls[id] === held) _audio.value = _audio.value.copy(muted = m) } }
                     held.pending?.let { p ->
                         held.pending = null
@@ -157,9 +164,28 @@ class CallTelecom(context: Context, private val scope: CoroutineScope, private v
         return true
     }
 
+    /** Send the sound to one place the person picked. False when Telecom doesn't hold the call. */
+    fun setRoute(callId: String, routeId: String): Boolean {
+        val h = calls[callId] ?: return false
+        val c = h.control ?: return false
+        val target = h.endpoints.firstOrNull { it.identifier.toString() == routeId } ?: return true
+        scope.launch { result("route", c.requestEndpointChange(target)) }
+        return true
+    }
+
     private fun publish(callId: String) {
         val h = calls[callId] ?: return
-        _audio.value = _audio.value.copy(current = h.current, available = h.endpoints.map { kindOf(it) }.distinct())
+        _audio.value = _audio.value.copy(
+            current = h.current,
+            available = h.endpoints.map { kindOf(it) }.distinct(),
+            routes = Routing.options(
+                h.endpoints.map { e ->
+                    val id = e.identifier.toString()
+                    val kind = kindOf(e)
+                    AudioRoute(id, kind, Routing.label(kind, e.name.toString()), current = id == h.currentId)
+                },
+            ),
+        )
     }
 
     private fun run(callId: String, step: suspend CallControlScope.() -> Unit) {

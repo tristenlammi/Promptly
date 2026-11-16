@@ -336,4 +336,21 @@ class CallLogicTest {
         assertTrue(Routing.screenOffAtEar(inCall = true, route = null, speaker = false, picture = false))
         assertFalse(Routing.screenOffAtEar(inCall = true, route = null, speaker = true, picture = false))
     }
+
+    @Test
+    fun `the sound picker lists every place by name`() {
+        val buds = AudioRoute("b1", Routing.Kind.BLUETOOTH, Routing.label(Routing.Kind.BLUETOOTH, "Pixel Buds"))
+        val car = AudioRoute("b2", Routing.Kind.BLUETOOTH, Routing.label(Routing.Kind.BLUETOOTH, " My Car "), current = true)
+        val ear = AudioRoute("e", Routing.Kind.EARPIECE, Routing.label(Routing.Kind.EARPIECE, "Earpiece"))
+        val loud = AudioRoute("s", Routing.Kind.SPEAKER, Routing.label(Routing.Kind.SPEAKER, null))
+        val list = Routing.options(listOf(loud, ear, buds, car, buds))
+        assertEquals(listOf("Pixel Buds", "My Car", "Phone", "Speaker"), list.map { it.name })
+        assertEquals("b2", list.single { it.current }.id)
+        assertEquals("Bluetooth", Routing.label(Routing.Kind.BLUETOOTH, "  "))
+        assertEquals("Headphones", Routing.label(Routing.Kind.WIRED, "Wired headset"))
+        // Just the phone and its speaker stays a plain switch.
+        assertFalse(Routing.needsList(listOf(ear, loud)))
+        assertTrue(Routing.needsList(listOf(ear, loud, buds)))
+        assertFalse(Routing.needsList(emptyList()))
+    }
 }

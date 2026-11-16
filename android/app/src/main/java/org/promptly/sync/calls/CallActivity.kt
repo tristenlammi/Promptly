@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
@@ -59,6 +60,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -69,6 +71,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
@@ -406,10 +409,54 @@ class CallActivity : ComponentActivity() {
             if (cam.live) {
                 RoundButton(R.drawable.ic_call_flip, "Flip", KEY, size = 60.dp) { CallService.flipCamera() }
             }
-            RoundButton(R.drawable.ic_call_speaker, if (media.speaker) "Speaker on" else "Speaker", if (media.speaker) Color.White else KEY, dark = media.speaker, size = 60.dp) {
-                CallService.speaker(!media.speaker)
+            val audio by CallCenter.audio.collectAsState()
+            val routes = audio.routes.ifEmpty { media.routes }
+            if (Routing.needsList(routes)) {
+                // A headset or the car is there too: the button opens the list.
+                val now = routes.firstOrNull { it.current }
+                val loud = now?.kind == Routing.Kind.SPEAKER
+                var open by remember { mutableStateOf(false) }
+                RoundButton(
+                    routeIcon(now?.kind ?: Routing.Kind.SPEAKER), now?.name ?: "Sound", if (loud) Color.White else KEY, dark = loud, size = 60.dp,
+                    says = "Sound: ${now?.name ?: "not chosen"}. Change where the sound goes",
+                ) { open = true }
+                if (open) AudioPicker(routes, onPick = { CallService.route(it.id); open = false }, onClose = { open = false })
+            } else {
+                RoundButton(R.drawable.ic_call_speaker, if (media.speaker) "Speaker on" else "Speaker", if (media.speaker) Color.White else KEY, dark = media.speaker, size = 60.dp) {
+                    CallService.speaker(!media.speaker)
+                }
             }
             RoundButton(R.drawable.ic_call_decline, "Hang up", RED, size = 60.dp) { CallCenter.hangUp(active.callId) }
+        }
+    }
+
+    private fun routeIcon(kind: Routing.Kind): Int = when (kind) {
+        Routing.Kind.EARPIECE -> R.drawable.ic_call_phone
+        Routing.Kind.SPEAKER -> R.drawable.ic_call_speaker
+        Routing.Kind.BLUETOOTH -> R.drawable.ic_call_bluetooth
+        Routing.Kind.WIRED, Routing.Kind.OTHER -> R.drawable.ic_call_headset
+    }
+
+    /** Where the sound goes: the phone, its speaker, a headset, the car. */
+    @Composable
+    private fun AudioPicker(routes: List<AudioRoute>, onPick: (AudioRoute) -> Unit, onClose: () -> Unit) {
+        Dialog(onDismissRequest = onClose) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF2A2523)).padding(vertical = 12.dp)) {
+                Text("Sound", color = MUTED, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                routes.forEach { r ->
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .selectable(selected = r.current, role = Role.RadioButton) { onPick(r) }
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(painterResource(routeIcon(r.kind)), contentDescription = null, tint = if (r.current) Color(0xFFD97757) else Color.White, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Text(r.name, color = Color.White, fontSize = 17.sp, fontWeight = if (r.current) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        if (r.current) Text("In use", color = Color(0xFFD97757), fontSize = 14.sp)
+                    }
+                }
+            }
         }
     }
 
@@ -505,11 +552,11 @@ class CallActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun RoundButton(icon: Int, label: String, color: Color, dark: Boolean = false, size: Dp = 72.dp, onClick: () -> Unit) {
+    private fun RoundButton(icon: Int, label: String, color: Color, dark: Boolean = false, size: Dp = 72.dp, says: String = label, onClick: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(size + 16.dp)) {
             Button(
                 onClick = onClick,
-                modifier = Modifier.size(size).semantics { contentDescription = label },
+                modifier = Modifier.size(size).semantics { contentDescription = says },
                 shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = if (dark) Color(0xFF1C1917) else Color.White),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
@@ -517,7 +564,7 @@ class CallActivity : ComponentActivity() {
                 Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(size * 0.44f))
             }
             Spacer(Modifier.height(8.dp))
-            Text(label, color = Color.White, fontSize = 13.sp, textAlign = TextAlign.Center, maxLines = 2, style = TextStyle(shadow = Shadow(Color.Black, blurRadius = 6f)))
+            Text(label, color = Color.White, fontSize = 13.sp, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, style = TextStyle(shadow = Shadow(Color.Black, blurRadius = 6f)))
         }
     }
 

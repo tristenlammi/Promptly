@@ -369,6 +369,8 @@ class CallService : Service() {
             if (telecom) LiveKitOverrides(audioOptions = AudioOptions(audioHandler = NoAudioHandler())) else LiveKitOverrides(),
         )
         r.audioSwitchHandler?.apply {
+            // A headset connecting or leaving changes the picker's list.
+            audioDeviceChangeListener = { _, _ -> scope.launch { if (room === r) publish() } }
             preferredDeviceList = if (speaker) {
                 listOf(AudioDevice.BluetoothHeadset::class.java, AudioDevice.WiredHeadset::class.java, AudioDevice.Speakerphone::class.java, AudioDevice.Earpiece::class.java)
             } else {
@@ -623,6 +625,39 @@ class CallService : Service() {
         }
         note(now = true)
         publish()
+    }
+
+    /** The person picked where the sound goes (the call screen's list). */
+    fun setRoute(routeId: String) {
+        val id = callId
+        if (id != null && CallCenter.telecomRoute(id, routeId)) return
+        val sw = room?.audioSwitchHandler ?: return
+        val pick = sw.availableAudioDevices.firstOrNull { switchId(it) == routeId } ?: return
+        sw.selectDevice(pick)
+        speaker = pick is AudioDevice.Speakerphone
+        note(now = true)
+        publish()
+    }
+
+    private fun switchId(d: AudioDevice): String = d.javaClass.simpleName + ":" + d.name
+
+    /** The list when this service routes the sound itself (Telecom has its own). */
+    private fun switchRoutes(): List<AudioRoute> {
+        val id = callId
+        if (id != null && CallCenter.telecomHolds(id)) return emptyList()
+        val sw = room?.audioSwitchHandler ?: return emptyList()
+        val now = sw.selectedAudioDevice
+        return Routing.options(
+            sw.availableAudioDevices.map { d ->
+                val kind = when (d) {
+                    is AudioDevice.BluetoothHeadset -> Routing.Kind.BLUETOOTH
+                    is AudioDevice.WiredHeadset -> Routing.Kind.WIRED
+                    is AudioDevice.Earpiece -> Routing.Kind.EARPIECE
+                    is AudioDevice.Speakerphone -> Routing.Kind.SPEAKER
+                }
+                AudioRoute(switchId(d), kind, Routing.label(kind, d.name), current = now != null && switchId(now) == switchId(d))
+            },
+        )
     }
 
     private fun syncMic() {
@@ -986,6 +1021,7 @@ class CallService : Service() {
                 status = status,
                 muted = muted,
                 speaker = speaker,
+                routes = switchRoutes(),
                 others = others,
                 group = group,
                 calling = outgoing && !answered,
@@ -1214,6 +1250,7 @@ class CallService : Service() {
 
         fun mute(on: Boolean) = current?.setMuted(on)
         fun speaker(on: Boolean) = current?.setSpeaker(on)
+        fun route(routeId: String) = current?.setRoute(routeId)
         fun toggleCamera() = current?.toggleCamera()
         fun flipCamera() = current?.flipCamera()
         fun permissionsChanged() = current?.permissionsChanged()
