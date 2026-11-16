@@ -38,7 +38,10 @@ import androidx.car.app.navigation.NavigationManager
 import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.car.app.navigation.model.TravelEstimate
 import androidx.car.app.validation.HostValidator
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.withFrameMillis
 import com.stadiamaps.ferrostar.maplibreui.runtime.NavigationCameraMode
@@ -49,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
@@ -63,9 +67,6 @@ import com.stadiamaps.ferrostar.core.extensions.visualInstruction
 import org.promptly.sync.BuildConfig
 import uniffi.ferrostar.DrivingSide
 import com.stadiamaps.ferrostar.car.app.template.models.toCarDistance
-import com.stadiamaps.ferrostar.composeui.config.VisualNavigationViewConfig
-import com.stadiamaps.ferrostar.composeui.config.withSpeedLimitStyle
-import com.stadiamaps.ferrostar.composeui.views.components.speedlimit.SignageStyle
 import com.stadiamaps.ferrostar.core.NavigationUiState
 import com.stadiamaps.ferrostar.maplibreui.runtime.navigationCameraOptions
 import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
@@ -328,10 +329,16 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         // when there isn't one). Where you're drawn glides from fix to fix, and the camera
         // follows the glide every frame, so nothing jumps once a second.
         val glide = remember { Glide() }
+        // Your speed, from each GPS reading as it comes, trip or no trip.
+        val speed = remember { LiveSpeed() }
+        KeepSpeedFresh(speed)
+        var lastFix by remember { mutableStateOf<android.location.Location?>(null) }
         LaunchedEffect(Unit) {
             while (true) {
                 runCatching {
-                    Nav.locationProvider.locationUpdates(1000L).collect { fix ->
+                    Nav.locationProvider.locationUpdates(SpeedReading.ASK_MS).collect { fix ->
+                        speed.fix(fix)
+                        lastFix = fix
                         val driving = fix.hasSpeed() && fix.speed >= DRIVING_MPS
                         glide.to(fix.latitude, fix.longitude, if (driving && fix.hasBearing()) fix.bearing.toDouble() else null, if (fix.hasSpeed()) fix.speed.toDouble() else null)
                     }
@@ -389,14 +396,49 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 }
             }
         }
+        // With no trip, the limit of the road you're on comes from your server, asked as
+        // you move along (a trip carries its own limits).
+        var road by remember { mutableStateOf<Road?>(null) }
+        val navigatingNow = ui.isNavigating()
+        LaunchedEffect(navigatingNow) {
+            road = null
+            if (navigatingNow) return@LaunchedEffect
+            var asked: android.location.Location? = null
+            var misses = 0
+            while (true) {
+                val at = lastFix
+                val moving = at != null && at.hasSpeed() && at.speed >= DRIVING_MPS
+                if (at != null && moving && (asked == null || asked.distanceTo(at) > 60f)) {
+                    asked = at
+                    val found = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        runCatching { Maps.road(carContext, at.latitude, at.longitude, if (at.hasBearing()) at.bearing else null) }.getOrNull()
+                    }
+                    if (found != null) {
+                        road = found
+                        misses = 0
+                    } else if (++misses >= 2) {
+                        // Rather nothing than the last road's limit on this one.
+                        road = null
+                    }
+                }
+                delay(4_000)
+            }
+        }
+        val limit = if (navigatingNow) {
+            ui.currentAnnotation?.speedLimit?.value(com.stadiamaps.ferrostar.core.measurement.MeasurementSpeedUnit.KilometersPerHour)?.let { Math.round(it).toInt() }?.takeIf { it in 5..150 }
+        } else {
+            road?.limit
+        }
         // The route in Promptly's terracotta, as on the phone, and only the way ahead.
         val routeLine = remember(dark) { routeAheadOverlay(dark) }
         CarMapView(
+            kmh = speed.kmh,
+            limit = limit,
+            dark = dark,
             styleUrl = styleUri,
             mapState = mapState,
             options = options,
             ui = ui,
-            config = VisualNavigationViewConfig.Default().withSpeedLimitStyle(SignageStyle.ViennaConvention),
             surfaceArea = surfaceArea,
             routeOverlayBuilder = routeLine,
             mapContent = { state ->
@@ -581,13 +623,14 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
 }
 
 private const val DRIVING_MPS = 2.5f
+private const val CAR_SPEED_DP = 76f
 
 /**
  * The car's map: the navigation library's car view (CarAppNavigationView, Ferrostar
  * 0.59) put together here, because that one always drew the library's own position dot
- * as well as ours, two markers on the screen with one trailing the other. Speed limit
- * top-left and road name at the bottom, inside the part of the screen the car keeps
- * clear, as before.
+ * as well as ours, two markers on the screen with one trailing the other. Your speed
+ * and the road's limit sit together at the bottom, with the road's name, inside the
+ * part of the screen the car keeps clear.
  */
 @Composable
 private fun CarMapView(
@@ -595,7 +638,9 @@ private fun CarMapView(
     mapState: com.stadiamaps.ferrostar.maplibreui.runtime.NavigationMapState,
     options: com.stadiamaps.ferrostar.maplibreui.runtime.NavigationCameraOptions,
     ui: NavigationUiState,
-    config: VisualNavigationViewConfig,
+    kmh: Int?,
+    limit: Int?,
+    dark: Boolean,
     surfaceArea: SurfaceAreaTracker,
     routeOverlayBuilder: com.stadiamaps.ferrostar.maplibreui.routeline.RouteOverlayBuilder,
     mapContent: @Composable @org.maplibre.compose.util.MaplibreComposable (NavigationUiState) -> Unit,
@@ -615,20 +660,23 @@ private fun CarMapView(
             content = mapContent,
         )
         androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(grid)) {
-            ui.currentAnnotation?.speedLimit?.let { limit ->
-                config.speedLimitStyle?.let { style ->
-                    com.stadiamaps.ferrostar.composeui.views.components.speedlimit.SpeedLimitView(
-                        speedLimit = limit,
-                        signageStyle = style,
-                        modifier = Modifier.align(androidx.compose.ui.Alignment.TopStart),
-                    )
+            // Along the bottom of the part of the screen the car keeps clear: your speed
+            // and the limit together at the near corner, the road's name in what's left,
+            // so neither sits on the other, on the cards or on the car's own buttons.
+            BoxWithConstraints(Modifier.align(androidx.compose.ui.Alignment.BottomStart).fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
+                val cluster = SpeedPlace.clusterWidthDp(CAR_SPEED_DP, limit != null)
+                val balance = SpeedPlace.balanceDp(maxWidth.value, cluster)
+                androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.Bottom) {
+                    SpeedCluster(kmh, limit, dark, size = CAR_SPEED_DP.dp)
+                    androidx.compose.foundation.layout.Box(Modifier.weight(1f).padding(horizontal = 8.dp), contentAlignment = androidx.compose.ui.Alignment.BottomCenter) {
+                        ui.currentStepRoadName?.let { road ->
+                            com.stadiamaps.ferrostar.composeui.views.components.CurrentRoadNameView(currentRoadName = road)
+                        }
+                    }
+                    // The same again on the far side where there's room, so the road's
+                    // name stays under your arrow; on a narrow screen it has the room.
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(balance.dp))
                 }
-            }
-            ui.currentStepRoadName?.let { road ->
-                com.stadiamaps.ferrostar.composeui.views.components.CurrentRoadNameView(
-                    currentRoadName = road,
-                    modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter),
-                )
             }
         }
     }

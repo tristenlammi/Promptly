@@ -363,7 +363,17 @@ class NavigationActivity : ComponentActivity() {
             )
             // The road's limit in km/h, when the map has one (many Australian roads don't).
             val limit = state.currentAnnotation?.speedLimit?.value(MeasurementSpeedUnit.KilometersPerHour)?.let { Math.round(it).toInt() }?.takeIf { it in 5..150 }
-            val kmh = state.location?.speed?.value?.let { Math.round(it * 3.6).toInt() }
+            // Your speed straight from the GPS as each reading comes, not by way of the trip.
+            val speed = remember { LiveSpeed() }
+            KeepSpeedFresh(speed)
+            LaunchedEffect(navigating) {
+                // Only on a trip, when the GPS is on anyway.
+                while (navigating) {
+                    runCatching { Nav.locationProvider.locationUpdates(SpeedReading.ASK_MS).collect { speed.fix(it) } }
+                    kotlinx.coroutines.delay(2_000)
+                }
+            }
+            val kmh = speed.kmh
             val status = when {
                 // Started from Drive or the web, while the route is worked out.
                 trip != null && !navigating && !arrived && message == null -> "Finding your route…"
@@ -430,7 +440,7 @@ class NavigationActivity : ComponentActivity() {
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = above + 12.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    if (kmh != null) SpeedBadge(kmh, limit)
+                    if (navigating || kmh != null) SpeedBadge(kmh, limit)
                     Box(Modifier.weight(1f).padding(horizontal = 8.dp), contentAlignment = Alignment.BottomCenter) {
                         if (navigating && mapState.isTrackingUser) state.currentStepRoadName?.takeIf { it.isNotBlank() }?.let { RoadName(it) }
                     }

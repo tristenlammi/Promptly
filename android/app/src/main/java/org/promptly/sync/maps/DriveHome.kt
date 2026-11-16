@@ -176,6 +176,8 @@ fun DriveHome(
     var driving by remember { mutableStateOf(false) }
     var heading by remember { mutableStateOf(0f) }
     var following by remember { mutableStateOf(true) }
+    val speed = remember { LiveSpeed() }
+    KeepSpeedFresh(speed)
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(owner) {
         runCatching { Nav.locationProvider.lastLocation() }.getOrNull()?.let { here = it }
@@ -184,7 +186,9 @@ fun DriveHome(
         owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             var slowSince = 0L
             var last: Location? = null
-            Nav.locationProvider.locationUpdates(1_000L).collect { fix ->
+            Nav.locationProvider.locationUpdates(SpeedReading.ASK_MS).collect { fix ->
+                // The speed you're shown is the GPS's own, never one worked out below.
+                speed.fix(fix)
                 // A fix with no speed or direction of its own (not from GPS): worked out from the one before.
                 last?.let { before ->
                     val seconds = (fix.elapsedRealtimeNanos - before.elapsedRealtimeNanos) / 1e9f
@@ -462,7 +466,7 @@ fun DriveHome(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 20.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                if (driving) SpeedBadge(Math.round((here?.speed ?: 0f) * 3.6f), road?.limit)
+                if (driving) SpeedBadge(speed.kmh, road?.limit)
                 Box(Modifier.weight(1f).padding(horizontal = 8.dp), contentAlignment = Alignment.BottomCenter) {
                     if (driving && following) road?.name?.let { RoadName(it) }
                 }

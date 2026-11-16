@@ -41,6 +41,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Home: when adding a device, the box asking for its network address is labelled "Address", and WiiM and AirTouch 5 say where to find it.
 - Home: long readings are shortened ("0.028 m³", not "0.028316846592 m³").
 - P Maps on Android Auto: the map is light by day and dark by night by the sun where you are (or your Always light / Always dark choice), as on the phone. It used to follow the car's own day/night signal alone, and some cars say night all day.
+- P Maps on Android Auto: the speed limit sign has moved from the top of the map to the bottom, next to your speed.
+- P Maps on the phone: the speed shown while driving is the GPS's own reading only (never worked out from two positions), is asked for more often, turns amber then red over the limit, and shows dashes when the GPS has gone quiet.
 
 ### Fixed
 
@@ -53,6 +55,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords on Android: apps with Australian or British style names (au.com.…, uk.co.…) are now matched to their sites.
 - Home: sorting several devices into a room no longer stops at the first one that can't be moved; the rest still go, and one that can't be renamed or placed says why in plain words.
 - P Maps (Android, phone and car): the time left and arrival time now come down as you drive. On a long stretch of one road (a motorway) the traffic check measured that road from where it began, not from where you were, so the time sat still until the next turn; a traffic answer is also dropped once it's old or far beyond the trip's own count.
+- P Maps on Android Auto: your speed now shows on the car's map, with or without a trip, beside the road's limit. It is the GPS's own speed reading, shown as each one arrives (about once a second), goes amber over the limit and red more than 3 km/h over, and shows dashes when there has been no reading for 3 seconds. With no trip on, the car now shows the road's limit too.
+- P Maps (Android, phone and car): the fixed speed cameras the map knows about are drawn on the map, around you and along a trip, with a Speed cameras choice (Show and warn / Off) in the Drive menu and the trip's options. From the map data already on your server and in offline areas; it doesn't know every camera.
 
 ## [0.46.0] - 2026-11-16
 
