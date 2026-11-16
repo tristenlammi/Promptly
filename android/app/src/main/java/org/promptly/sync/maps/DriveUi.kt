@@ -185,35 +185,11 @@ fun WordButton(text: String, icon: Int?, modifier: Modifier = Modifier, onClick:
     }
 }
 
-/** How fast you're going, and the road's limit beside it when the map knows one. Over
- *  the limit (by more than a needle's width), the speed turns red. */
+/** How fast you're going by GPS, and the road's limit beside it when the map knows
+ *  one. Over the limit the speed turns amber, then red ([SpeedReading.level]). */
 @Composable
-fun SpeedBadge(kmh: Int, limit: Int?, modifier: Modifier = Modifier) {
-    val scheme = MaterialTheme.colorScheme
-    val over = limit != null && kmh > limit + 2
-    Row(
-        modifier.clearAndSetSemantics {
-            contentDescription = "$kmh kilometres an hour" + (limit?.let { ", limit $it" } ?: "")
-        },
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Surface(shape = CircleShape, color = if (over) DriveColours.Danger else scheme.surface, contentColor = if (over) Color.White else scheme.onSurface, shadowElevation = 4.dp, modifier = Modifier.size(76.dp)) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Text("$kmh", fontSize = 28.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold)
-                Text("km/h", fontSize = 12.sp, lineHeight = 13.sp)
-            }
-        }
-        if (limit != null) {
-            // The sign as it looks on the road: a red ring on white, day or night.
-            Box(
-                Modifier.size(52.dp).clip(CircleShape).background(Color.White).border(5.dp, Color(0xFFD32F2F), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("$limit", color = Color(0xFF1B1B1B), fontSize = if (limit >= 100) 17.sp else 20.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
+fun SpeedBadge(kmh: Int?, limit: Int?, modifier: Modifier = Modifier) {
+    SpeedCluster(kmh, limit, dark = LocalDriveDark.current, modifier = modifier)
 }
 
 /** The road you're on. */

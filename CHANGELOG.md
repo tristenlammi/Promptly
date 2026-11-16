@@ -27,10 +27,13 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Changed
 
+- P Maps on Android Auto: the speed limit sign has moved from the top of the map to the bottom, next to your speed.
+- P Maps on the phone: the speed shown while driving is the GPS's own reading only (never worked out from two positions), is asked for more often, turns amber then red over the limit, and shows dashes when the GPS has gone quiet.
 - P Maps on Android Auto: the map is light by day and dark by night by the sun where you are (or your Always light / Always dark choice), as on the phone. It used to follow the car's own day/night signal alone, and some cars say night all day.
 
 ### Added
 
+- P Maps on Android Auto: your speed now shows on the car's map, with or without a trip, beside the road's limit. It is the GPS's own speed reading, shown as each one arrives (about once a second), goes amber over the limit and red more than 3 km/h over, and shows dashes when there has been no reading for 3 seconds. With no trip on, the car now shows the road's limit too.
 - P Maps (Android, phone and car): the fixed speed cameras the map knows about are drawn on the map, around you and along a trip, with a Speed cameras choice (Show and warn / Off) in the Drive menu and the trip's options. From the map data already on your server and in offline areas; it doesn't know every camera.
 
 ## [0.46.0] - 2026-11-16
