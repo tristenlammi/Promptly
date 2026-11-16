@@ -1376,6 +1376,7 @@ async def get_storage_quota(
         used_bytes=quota.used_bytes,
         remaining_bytes=quota.remaining_bytes,
         office_pending_bytes=quota.office_pending_bytes,
+        rooms_bytes=quota.rooms_bytes,
     )
 
 

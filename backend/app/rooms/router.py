@@ -20,7 +20,7 @@ from app.background import spawn
 from app.database import get_db
 from app.files.storage import absolute_path
 
-from . import core, features, media, polls, receipts, service
+from . import core, features, media, polls, receipts, service, uploads
 from . import settings as rooms_settings
 from . import voice as voices
 from .media_router import GifIn, gif_for_message
@@ -960,6 +960,44 @@ async def upload(room_id: uuid.UUID, file: UploadFile = File(...), db: AsyncSess
     return core.attachment_out(att)
 
 
+# ---- your own Rooms uploads (Files → Rooms uploads; ``uploads.py``) ----
+
+
+@router.get("/uploads/policy")
+async def uploads_policy(user: User = Depends(get_current_user)) -> dict:
+    """How big a file can be here, and where the big ones go."""
+    return uploads.policy()
+
+
+@router.get("/uploads")
+async def my_uploads(
+    before: datetime | None = None,
+    limit: int = Query(default=60, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """The files you've sent in Rooms, newest first, and what they add up
+    to. Only ever your own."""
+    return await uploads.list_mine(db, user, before=before, limit=limit)
+
+
+@router.get("/uploads/{att_id}")
+async def my_upload(att_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """One of your own uploads (a big one that just finished arriving)."""
+    return core.attachment_out(await uploads.mine(db, user, att_id))
+
+
+@router.delete("/uploads/{att_id}", status_code=204)
+async def remove_upload(att_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    """Remove one of your own files from Rooms: the bytes go and its
+    message says "File removed"."""
+    msg = await uploads.remove(db, user, att_id)
+    if msg is not None:
+        room = await db.get(Room, msg.room_id)
+        if room is not None:
+            await core.publish(await core.member_ids(db, room), {"type": "message_edit", "message": await core.message_out(db, msg)})
+
+
 _INLINE = ("image/", "video/", "audio/")
 
 
@@ -970,7 +1008,7 @@ async def get_attachment(att_id: uuid.UUID, exp: int, sig: str, thumb: int = 0, 
     if not core.verify_attachment_sig(att_id, exp, sig):
         raise core.not_found("File")
     att = await db.get(RoomAttachment, att_id)
-    if att is None:
+    if att is None or att.removed_at is not None:
         raise core.not_found("File")
     if att.message_id is not None:
         # A deleted message's files are gone, even before they're wiped.

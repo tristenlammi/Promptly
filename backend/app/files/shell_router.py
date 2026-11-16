@@ -200,6 +200,8 @@ class StorageBreakdown(BaseModel):
     versions_bytes: int
     versions_counted: bool = False
     versions_counted_from: datetime | None = None
+    # Files this person sent in Rooms (not Drive files; Files → Rooms uploads).
+    rooms_bytes: int = 0
     # The newest successful backup of the server (database + files), and
     # of its off-site copy when one is set up.
     last_backup_at: datetime | None
@@ -244,7 +246,7 @@ async def storage_breakdown(
     )
     trash_b = min(int(trash or 0), quota.used_bytes)
     counted_versions = quota.versions_bytes if quota.versions_counted else 0
-    files_b = max(quota.used_bytes - trash_b - counted_versions, 0)
+    files_b = max(quota.used_bytes - trash_b - counted_versions - quota.rooms_bytes, 0)
     return StorageBreakdown(
         cap_bytes=quota.cap_bytes,
         used_bytes=quota.used_bytes,
@@ -255,6 +257,7 @@ async def storage_breakdown(
         versions_bytes=quota.versions_bytes,
         versions_counted=quota.versions_counted,
         versions_counted_from=quota.versions_from,
+        rooms_bytes=quota.rooms_bytes,
         last_backup_at=await last_ok(("nightly", "pre_migrate", "manual")),
         last_offsite_at=await last_ok(("offsite",)),
     )

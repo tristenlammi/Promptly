@@ -133,8 +133,9 @@ export async function unfinishedUploads(): Promise<UnfinishedUpload[]> {
   try {
     const all = await defaultOptions.urlStorage.findAllUploads();
     // Import archives (WP-10.1) resume on the import page, not here; a
-    // note's pictures and recordings carry on by themselves in Notes.
-    return all.filter((u) => !u.metadata?.import_job && u.metadata?.route !== "note").map((u) => ({
+    // note's pictures and recordings carry on by themselves in Notes; a file
+    // being sent in Rooms isn't a Drive upload at all.
+    return all.filter((u) => !u.metadata?.import_job && u.metadata?.route !== "note" && !u.metadata?.room_id).map((u) => ({
       key: u.urlStorageKey,
       name: u.metadata?.filename ?? "file",
       size: u.size,
@@ -146,6 +147,32 @@ export async function unfinishedUploads(): Promise<UnfinishedUpload[]> {
     }));
   } catch {
     return [];
+  }
+}
+
+/**
+ * Big files that were being sent in Rooms and never finished (the tab was
+ * closed): nothing can carry them on, since the message they were for is
+ * gone, and until they're removed the server holds their size against your
+ * storage. Removes the ones old enough that no open tab is still sending
+ * them.
+ */
+export async function discardStaleRoomUploads(maxAgeMs = 12 * 3600 * 1000): Promise<void> {
+  try {
+    const all = await defaultOptions.urlStorage.findAllUploads();
+    for (const u of all) {
+      if (!u.metadata?.room_id) continue;
+      const started = Date.parse(u.creationTime);
+      if (Number.isFinite(started) && Date.now() - started < maxAgeMs) continue;
+      try {
+        if (u.uploadUrl) await Upload.terminate(u.uploadUrl, { headers: authHeader(), retryDelays: [0, 1000] });
+      } catch {
+        /* already gone: the server sweeps old ones anyway */
+      }
+      await defaultOptions.urlStorage.removeUpload(u.urlStorageKey);
+    }
+  } catch {
+    /* nothing remembered, or storage is off */
   }
 }
 

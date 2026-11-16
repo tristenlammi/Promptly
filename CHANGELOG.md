@@ -21,6 +21,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Rooms: a file you send can now be up to 1 GB (it was 50 MB). A big file goes up in pieces, so a dropped connection carries on from where it got to instead of starting again. A file over 1 GB is refused before anything is sent, with a note to put it in your files and use Send to… instead. Servers without big uploads switched on stay at 50 MB.
+- Files: a new "Rooms uploads" list (in the Files menu) shows every file you've sent in Rooms, where you sent it, its size, and what they add up to. You can download one or remove it. Removing a file takes it away for everyone in that conversation; the message stays and says "File removed". These files stay with Rooms: they aren't mixed in with your other files and AI never reads them.
+
+### Changed
+
+- Rooms: files you send now count towards your own storage, the same total your other files use, and show as their own line under Storage. A file that would take you over your limit is refused with a plain message. Files sent before this update count too.
+- Rooms: sending one of your saved GIFs now follows the same limits as any attached file (30 waiting to be sent, and your storage).
+
 ## [0.47.0] - 2026-11-17
 
 ### Added

@@ -213,6 +213,41 @@ export interface Attachment {
   animated?: boolean;
 }
 
+/** A file its sender has since removed (Files → Rooms uploads): a name to
+ *  show as "File removed", nothing to open. */
+export interface RemovedAttachment {
+  id: string;
+  filename: string;
+  mime: string;
+}
+
+/** How big a file can be in Rooms, and where the big ones go. */
+export interface RoomUploadPolicy {
+  max_bytes: number;
+  /** Up to this, one request; over it, in pieces that can resume. */
+  direct_max_bytes: number;
+  tus_endpoint: string | null;
+}
+
+/** One of your own Rooms uploads, as Files → Rooms uploads lists it. */
+export interface MyRoomUpload extends Attachment {
+  room_id: string;
+  /** "Family · general", or who the conversation is with. */
+  room: string;
+  message_id: string | null;
+  /** False: attached but not sent yet (it goes after a day). */
+  sent: boolean;
+  voice: boolean;
+  created_at: string | null;
+}
+
+export interface MyRoomUploads {
+  items: MyRoomUpload[];
+  next_before: string | null;
+  count: number;
+  bytes: number;
+}
+
 export interface Reaction {
   emoji: string;
   user_ids: string[];
@@ -238,6 +273,8 @@ export interface Message {
   mentions: string[];
   reactions: Reaction[];
   attachments: Attachment[];
+  /** Files the sender has since removed. */
+  removed_attachments?: RemovedAttachment[];
   pinned: boolean;
   edited_at: string | null;
   deleted: boolean;
@@ -381,6 +418,17 @@ export type RoomEvent =
   | CallServerEvent;
 
 export const ROOMS_EVENTS_PATH = "/rooms/events";
+
+/** A big file goes up in pieces this size: small enough that a phone's
+ *  dropped connection loses little, big enough not to crawl. */
+const ROOM_CHUNK = 16 * 1024 * 1024;
+
+/** What to say when a file is over the limit for Rooms. */
+export function tooBigForRooms(name: string, maxBytes: number): string {
+  const gb = maxBytes >= 1024 ** 3;
+  const limit = gb ? `${Math.round(maxBytes / 1024 ** 3)} GB` : `${Math.round(maxBytes / 1024 ** 2)} MB`;
+  return `${name} is over ${limit}, the most a file can be in Rooms. Put it in your files, then use Send to… to share it here.`;
+}
 
 /** When a "Remind me" on a message is due. */
 export type RemindWhen = "hour" | "evening" | "tomorrow" | "none";
@@ -547,7 +595,31 @@ export const roomsApi = {
   },
 
   // ---- attachments ----
-  async upload(roomId: string, file: File, onProgress?: (fraction: number) => void, signal?: AbortSignal): Promise<Attachment> {
+  async uploadPolicy(): Promise<RoomUploadPolicy> {
+    const { data } = await apiClient.get<RoomUploadPolicy>("/rooms/uploads/policy");
+    return data;
+  },
+  /** Attach a file. A big one (over the policy's one-request size) goes in
+   *  pieces that carry on after a dropped connection. */
+  async upload(
+    roomId: string,
+    file: File,
+    onProgress?: (fraction: number) => void,
+    signal?: AbortSignal,
+    policy?: RoomUploadPolicy | null,
+  ): Promise<Attachment> {
+    if (policy?.tus_endpoint && file.size > policy.direct_max_bytes) {
+      const { tusUpload } = await import("@/lib/tusUpload");
+      const id = await tusUpload({
+        file,
+        metadata: { filename: file.name, filetype: file.type || "application/octet-stream", room_id: roomId },
+        signal: signal ?? new AbortController().signal,
+        onProgress: (sent, total) => onProgress?.(total ? sent / total : 0),
+        chunkSize: ROOM_CHUNK,
+      });
+      const { data } = await apiClient.get<Attachment>(`/rooms/uploads/${id}`);
+      return data;
+    }
     const form = new FormData();
     form.append("file", file, file.name);
     const { data } = await apiClient.post<Attachment>(`/rooms/rooms/${roomId}/attachments`, form, {
@@ -559,6 +631,16 @@ export const roomsApi = {
       },
     });
     return data;
+  },
+
+  // ---- your own Rooms uploads (Files → Rooms uploads) ----
+  async myUploads(before?: string | null): Promise<MyRoomUploads> {
+    const { data } = await apiClient.get<MyRoomUploads>("/rooms/uploads", { params: before ? { before } : undefined });
+    return data;
+  },
+  /** Remove one of your own files from Rooms: its message says "File removed". */
+  async removeUpload(id: string): Promise<void> {
+    await apiClient.delete(`/rooms/uploads/${id}`);
   },
 
   // ---- GIFs ----

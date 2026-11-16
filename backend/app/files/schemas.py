@@ -231,6 +231,9 @@ class StorageQuotaResponse(BaseModel):
     # until ``app_settings.office_quota_from`` (0189).
     office_pending_bytes: int = 0
     remaining_bytes: int | None
+    # Of ``used_bytes``: files this person sent in Rooms (not Drive files;
+    # listed in Files → Rooms uploads).
+    rooms_bytes: int = 0
 
 
 class AttachmentDescriptor(BaseModel):

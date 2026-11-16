@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   Loader2,
   Menu,
+  MessagesSquare,
   ShieldCheck,
   ShieldAlert,
   Share2,
@@ -208,6 +209,7 @@ function FilesRail() {
         )}
 
 
+        <RailLink to="/files/rooms-uploads" icon={MessagesSquare} label="Rooms uploads" hint="Files you've sent in Rooms. They use your storage; AI never reads them" />
         {(chatUploads || generated) && (
           <>
             <button
@@ -397,6 +399,16 @@ function StorageMeter() {
             <dt>{(data.photos_bytes ?? 0) > 0 ? "Other files" : "Files"}</dt>
             <dd className="tabular-nums">{humanSize(data.files_bytes - (data.photos_bytes ?? 0))}</dd>
           </div>
+          {(data.rooms_bytes ?? 0) > 0 && (
+            <div className="flex justify-between" title="Files you've sent in Rooms">
+              <dt>
+                <Link to="/files/rooms-uploads" className="hover:underline">
+                  Rooms uploads
+                </Link>
+              </dt>
+              <dd className="tabular-nums">{humanSize(data.rooms_bytes ?? 0)}</dd>
+            </div>
+          )}
           <div className="flex justify-between">
             <dt>
               <Link to="/files/trash" className="hover:underline">

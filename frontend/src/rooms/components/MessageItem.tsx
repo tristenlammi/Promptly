@@ -11,7 +11,7 @@ import { EmojiGlyph } from "../customEmoji";
 import { QUICK_REACTIONS } from "../emoji";
 import { fullDate, plainSnippet, timeOf } from "../format";
 import type { PendingMessage } from "../store";
-import { AttachmentList } from "./Attachments";
+import { AttachmentList, RemovedAttachments } from "./Attachments";
 import { EventCard } from "./EventCard";
 import { LibraryGifView } from "./GifViews";
 import { LinkPreviewCard } from "./LinkPreviewCard";
@@ -203,6 +203,9 @@ export const MessageItem = memo(function MessageItem({
             >
             {typeof m.meta?.event_id === "string" ? (
               <EventCard eventId={m.meta.event_id} fallback={m.body} meId={ctx.meId} users={ctx.users} />
+            ) : voiceOf(m) && m.removed_attachments?.some((a) => a.id === voiceOf(m)!.att) ? (
+              // The sender removed the recording: the chip below says so.
+              null
             ) : voiceOf(m) ? (
               <VoiceMessage
                 messageId={m.id}
@@ -255,6 +258,7 @@ export const MessageItem = memo(function MessageItem({
               </span>
             )}
             <AttachmentList attachments={voiceOf(m) ? m.attachments.filter((a) => a.id !== voiceOf(m)!.att) : m.attachments} saveable />
+            <RemovedAttachments removed={m.removed_attachments} />
             {previewOf(m) && <LinkPreviewCard preview={previewOf(m)!} messageId={m.id} own={own} />}
             {showTime && grouped && ctx.isPhone && (
               <time dateTime={m.created_at} className="mt-0.5 animate-[fadeIn_120ms_ease-out] text-xs text-[var(--text-muted)]">
