@@ -100,14 +100,18 @@ function run(name, cmd, argv, opts = {}) {
   const fd = fs.openSync(log, "a");
   fs.writeSync(fd, `$ ${cmd} ${argv.map((x) => (/\s/.test(x) ? JSON.stringify(x) : x)).join(" ")}\n`);
   const started = Date.now();
+  // Git Bash can't write to a file handle opened for appending (it exits 1
+  // and says nothing), so its output comes back through a pipe instead.
   const r = spawnSync(cmd, argv, {
     cwd: opts.cwd ?? ROOT,
     env: { ...process.env, ...(opts.env ?? {}) },
-    stdio: ["ignore", fd, fd],
+    stdio: opts.pipe ? ["ignore", "pipe", "pipe"] : ["ignore", fd, fd],
     shell: opts.shell ?? false,
     timeout: opts.timeout ?? 0,
     windowsHide: true,
+    maxBuffer: 1 << 28,
   });
+  if (opts.pipe) fs.writeSync(fd, `${r.stdout ?? ""}${r.stderr ?? ""}`);
   if (r.error || r.status !== 0) fs.writeSync(fd, `
 [check] ${cmd} ended with ${r.error ? r.error.message : `exit ${r.status}${r.signal ? `, signal ${r.signal}` : ""}`}
 `);
@@ -188,10 +192,11 @@ function stepStatic() {
 
   // Shell scripts parse.
   const sh = ["update.sh", "install.sh", ...fs.readdirSync(path.join(ROOT, "scripts")).filter((f) => f.endsWith(".sh")).map((f) => `scripts/${f}`)];
-  if (has("bash")) {
+  const bash = gitBash(); // on Windows: Git's, never WSL's
+  if (bash) {
     for (const f of sh) {
       ran++;
-      if (run("static", "bash", ["-n", f]).code !== 0) problems.push(`${f} doesn't parse`);
+      if (run("static", bash, ["-n", f], { pipe: true }).code !== 0) problems.push(`${f} doesn't parse`);
     }
   } else fs.appendFileSync(log, "bash not found: shell scripts not checked\n");
 
@@ -390,10 +395,10 @@ function stepE2e() {
     const bash = gitBash();
     if (!bash) return record("e2e", "skip", {}, "needs bash (Git for Windows) to build the private test stack, or set E2E_BASE_URL", 0);
     const stack = "scripts/stack.sh";
-    const up = run("e2e", bash, [stack, "up", "check", "--e2e", "--with", "calls"]);
+    const up = run("e2e", bash, [stack, "up", "check", "--e2e", "--with", "calls"], { pipe: true });
     if (up.code !== 0) return record("e2e", "fail", {}, "the private test stack didn't come up: see the log", up.seconds, up.log);
     where = "a private stack built from this checkout";
-    r = run("e2e", bash, [stack, "e2e", "check", ...pw], { env });
+    r = run("e2e", bash, [stack, "e2e", "check", ...pw], { env, pipe: true });
     r.seconds += up.seconds;
   }
   let t = null;
