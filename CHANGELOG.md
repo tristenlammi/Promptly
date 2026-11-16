@@ -23,6 +23,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- Promptly Home: "Add a device" only starts set-ups for the brands it offers. Home Assistant's general tools (fetch a web address, open a database, ping) could be started by anyone in a home by asking the server directly, and on this server's own box they would have run from the server's machine; they're now refused and never offered. An over-large set-up answer is refused before it can drop the box's connection.
 - Rooms: a file attached to a message and never sent is now wiped after a day (it used to stay on the server for good), and one person can have at most 30 files waiting to be sent, so the disk can't be filled that way.
 
 ## [0.46.0] - 2026-11-16

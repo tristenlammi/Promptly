@@ -440,6 +440,20 @@ async def setup_get(home_id: uuid.UUID, box_id: uuid.UUID, flow_id: str, db: Asy
     return await _ask_box(db, box.id, "flows.get", {"flow": flow_id}, timeout=relay.SETUP_S)
 
 
+# What's typed into one step is a few fields. The box's line carries a
+# megabyte at most: more than this would drop it for the whole home.
+MAX_STEP_BYTES = 16 * 1024
+
+
+def _too_big(given: dict[str, Any]) -> bool:
+    import json
+
+    try:
+        return len(json.dumps(given)) > MAX_STEP_BYTES
+    except (TypeError, ValueError):
+        return True
+
+
 class StepBody(BaseModel):
     # What was typed into this step. Passed to the box as it is.
     input: dict[str, Any] = Field(default_factory=dict)
@@ -448,7 +462,7 @@ class StepBody(BaseModel):
 @router.post("/{home_id}/boxes/{box_id}/setup/{flow_id}", dependencies=SETUP)
 async def setup_step(home_id: uuid.UUID, box_id: uuid.UUID, flow_id: str, body: StepBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
     box = await _box_of(db, user, home_id, box_id)
-    if not re.match(_ID, flow_id) or len(body.input) > 60:
+    if not re.match(_ID, flow_id) or len(body.input) > 60 or _too_big(body.input):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "That step can't be sent.")
     return await _ask_box(db, box.id, "flows.step", {"flow": flow_id, "input": body.input}, timeout=relay.SETUP_S)
 
@@ -595,7 +609,7 @@ class DeviceBody(BaseModel):
 async def update_device(home_id: uuid.UUID, box_id: uuid.UUID, body: DeviceBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
     """Name a device, or put it in a room."""
     box = await _box_of(db, user, home_id, box_id)
-    if not (body.device_id or body.entity_id) or (body.name is None and body.area is None):
+    if not (body.device_id or body.entity_id) or (body.name is None and body.area is None) or (body.area and not re.match(_ID, body.area)):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Say which device, and its name or room.")
     await _ask_box(db, box.id, "device.update", body.model_dump(exclude_none=True))
     return {"ok": True}

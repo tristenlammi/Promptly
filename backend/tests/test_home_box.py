@@ -100,13 +100,13 @@ def test_stops_menus_waits_and_other_websites():
 
 
 def test_found_devices_get_a_name_and_brands_put_the_known_ones_first():
-    names = {"hue": {"domain": "hue", "name": "Philips Hue", "iot_class": "local_push"}, "tuya": {"domain": "tuya", "name": "Tuya", "iot_class": "cloud_push"}, "ping": {"domain": "ping", "name": "Ping (ICMP)", "iot_class": "local_polling"}, "sun": {"domain": "sun", "name": "Sun"}}
+    names = {"hue": {"domain": "hue", "name": "Philips Hue", "iot_class": "local_push"}, "tuya": {"domain": "tuya", "name": "Tuya", "iot_class": "cloud_push"}, "pinecil": {"domain": "pinecil", "name": "Pinecil", "iot_class": "local_polling"}, "sun": {"domain": "sun", "name": "Sun"}}
     found = pb.found_one({"flow_id": "f", "handler": "hue", "context": {"source": "zeroconf", "title_placeholders": {"name": "Hue Bridge 1A2B3C"}}}, names, HUE_WORDS)
     assert found == {"flow": "f", "brand": "hue", "brand_name": "Philips Hue", "name": "Hue Bridge 1A2B3C"}
-    can = {"hue", "tuya", "ping", "sun"}
+    can = {"hue", "tuya", "pinecil", "sun"}
     first = pb.brands_for(names, can, "")
     assert [b["id"] for b in first] == ["hue", "tuya"] and first[1]["cloud"] is True and first[0]["cloud"] is False
-    assert [b["id"] for b in pb.brands_for(names, can, "pin")] == ["ping"]
+    assert [b["id"] for b in pb.brands_for(names, can, "pin")] == ["pinecil"]
     assert pb.brands_for(names, can, "sun") == []  # housekeeping isn't a brand
 
 
@@ -344,3 +344,27 @@ def test_it_looks_for_devices_only_once_it_has_its_own_account(tmp_path, monkeyp
     assert lines.count(hc.HOOK) == 1 and lines.index(hc.HOOK) == lines.index("exec python3 -P -m homeassistant --config /config") - 1
     # No such script (a different image): it says so, and the looking stays on.
     assert hc.install_hook(str(tmp_path / "nope")) is False
+
+
+def test_only_what_add_a_device_offers_can_be_started():
+    """The page only asks for brands it was offered. Anything else asking
+    (Home Assistant's own tools that fetch an address, open a database or
+    read a file) is turned away, and never offered by a search either."""
+    names = {
+        "hue": {"domain": "hue", "name": "Philips Hue"},
+        "acme": {"domain": "acme", "name": "Acme Plugs", "integration_type": "hub"},
+        "scrape": {"domain": "scrape", "name": "Scrape"},
+        "sql": {"domain": "sql", "name": "SQL"},
+        "ping": {"domain": "ping", "name": "Ping (ICMP)"},
+        "template": {"domain": "template", "name": "Template", "integration_type": "helper"},
+        "sun": {"domain": "sun", "name": "Sun"},
+    }
+    can = set(names) | {"file"}
+    assert pb.can_start("hue", names, can) and pb.can_start("acme", names, can)
+    for tool in ("scrape", "sql", "ping", "file", "template", "sun", "", "not_a_brand"):
+        assert not pb.can_start(tool, names, can), tool
+    assert not pb.can_start("hue", names, {"acme"})  # this Home Assistant can't set it up
+    for q in ("s", "p", "scrape", "sql", "ping", "template"):
+        assert all(pb.can_start(b["id"], names, can) for b in pb.brands_for(names, can, q))
+    assert [b["id"] for b in pb.brands_for(names, can, "sql")] == []
+

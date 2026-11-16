@@ -549,6 +549,10 @@ async def test_rooms_names_and_removing_reach_the_box(user, client):
         ("flows.abort", {"flow": "f9"}),
     ]
     assert (await client.patch(f"{base}/devices", headers=_hdr(user), json={"name": "x"})).status_code == 400
+    # A room's id is an id, here as everywhere else.
+    assert (await client.patch(f"{base}/devices", headers=_hdr(user), json={"entity_id": "light.bulb", "area": "../x"})).status_code == 400
+    # A step is a few fields: one far bigger than the box's line carries is refused here.
+    assert (await client.post(f"{base}/setup/f1", headers=_hdr(user), json={"input": {"host": "x" * 20_000}})).status_code == 400
     await box.hang_up()
     await task
 
