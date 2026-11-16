@@ -24,6 +24,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Changed
 
 - Passwords extension 0.2.2: clicking a card box on a checkout lists your saved cards (name, brand and last four digits). Pick one and the toolbar panel opens with it at the top; Fill there asks once, then fills every card box on the page. Cards still never fill from one click on the page.
+- Passwords on Android (next Promptly for Android): using a passkey takes one step. With fingerprint unlock on, one touch signs you in whether the vault was locked or open. Without it, an open vault asks for your passkey PIN and a locked one for your master password, never one after the other. A login marked "ask again" isn't asked for twice either.
+- Passwords on Android: after you type your master password on a phone with a fingerprint set up, it asks once whether to use your fingerprint next time. It was only in Settings before.
 
 ### Fixed
 

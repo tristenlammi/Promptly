@@ -135,7 +135,12 @@ class AutofillAuthActivity : FragmentActivity() {
     private fun lockedOut() {
         step = Step.Unlock
         lookalikeCleared = false
+        justProved = false
     }
+
+    /** The vault was unlocked in this window a moment ago, by a biometric or the master password.
+     *  That's the proof an "ask again" item wants too, so it isn't asked for twice (A74). */
+    private var justProved = false
 
     /** It can have been a while, and Android's timer doesn't tick in deep sleep. */
     override fun onStart() {
@@ -194,7 +199,10 @@ class AutofillAuthActivity : FragmentActivity() {
         }
 
         fun afterChecks(item: Item) {
-            if (!Pw.unlocked) lockedOut() else if (item.body.reprompt) step = Step.Reprompt(item) else deliver(item)
+            if (!Pw.unlocked) lockedOut() else if (item.body.reprompt && !justProved) step = Step.Reprompt(item) else {
+                justProved = false
+                deliver(item)
+            }
         }
 
         /** Writing to the vault, off the main thread, can meet a lock on the way. */
@@ -280,7 +288,7 @@ class AutofillAuthActivity : FragmentActivity() {
         }
 
         when (val s = shown) {
-            Step.Unlock -> UnlockPane(this, "Unlock to fill", { step = Step.Pick }, { finish() })
+            Step.Unlock -> UnlockPane(this, "Unlock to fill", { step = Step.Pick }, { finish() }, onProof = { justProved = true })
             Step.Pick -> if (mode == MODE_MAIL_CODE || mode == MODE_MAIL_LINK) MailPane(lookalike(null)) else if (itemId != null) Busy() else {
                 // Nothing from the vault shows behind this.
                 val looks = remember(lookalikeCleared) { lookalike(null) }

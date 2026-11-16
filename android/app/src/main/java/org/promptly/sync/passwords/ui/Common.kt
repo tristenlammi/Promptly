@@ -65,6 +65,7 @@ import org.promptly.sync.passwords.core.KeyChangedError
 import org.promptly.sync.passwords.core.OfflineError
 import org.promptly.sync.passwords.core.PasskeyPin
 import org.promptly.sync.passwords.core.PinCheck
+import org.promptly.sync.passwords.core.ProofKind
 import org.promptly.sync.passwords.core.WrongPasswordError
 
 private val Terracotta = Color(0xFFC8613F)
@@ -212,8 +213,47 @@ fun answerPasskeyPin(choosing: Boolean, pin: String, again: String): PinOutcome 
     }
 }
 
-/** Asked before every passkey sign-in and every new passkey (D86). The box has the focus, and
- *  Done signs. The first time, it's chosen here, typed twice. */
+/** One fingerprint (or face) as the one proof for a passkey (A74). The prompt comes up by
+ *  itself; its own other button is "Use PIN", and so is the button here if the prompt was closed.
+ *  A new fingerprint since it was set up kills the key, so that goes to the PIN and says why. */
+@Composable
+fun PasskeyBiometricPane(activity: FragmentActivity, heading: String, detail: String?, onConfirmed: () -> Unit, onUsePin: () -> Unit, onCancel: () -> Unit) {
+    var note by remember { mutableStateOf<String?>(null) }
+    var dead by remember { mutableStateOf(false) }
+
+    fun ask() {
+        note = null
+        Biometrics.confirm(activity, heading, detail, "Use PIN") { r ->
+            r.onSuccess { onConfirmed() }.onFailure { e ->
+                when {
+                    e is Biometrics.Invalidated -> {
+                        dead = true
+                        note = e.message
+                    }
+                    e is Biometrics.Failed && e.otherWay -> onUsePin()
+                    e is Biometrics.Failed && e.cancelled -> Unit
+                    else -> note = e.message
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) { ask() }
+
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(heading, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        note?.let { ErrorCard(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!dead) Button(onClick = { ask() }, modifier = Modifier.testTag("passkey-biometric")) { Text("Use fingerprint") }
+            OutlinedButton(onClick = onUsePin, modifier = Modifier.testTag("passkey-use-pin")) { Text("Use PIN") }
+            TextButton(onClick = onCancel, modifier = Modifier.testTag("cancel")) { Text("Cancel") }
+        }
+    }
+}
+
+/** The passkey PIN: asked when the vault's open and this phone has no biometric unlock, or when
+ *  "Use PIN" was chosen (A74). The box has the focus, and Done signs. The first time, it's chosen
+ *  here, typed twice. */
 @Composable
 fun PasskeyPinPane(heading: String, detail: String?, choosing: Boolean, onConfirmed: () -> Unit, onCancel: () -> Unit) {
     var pin by remember { mutableStateOf("") }
@@ -309,11 +349,22 @@ fun PreviewNote() {
     }
 }
 
+/** The once-only fingerprint question is up. The vault is open by then, and a screen that shows
+ *  the unlock pane only while it's locked would drop the question: it keeps the pane while this
+ *  is true. Cleared when the question's answered or the pane goes. */
+object BiometricOfferHold {
+    var pending by mutableStateOf(false)
+}
+
 /** Master password, with a biometric if it's set up. Shared by the app and the autofill
- *  and passkey sheets, so they unlock exactly the same way. */
+ *  and passkey sheets, so they unlock exactly the same way. `onProof` hears which of the two
+ *  it was, before `onUnlocked`: that unlock is the one proof for what the sheet goes on to do
+ *  (A74). After a master password, a phone that could use a fingerprint and doesn't is asked,
+ *  once, whether to. */
 @Composable
-fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Unit, onCancel: (() -> Unit)? = null) {
+fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Unit, onCancel: (() -> Unit)? = null, onProof: ((ProofKind) -> Unit)? = null) {
     var password by remember { mutableStateOf("") }
+    var offer by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var removed by remember { mutableStateOf(false) }
@@ -335,6 +386,7 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
                     busy = false
                     done.onSuccess {
                         Pw.touch()
+                        onProof?.invoke(ProofKind.BIOMETRIC)
                         onUnlocked()
                     }.onFailure {
                         // The password changed on another device: these keys are the old ones.
@@ -363,7 +415,15 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
             done.onSuccess {
                 password = ""
                 Pw.touch()
-                onUnlocked()
+                onProof?.invoke(ProofKind.MASTER)
+                // Once per phone: it has a fingerprint and isn't using it here.
+                if (Biometrics.available(ctx) && !Biometrics.enrolled && !Pw.prefs.biometricOffered) {
+                    Pw.prefs.biometricOffered = true
+                    BiometricOfferHold.pending = true
+                    offer = true
+                } else {
+                    onUnlocked()
+                }
             }.onFailure {
                 // /session answers wrong proofs as WrongPasswordError, so a 401 here is the
                 // device token itself: removed in Devices, or "sign out everywhere".
@@ -375,6 +435,15 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
     }
 
     LaunchedEffect(Unit) { if (canBio) biometric() }
+
+    DisposableEffect(Unit) { onDispose { BiometricOfferHold.pending = false } }
+    if (offer) {
+        BiometricOffer(activity) {
+            BiometricOfferHold.pending = false
+            onUnlocked()
+        }
+        return
+    }
 
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp),
@@ -404,6 +473,40 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
             if (canBio) OutlinedButton(onClick = { biometric() }, enabled = !busy, modifier = Modifier.testTag("use-biometric")) { Text("Use biometric") }
             if (onCancel != null) TextButton(onClick = onCancel, enabled = !busy, modifier = Modifier.testTag("unlock-cancel")) { Text("Cancel") }
             if (busy) CircularProgressIndicator(Modifier.padding(start = 4.dp))
+        }
+    }
+}
+
+/** "Use your fingerprint next time?", once, straight after a master password unlock on a phone
+ *  that has a fingerprint or face set up but doesn't use it here (A74). The master password was
+ *  typed a moment ago, which is what turning it on in Settings asks for too. Either answer goes on. */
+@Composable
+fun BiometricOffer(activity: FragmentActivity, onDone: () -> Unit) {
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("Use your fingerprint next time?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("bio-offer"))
+        Text("One touch then unlocks Passwords and signs you in with a passkey on this phone, with nothing to type. Your master password still works, and you can change this in Settings.", style = MaterialTheme.typography.bodyMedium)
+        error?.let { ErrorCard(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = {
+                val client = Pw.client()
+                if (client == null || !client.unlocked) {
+                    onDone()
+                    return@Button
+                }
+                busy = true
+                error = null
+                val secret = client.currentUnlockSecret()
+                Biometrics.enroll(activity, secret) { r ->
+                    secret.fill(0)
+                    busy = false
+                    r.onSuccess { onDone() }.onFailure { e ->
+                        if (e is Biometrics.Failed && e.cancelled) onDone() else error = e.message ?: "That didn't work. You can turn it on later in Settings."
+                    }
+                }
+            }, enabled = !busy, modifier = Modifier.testTag("bio-offer-on")) { Text("Turn on") }
+            TextButton(onClick = onDone, enabled = !busy, modifier = Modifier.testTag("bio-offer-later")) { Text("Not now") }
         }
     }
 }

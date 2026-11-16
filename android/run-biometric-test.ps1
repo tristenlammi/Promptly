@@ -48,13 +48,13 @@ function Enrol([int]$finger) {
     return $false
 }
 
-function Instrument([string]$test, [string[]]$extra = @()) {
+function Instrument([string]$test, [string[]]$extra = @(), [string]$class = "BiometricE2ETest") {
     $job = Start-Job -ArgumentList $adb, $Serial -ScriptBlock {
         param($adb, $serial)
         while ($true) { & $adb -s $serial emu finger touch 1 | Out-Null; Start-Sleep -Milliseconds 800 }
     }
     try {
-        $cmd = @("-s", $Serial, "shell", "am", "instrument", "-w") + $extra + @("-e", "class", "org.promptly.sync.passwords.BiometricE2ETest#$test", "org.promptly.app.test/androidx.test.runner.AndroidJUnitRunner")
+        $cmd = @("-s", $Serial, "shell", "am", "instrument", "-w") + $extra + @("-e", "class", "org.promptly.sync.passwords.$class#$test", "org.promptly.app.test/androidx.test.runner.AndroidJUnitRunner")
         & $adb @cmd
     } finally {
         Stop-Job $job
@@ -72,4 +72,11 @@ Instrument "enrolUnlockAndFillBehindAFingerprint"
 if (-not (Enrol 2)) { exit 1 }
 & $adb -s $Serial shell input keyevent KEYCODE_HOME
 Instrument "aNewFingerprintKillsTheKey" @("-e", "pwAfterNewFinger", "1")
+# One proof per passkey (A74): a fresh enrolment through the once-only offer, then every passkey
+# case on one touch; then a third finger, and a passkey falls back to the PIN.
+& $adb -s $Serial shell input keyevent KEYCODE_HOME
+Instrument "passkeysTakeOneFingerprint" @() "PasskeyBiometricE2ETest"
+if (-not (Enrol 3)) { exit 1 }
+& $adb -s $Serial shell input keyevent KEYCODE_HOME
+Instrument "aNewFingerprintGoesBackToThePin" @("-e", "pwAfterNewFinger", "1") "PasskeyBiometricE2ETest"
 & $adb -s $Serial shell locksettings clear --old 1234
