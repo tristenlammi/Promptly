@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AirVent,
   Blinds,
   BatteryMedium,
+  Bot,
   DoorClosed,
+  Droplet,
   Droplets,
   Fan,
   LayoutGrid,
@@ -15,6 +18,8 @@ import {
   Radio,
   Router,
   Settings,
+  Shield,
+  Sparkles,
   Speaker,
   Thermometer,
   Tv,
@@ -36,6 +41,7 @@ import { cn } from "@/utils/cn";
 import { AddDeviceSheet } from "./AddDeviceSheet";
 import { DeviceSheet } from "./DeviceSheet";
 import { HomeSettingsSheet } from "./HomeSettingsSheet";
+import { byKind, isScene, isTile, isZone, keyOf, lit, tapSwitches } from "./kinds";
 import { RoomsSheet } from "./RoomsSheet";
 import { looseDevices, SortSheet } from "./SortSheet";
 import { byReading, isReading, noteLine, stateWords } from "./words";
@@ -43,11 +49,14 @@ import { byReading, isReading, noteLine, stateWords } from "./words";
 /**
  * Home: the devices in your home, through the box that lives there.
  *
- * Your home, its rooms, each device as a tile. Lights, plugs, switches and
- * fans turn on and off with a tap, and "…" opens the rest (brightness,
- * warmth, speed); a blind, a thermostat, a lock or a speaker opens its
- * controls. Readings (a temperature, a door, a battery) sit in a row under
- * each room. A room with lights has one switch for all of them. Rooms are
+ * Your home, its rooms, each device as a tile: lights first, then air con,
+ * speakers and TVs, and the rest. Lights, plugs, switches, fans and an air
+ * con's zones turn on and off with a tap, and "…" opens the rest
+ * (brightness, warmth, speed); a blind, an air con, a lock, a speaker or a
+ * vacuum opens its controls. Scenes are a row of buttons, and readings (a
+ * temperature, a door, a battery) a row under each room. A kind of device
+ * with no controls yet is a tile that says what it's doing. A room with
+ * lights has one switch for all of them. Rooms are
  * made, named, ordered and merged under "Rooms"; devices with no room yet
  * sit last, with "Sort into rooms". A brand's bridge, and its own "rooms" of
  * lights, are never tiles. "Add a device" runs a brand's set-up steps on the home's box;
@@ -243,7 +252,6 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
   const starting = home.boxes.filter((b) => b.builtin && !b.ready);
   const offline = home.boxes.filter((b) => !b.online && !b.builtin);
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const keyOf = (e: HomeEntity) => `${e.box_id}/${e.id}`;
   const opened = openKey ? home.entities.find((e) => keyOf(e) === openKey) ?? null : null;
   // In the order set under Rooms; what has no room yet comes last.
   const rooms = useMemo(() => {
@@ -263,6 +271,12 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
   const gotIt = useMutation({
     mutationFn: (boxId: string) => homeApi.clearNote(home.id, boxId),
     onMutate: (boxId) => qc.setQueryData<Home[]>(KEY, (old) => old?.map((h) => (h.id === home.id ? { ...h, boxes: h.boxes.map((b) => (b.id === boxId ? { ...b, note: null } : b)) } : h))),
+  });
+  const runScene = useMutation({
+    mutationFn: (e: HomeEntity) => homeApi.act(home.id, { box_id: e.box_id, entity_id: e.id, action: "run" }),
+    onMutate: () => void navigator.vibrate?.(8),
+    onSuccess: (_r, e) => toast.success(`${e.name} is on`),
+    onError: (e) => toast.error(apiErrorMessage(e, "That didn't work. Try again.")),
   });
   const allLights = useMutation({
     mutationFn: (v: { boxId: string; area: string; on: boolean }) => homeApi.roomLights(home.id, v.boxId, v.area, v.on),
@@ -323,7 +337,8 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
         />
       )}
       {rooms.map(({ id, name: room, list }) => {
-        const tiles = list.filter((e) => !isReading(e));
+        const tiles = list.filter((e) => isTile(e, home.entities)).sort(byKind);
+        const scenes = list.filter(isScene).sort((a, b) => a.name.localeCompare(b.name));
         const readings = list.filter(isReading).sort(byReading);
         // One switch for the room's lights (two or more: one light has its own tile).
         const lights = id ? tiles.filter((e) => e.domain === "light" && e.online && e.state !== "unavailable") : [];
@@ -359,8 +374,21 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
                 {tiles.map((e) => <Tile key={keyOf(e)} homeId={home.id} entity={e} onOpen={() => setOpenKey(keyOf(e))} />)}
               </div>
             )}
+            {scenes.length > 0 && (
+              // One line that scrolls sideways: a brand can bring a dozen scenes to a room.
+              <ul className={cn("-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:-mx-6 md:px-6", tiles.length > 0 && "mt-3")} aria-label={`${room} scenes`}>
+                {scenes.map((e) => (
+                  <li key={keyOf(e)} className="shrink-0">
+                    <button type="button" disabled={!e.online || e.state === "unavailable" || runScene.isPending} onClick={() => runScene.mutate(e)} className="inline-flex h-10 max-w-52 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+                      <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text,var(--accent))]" aria-hidden />
+                      <span className="truncate">{e.name}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             {readings.length > 0 && (
-              <ul className={cn("flex flex-wrap gap-2", tiles.length > 0 && "mt-3")} aria-label={`${room} readings`}>
+              <ul className={cn("flex flex-wrap gap-2", (tiles.length > 0 || scenes.length > 0) && "mt-3")} aria-label={`${room} readings`}>
                 {readings.map((e) => {
                   const Icon = iconOf(e);
                   return (
@@ -378,30 +406,25 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
           </section>
         );
       })}
-      <DeviceSheet home={home} entity={opened} onClose={() => setOpenKey(null)} />
+      <DeviceSheet home={home} entity={opened} onClose={() => setOpenKey(null)} onOpen={(other) => setOpenKey(keyOf(other))} />
     </>
   );
 }
 
-const ICONS: Record<string, LucideIcon> = { light: Lightbulb, switch: Plug, input_boolean: Power, fan: Fan, lock: Lock, cover: Blinds, climate: Thermometer, media_player: Speaker };
+const ICONS: Record<string, LucideIcon> = {
+  light: Lightbulb, switch: Plug, input_boolean: Power, fan: Fan, lock: Lock, cover: Blinds, climate: Thermometer, media_player: Speaker,
+  vacuum: Bot, humidifier: Droplets, valve: Droplet, remote: Power, alarm_control_panel: Shield, water_heater: Thermometer, lawn_mower: Bot, siren: Radio,
+};
 
 function iconOf(e: HomeEntity): LucideIcon {
   if (e.domain === "media_player") return e.cls === "tv" || e.cls === "receiver" ? Tv : Speaker;
+  if (e.domain === "climate") return isZone(e) ? AirVent : Thermometer;
   if (e.cls === "temperature") return Thermometer;
   if (e.cls === "humidity" || e.cls === "moisture") return Droplets;
   if (e.cls === "battery") return BatteryMedium;
   if (e.cls === "door" || e.cls === "window" || e.cls === "opening" || e.cls === "garage_door") return DoorClosed;
   if (e.domain === "cover" && (e.cls === "garage" || e.cls === "door" || e.cls === "gate")) return DoorClosed;
   return ICONS[e.domain] ?? Radio;
-}
-
-/** "On" for the tile's look: lit, open, unlocked, playing, heating. */
-function lit(e: HomeEntity): boolean {
-  if (e.domain === "cover") return e.state === "open" || e.state === "opening";
-  if (e.domain === "lock") return e.state === "unlocked";
-  if (e.domain === "climate") return e.state !== "off";
-  if (e.domain === "media_player") return e.state === "playing";
-  return e.state === "on";
 }
 
 function Tile({ homeId, entity, onOpen }: { homeId: string; entity: HomeEntity; onOpen: () => void }) {
@@ -413,7 +436,7 @@ function Tile({ homeId, entity, onOpen }: { homeId: string; entity: HomeEntity; 
     // Shows at once; the box's own word follows within a moment.
     onMutate: () => {
       qc.setQueryData<Home[]>(KEY, (old) =>
-        old?.map((h) => (h.id === homeId ? { ...h, entities: h.entities.map((x) => (x.id === entity.id && x.box_id === entity.box_id ? { ...x, state: on ? "off" : "on" } : x)) } : h)),
+        old?.map((h) => (h.id === homeId ? { ...h, entities: h.entities.map((x) => (x.id === entity.id && x.box_id === entity.box_id ? { ...x, state: on ? "off" : isZone(entity) ? "fan_only" : "on" } : x)) } : h)),
       );
       navigator.vibrate?.(8);
     },
@@ -429,7 +452,7 @@ function Tile({ homeId, entity, onOpen }: { homeId: string; entity: HomeEntity; 
         <Icon className="h-[18px] w-[18px]" aria-hidden />
       </span>
       <span className="mt-2 block w-full truncate text-sm font-medium text-[var(--text)]">{entity.name}</span>
-      <span className="block w-full truncate text-xs text-[var(--text-muted)]">{entity.grp ? "Group · " : ""}{stateWords(entity)}</span>
+      <span className="block w-full truncate text-xs text-[var(--text-muted)]">{entity.grp ? "Group · " : isZone(entity) ? "Zone · " : ""}{stateWords(entity) || "\u00a0"}</span>
     </>
   );
   const shell = cn(
@@ -437,9 +460,9 @@ function Tile({ homeId, entity, onOpen }: { homeId: string; entity: HomeEntity; 
     on && !dead ? "border-[var(--accent)]/50 bg-[color-mix(in_srgb,var(--accent)_9%,var(--surface))]" : "border-[var(--border)] bg-[var(--surface)]",
     dead && "opacity-60",
   );
-  // A blind, a thermostat, a lock, a speaker: the tile opens its controls.
-  if (!entity.can_switch) {
-    return <button type="button" aria-label={`${entity.name}, ${stateWords(entity)}`} onClick={onOpen} className={cn(shell, "hover:border-[var(--accent)]/60")}>{body}</button>;
+  // A blind, an air con, a lock, a speaker: the tile opens its controls.
+  if (!tapSwitches(entity)) {
+    return <button type="button" aria-label={[entity.name, stateWords(entity)].filter(Boolean).join(", ")} onClick={onOpen} className={cn(shell, "hover:border-[var(--accent)]/60")}>{body}</button>;
   }
   return (
     <div className="relative">

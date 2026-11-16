@@ -1,5 +1,26 @@
 import type { BoxNote, HomeEntity } from "@/api/home";
 
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+
+/** An air con's modes and fan speeds, in plain words. */
+export const MODE_WORDS: Record<string, string> = { off: "Off", heat: "Heat", cool: "Cool", heat_cool: "Auto", auto: "Auto", dry: "Dry", fan_only: "Fan" };
+export const FAN_WORDS: Record<string, string> = { auto: "Auto", low: "Low", medium: "Medium", high: "High", diffuse: "Quiet", focus: "Powerful", turbo: "Turbo", intelligent_auto: "Smart auto", on: "On", off: "Off", middle: "Medium", top: "Top" };
+export const modeWord = (m: string) => MODE_WORDS[m] ?? cap(m);
+export const fanWord = (m: string) => FAN_WORDS[m.toLowerCase()] ?? cap(m);
+const DOING: Record<string, string> = { heating: "Heating", cooling: "Cooling", drying: "Drying", fan: "Fan", idle: "Idle", preheating: "Warming up", defrosting: "Defrosting" };
+const VACUUM: Record<string, string> = { cleaning: "Cleaning", docked: "Docked", returning: "Going home", paused: "Paused", idle: "Stopped", error: "Needs attention" };
+
+/** Air con in a line: "Cooling to 23°", "Cool · 23°", "Off"; a zone is just on or off. */
+function climateWords(e: HomeEntity): string {
+  const s = e.state;
+  const to = typeof e.x?.target === "number" ? `${e.x.target}°` : "";
+  if (s === "off") return "Off";
+  if (e.x?.zone) return to ? `On · ${to}` : "On";
+  const doing = e.x?.act && e.x.act !== "off" ? DOING[e.x.act] : undefined;
+  if (doing && doing !== "Idle" && doing !== "Fan" && to) return `${doing} to ${to}`;
+  return to && s !== "fan_only" ? `${modeWord(s)} · ${to}` : modeWord(s);
+}
+
 /** What a device is doing, in plain words. */
 export function stateWords(e: HomeEntity): string {
   if (!e.online) return "Offline";
@@ -20,16 +41,21 @@ export function stateWords(e: HomeEntity): string {
     return on ? "On" : "Off";
   }
   if (e.domain === "light" && s === "on" && typeof e.bri === "number" && e.bri > 0 && e.bri < 100) return `On · ${e.bri}%`;
-  if (e.domain === "climate" && typeof e.x?.target === "number") return `${s === "off" ? "Off" : s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ")} · ${e.x.target}°`;
+  if (e.domain === "climate") return climateWords(e);
+  if (e.domain === "vacuum") return `${VACUUM[s] ?? cap(s)}${typeof e.x?.bat === "number" && s === "docked" ? ` · ${Math.round(e.x.bat)}%` : ""}`;
+  if (e.domain === "scene") return "Scene";
   if (e.domain === "cover" && typeof e.x?.pos === "number" && e.x.pos > 0 && e.x.pos < 100) return `${e.x.pos}% open`;
   if (e.domain === "media_player") {
     // A speaker is "off" when nothing is playing on it, not when it's unplugged.
     if (s === "playing") return e.x?.title ? `Playing · ${e.x.title}` : "Playing";
     if (s === "paused") return "Paused";
     if (s === "buffering") return "Starting…";
+    if (e.cls === "tv" || e.cls === "receiver") return s === "off" || s === "standby" ? "Off" : "On";
     return "Not playing";
   }
-  return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+  // A kind we have no controls for: what it says, tidied. A bare time means nothing to anyone.
+  if (/^\d{4}-\d\d-\d\dT/.test(s)) return "";
+  return cap(s);
 }
 
 /** Readings (a temperature, a door, a battery) sit in a row under a room's tiles, not as tiles. */
@@ -53,7 +79,11 @@ const KINDS: Record<string, [string, string]> = {
   switch: ["plug or switch", "plugs and switches"],
   input_boolean: ["switch", "switches"],
   fan: ["fan", "fans"],
-  climate: ["thermostat", "thermostats"],
+  climate: ["air con or heater", "air con and heaters"],
+  vacuum: ["robot vacuum", "robot vacuums"],
+  humidifier: ["humidifier", "humidifiers"],
+  valve: ["valve", "valves"],
+  remote: ["remote", "remotes"],
   cover: ["blind or door", "blinds and doors"],
   lock: ["lock", "locks"],
   media_player: ["speaker or TV", "speakers and TVs"],

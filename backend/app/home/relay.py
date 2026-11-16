@@ -23,11 +23,21 @@ Protocol (JSON text frames, each with a ``t``)::
     Entity = {"id","domain","name","state","area"?,"unit"?,"cls"?,"bri"?,"x"?,
               "dev"?: its device (several entities can be one device),
               "grp"?: true for several speakers that play as one}
+    x (what a device's controls need; all optional) holds, among others:
+      "can":   what it says it can do ("play","next","vol","src","group",
+               "temp","fan","pos","stop","start","dock"…). When a device
+               sends this, anything not in it is refused here.
+      air con: "modes","target","cur","min","max","step","fans","fan","act",
+               "last" (the mode it was last on in), and for ducted systems
+               "sys" (its unit's entity id) and "zone": true on each zone
+      speaker: "vol","muted","title","artist","src","srcs","members","art"
+               (changes when the picture does; the picture comes by ``art``)
     Note   = {"n": how many, "what": "speakers"|"devices", "brands": [names]}:
              things that had joined the home on their own and were put back
              under "Found on your network". Said once; ``note.clear`` ends it.
 
-``op`` is one of: ``do`` (switch or set one device), ``flows.found``,
+``op`` is one of: ``do`` (switch or set one device), ``art`` (the picture of
+what a speaker is playing: ``{"type","b64"}``), ``flows.found``,
 ``brands``, ``flows.start``, ``flows.get``, ``flows.step``, ``flows.abort``
 (adding a device: Home Assistant's own set-up steps, in plain shapes),
 ``entries.list``, ``entries.remove``, ``areas.create``, ``areas.rename``,
@@ -50,6 +60,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -79,29 +90,68 @@ CLOSE_REVOKED = 4403
 CLOSE_REPLACED = 4409
 CLOSE_BUSY = 4429
 
-# What a page may be shown, and what it may switch.
-SHOWN = frozenset(
-    {"light", "switch", "input_boolean", "fan", "sensor", "binary_sensor", "climate", "cover", "lock", "media_player"}
-)
-SWITCHABLE = frozenset({"light", "switch", "input_boolean", "fan"})
+# What a page may be shown: any kind of device the box sends (it leaves out
+# Home Assistant's own odds and ends). One we have no controls for is shown
+# with its name and what it says. And what a tap on a tile may switch.
+_DOMAIN = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+# Home Assistant's own odds and ends, which are nobody's device (the box
+# leaves them out too: ``HIDDEN`` in the connector).
+NEVER = frozenset({
+    "automation", "script", "person", "zone", "sun", "update", "tts", "stt", "conversation", "notify", "device_tracker", "weather",
+    "calendar", "todo", "camera", "image", "event", "button", "number", "select", "text", "date", "time", "datetime",
+    "input_number", "input_select", "input_text", "input_datetime", "input_button", "timer", "counter", "schedule", "tag",
+    "wake_word", "assist_satellite", "ai_task", "geo_location", "image_processing", "homeassistant", "group", "persistent_notification",
+})
+SWITCHABLE = frozenset({"light", "switch", "input_boolean", "fan", "humidifier", "remote"})
 # What each kind of device can be asked to do, and the value that goes with it.
+_ON_OFF = frozenset({"turn_on", "turn_off", "toggle"})
 ACTIONS: dict[str, frozenset[str]] = {
-    "light": frozenset({"turn_on", "turn_off", "toggle", "set"}),
-    "switch": frozenset({"turn_on", "turn_off", "toggle"}),
-    "input_boolean": frozenset({"turn_on", "turn_off", "toggle"}),
-    "fan": frozenset({"turn_on", "turn_off", "toggle", "speed"}),
+    "light": _ON_OFF | {"set"},
+    "switch": _ON_OFF,
+    "input_boolean": _ON_OFF,
+    "humidifier": _ON_OFF,
+    "remote": _ON_OFF,
+    "fan": _ON_OFF | {"speed", "oscillate"},
     "cover": frozenset({"open", "close", "stop", "position"}),
-    "climate": frozenset({"temperature", "mode"}),
-    "media_player": frozenset({"play", "pause", "volume"}),
+    "valve": frozenset({"open", "close"}),
+    # On is "the way it was last on" (the box remembers), never "its first mode".
+    "climate": frozenset({"turn_on", "turn_off", "temperature", "mode", "fan"}),
+    "media_player": frozenset({"turn_on", "turn_off", "play", "pause", "stop", "next", "prev", "volume", "mute", "source", "join", "unjoin"}),
     "lock": frozenset({"lock", "unlock"}),
+    "vacuum": frozenset({"start", "pause", "stop", "dock", "locate"}),
+    "scene": frozenset({"run"}),
+}
+# What a device must say it can do (``x.can``) for an action to go through.
+# Checked only when the device says what it can do at all.
+NEEDS: dict[tuple[str, str], str] = {
+    ("media_player", "turn_on"): "on", ("media_player", "turn_off"): "off", ("media_player", "play"): "play",
+    ("media_player", "pause"): "pause", ("media_player", "stop"): "stop", ("media_player", "next"): "next",
+    ("media_player", "prev"): "prev", ("media_player", "volume"): "vol", ("media_player", "mute"): "mute",
+    ("media_player", "source"): "src", ("media_player", "join"): "group", ("media_player", "unjoin"): "group",
+    ("climate", "temperature"): "temp", ("climate", "fan"): "fan",
+    ("cover", "open"): "open", ("cover", "close"): "close", ("cover", "stop"): "stop", ("cover", "position"): "pos",
+    ("fan", "speed"): "speed", ("fan", "oscillate"): "osc",
+    ("vacuum", "start"): "start", ("vacuum", "pause"): "pause", ("vacuum", "stop"): "stop", ("vacuum", "dock"): "dock", ("vacuum", "locate"): "locate",
 }
 # A door that lets someone in: the page asks "are you sure?" and says so here.
 ENTRANCES = frozenset({"garage", "door", "gate"})
 # Extras an entity may carry (``x``), by kind of value.
-_X_NUM = frozenset({"k", "kmin", "kmax", "pct", "pos", "target", "cur", "min", "max", "step", "vol"})
-_X_TEXT = frozenset({"title"})
-_X_BOOL = frozenset({"muted"})
-_X_LISTS = frozenset({"modes", "colours"})
+_X_NUM = frozenset({"k", "kmin", "kmax", "pct", "pos", "target", "cur", "min", "max", "step", "vol", "hum", "bat"})
+_X_TEXT = {"title": 120, "artist": 120, "src": 60, "fan": 24, "act": 24, "last": 24, "art": 16, "sys": 200}
+_X_BOOL = frozenset({"muted", "osc", "zone"})
+# name -> (most items, longest item)
+_X_LISTS = {"modes": (16, 24), "colours": (16, 24), "fans": (16, 24), "can": (24, 16), "srcs": (40, 60), "members": (32, 200)}
+ART_TYPES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})
+ART_MAX = 300 * 1024
+
+
+def ask_first(entity: dict[str, Any]) -> bool:
+    """Something that lets a person in, or keeps one out: a lock, a garage
+    door, a gate, an alarm. The page asks "are you sure?" before it opens
+    one, and so must anything else that acts for a person (an assistant, an
+    automation made by voice)."""
+    domain = entity.get("domain")
+    return domain in ("lock", "alarm_control_panel") or (domain == "cover" and entity.get("cls") in ENTRANCES)
 
 
 def needs_confirm(entity: dict[str, Any], action: str) -> bool:
@@ -110,19 +160,53 @@ def needs_confirm(entity: dict[str, Any], action: str) -> bool:
     return entity.get("domain") == "cover" and entity.get("cls") in ENTRANCES and action in ("open", "position")
 
 
-def clean_value(domain: str, action: str, value: Any, entity: dict[str, Any]) -> Any:
-    """The value for an action, checked; raises ValueError when it won't do."""
+def can_do(entity: dict[str, Any], action: str) -> bool:
+    """Whether this device says it can do this. One that doesn't say what it
+    can do (an older box) is taken at its word."""
+    can = (entity.get("x") or {}).get("can")
+    need = NEEDS.get((str(entity.get("domain")), action))
+    return need is None or not isinstance(can, list) or need in can
+
+
+def clean_value(domain: str, action: str, value: Any, entity: dict[str, Any], others: dict[str, dict[str, Any]] | None = None) -> Any:
+    """The value for an action, checked; raises ValueError when it won't do.
+    ``others`` is everything else on the same box (for grouping speakers)."""
     num = isinstance(value, (int, float)) and not isinstance(value, bool)
+    x = entity.get("x") or {}
+    if (domain, action) in (("media_player", "mute"), ("fan", "oscillate")):
+        if not isinstance(value, bool):
+            raise ValueError("on or off")
+        return value
+    if (domain, action) == ("media_player", "source"):
+        if not isinstance(value, str) or value not in (x.get("srcs") or []):
+            raise ValueError("one of its sources")
+        return value
+    if (domain, action) == ("climate", "fan"):
+        if not isinstance(value, str) or value not in (x.get("fans") or []):
+            raise ValueError("one of its fan speeds")
+        return value
+    if (domain, action) == ("media_player", "join"):
+        # Speakers on the same box that can be grouped, and not itself.
+        ids = [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+        ok = [
+            i for i in dict.fromkeys(ids[:16])
+            if i != entity.get("id") and (others or {}).get(i, {}).get("domain") == "media_player" and can_do((others or {})[i], "join")
+        ]
+        if not ok or len(ok) != len(set(ids)):
+            raise ValueError("speakers in this home that can be grouped")
+        return ok
     if (domain, action) in (("fan", "speed"), ("cover", "position"), ("media_player", "volume")):
         if not num or not 0 <= value <= 100:
             raise ValueError("0 to 100")
         return int(value)
     if (domain, action) == ("climate", "temperature"):
-        if not num or not -50 <= value <= 100:
-            raise ValueError("a temperature")
+        low = x.get("min") if isinstance(x.get("min"), (int, float)) else -50
+        high = x.get("max") if isinstance(x.get("max"), (int, float)) else 100
+        if not num or not low <= value <= high:
+            raise ValueError("a temperature it can be set to")
         return float(value)
     if (domain, action) == ("climate", "mode"):
-        modes = (entity.get("x") or {}).get("modes") or []
+        modes = x.get("modes") or []
         if not isinstance(value, str) or value not in modes:
             raise ValueError("one of its modes")
         return value
@@ -207,7 +291,7 @@ def clean_entity(raw: Any) -> dict[str, Any] | None:
         return None
     eid = _text(raw.get("id"), 200)
     domain = _text(raw.get("domain"), 32)
-    if not eid or "." not in eid or domain not in SHOWN or eid.split(".", 1)[0] != domain:
+    if not eid or "." not in eid or not _DOMAIN.match(domain) or domain in NEVER or eid.split(".", 1)[0] != domain:
         return None
     out: dict[str, Any] = {
         "id": eid,
@@ -238,11 +322,12 @@ def _clean_x(raw: Any) -> dict[str, Any]:
         if key in _X_NUM and isinstance(v, (int, float)) and not isinstance(v, bool) and -100_000 <= v <= 100_000:
             out[key] = round(v, 2)
         elif key in _X_TEXT and isinstance(v, str) and v:
-            out[key] = v[:120]
+            out[key] = v[: _X_TEXT[key]]
         elif key in _X_BOOL and isinstance(v, bool):
             out[key] = v
         elif key in _X_LISTS and isinstance(v, list):
-            out[key] = [str(i)[:24] for i in v[:16] if isinstance(i, (str, int))]
+            most, longest = _X_LISTS[key]
+            out[key] = [str(i)[:longest] for i in v[:most] if isinstance(i, (str, int)) and not isinstance(i, bool)]
         elif key == "rgb" and isinstance(v, list) and len(v) == 3 and all(isinstance(c, int) and 0 <= c <= 255 for c in v):
             out[key] = v
     return out

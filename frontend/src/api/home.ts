@@ -49,16 +49,47 @@ export interface HomeEntity {
     min?: number;
     max?: number;
     step?: number;
+    /** Air con: its fan speeds and the one it's on; what it's doing now (heating, cooling, idle); humidity. */
+    fans?: string[];
+    fan?: string;
+    act?: string;
+    hum?: number;
+    /** Air con: the mode it was last on in ("On" brings that back). */
+    last?: string;
+    /** Ducted air con: the unit's entity id, on the unit and on each of its zones. */
+    sys?: string;
+    /** Ducted air con: this is one zone of ``sys``. */
+    zone?: boolean;
     /** Media: volume 0–100, what's playing. */
     vol?: number;
     title?: string;
+    artist?: string;
     muted?: boolean;
+    /** Media: where it's playing from, and where it can. */
+    src?: string;
+    srcs?: string[];
+    /** Media: the speakers playing together with this one (itself included). */
+    members?: string[];
+    /** Media: there's a picture of what's playing. Changes when the picture does. */
+    art?: string;
+    /** Fan: turning its head. */
+    osc?: boolean;
+    /** Vacuum: battery, 0–100. */
+    bat?: number;
+    /**
+     * What it says it can do: "play", "pause", "next", "prev", "stop", "vol",
+     * "mute", "src", "on", "off", "group" (media); "temp", "fan" (air con);
+     * "open", "close", "pos", "stop" (cover); "speed", "osc" (fan);
+     * "start", "pause", "stop", "dock", "locate" (vacuum). Missing = not told.
+     */
+    can?: string[];
   };
 }
 
 export type HomeAction =
   | "turn_on" | "turn_off" | "toggle" | "set" | "speed" | "open" | "close" | "stop" | "position"
-  | "temperature" | "mode" | "play" | "pause" | "volume" | "lock" | "unlock";
+  | "temperature" | "mode" | "play" | "pause" | "volume" | "lock" | "unlock"
+  | "fan" | "next" | "prev" | "mute" | "source" | "join" | "unjoin" | "oscillate" | "start" | "dock" | "locate" | "run";
 
 /** One field of a set-up step. */
 export interface SetupField {
@@ -205,6 +236,8 @@ export const homeApi = {
   /** Several devices into one room ("" = out of their room). */
   placeDevices: (h: string, b: string, entities: string[], area: string) => apiClient.post(`/home/${h}/boxes/${b}/devices/place`, { entities, area }).then(() => undefined),
   clearNote: (h: string, b: string) => apiClient.delete(`/home/${h}/boxes/${b}/note`).then(() => undefined),
+  /** The picture of what a speaker is playing (the box fetches it). */
+  art: (h: string, b: string, entity: string) => apiClient.get<Blob>(`/home/${h}/boxes/${b}/art/${entity}`, { responseType: "blob" }).then((r) => r.data),
 };
 
 // ---- Admin → Home ----

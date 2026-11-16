@@ -21,6 +21,19 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Home: air conditioning has real controls. Pick a mode (Cool, Heat, Dry, Fan, Auto), set the temperature and fan speed, and see the room's temperature. A ducted system (AirTouch 5) shows its unit once with its zones listed under it; each zone is a tile in its own room that turns on and off with a tap.
+- Home: speakers and TVs show what's playing with its picture, and have play, pause, next, previous, volume, mute, a choice of input, and "Play together with" to group speakers. Each shows only what it can do. WiiM is offered when you add a device.
+- Home: robot vacuums (start, pause, send home, find it), scenes (a row of buttons in each room), fans that turn side to side, humidifiers, valves and remotes now have controls. Any other kind of device a brand brings is shown with its name and what it's doing, instead of being left out.
+
+### Changed
+
+- Home: turning an air conditioner on brings back the mode it was last in. Before, the system underneath chose for you, and chose heating before cooling.
+- Home: devices in a room are in a steadier order: lights, then air con, speakers and TVs, then the rest.
+- Home: a brand that needs you to sign in on its maker's own website now says plainly that it isn't supported yet, instead of stopping without a reason.
+
+
 ## [0.46.0] - 2026-11-16
 
 ### Changed
