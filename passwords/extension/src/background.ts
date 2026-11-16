@@ -279,7 +279,10 @@ ext.alarms.onAlarm.addListener(async (a) => {
   }
 });
 
-ext.idle.onStateChanged.addListener((state) => void onIdleState(state));
+// A test build doesn't listen to the computer it runs on: with the test machine's screen locked,
+// the browser reports "locked" as it starts and every vault under test locked itself seconds after
+// its unlock. Tests send the same event themselves (the "idle" hook).
+if (!__TEST_BUILD__) ext.idle.onStateChanged.addListener((state) => void onIdleState(state));
 
 /** Did the last sync get through to the server? Unknown until one has run. */
 let serverReached: boolean | undefined;

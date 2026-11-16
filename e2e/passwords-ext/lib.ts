@@ -218,3 +218,24 @@ export async function saveWithPin(prompt: Page, buttonName = "Save as a new item
 
 export const siteA = (path_: string) => `http://localhost:${PORT_A}/${path_}`;
 export const siteB = (path_: string) => `http://localhost:${PORT_B}/${path_}`;
+
+/**
+ * Makes the browser's own passkey request stay open on this page, as it does for a person
+ * (their browser shows its passkey dialog and waits). A browser driven by tests has no dialog
+ * and refuses the request at once (Chrome 157), which takes any offer down with it. This gives
+ * the page a stand-in authenticator that holds a passkey with the same id and never answers:
+ * its key is its own, so nothing it signed could pass for ours.
+ */
+export async function holdBrowserPasskey(rig: Rig, page: Page, rpId: string, credentialId: string): Promise<void> {
+  const cdp = await rig.ctx.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: false },
+  });
+  const { generateKeyPairSync } = await import("node:crypto");
+  const key = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ format: "der", type: "pkcs8" }) as Buffer;
+  await cdp.send("WebAuthn.addCredential", {
+    authenticatorId,
+    credential: { credentialId: Buffer.from(credentialId, "base64url").toString("base64"), isResidentCredential: true, rpId, privateKey: key.toString("base64"), userHandle: Buffer.from("browser").toString("base64"), signCount: 0 },
+  });
+}

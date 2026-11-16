@@ -7,7 +7,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
 
 import { fromBitwardenJson } from "../../frontend/src/passwords/core/importers";
-import { connect, launch, makeUsers, menuFrame, popupFor, type Rig, signInWithPin, siteA, startSite, tabIdOf, testHook, unlockExt } from "./lib";
+import { connect, holdBrowserPasskey, launch, makeUsers, menuFrame, popupFor, type Rig, signInWithPin, siteA, startSite, tabIdOf, testHook, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -84,6 +84,13 @@ async function promptWindow() {
   return p;
 }
 
+/** A tab for the test site, where the browser's own passkey request waits as a real one does. */
+async function sitePage(): Promise<Page> {
+  const p = await rig.ctx.newPage();
+  await holdBrowserPasskey(rig, p, RP, SITE_ID);
+  return p;
+}
+
 const prompts = () => rig.ctx.pages().filter((p) => p.url().includes("/passkey.html"));
 
 async function verified(page: Page, wanted: string) {
@@ -116,7 +123,7 @@ const answerWith = async (pop: Page) => {
 
 test("a quiet request shows nothing by itself, and an imported passkey answers it from the panel", async () => {
   const wanted = challenge();
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("webauthn.html")}?auto=${wanted}&rp=${RP}&m=conditional&allow=${SITE_ID}`);
   await page.waitForTimeout(800);
   // Nothing opened, and the page knows nothing.
@@ -134,7 +141,7 @@ const NO_CLICK = 7_000 + 600;
 
 test("a page asking with no click gets our window, not the browser's, when the passkey's here", async () => {
   const wanted = challenge();
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   const opened = promptWindow();
   await page.goto(`${siteA("webauthn.html")}?late=1&auto=${wanted}&rp=${RP}&allow=${SITE_ID}`);
   const prompt = await opened;
@@ -151,7 +158,7 @@ test("a page asking with no click gets our window, not the browser's, when the p
 
 test("a page can't keep throwing up windows: the next no-click request goes to the browser, and the panel still has it", async () => {
   const wanted = challenge();
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   const opened = promptWindow();
   await page.goto(`${siteA("webauthn.html")}?late=1&auto=${wanted}&rp=${RP}&allow=${SITE_ID}`);
   const first = await opened;
@@ -173,7 +180,7 @@ test("a page can't keep throwing up windows: the next no-click request goes to t
 test("a page asking in a frame with no click gets no window: that's the browser's to answer", async () => {
   const wanted = challenge();
   const inner = `${siteA("webauthn.html")}?late=1&auto=${wanted}&rp=${RP}&allow=${SITE_ID}`;
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("adv-nest.html")}?src=${encodeURIComponent(inner)}`);
   await page.waitForTimeout(NO_CLICK + 500);
   const frame = page.frames().find((f) => new URL(f.url()).pathname === "/webauthn.html")!;
@@ -183,7 +190,7 @@ test("a page asking in a frame with no click gets no window: that's the browser'
 });
 
 test("a site whose list doesn't include the passkey gets no window, and the panel says why", async () => {
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   const other = crypto.randomBytes(16).toString("base64url");
   await page.goto(`${siteA("webauthn.html")}?late=1&auto=${challenge()}&rp=${RP}&allow=${other}`);
   await page.waitForTimeout(NO_CLICK);
@@ -201,7 +208,7 @@ test("locked, a no-click request opens nothing, and a request still waiting is t
   await lock.getByRole("button", { name: "Lock" }).click();
   await lock.close();
   // There's no way to know a passkey matches while locked, so it's the browser's.
-  const asks = await rig.ctx.newPage();
+  const asks = await sitePage();
   await asks.goto(`${siteA("webauthn.html")}?late=1&auto=${challenge()}&rp=${RP}&allow=${SITE_ID}`);
   await asks.bringToFront();
   await asks.waitForTimeout(NO_CLICK);
@@ -211,7 +218,7 @@ test("locked, a no-click request opens nothing, and a request still waiting is t
 
   // A quiet request stays open by its nature, so it's still there after unlocking.
   const wanted = challenge();
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("webauthn.html")}?auto=${wanted}&rp=${RP}&m=conditional&allow=${SITE_ID}`);
   await page.waitForTimeout(500);
   expect(prompts()).toHaveLength(0);
@@ -225,7 +232,7 @@ test("locked, a no-click request opens nothing, and a request still waiting is t
 
 test("the on-page menu offers it as well, and picking it goes through the same window", async () => {
   const wanted = challenge();
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("webauthn.html")}?auto=${wanted}&rp=${RP}&m=conditional`);
   await page.waitForTimeout(800);
   await page.click("#user");
@@ -244,7 +251,7 @@ test("the on-page menu offers it as well, and picking it goes through the same w
 
 test("cancelling our window leaves the request open, and the page can still be answered", async () => {
   const wanted = challenge();
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("webauthn.html")}?auto=${wanted}&rp=${RP}&m=conditional&allow=${SITE_ID}`);
   await page.waitForTimeout(500);
   const pop = await popupFor(rig, page);
@@ -261,7 +268,7 @@ test("cancelling our window leaves the request open, and the page can still be a
 });
 
 test("a page calling it off, or going away, takes the offer with it", async () => {
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("webauthn.html")}?auto=${challenge()}&rp=${RP}&m=conditional`);
   const pop = await popupFor(rig, page);
   await expect(pop.getByTestId("passkey-offer")).toBeVisible();
@@ -270,7 +277,7 @@ test("a page calling it off, or going away, takes the offer with it", async () =
   await expect.poll(() => page.evaluate(() => (window as any).__result?.error)).toBe("AbortError");
   await page.close();
 
-  const again = await rig.ctx.newPage();
+  const again = await sitePage();
   await again.goto(`${siteA("webauthn.html")}?auto=${challenge()}&rp=${RP}&m=conditional`);
   const pop2 = await popupFor(rig, again);
   await expect(pop2.getByTestId("passkey-offer")).toBeVisible();
@@ -281,7 +288,7 @@ test("a page calling it off, or going away, takes the offer with it", async () =
 
 test("a window left open when the page navigates closes, and nothing's signed for the new page", async () => {
   const wanted = challenge();
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("webauthn.html")}?auto=${wanted}&rp=${RP}&m=conditional&allow=${SITE_ID}`);
   await page.waitForTimeout(500);
   const pop = await popupFor(rig, page);
@@ -305,7 +312,7 @@ test("a window left open when the page navigates closes, and nothing's signed fo
 });
 
 test("an answer sent with the wrong document's value is dropped by the content script", async () => {
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("webauthn.html")}?auto=${challenge()}&rp=${RP}&m=conditional`);
   await page.evaluate(() => {
     (window as any).__got = [];
@@ -324,7 +331,7 @@ test("an answer sent with the wrong document's value is dropped by the content s
 });
 
 test("a page's oversized or malformed offers are refused, and leave the panel working", async () => {
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(siteA("webauthn.html"));
   await page.evaluate(() => {
     const send = (id: number, options: unknown) => window.postMessage({ __pk: "offer", id, options }, location.origin);
@@ -345,7 +352,7 @@ test("a page's oversized or malformed offers are refused, and leave the panel wo
 });
 
 test("with a passkey saved and no request, the panel says why nothing's happening", async () => {
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(siteA("webauthn.html"));
   const pop = await popupFor(rig, page);
   await expect(pop.getByTestId("passkey-saved")).toContainText("The site asks for it when you press its own button");
@@ -355,7 +362,7 @@ test("with a passkey saved and no request, the panel says why nothing's happenin
 
 test("a page can't offer another site's passkey, or hear about one by asking", async () => {
   // Another site's id can't be asked for from here: the RP ID check is against the real origin.
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto("http://127.0.0.1:8111/webauthn.html");
   await page.evaluate(() => {
     window.postMessage({ __pk: "offer", id: 9001, options: { rpId: "localhost", challenge: "AAAA", allow: [] } }, location.origin);
@@ -376,7 +383,7 @@ test("a page can't offer another site's passkey, or hear about one by asking", a
 });
 
 test("only the toolbar panel can list or use offers", async () => {
-  const page = await rig.ctx.newPage();
+  const page = await sitePage();
   await page.goto(`${siteA("webauthn.html")}?auto=${challenge()}&rp=${RP}&m=conditional`);
   const tabId = await tabIdOf(rig, page);
   // Another of our own pages stands in for any other sender: the check is on who's asking.

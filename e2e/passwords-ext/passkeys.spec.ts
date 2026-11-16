@@ -265,14 +265,15 @@ test("passkey PIN: five wrong in a row lock the vault, and only the master passw
   expect(quick.ok).toBe(false);
   expect(quick.error).toContain("Five wrong passkey PINs");
   expect(await bg<boolean>(rig, `return (await chrome.runtime.sendMessage({ t: "state" })).r.unlocked;`)).toBe(false);
-  // The master password, in the same window, and the request carries on with a fresh count.
+  // The master password, in the same window, opens it and is the proof for this request: no PIN
+  // is asked after it (D139). The count starts again, as the next test's "4 tries left" shows.
   await prompt.getByLabel("Master password").fill(MASTER);
   await prompt.getByRole("button", { name: "Unlock" }).click();
-  await expect(prompt.locator("#pin")).toBeVisible({ timeout: 60_000 });
-  await expect(prompt.locator("#pin-error")).toHaveText("");
+  await expect(prompt.getByRole("button", { name: "Sign in", exact: true })).toBeVisible({ timeout: 60_000 });
+  await expect(prompt.locator("#pin")).toHaveCount(0);
   await expect(prompt.locator("#pk-notice")).toHaveCount(0);
-  await prompt.locator("#pin").fill(PASSKEY_PIN);
-  await prompt.locator("#pin").press("Enter");
+  expect(await stillWaiting(run)).toBe("waiting");
+  await prompt.getByRole("button", { name: "Sign in", exact: true }).click();
   await verifiedSignIn(run, challenge);
   await bg(rig, `await chrome.runtime.sendMessage({ t: "setPin", pin: null });`);
   await page.close();
