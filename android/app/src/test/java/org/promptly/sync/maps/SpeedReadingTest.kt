@@ -54,11 +54,12 @@ class SpeedReadingTest {
     }
 
     @Test
-    fun `over the limit is amber, well over is red`() {
+    fun `three over the limit is amber, five over is red`() {
         assertEquals(SpeedReading.Level.FINE, SpeedReading.level(110, 110))
-        assertEquals(SpeedReading.Level.OVER, SpeedReading.level(111, 110))
+        assertEquals(SpeedReading.Level.FINE, SpeedReading.level(112, 110))
         assertEquals(SpeedReading.Level.OVER, SpeedReading.level(113, 110))
-        assertEquals(SpeedReading.Level.WELL_OVER, SpeedReading.level(114, 110))
+        assertEquals(SpeedReading.Level.OVER, SpeedReading.level(114, 110))
+        assertEquals(SpeedReading.Level.WELL_OVER, SpeedReading.level(115, 110))
         assertEquals(SpeedReading.Level.WELL_OVER, SpeedReading.level(118, 110))
         assertEquals(SpeedReading.Level.FINE, SpeedReading.level(118, null))
         assertEquals(SpeedReading.Level.FINE, SpeedReading.level(null, 110))

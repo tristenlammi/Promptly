@@ -57,8 +57,9 @@ object SpeedReading {
     /** The shown number holds until the real speed is this far from it (km/h). */
     const val HOLD_KMH = 0.8
 
-    /** Past the limit by more than this is red; any amount over is amber. */
-    const val RED_OVER_KMH = 3
+    /** This far over the limit is amber, and [RED_OVER_KMH] over is red. Under that it stays plain. */
+    const val AMBER_OVER_KMH = 3
+    const val RED_OVER_KMH = 5
 
     /**
      * Your speed in km/h, not yet rounded, or null when there's nothing honest to show:
@@ -84,8 +85,8 @@ object SpeedReading {
 
     fun level(kmh: Int?, limit: Int?): Level = when {
         kmh == null || limit == null || limit !in 5..150 -> Level.FINE
-        kmh > limit + RED_OVER_KMH -> Level.WELL_OVER
-        kmh > limit -> Level.OVER
+        kmh >= limit + RED_OVER_KMH -> Level.WELL_OVER
+        kmh >= limit + AMBER_OVER_KMH -> Level.OVER
         else -> Level.FINE
     }
 
