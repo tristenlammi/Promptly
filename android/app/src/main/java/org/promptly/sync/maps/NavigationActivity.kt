@@ -357,6 +357,7 @@ class NavigationActivity : ComponentActivity() {
                 onTapExit = { Nav.stop() },
                 mapContent = { ui ->
                     TrafficOnRoute()
+                    CamerasOnMap(ui.location?.coordinates?.let { it.lat to it.lng })
                     YouOnTrip(ui)
                 },
             )
@@ -566,7 +567,7 @@ private val driveViews = NavigationViewComponentBuilder.Default()
             val watching by Nav.sharedWith.collectAsState()
             val context = LocalContext.current
             val now = java.time.Instant.now()
-            val arriveAt = traffic?.arriveAt?.takeIf { it.isAfter(now) } ?: now.plusSeconds(progress.durationRemaining.toLong())
+            val arriveAt = Nav.arriveAt(progress.durationRemaining, now)
             EtaBar(
                 arrive = android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date.from(arriveAt)),
                 left = duration(java.time.Duration.between(now, arriveAt).seconds.toInt()),

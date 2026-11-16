@@ -27,6 +27,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Home: air conditioning has real controls. Pick a mode (Cool, Heat, Dry, Fan, Auto), set the temperature and fan speed, and see the room's temperature. A ducted system (AirTouch 5) shows its unit once with its zones listed under it; each zone is a tile in its own room that turns on and off with a tap.
 - Home: speakers and TVs show what's playing with its picture, and have play, pause, next, previous, volume, mute, a choice of input, and "Play together with" to group speakers. Each shows only what it can do. WiiM is offered when you add a device.
 - Home: robot vacuums (start, pause, send home, find it), scenes (a row of buttons in each room), fans that turn side to side, humidifiers, valves and remotes now have controls. Any other kind of device a brand brings is shown with its name and what it's doing, instead of being left out.
+- P Maps (Android, phone and car): the fixed speed cameras the map knows about are drawn on the map, around you and along a trip, with a Speed cameras choice (Show and warn / Off) in the Drive menu and the trip's options. From the map data already on your server and in offline areas; it doesn't know every camera.
 
 ### Changed
 
@@ -39,6 +40,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Home: a brand that needs you to sign in on its maker's own website now says plainly that it isn't supported yet, instead of stopping without a reason.
 - Home: when adding a device, the box asking for its network address is labelled "Address", and WiiM and AirTouch 5 say where to find it.
 - Home: long readings are shortened ("0.028 m³", not "0.028316846592 m³").
+- P Maps on Android Auto: the map is light by day and dark by night by the sun where you are (or your Always light / Always dark choice), as on the phone. It used to follow the car's own day/night signal alone, and some cars say night all day.
 
 ### Fixed
 
@@ -50,6 +52,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords on Android: long-pressing a box and choosing Autofill now always offers "Search Passwords", even on a box Passwords couldn't recognise.
 - Passwords on Android: apps with Australian or British style names (au.com.…, uk.co.…) are now matched to their sites.
 - Home: sorting several devices into a room no longer stops at the first one that can't be moved; the rest still go, and one that can't be renamed or placed says why in plain words.
+- P Maps (Android, phone and car): the time left and arrival time now come down as you drive. On a long stretch of one road (a motorway) the traffic check measured that road from where it began, not from where you were, so the time sat still until the next turn; a traffic answer is also dropped once it's old or far beyond the trip's own count.
 
 ## [0.46.0] - 2026-11-16
 

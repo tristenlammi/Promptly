@@ -218,6 +218,16 @@ object Maps {
         }
     }
 
+    /** The cameras the map knows in a box (`west, south, east, north`), for drawing them. */
+    fun camerasIn(context: Context, box: DoubleArray): List<Camera> {
+        val bbox = box.joinToString(",") { String.format(java.util.Locale.US, "%.4f", it) }
+        val rows = get(context, "/api/maps/cameras?bbox=$bbox", DRIVING_TIMEOUT_SECONDS / 2).getJSONArray("cameras")
+        return List(rows.length()) { i ->
+            val c = rows.getJSONObject(i)
+            Camera(c.getDouble("lat"), c.getDouble("lon"), c.optDouble("maxspeed").takeUnless { it.isNaN() })
+        }
+    }
+
     /** Where you parked. [at]: when (ISO 8601), for one saved with no signal and sent later;
      *  the server keeps a newer one it already has. */
     fun park(context: Context, lat: Double, lon: Double, source: String, at: String? = null, timeoutSeconds: Long = 40) {
