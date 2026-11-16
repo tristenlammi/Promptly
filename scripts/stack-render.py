@@ -52,7 +52,8 @@ EXTRAS = {
     "home": ["home-assistant-desktop", "home-connector-desktop"],
 }
 # What `--e2e` adds: what the e2e suite exercises beyond the core.
-E2E_EXTRAS = ["media", "photos-ml", "maps", "convert"]
+# voice: the Talk and voice-note specs speak through the real whisper + tts.
+E2E_EXTRAS = ["media", "photos-ml", "maps", "convert", "voice"]
 # Services the stack builds from this worktree, always.
 OWN_BUILDS = {"backend", "frontend", "collab", "home-connector-desktop"}
 FIRST_PORT = 8093

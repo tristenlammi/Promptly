@@ -111,3 +111,22 @@ export function resumableUploadsReady(): boolean {
 }
 export const NO_RESUMABLE_UPLOADS =
   "this stack has no TUS_HOOK_SECRET, so its upload service refuses every resumable upload (run update.ps1 or ./update.sh once, then recreate backend and tusd)";
+
+/** Answering a form by its link is limited to 10 a minute per address, and
+ *  the whole suite is one address standing in for many people: the forms
+ *  specs, back to back, ran into each other's limit. Start a spec's test
+ *  with a clean count (the limit itself has its own backend tests). */
+export function forgetFormSubmits(): void {
+  const py = `
+import asyncio
+from redis.asyncio import from_url
+from app.config import get_settings
+async def main():
+    r = from_url(get_settings().REDIS_URL)
+    async for k in r.scan_iter(match="*form_submit*"):
+        await r.delete(k)
+    await r.aclose()
+asyncio.run(main())
+`;
+  execFileSync("docker", ["exec", "-i", BACKEND, "python", "-"], { input: py, stdio: ["pipe", "pipe", "pipe"] });
+}

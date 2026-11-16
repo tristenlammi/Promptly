@@ -3,6 +3,10 @@ import { deflateSync } from "node:zlib";
 
 import { expect, ready, stamp, test } from "../fixtures";
 import { BASE_URL } from "../lib/stack";
+import { forgetFormSubmits } from "../lib/stack";
+
+// One address, many "people": see forgetFormSubmits.
+test.beforeEach(() => forgetFormSubmits());
 
 /** Forms WP-F1.6: someone without an account answers a link form on a phone,
  *  with a photo; it uploads with its progress and shows as a tile. The owner

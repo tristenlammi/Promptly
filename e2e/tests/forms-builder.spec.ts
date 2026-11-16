@@ -2,6 +2,10 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
+import { forgetFormSubmits } from "../lib/stack";
+
+// One address, many "people": see forgetFormSubmits.
+test.beforeEach(() => forgetFormSubmits());
 
 /** Forms WP-F1.2: the builder, its preview and the Forms home (desktop).
  *  An RSVP with branching and an option limit is built and previewed;

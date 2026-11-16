@@ -3,6 +3,10 @@ import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
 import { BASE_URL } from "../lib/stack";
+import { forgetFormSubmits } from "../lib/stack";
+
+// One address, many "people": see forgetFormSubmits.
+test.beforeEach(() => forgetFormSubmits());
 
 /** Forms phase 2 (WP-F2.1 to F2.4): a multiple-choice grid built in the
  *  builder and answered on a phone with no sideways scroll; a Location

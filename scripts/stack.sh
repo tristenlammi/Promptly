@@ -23,7 +23,7 @@
 #                           home       Promptly Home: the bundled Home Assistant and its connector
 #                                      (the image is about 3.5 GB, pulled once)
 #                           all        everything above except maps-full
-#         --e2e           add what the e2e suite exercises (media, photos-ml, maps, convert)
+#         --e2e           add what the e2e suite exercises (media, photos-ml, maps, convert, voice)
 #         --build-extras  build whisper/tts/photos-ml/maps from this worktree
 #                         too (default: reuse the main app's promptly-<svc>:latest
 #                         image when there is one, read-only)

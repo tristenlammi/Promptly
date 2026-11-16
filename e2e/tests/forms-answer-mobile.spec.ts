@@ -3,6 +3,10 @@ import type { Browser, BrowserContext, Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
 import { BASE_URL } from "../lib/stack";
+import { forgetFormSubmits } from "../lib/stack";
+
+// One address, many "people": see forgetFormSubmits.
+test.beforeEach(() => forgetFormSubmits());
 
 /** Forms WP-F1.3: answering on a phone (375×812). Someone without an
  *  account answers a branching link form — with a draft that survives a

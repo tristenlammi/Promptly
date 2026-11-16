@@ -2,6 +2,10 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
+import { forgetFormSubmits } from "../lib/stack";
+
+// One address, many "people": see forgetFormSubmits.
+test.beforeEach(() => forgetFormSubmits());
 
 /** Forms WP-F1.4: the owner's Responses tab. A few answers arrive (through
  *  the answer link), Today says how many are new, the summary shows the
@@ -75,6 +79,19 @@ test("the owner reads, steps through, deletes and downloads answers", async ({ a
     });
     expect(r.ok(), await r.text()).toBe(true);
   }
+
+  // Today's card lists the five forms with the most new answers. Other specs'
+  // forms have new answers too (on a fresh stack, more than five of them),
+  // so look at those first: this form's three are then the ones left.
+  const mine = (await (await alice.request.get("/api/forms", { headers })).json()).forms as { file_id: string; new_count: number }[];
+  for (const f of mine) {
+    if (f.file_id !== fileId && f.new_count > 0) expect((await alice.request.post(`/api/forms/${f.file_id}/seen`, { headers })).ok()).toBe(true);
+  }
+
+  // A new account's Today starts with the Forms card put away: bring it back.
+  const me = await (await alice.request.get("/api/auth/me", { headers })).json();
+  const hidden = ((me.settings?.today_hidden ?? []) as string[]).filter((k) => k !== "forms");
+  expect((await alice.request.patch("/api/auth/me/preferences", { headers, data: { today_hidden: hidden } })).ok()).toBe(true);
 
   // Today says how many are new (never what they say).
   await alice.goto("/today");

@@ -1,10 +1,47 @@
-import { expect, ready, test } from "../fixtures";
+import fs from "node:fs";
+
+import type { Page } from "@playwright/test";
+
+import { expect, ready, stamp, test } from "../fixtures";
+import { wordPhoto } from "../lib/files";
+
+/** A photo of this spec's own to find: on a fresh stack the library is empty
+ *  until some other spec has left a photo behind, and this one runs first. */
+async function ownPhoto(page: Page, searchable: boolean): Promise<void> {
+  const seen = page.waitForRequest((r) => !!r.headers()["authorization"] && r.url().includes("/api/"));
+  await page.goto("/files");
+  await ready(page);
+  const headers = { Authorization: (await seen).headers()["authorization"] };
+  if (searchable) {
+    const probe = await page.request.get("/api/photos/search?q=x", { headers });
+    test.skip(probe.status() === 503, `photos-ml isn't running: ${await probe.text()}`);
+  }
+  const name = `pancakes-chat-${stamp}.jpg`;
+  const timeline = await (await page.request.get("/api/photos/timeline?limit=50", { headers })).json();
+  let id = (timeline.items as { id: string; name?: string }[]).find((i) => i.name === name)?.id;
+  if (!id) {
+    const up = await page.request.post("/api/files/", {
+      headers,
+      multipart: { scope: "mine", route: "camera", file: { name, mimeType: "image/jpeg", buffer: fs.readFileSync(wordPhoto(name, "PANCAKES")) } },
+    });
+    expect(up.ok(), await up.text()).toBeTruthy();
+    id = (await up.json()).id as string;
+  }
+  if (!searchable) return;
+  await expect
+    .poll(async () => {
+      const r = await page.request.get("/api/photos/search?q=pancakes", { headers });
+      return r.ok() ? ((await r.json()).items as { id: string }[]).some((i) => i.id === id) : false;
+    }, { timeout: 180_000, intervals: [5_000] })
+    .toBe(true);
+}
 
 /** Ask your photos in chat (PH-4): the model calls search_photos and the
  *  photos it found show as a gallery under its reply. (The fake model calls
  *  the tool when the message carries a [tool:…] marker.) */
 test("a chat finds photos and shows them", async ({ dana: page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(300_000);
+  await ownPhoto(page, true);
   await page.goto("/chat");
   await ready(page);
   await page.locator('button[aria-haspopup="listbox"]').first().click();
@@ -24,6 +61,7 @@ test("a chat finds photos and shows them", async ({ dana: page }) => {
  *  and nothing happens until the person applies it. */
 test("an album proposed in a chat is made when applied", async ({ dana: page }) => {
   test.setTimeout(120_000);
+  await ownPhoto(page, false);
   const seen = page.waitForRequest((r) => !!r.headers()["authorization"] && r.url().includes("/api/"));
   await page.goto("/chat");
   await ready(page);
