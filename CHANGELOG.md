@@ -24,6 +24,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 
 - Voice rooms on Android: a Sound button on the channel page opens a list on the phone to send the sound to the phone, its speaker, wired headphones or a Bluetooth device by name. Needs the next phone app; the list stays on the phone.
+- Home: air conditioning has real controls. Pick a mode (Cool, Heat, Dry, Fan, Auto), set the temperature and fan speed, and see the room's temperature. A ducted system (AirTouch 5) shows its unit once with its zones listed under it; each zone is a tile in its own room that turns on and off with a tap.
+- Home: speakers and TVs show what's playing with its picture, and have play, pause, next, previous, volume, mute, a choice of input, and "Play together with" to group speakers. Each shows only what it can do. WiiM is offered when you add a device.
+- Home: robot vacuums (start, pause, send home, find it), scenes (a row of buttons in each room), fans that turn side to side, humidifiers, valves and remotes now have controls. Any other kind of device a brand brings is shown with its name and what it's doing, instead of being left out.
 
 ### Changed
 
@@ -31,6 +34,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Workout on a phone: the set type is a small chip that opens the four choices, next to "Last" and Use; hold − or + to keep stepping; a second Finish button appears under the last exercise once every set is ticked; tap the rest countdown to fill the screen with it.
 - Passwords on Android (next Promptly for Android): in an app you haven't filled before, the logins that look like they belong to it are now listed by name above "Search Passwords" (for example your Netflix login in the Netflix app). Tapping one still checks the app first, and asks you if the site doesn't vouch for it.
 - Passwords on Android: a card on the main screen tells you when Chrome isn't using Passwords yet (Chrome only fills from Google until you pick "Autofill using another service" in its settings), with a button that opens that setting.
+- Home: turning an air conditioner on brings back the mode it was last in. Before, the system underneath chose for you, and chose heating before cooling.
+- Home: devices in a room are in a steadier order: lights, then air con, speakers and TVs, then the rest.
+- Home: a brand that needs you to sign in on its maker's own website now says plainly that it isn't supported yet, instead of stopping without a reason.
+- Home: when adding a device, the box asking for its network address is labelled "Address", and WiiM and AirTouch 5 say where to find it.
+- Home: long readings are shortened ("0.028 m³", not "0.028316846592 m³").
 
 ### Fixed
 
@@ -41,6 +49,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords on Android: sign-in boxes labelled "Email address" got no suggestions unless the app marked them as an email box; they do now, and so do sign-ins that use a phone number, a customer ID or a client number.
 - Passwords on Android: long-pressing a box and choosing Autofill now always offers "Search Passwords", even on a box Passwords couldn't recognise.
 - Passwords on Android: apps with Australian or British style names (au.com.…, uk.co.…) are now matched to their sites.
+- Home: sorting several devices into a room no longer stops at the first one that can't be moved; the rest still go, and one that can't be renamed or placed says why in plain words.
 
 ## [0.46.0] - 2026-11-16
 

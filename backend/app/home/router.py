@@ -6,12 +6,13 @@ seen only by its members: not by other homes, and not by an admin.
 """
 from __future__ import annotations
 
+import base64
 import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,8 +119,9 @@ async def _devices(db: AsyncSession, home_id: uuid.UUID) -> dict[str, Any]:
                     "box_id": str(box.id),
                     "online": is_live,
                     "can_switch": e.get("domain") in relay.SWITCHABLE,
-                    # Unlocking, or opening a garage door: the page asks first.
-                    "careful": e.get("domain") == "lock" or (e.get("domain") == "cover" and e.get("cls") in relay.ENTRANCES),
+                    # Unlocking, or opening a garage door: the page asks first
+                    # (and so must anything that acts for a person later).
+                    "careful": relay.ask_first(e),
                 }
             )
     entities.sort(key=lambda e: (str(e.get("area") or "~"), str(e.get("name") or "").lower()))
@@ -252,14 +254,36 @@ async def act(home_id: uuid.UUID, body: ActBody, db: AsyncSession = Depends(get_
     entity = live.entities.get(body.entity_id) if live is not None else None
     if live is None or not live.got_snapshot or entity is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "The home box is offline. Check it has power and internet.")
+    if not relay.can_do(entity, body.action):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This device can't do that.")
     try:
-        value = relay.clean_value(domain, body.action, body.value, entity)
+        value = relay.clean_value(domain, body.action, body.value, entity, live.entities)
     except ValueError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"That needs {e}.") from e
     if relay.needs_confirm(entity, body.action) and not body.confirm:
         raise HTTPException(status.HTTP_428_PRECONDITION_REQUIRED, "Say you're sure first.")
     await _ask_box(db, box.id, "do", {"entity": body.entity_id, "action": body.action, "value": value})
     return {"ok": True}
+
+
+@router.get("/{home_id}/boxes/{box_id}/art/{entity_id}", dependencies=[Depends(_on), Depends(_act_limit)])
+async def art(home_id: uuid.UUID, box_id: uuid.UUID, entity_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Response:
+    """The picture of what a speaker is playing. The box fetches it; only a
+    small image of a kind we know comes back, and never as anything else."""
+    box = await _box_of(db, user, home_id, box_id)
+    live = relay.link(box.id)
+    entity = live.entities.get(entity_id) if live is not None and re.match(r"^media_player\.[a-z0-9_]+$", entity_id) else None
+    if entity is None or not (entity.get("x") or {}).get("art"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No picture")
+    try:
+        got = await _ask_box(db, box.id, "art", {"entity": entity_id})
+        kind = str((got or {}).get("type") or "")
+        data = base64.b64decode(str((got or {}).get("b64") or ""), validate=True)
+    except (HTTPException, ValueError):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No picture") from None
+    if kind not in relay.ART_TYPES or not data or len(data) > relay.ART_MAX:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No picture")
+    return Response(content=data, media_type=kind, headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'"})
 
 
 async def _ask_box(db: AsyncSession, box_id: uuid.UUID, op: str, args: dict[str, Any], *, timeout: float = relay.CALL_S) -> Any:

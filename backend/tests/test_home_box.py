@@ -61,7 +61,7 @@ LOGIN_WORDS = {"component.acme.config.step.user.description": "Sign in at {url} 
 def test_hue_asks_for_the_bridge_then_for_its_button():
     step = pb.shape_flow(HUE_MANUAL, HUE_WORDS, "Philips Hue")
     assert (step["kind"], step["title"]) == ("form", "Your Hue bridge's address")
-    assert step["fields"] == [{"name": "host", "label": "Host", "required": True, "type": "text"}]
+    assert step["fields"] == [{"name": "host", "label": "Address", "required": True, "type": "text"}]
 
     link = pb.shape_flow(HUE_LINK, HUE_WORDS, "Philips Hue")
     # No fields: "press the button, then Continue". Home Assistant is never named, and its picture is dropped.
@@ -116,8 +116,8 @@ def test_actions_become_home_assistant_services():
     assert pb.service_for("lock", "unlock", None) == ("lock", "unlock", {})
     assert pb.service_for("cover", "position", 20) == ("cover", "set_cover_position", {"position": 20})
     assert pb.service_for("sensor", "turn_on", None) is None and pb.service_for("lock", "toggle", None) is None
-    assert pb.extras("climate", {"temperature": 21, "current_temperature": 19.5, "hvac_modes": ["off", "heat"], "min_temp": 7, "max_temp": 35}) == {"target": 21, "cur": 19.5, "min": 7, "max": 35, "modes": ["off", "heat"]}
-    assert pb.extras("media_player", {"volume_level": 0.4, "media_title": "Song", "is_volume_muted": False}) == {"vol": 40, "title": "Song", "muted": False}
+    assert pb.extras("climate", {"temperature": 21, "current_temperature": 19.5, "hvac_modes": ["off", "heat"], "min_temp": 7, "max_temp": 35}) == {"target": 21, "cur": 19.5, "min": 7, "max": 35, "modes": ["off", "heat"], "can": []}
+    assert pb.extras("media_player", {"volume_level": 0.4, "media_title": "Song", "is_volume_muted": False}) == {"vol": 40, "title": "Song", "muted": False, "can": []}
 
 
 def test_a_server_on_this_machine_is_reached_through_the_host():
@@ -368,3 +368,108 @@ def test_only_what_add_a_device_offers_can_be_started():
         assert all(pb.can_start(b["id"], names, can) for b in pb.brands_for(names, can, q))
     assert [b["id"] for b in pb.brands_for(names, can, "sql")] == []
 
+
+# ------------------------------------------------------------------ every kind of device (Home phase 2, stage 1)
+
+# As Home Assistant 2026.11 reports an AirTouch 5: one unit, a "thermostat" per zone.
+AT5_AC = {"hvac_modes": ["off", "auto", "cool", "dry", "fan_only", "heat"], "min_temp": 16, "max_temp": 30, "target_temp_step": 1, "fan_modes": ["low", "medium", "high", "auto"], "current_temperature": 26, "temperature": 23, "fan_mode": "auto", "supported_features": 393}
+AT5_ZONE = {"hvac_modes": ["off", "fan_only"], "min_temp": 16, "max_temp": 30, "preset_modes": ["none", "boost"], "current_temperature": 24, "temperature": 22, "supported_features": 401}
+# A WiiM speaker playing.
+WIIM = {"volume_level": 0.3, "is_volume_muted": False, "media_title": "Song", "media_artist": "Band", "source": "Wi-Fi", "source_list": ["Wi-Fi", "Line In", "Bluetooth"], "group_members": ["media_player.kitchen"], "entity_picture": "https://cdn.example/cover.jpg", "device_class": "speaker", "supported_features": 1 | 2 | 4 | 8 | 32 | 512 | 2048 | 4096 | 16384 | 131072 | 524288}
+
+
+def test_air_con_says_what_it_can_do_and_its_fan_speeds():
+    x = pb.extras("climate", AT5_AC)
+    assert x["can"] == ["temp", "fan", "off", "on"] and x["fans"] == ["low", "medium", "high", "auto"] and x["fan"] == "auto" and x["step"] == 1
+    assert pb.extras("climate", AT5_ZONE)["can"] == ["temp", "off", "on"] and "fans" not in pb.extras("climate", AT5_ZONE)
+
+
+def test_a_ducted_systems_zones_are_told_apart_from_its_unit():
+    got = pb.zones_of({
+        "climate.ac_0": ("e1", AT5_AC["hvac_modes"]), "climate.bedroom": ("e1", ["off", "fan_only"]), "climate.lounge": ("e1", ["off", "fan_only"]),
+        "climate.heater": ("e2", ["off", "heat"]),  # something else entirely: left alone
+        "climate.a": ("e3", ["off", "cool"]), "climate.b": ("e3", ["off", "cool"]),  # two split systems from one brand: both units
+        "climate.loose": ("", ["off", "fan_only"]),
+    })
+    assert got == {"climate.ac_0": {"sys": "climate.ac_0"}, "climate.bedroom": {"sys": "climate.ac_0", "zone": True}, "climate.lounge": {"sys": "climate.ac_0", "zone": True}}
+
+
+def test_turning_air_con_on_is_the_way_it_was_not_its_first_mode():
+    modes = AT5_AC["hvac_modes"]
+    x = {"modes": modes, "can": ["temp", "fan", "off", "on"]}
+    # Home Assistant's own turn-on would pick heat (it tries heat before cool).
+    assert pb.service_for("climate", "turn_on", None, x, "cool") == ("climate", "set_hvac_mode", {"hvac_mode": "cool"})
+    assert pb.service_for("climate", "turn_on", None, x, "dry") == ("climate", "set_hvac_mode", {"hvac_mode": "dry"})
+    # Nothing remembered, or a mode it no longer has: let the unit decide (auto), never plain "turn on".
+    assert pb.service_for("climate", "turn_on", None, x, None) == ("climate", "set_hvac_mode", {"hvac_mode": "auto"})
+    assert pb.service_for("climate", "turn_on", None, x, "heat_cool") == ("climate", "set_hvac_mode", {"hvac_mode": "auto"})
+    assert pb.service_for("climate", "turn_on", None, {"modes": ["off", "heat", "cool"]}, None) == ("climate", "set_hvac_mode", {"hvac_mode": "cool"})
+    # A zone only has "on".
+    assert pb.service_for("climate", "turn_on", None, {"modes": ["off", "fan_only"]}, None) == ("climate", "set_hvac_mode", {"hvac_mode": "fan_only"})
+    assert pb.service_for("climate", "turn_off", None, x, "cool") == ("climate", "set_hvac_mode", {"hvac_mode": "off"})
+    assert pb.service_for("climate", "turn_off", None, {"modes": ["heat"]}, None) == ("climate", "turn_off", {})
+    assert pb.service_for("climate", "fan", "high", x) == ("climate", "set_fan_mode", {"fan_mode": "high"})
+
+
+def test_a_speaker_says_what_is_playing_and_what_it_can_do():
+    x = pb.extras("media_player", WIIM)
+    assert x["can"] == ["pause", "vol", "mute", "next", "src", "stop", "play", "group"]  # no "previous", no power button
+    assert (x["title"], x["artist"], x["src"], x["vol"], x["muted"]) == ("Song", "Band", "Wi-Fi", 30, False)
+    assert x["srcs"] == ["Wi-Fi", "Line In", "Bluetooth"] and x["members"] == ["media_player.kitchen"]
+    # The picture's address never leaves the box: only a mark that changes when the picture does.
+    assert len(x["art"]) == 12 and "cdn.example" not in str(x)
+    assert x["art"] != pb.extras("media_player", {**WIIM, "entity_picture": "https://cdn.example/other.jpg"})["art"]
+    assert pb.service_for("media_player", "next", None) == ("media_player", "media_next_track", {})
+    assert pb.service_for("media_player", "mute", True) == ("media_player", "volume_mute", {"is_volume_muted": True})
+    assert pb.service_for("media_player", "source", "Line In") == ("media_player", "select_source", {"source": "Line In"})
+    assert pb.service_for("media_player", "join", ["media_player.lounge"]) == ("media_player", "join", {"group_members": ["media_player.lounge"]})
+    assert pb.service_for("media_player", "unjoin", None) == ("media_player", "unjoin", {})
+    assert pb.service_for("media_player", "turn_off", None) == ("media_player", "turn_off", {})
+
+
+def test_the_other_kinds_have_their_own_few_actions():
+    assert pb.service_for("vacuum", "dock", None) == ("vacuum", "return_to_base", {})
+    assert pb.service_for("vacuum", "start", None) == ("vacuum", "start", {})
+    assert pb.service_for("scene", "run", None) == ("scene", "turn_on", {})
+    assert pb.service_for("fan", "oscillate", True) == ("fan", "oscillate", {"oscillating": True})
+    assert pb.service_for("valve", "close", None) == ("valve", "close_valve", {})
+    assert pb.service_for("humidifier", "turn_on", None) == ("homeassistant", "turn_on", {})
+    assert pb.service_for("lawn_mower", "start", None) is None and pb.service_for("siren", "turn_on", None) is None
+    assert pb.extras("vacuum", {"battery_level": 80, "supported_features": 4 | 16 | 8192}) == {"bat": 80, "can": ["pause", "dock", "start"]}
+    assert pb.extras("cover", {"current_position": 40, "supported_features": 15})["can"] == ["open", "close", "pos", "stop"]
+    assert pb.extras("fan", {"percentage": 33, "oscillating": False, "supported_features": 1}) == {"pct": 33, "osc": False, "can": ["speed"]}
+
+
+def test_any_kind_of_device_is_shown_but_not_home_assistants_odds_and_ends():
+    for kind in ("light", "climate", "media_player", "vacuum", "scene", "lawn_mower", "water_heater", "alarm_control_panel", "siren", "something_new"):
+        assert pb.shown(kind), kind
+    for kind in ("automation", "update", "person", "zone", "button", "number", "select", "tts", "camera", "device_tracker", ""):
+        assert not pb.shown(kind), kind
+
+
+def test_a_brand_that_signs_in_on_its_makers_website_says_it_is_not_supported_yet():
+    for reason in ("missing_credentials", "missing_configuration", "oauth_error", "no_url_available", "authorize_url_timeout"):
+        stopped = pb.shape_flow({"type": "abort", "flow_id": "f", "handler": "nest", "reason": reason}, {}, "Google Nest")
+        assert stopped["kind"] == "stopped" and "doesn't support yet" in stopped["text"], reason
+    away = pb.shape_flow({"type": "external", "flow_id": "f", "handler": "spotify", "step_id": "auth", "url": "https://accounts.example/authorize"}, {}, "Spotify")
+    assert away["kind"] == "elsewhere" and "doesn't support yet" in away["text"] and "accounts.example" not in str(away)
+
+
+def test_wiim_and_airtouch_ask_for_an_address_in_plain_words():
+    host = [{"type": "string", "name": "host", "required": True}]
+    words = {"component.wiim.config.step.user.data.host": "Host", "component.wiim.config.step.user.data_description.host": "The hostname or IP address of the WiiM device."}
+    step = pb.shape_flow({"type": "form", "flow_id": "f", "handler": "wiim", "step_id": "user", "data_schema": host, "errors": {}}, words, "WiiM")
+    assert step["title"] == "Your WiiM's address" and "WiiM Home app" in step["text"] and step["fields"][0]["type"] == "text"
+    step = pb.shape_flow({"type": "form", "flow_id": "f", "handler": "airtouch5", "step_id": "user", "data_schema": host, "errors": {"base": "cannot_connect"}}, {}, "AirTouch 5")
+    assert step["title"] == "Your AirTouch 5's address" and step["errors"]["base"].startswith("Couldn't reach it")
+    assert step["fields"][0]["label"] == "Address"  # not "Host"
+    assert {"wiim", "airtouch5"} <= {b[0] for b in pb.BRANDS}
+    # Google Nest starts by sending you off to make a developer project: said plainly instead.
+    nest = pb.shape_flow({"type": "form", "flow_id": "f", "handler": "nest", "step_id": "create_cloud_project", "data_schema": [], "errors": {}}, {}, "Google Nest")
+    assert nest["kind"] == "elsewhere" and "doesn't support yet" in nest["text"]
+
+
+def test_the_server_and_the_box_agree_on_what_is_nobodys_device():
+    from app.home import relay
+
+    assert relay.NEVER == pb.HIDDEN

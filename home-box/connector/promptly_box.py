@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -40,10 +41,23 @@ from typing import Any
 
 import aiohttp
 
-VERSION = "0.4.1"
+VERSION = "0.5.1"
 log = logging.getLogger("promptly-box")
 
-SHOWN = {"light", "switch", "input_boolean", "fan", "sensor", "binary_sensor", "climate", "cover", "lock", "media_player"}
+# Kinds of thing Promptly has controls for. Anything else a brand brings is
+# still shown, with its name and what it says (``shown``), unless it's one of
+# Home Assistant's own odds and ends (``HIDDEN``).
+SHOWN = {"light", "switch", "input_boolean", "fan", "sensor", "binary_sensor", "climate", "cover", "lock", "media_player", "vacuum", "scene", "humidifier", "remote", "valve"}
+HIDDEN = {
+    "automation", "script", "person", "zone", "sun", "update", "tts", "stt", "conversation", "notify", "device_tracker", "weather",
+    "calendar", "todo", "camera", "image", "event", "button", "number", "select", "text", "date", "time", "datetime",
+    "input_number", "input_select", "input_text", "input_datetime", "input_button", "timer", "counter", "schedule", "tag",
+    "wake_word", "assist_satellite", "ai_task", "geo_location", "image_processing", "homeassistant", "group", "persistent_notification",
+}
+
+
+def shown(domain: str) -> bool:
+    return bool(domain) and domain not in HIDDEN
 # What each kind of device can be asked to do -> the Home Assistant service.
 SERVICES: dict[tuple[str, str], tuple[str, str]] = {
     ("fan", "speed"): ("fan", "set_percentage"),
@@ -53,14 +67,46 @@ SERVICES: dict[tuple[str, str], tuple[str, str]] = {
     ("cover", "position"): ("cover", "set_cover_position"),
     ("climate", "temperature"): ("climate", "set_temperature"),
     ("climate", "mode"): ("climate", "set_hvac_mode"),
+    ("climate", "fan"): ("climate", "set_fan_mode"),
     ("media_player", "play"): ("media_player", "media_play"),
     ("media_player", "pause"): ("media_player", "media_pause"),
+    ("media_player", "next"): ("media_player", "media_next_track"),
+    ("media_player", "prev"): ("media_player", "media_previous_track"),
+    ("media_player", "stop"): ("media_player", "media_stop"),
     ("media_player", "volume"): ("media_player", "volume_set"),
+    ("media_player", "mute"): ("media_player", "volume_mute"),
+    ("media_player", "source"): ("media_player", "select_source"),
+    ("media_player", "turn_on"): ("media_player", "turn_on"),
+    ("media_player", "turn_off"): ("media_player", "turn_off"),
+    ("media_player", "join"): ("media_player", "join"),
+    ("media_player", "unjoin"): ("media_player", "unjoin"),
+    ("fan", "oscillate"): ("fan", "oscillate"),
+    ("vacuum", "start"): ("vacuum", "start"),
+    ("vacuum", "pause"): ("vacuum", "pause"),
+    ("vacuum", "stop"): ("vacuum", "stop"),
+    ("vacuum", "dock"): ("vacuum", "return_to_base"),
+    ("vacuum", "locate"): ("vacuum", "locate"),
+    ("scene", "run"): ("scene", "turn_on"),
+    ("valve", "open"): ("valve", "open_valve"),
+    ("valve", "close"): ("valve", "close_valve"),
     ("lock", "lock"): ("lock", "lock"),
     ("lock", "unlock"): ("lock", "unlock"),
     ("light", "set"): ("light", "turn_on"),
 }
-ON_OFF = {"light", "switch", "input_boolean", "fan"}
+ON_OFF = {"light", "switch", "input_boolean", "fan", "humidifier", "remote"}
+# What a device says it can do (Home Assistant's ``supported_features`` bits),
+# in our words. The page draws only these; the server refuses the rest.
+CAN: dict[str, tuple[tuple[int, str], ...]] = {
+    "media_player": ((1, "pause"), (4, "vol"), (8, "mute"), (16, "prev"), (32, "next"), (128, "on"), (256, "off"), (2048, "src"), (4096, "stop"), (16384, "play"), (524288, "group")),
+    "climate": ((1, "temp"), (8, "fan"), (128, "off"), (256, "on")),
+    "cover": ((1, "open"), (2, "close"), (4, "pos"), (8, "stop")),
+    "fan": ((1, "speed"), (2, "osc")),
+    "vacuum": ((4, "pause"), (8, "stop"), (16, "dock"), (512, "locate"), (8192, "start")),
+}
+# With nothing remembered and no word from the device, the mode to start in.
+MODE_ORDER = ("auto", "heat_cool", "cool", "heat", "fan_only", "dry")
+ART_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+ART_MAX = 300 * 1024
 
 # "Add by brand": the ones offered first. (id, name, note). Everything else
 # Home Assistant can set up is found by searching.
@@ -75,6 +121,8 @@ BRANDS: list[tuple[str, str, str]] = [
     ("cast", "Google Cast and Chromecast", ""),
     ("esphome", "ESPHome", ""),
     ("matter", "Matter", "Needs a Matter server on the box, which isn't set up yet."),
+    ("wiim", "WiiM", ""),
+    ("airtouch5", "AirTouch 5", ""),
 ]
 # Set-up steps that aren't a device in anyone's home, or that Promptly does itself.
 NOT_BRANDS = {"sun", "backup", "hassio", "cloud", "analytics", "mobile_app", "person", "zone", "homeassistant", "onboarding", "go2rtc", "radio_browser", "shopping_list", "met", "google_translate"}
@@ -97,7 +145,7 @@ NOT_DEVICES = {"sun", "backup", "hassio", "update", "analytics", "cloud", "perso
 # chose doesn't stay in the home (see ``uninvited``).
 NETWORK_SOURCES = {"zeroconf", "ssdp", "dhcp", "homekit", "usb", "bluetooth"}
 # What a device mainly is, when it has several parts: the first of these it has.
-KIND_ORDER = ("light", "climate", "cover", "lock", "fan", "media_player", "switch", "input_boolean", "binary_sensor", "sensor")
+KIND_ORDER = ("light", "climate", "media_player", "vacuum", "cover", "lock", "fan", "humidifier", "valve", "switch", "input_boolean", "remote", "scene", "binary_sensor", "sensor")
 
 # Our own words for steps people actually meet, over Home Assistant's.
 # (brand, step) -> title / text / button. Anything not here uses its wording.
@@ -109,6 +157,9 @@ OUR_STEPS: dict[tuple[str, str], dict[str, str]] = {
     },
     ("hue", "init"): {"title": "Which Hue bridge?"},
     ("hue", "manual"): {"title": "Your Hue bridge's address"},
+    ("wiim", "user"): {"title": "Your WiiM's address", "text": "Type the address your WiiM has on your network. The WiiM Home app shows it: open the speaker's settings, then Speaker Info, and look for IP."},
+    ("wiim", "discovery_confirm"): {"title": "Add this WiiM?"},
+    ("airtouch5", "user"): {"title": "Your AirTouch 5's address", "text": "Type the address your AirTouch 5 console has on your network. Your router's list of connected devices shows it, usually as AirTouch5."},
 }
 # (brand or "*", error code) -> what went wrong, in plain words.
 OUR_ERRORS: dict[tuple[str, str], str] = {
@@ -121,6 +172,7 @@ OUR_ERRORS: dict[tuple[str, str], str] = {
     ("*", "already_configured"): "This is already added to your home.",
     ("*", "unknown"): "Something went wrong. Try again.",
 }
+ELSEWHERE = "This brand signs you in on its maker's own website, which Promptly doesn't support yet."
 # (brand or "*", reason) -> why a set-up stopped.
 OUR_STOPS: dict[tuple[str, str], str] = {
     ("hue", "no_bridges"): "No Hue bridge was found on your network. Check it has power and is plugged into your router.",
@@ -133,7 +185,25 @@ OUR_STOPS: dict[tuple[str, str], str] = {
     ("*", "single_instance_allowed"): "This is already added, and there can only be one.",
     ("*", "cannot_connect"): "Couldn't reach it. Check it's switched on and on the same network.",
     ("*", "unknown"): "Something went wrong. Try again.",
+    # Brands that sign in on their maker's own website (and need a developer
+    # account behind it): said plainly, not left as a dead end.
+    ("*", "missing_credentials"): ELSEWHERE,
+    ("*", "missing_configuration"): ELSEWHERE,
+    ("*", "oauth_error"): ELSEWHERE,
+    ("*", "oauth_unauthorized"): ELSEWHERE,
+    ("*", "oauth_failed"): ELSEWHERE,
+    ("*", "oauth_timeout"): ELSEWHERE,
+    ("*", "authorize_url_timeout"): ELSEWHERE,
+    ("*", "no_url_available"): ELSEWHERE,
+    ("*", "cloud_not_connected"): "This brand needs a paid cloud service, which Promptly doesn't use. It isn't supported yet.",
+    ("*", "not_supported"): "This one isn't supported yet.",
 }
+CANT_PLACE = "This device can't be renamed or put in a room: it doesn't tell Promptly enough about itself."
+# Steps that send someone off to make a developer account with the maker
+# (Google Nest's "create a Cloud Project"): the same "not supported yet".
+DEVELOPER_STEPS = {"create_cloud_project", "cloud_project", "device_project", "pubsub", "pick_implementation"}
+# Home Assistant's label -> ours, where its word means nothing to most people.
+OUR_LABELS = {"Host": "Address", "IP address": "Address", "IP Address": "Address", "Hostname or IP address": "Address"}
 CLIENT_ID = "http://promptly-box.local/"
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 # Close codes the server uses to say "don't keep trying like this".
@@ -213,25 +283,103 @@ def extras(domain: str, attrs: dict[str, Any]) -> dict[str, Any]:
         rgb = attrs.get("rgb_color")
         if isinstance(rgb, (list, tuple)) and len(rgb) == 3:
             x["rgb"] = [int(c) for c in rgb]
-    elif domain == "fan" and num("percentage") is not None:
-        x["pct"] = num("percentage")
+    elif domain == "fan":
+        if num("percentage") is not None:
+            x["pct"] = num("percentage")
+        if isinstance(attrs.get("oscillating"), bool):
+            x["osc"] = attrs["oscillating"]
     elif domain == "cover" and num("current_position") is not None:
         x["pos"] = num("current_position")
     elif domain == "climate":
-        for ours, theirs in (("target", "temperature"), ("cur", "current_temperature"), ("min", "min_temp"), ("max", "max_temp"), ("step", "target_temp_step")):
+        for ours, theirs in (("target", "temperature"), ("cur", "current_temperature"), ("min", "min_temp"), ("max", "max_temp"), ("step", "target_temp_step"), ("hum", "current_humidity")):
             if num(theirs) is not None:
                 x[ours] = num(theirs)
         modes = [m for m in attrs.get("hvac_modes") or [] if isinstance(m, str)]
         if modes:
             x["modes"] = modes
+        fans = [m for m in attrs.get("fan_modes") or [] if isinstance(m, str)]
+        if fans:
+            x["fans"] = fans[:16]
+        if isinstance(attrs.get("fan_mode"), str):
+            x["fan"] = attrs["fan_mode"]
+        # What it's doing right now (heating, cooling, idle), which isn't its mode.
+        if isinstance(attrs.get("hvac_action"), str):
+            x["act"] = attrs["hvac_action"]
     elif domain == "media_player":
         if num("volume_level") is not None:
             x["vol"] = round(num("volume_level") * 100)
-        if isinstance(attrs.get("media_title"), str):
-            x["title"] = attrs["media_title"]
+        for ours, theirs in (("title", "media_title"), ("artist", "media_artist"), ("src", "source")):
+            if isinstance(attrs.get(theirs), str) and attrs[theirs]:
+                x[ours] = attrs[theirs]
         if isinstance(attrs.get("is_volume_muted"), bool):
             x["muted"] = attrs["is_volume_muted"]
+        srcs = [m for m in attrs.get("source_list") or [] if isinstance(m, str)]
+        if srcs:
+            x["srcs"] = srcs[:40]
+        members = [m for m in attrs.get("group_members") or [] if isinstance(m, str)]
+        if members:
+            x["members"] = members[:32]
+        if isinstance(attrs.get("entity_picture"), str) and attrs["entity_picture"]:
+            # Changes when the picture does; the picture itself is fetched on its own (op "art").
+            x["art"] = hashlib.sha1(attrs["entity_picture"].encode()).hexdigest()[:12]
+    elif domain == "vacuum" and num("battery_level") is not None:
+        x["bat"] = num("battery_level")
+    can = can_of(domain, attrs)
+    if can is not None:
+        x["can"] = can
     return x
+
+
+def can_of(domain: str, attrs: dict[str, Any]) -> list[str] | None:
+    """What this device says it can do, or None for a kind with nothing to say."""
+    table = CAN.get(domain)
+    if table is None:
+        return None
+    bits = attrs.get("supported_features")
+    bits = bits if isinstance(bits, int) and not isinstance(bits, bool) else 0
+    return [name for bit, name in table if bits & bit]
+
+
+def zones_of(climates: dict[str, tuple[str, list[str]]]) -> dict[str, dict[str, Any]]:
+    """Ducted air con comes as one unit and a "thermostat" per zone (a zone
+    only opens and closes, so its modes are just off and fan). Which is
+    which, so the page shows zones under their unit and not as six air
+    conditioners. ``climates`` is entity -> (set-up it came with, its modes);
+    out is entity -> {"sys": the unit it belongs to, "zone": True}, and the
+    unit itself -> {"sys": itself}."""
+    by_entry: dict[str, list[str]] = {}
+    for eid, (entry, _modes) in climates.items():
+        if entry:
+            by_entry.setdefault(entry, []).append(eid)
+    out: dict[str, dict[str, Any]] = {}
+    for ids in by_entry.values():
+        if len(ids) < 2:
+            continue
+        ons = {eid: {m for m in climates[eid][1] if m != "off"} for eid in ids}
+        units = sorted(eid for eid in ids if not ons[eid] <= {"fan_only"})
+        zones = sorted(eid for eid in ids if ons[eid] <= {"fan_only"})
+        if len(units) != 1 or not zones:
+            continue  # two units, or nothing that's plainly a zone: leave them as they are
+        out[units[0]] = {"sys": units[0]}
+        for z in zones:
+            out[z] = {"sys": units[0], "zone": True}
+    return out
+
+
+def climate_on(modes: list[str], last: str | None) -> tuple[str, str, dict[str, Any]]:
+    """Turning air con on is "the way it was", not "the first mode it has":
+    Home Assistant's own turn-on, where a brand hasn't written its own
+    (AirTouch 5 hasn't), picks heat before cool. So: the mode it was last on
+    in; with nothing remembered, the one that lets the unit decide."""
+    ons = [m for m in modes if m != "off"]
+    if last in ons:
+        return ("climate", "set_hvac_mode", {"hvac_mode": last})
+    for m in MODE_ORDER:
+        if m in ons:
+            return ("climate", "set_hvac_mode", {"hvac_mode": m})
+    if ons:
+        return ("climate", "set_hvac_mode", {"hvac_mode": ons[0]})
+    return ("climate", "turn_on", {})
 
 
 def our_words(table: dict[tuple[str, str], str], brand: str, code: str) -> str | None:
@@ -274,7 +422,7 @@ def devices_of(entry_id: str, devices: list[dict[str, Any]]) -> list[dict[str, A
 
 def _shown_entity(e: dict[str, Any]) -> bool:
     return (
-        str(e.get("entity_id") or "").split(".", 1)[0] in SHOWN
+        shown(str(e.get("entity_id") or "").split(".", 1)[0])
         and not e.get("hidden_by")
         and not e.get("disabled_by")
         and e.get("entity_category") not in ("config", "diagnostic")
@@ -291,7 +439,8 @@ def brought(entry_id: str, devices: list[dict[str, Any]], registry: list[dict[st
     anything with nothing to show. ``areas`` is id -> name."""
     by_device: dict[str, list[str]] = {}
     for e in registry:
-        if e.get("device_id") and e.get("entity_id") not in groups and _shown_entity(e):
+        # (A scene isn't a device: Hue hangs its scenes on its own "rooms".)
+        if e.get("device_id") and e.get("entity_id") not in groups and _shown_entity(e) and not str(e["entity_id"]).startswith("scene."):
             by_device.setdefault(e["device_id"], []).append(str(e["entity_id"]).split(".", 1)[0])
     things: list[dict[str, Any]] = []
     for d in devices_of(entry_id, devices):
@@ -337,9 +486,15 @@ def first_chosen(entries: list[dict[str, Any]], devices: list[dict[str, Any]], o
     return chosen
 
 
-def service_for(domain: str, action: str, value: Any) -> tuple[str, str, dict[str, Any]] | None:
-    """``(domain, service, data)`` for one of our actions, or None."""
-    if action in ("turn_on", "turn_off", "toggle"):
+def service_for(domain: str, action: str, value: Any, x: dict[str, Any] | None = None, last: str | None = None) -> tuple[str, str, dict[str, Any]] | None:
+    """``(domain, service, data)`` for one of our actions, or None. ``x`` is
+    the device's extras and ``last`` the mode an air con was last on in."""
+    if domain == "climate" and action in ("turn_on", "turn_off"):
+        modes = list((x or {}).get("modes") or [])
+        if action == "turn_off":
+            return ("climate", "set_hvac_mode", {"hvac_mode": "off"}) if "off" in modes else ("climate", "turn_off", {})
+        return climate_on(modes, last)
+    if action in ("turn_on", "turn_off", "toggle") and (domain, action) not in SERVICES:
         return ("homeassistant", action, {}) if domain in ON_OFF else None
     call = SERVICES.get((domain, action))
     if call is None:
@@ -362,6 +517,16 @@ def service_for(domain: str, action: str, value: Any) -> tuple[str, str, dict[st
         data["hvac_mode"] = value
     elif action == "volume":
         data["volume_level"] = round(float(value) / 100, 2)
+    elif action == "mute":
+        data["is_volume_muted"] = bool(value)
+    elif action == "source":
+        data["source"] = value
+    elif action == "fan":
+        data["fan_mode"] = value
+    elif action == "oscillate":
+        data["oscillating"] = bool(value)
+    elif action == "join":
+        data["group_members"] = [str(m) for m in value or []]
     return (call[0], call[1], data)
 
 
@@ -452,7 +617,8 @@ def found_one(flow: dict[str, Any], manifests: dict[str, dict[str, Any]], words:
 def shape_field(f: dict[str, Any], label: str, hint: str) -> dict[str, Any]:
     """One field of a Home Assistant form, as something to draw."""
     name = str(f.get("name") or "")
-    out: dict[str, Any] = {"name": name, "label": label or name.replace("_", " ").capitalize(), "required": bool(f.get("required")), "type": "unsupported"}
+    label = OUR_LABELS.get(label, label) or ("Address" if name == "host" else name.replace("_", " ").capitalize())
+    out: dict[str, Any] = {"name": name, "label": label, "required": bool(f.get("required")), "type": "unsupported"}
     if hint:
         out["hint"] = hint
     default = f.get("default")
@@ -535,8 +701,8 @@ def shape_flow(r: dict[str, Any], words: dict[str, str], brand_name: str) -> dic
         text = our_words(OUR_STOPS, brand, reason) or words.get(f"{base}.abort.{reason}") or "This couldn't be added."
         out.update(kind="stopped", reason=reason, text=_say(text, places))
         return out
-    if kind in ("external", "external_done"):
-        out.update(kind="elsewhere", text="This one is finished on the maker's own website, which Promptly can't do for you yet.")
+    if kind in ("external", "external_done") or (kind in ("form", "menu") and step in DEVELOPER_STEPS):
+        out.update(kind="elsewhere", text=ELSEWHERE)
         return out
     if kind in ("show_progress", "show_progress_done"):
         action = str(r.get("progress_action") or "")
@@ -595,6 +761,10 @@ class HomeAssistant:
         self.groups: dict[str, dict[str, Any]] = {}
         self._device_of: dict[str, str] = {}  # entity -> device
         self._model_of: dict[str, str] = {}  # device -> model
+        self._entry_of: dict[str, str] = {}  # entity -> the set-up it came with
+        self._zones: dict[str, dict[str, Any]] = {}  # air-con units and their zones
+        # The mode each air con was last on in, so "on" means "as it was" (last_modes.json).
+        self._last_mode: dict[str, str] | None = None
         # Just made its own account on a fresh Home Assistant.
         self._fresh = False
         # Set-ups someone chose, and what to tell them once (policy.json).
@@ -922,11 +1092,13 @@ class HomeAssistant:
         device_area = {d["id"]: d.get("area_id") for d in devices or []}
         self._area_of, self._skip, self._names = {}, set(), {}
         self._model_of = {d["id"]: str(d.get("model") or "") for d in devices or []}
-        self._device_of, self.groups = {}, {}
+        self._device_of, self.groups, self._entry_of = {}, {}, {}
         for e in registry or []:
             eid = e["entity_id"]
             if e.get("device_id"):
                 self._device_of[eid] = e["device_id"]
+            if e.get("config_entry_id"):
+                self._entry_of[eid] = e["config_entry_id"]
             if e.get("hidden_by") or e.get("disabled_by") or e.get("entity_category") in ("config", "diagnostic") or e.get("platform") in NOT_DEVICES:
                 self._skip.add(eid)
             area = e.get("area_id") or device_area.get(e.get("device_id"))
@@ -934,6 +1106,11 @@ class HomeAssistant:
                 self._area_of[eid] = area
             if e.get("name"):
                 self._names[eid] = e["name"]
+        self._zones = zones_of({
+            str(s.get("entity_id")): (self._entry_of.get(str(s.get("entity_id")), ""), [m for m in (s.get("attributes") or {}).get("hvac_modes") or [] if isinstance(m, str)])
+            for s in states or []
+            if str(s.get("entity_id") or "").startswith("climate.") and str(s.get("entity_id")) not in self._skip
+        })
         entities: dict[str, dict[str, Any]] = {}
         for s in states or []:
             entity = self._entity(s)
@@ -945,7 +1122,7 @@ class HomeAssistant:
     def _entity(self, s: dict[str, Any]) -> dict[str, Any] | None:
         eid = str(s.get("entity_id") or "")
         domain = eid.split(".", 1)[0]
-        if domain not in SHOWN or eid in self._skip:
+        if not shown(domain) or eid in self._skip:
             return None
         attrs = s.get("attributes") or {}
         group = brand_group(domain, attrs)
@@ -973,19 +1150,70 @@ class HomeAssistant:
         if domain == "media_player" and speaker_group(attrs, self._model_of.get(device or "")):
             out["grp"] = True
         x = extras(domain, attrs)
+        if domain == "climate":
+            x.update(self._zones.get(eid) or {})
+            state = out["state"]
+            if state not in ("off", "unavailable", "unknown", ""):
+                self._remember_mode(eid, state)
+            last = self._modes().get(eid)
+            if last:
+                x["last"] = last
         if x:
             out["x"] = x
         return out
 
+    def _modes(self) -> dict[str, str]:
+        if self._last_mode is None:
+            try:
+                saved = json.loads((DATA_DIR / "last_modes.json").read_text())
+                self._last_mode = {str(k): str(v) for k, v in saved.items()} if isinstance(saved, dict) else {}
+            except (OSError, ValueError):
+                self._last_mode = {}
+        return self._last_mode
+
+    def _remember_mode(self, eid: str, mode: str) -> None:
+        modes = self._modes()
+        if modes.get(eid) == mode:
+            return
+        modes[eid] = mode
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = DATA_DIR / "last_modes.tmp"
+            tmp.write_text(json.dumps(modes))
+            tmp.replace(DATA_DIR / "last_modes.json")
+        except OSError as e:
+            log.warning("couldn't keep an air con's last mode: %s", e)
+
     async def do(self, entity_id: str, action: str, value: Any) -> None:
         """Switch or set one device."""
         domain = entity_id.split(".", 1)[0]
-        if entity_id not in self.entities:
+        entity = self.entities.get(entity_id)
+        if entity is None:
             raise RuntimeError("That device isn't here any more.")
-        call = service_for(domain, action, value)
+        if (domain, action) == ("media_player", "join"):
+            # Only speakers in this home that can be grouped.
+            value = [m for m in value or [] if m != entity_id and "group" in ((self.entities.get(m) or {}).get("x") or {}).get("can", [])]
+            if not value:
+                raise RuntimeError("Pick a speaker to group it with.")
+        call = service_for(domain, action, value, entity.get("x"), self._modes().get(entity_id))
         if call is None:
             raise RuntimeError("That can't be done.")
         await self.ask({"type": "call_service", "domain": call[0], "service": call[1], "service_data": call[2], "target": {"entity_id": entity_id}})
+
+    async def art(self, entity_id: str) -> dict[str, str]:
+        """The picture of what a speaker is playing, through Home Assistant's
+        own proxy (never fetched from wherever the speaker says it is)."""
+        if entity_id not in self.entities or not entity_id.startswith("media_player."):
+            raise RuntimeError("That device isn't here any more.")
+        token = await self.token()
+        async with self.session.get(f"{self.base}/api/media_player_proxy/{entity_id}", headers={"Authorization": f"Bearer {token}"}, timeout=aiohttp.ClientTimeout(total=10)) as r:
+            kind = (r.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            if r.status != 200 or kind not in ART_TYPES:
+                raise RuntimeError("No picture.")
+            body = await r.content.read(ART_MAX + 1)
+            if len(body) > ART_MAX:
+                raise RuntimeError("No picture.")
+        return {"type": kind, "b64": base64.b64encode(body).decode()}
 
     # -- Home Assistant's REST API (set-up steps live there)
 
@@ -1024,6 +1252,8 @@ class HomeAssistant:
         if op == "do":
             await self.do(str(a.get("entity") or ""), str(a.get("action") or ""), a.get("value"))
             return None
+        if op == "art":
+            return await self.art(str(a.get("entity") or ""))
         if op == "brands":
             return brands_for(await self.brand_names(), set(await self.rest("GET", "/config/config_entries/flow_handlers") or []), str(a.get("q") or ""))
         if op == "flows.found":
@@ -1092,13 +1322,21 @@ class HomeAssistant:
         if op == "devices.place":
             area = str(a.get("area") or "")
             done: set[str] = set()
+            moved = failed = 0
             for eid in [str(i) for i in a.get("entities") or []][:200]:
                 device = self._device_of.get(eid)
                 if device in done:
                     continue
-                await self._device_update({"entity_id": eid, "device_id": device, "area": area})
+                # One that can't be moved doesn't stop the rest.
+                try:
+                    await self._device_update({"entity_id": eid, "device_id": device, "area": area})
+                    moved += 1
+                except RuntimeError:
+                    failed += 1
                 if device:
                     done.add(device)
+            if failed and not moved:
+                raise RuntimeError(CANT_PLACE)
             return None
         if op == "room.lights":
             area, action = str(a.get("area") or ""), str(a.get("action") or "")
@@ -1149,7 +1387,11 @@ class HomeAssistant:
         elif entity:
             if a.get("name"):
                 change["name"] = str(a["name"])[:80]
-            await self.ask({"type": "config/entity_registry/update", "entity_id": entity, **change})
+            try:
+                await self.ask({"type": "config/entity_registry/update", "entity_id": entity, **change})
+            except RuntimeError as e:
+                # A few devices give Home Assistant nothing to remember them by.
+                raise RuntimeError(CANT_PLACE if "not found" in str(e).lower() else str(e)) from e
         else:
             raise RuntimeError("Which device?")
 
@@ -1157,6 +1399,12 @@ class HomeAssistant:
         brand = str(result.get("handler") or "")
         names = await self.brand_names()
         out = shape_flow(result, await self.words(brand), (names.get(brand) or {}).get("name") or brand)
+        if out["kind"] == "elsewhere" and out.get("flow"):
+            # It can't be finished here: don't leave it half-started on the box.
+            try:
+                await self.rest("DELETE", f"/config/config_entries/flow/{out['flow']}")
+            except RuntimeError:
+                pass
         if out["kind"] == "done":
             entry = str(out.get("entry_id") or "")
             self._chose(entry)

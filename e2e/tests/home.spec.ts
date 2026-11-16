@@ -56,6 +56,11 @@ test("a box is added from its card, its devices switch and update live, and nobo
         { id: "light.lamp", domain: "light", name: `Lamp ${stamp}`, state: "off", area: "lounge" },
         { id: "switch.kettle", domain: "switch", name: "Kettle", state: "off", area: "kitchen" },
         { id: "sensor.temp", domain: "sensor", name: "Temperature", state: "21.5", unit: "°C", cls: "temperature", area: "lounge" },
+        // A ducted air con (one unit, a zone in the kitchen), a speaker, and a kind with no controls yet.
+        { id: "climate.ac", domain: "climate", name: "Air con", state: "off", area: "lounge", x: { target: 23, cur: 26, min: 16, max: 30, step: 1, modes: ["off", "auto", "cool", "heat"], fans: ["low", "high"], fan: "low", last: "cool", can: ["temp", "fan", "off", "on"], sys: "climate.ac" } },
+        { id: "climate.kitchen", domain: "climate", name: "Kitchen zone", state: "fan_only", area: "kitchen", x: { target: 22, modes: ["off", "fan_only"], can: ["temp", "off", "on"], sys: "climate.ac", zone: true } },
+        { id: "media_player.speaker", domain: "media_player", name: "Speaker", state: "playing", cls: "speaker", area: "kitchen", x: { vol: 30, title: "A song", artist: "A band", can: ["pause", "play", "next", "vol"] } },
+        { id: "lawn_mower.back", domain: "lawn_mower", name: "Mower", state: "docked", area: "kitchen" },
       ],
     );
     expect((await box.up()).claimed).toBe(false);
@@ -86,6 +91,34 @@ test("a box is added from its card, its devices switch and update live, and nobo
     // Switched at the kettle itself: the page follows with no reload.
     box.change("switch.kettle", "on");
     await expect(kettle).toContainText("On", { timeout: 15_000 });
+
+    // Air con: the unit opens its controls and lists its zone; "on" is the way it was, by name.
+    const kitchen = alice.getByRole("region", { name: "Kitchen" });
+    await expect(kitchen.getByRole("switch", { name: "Kitchen zone", exact: true })).toContainText("Zone · On · 22°");
+    await expect(kitchen.getByRole("button", { name: "Mower, Docked" })).toBeVisible(); // shown, though there's nothing to press
+    await lounge.getByRole("button", { name: "Air con, Off" }).click();
+    const ac = alice.getByRole("dialog", { name: "Air con" });
+    await expect(ac.getByRole("radio", { name: "Off" })).toHaveAttribute("aria-checked", "true");
+    await ac.getByRole("button", { name: "Turn on (Cool, as it was)" }).click();
+    await expect(ac.getByRole("radio", { name: "Cool" })).toHaveAttribute("aria-checked", "true", { timeout: 15_000 });
+    await ac.getByRole("switch", { name: "Kitchen zone zone" }).click();
+    await expect(ac.getByRole("switch", { name: "Kitchen zone zone" })).toHaveAttribute("aria-checked", "false", { timeout: 15_000 });
+    await ac.getByRole("radio", { name: "Heat" }).click();
+    await expect
+      .poll(() => box!.asked.filter((q) => q.op === "do" && String(q.args.entity).startsWith("climate.")).map((q) => `${q.args.entity} ${q.args.action} ${q.args.value ?? ""}`.trim()))
+      .toEqual(["climate.ac turn_on", "climate.kitchen turn_off", "climate.ac mode heat"]);
+    await ac.getByRole("button", { name: "Close" }).last().click();
+    // A speaker shows what's playing and only what it can do.
+    await kitchen.getByRole("button", { name: /^Speaker, Playing/ }).click();
+    const speaker = alice.getByRole("dialog", { name: "Speaker" });
+    await expect(speaker).toContainText("A song");
+    await expect(speaker.getByRole("button", { name: "Next" })).toBeVisible();
+    await expect(speaker.getByRole("button", { name: "Previous" })).toHaveCount(0);
+    await speaker.getByRole("button", { name: "Pause" }).click();
+    await expect(speaker.getByRole("button", { name: "Play", exact: true })).toBeVisible({ timeout: 15_000 });
+    // What a device didn't say it can do is refused by the server too, not just left off the page.
+    expect((await call(alice, aAuth, "POST", `/home/${(((await (await call(alice, aAuth, "GET", "/home")).json()).homes ?? []) as { id: string; boxes: { id: string }[] }[]).find((h) => h.boxes.some((b) => b.id === boxId))!.id}/act`, { box_id: boxId, entity_id: "media_player.speaker", action: "prev" })).status()).toBe(400);
+    await speaker.getByRole("button", { name: "Close" }).last().click();
 
     // Nobody outside the home sees it: another person, or the admin.
     const mine = ((await (await call(alice, aAuth, "GET", "/home")).json()).homes ?? []) as { id: string; boxes: { id: string }[] }[];

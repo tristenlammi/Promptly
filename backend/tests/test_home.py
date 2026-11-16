@@ -466,7 +466,7 @@ async def test_setting_a_value_is_checked_then_passed_to_the_box(user, client):
         {"entity_id": "light.bulb", "action": "set", "value": {"bri": 400}},
         {"entity_id": "climate.hall", "action": "mode", "value": "cool"},  # not one of its modes
         {"entity_id": "cover.blind", "action": "position", "value": 140},
-        {"entity_id": "climate.hall", "action": "turn_on"},
+        {"entity_id": "climate.hall", "action": "temperature", "value": 40},  # above what it can be set to
         {"entity_id": "light.bulb", "action": "unlock"},
     ):
         assert (await client.post(url, headers=_hdr(user), json={**base, **bad})).status_code == 400, bad
@@ -709,3 +709,132 @@ async def test_ids_sent_on_to_the_box_are_never_dot_segments(bad):
 
     assert not re.match(_ID, bad)
     assert re.match(_ID, "01JABCDEF") and re.match(_ID, "living_room") and re.match(_ID, "a.b-c")
+
+
+# ------------------------------------------------------------------ every kind of device (Home phase 2, stage 1)
+
+AC = {"id": "climate.ac", "domain": "climate", "name": "AC", "state": "off", "x": {"target": 23, "cur": 26, "min": 16, "max": 30, "step": 1, "modes": ["off", "auto", "cool", "heat"], "fans": ["low", "high", "auto"], "fan": "auto", "last": "cool", "can": ["temp", "fan", "off", "on"], "sys": "climate.ac"}}
+ZONE = {"id": "climate.bed", "domain": "climate", "name": "Bedroom", "state": "fan_only", "x": {"target": 22, "modes": ["off", "fan_only"], "can": ["temp", "off", "on"], "sys": "climate.ac", "zone": True}}
+WIIM = {"id": "media_player.kitchen", "domain": "media_player", "name": "Kitchen", "state": "playing", "cls": "speaker", "x": {"vol": 30, "muted": False, "title": "Song", "artist": "Band", "src": "Wi-Fi", "srcs": ["Wi-Fi", "Line In"], "members": ["media_player.kitchen"], "art": "abc123", "can": ["pause", "vol", "mute", "next", "src", "stop", "play", "group"]}}
+WIIM2 = {"id": "media_player.lounge", "domain": "media_player", "name": "Lounge", "state": "idle", "cls": "speaker", "x": {"vol": 20, "can": ["pause", "vol", "play", "group"]}}
+TV = {"id": "media_player.tv", "domain": "media_player", "name": "TV", "state": "off", "cls": "tv", "x": {"can": ["on", "off", "vol"]}}
+ROBOT = {"id": "vacuum.robot", "domain": "vacuum", "name": "Robot", "state": "docked", "x": {"bat": 90, "can": ["start", "dock", "pause"]}}
+MOVIE = {"id": "scene.movie", "domain": "scene", "name": "Movie night", "state": "2026-11-16T10:00:00+00:00"}
+CEILING = {"id": "fan.ceiling", "domain": "fan", "name": "Ceiling fan", "state": "on", "x": {"pct": 50, "osc": False, "can": ["speed"]}}
+MOWER = {"id": "lawn_mower.back", "domain": "lawn_mower", "name": "Mower", "state": "docked"}
+ALARM = {"id": "alarm_control_panel.house", "domain": "alarm_control_panel", "name": "Alarm", "state": "disarmed"}
+
+
+async def test_air_con_speakers_a_vacuum_and_a_scene_are_controlled_and_checked(user, client):
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home_with(client, user, user, [AC, ZONE, WIIM, WIIM2, TV, ROBOT, MOVIE, CEILING, MOWER, ALARM])
+    url, base = f"/api/home/{home_id}/act", {"box_id": prepared["box"]["id"]}
+    good = [
+        {"entity_id": "climate.ac", "action": "turn_on"},
+        {"entity_id": "climate.ac", "action": "turn_off"},
+        {"entity_id": "climate.ac", "action": "mode", "value": "cool"},
+        {"entity_id": "climate.ac", "action": "fan", "value": "high"},
+        {"entity_id": "climate.ac", "action": "temperature", "value": 24},
+        {"entity_id": "climate.bed", "action": "turn_off"},
+        {"entity_id": "media_player.kitchen", "action": "next"},
+        {"entity_id": "media_player.kitchen", "action": "mute", "value": True},
+        {"entity_id": "media_player.kitchen", "action": "source", "value": "Line In"},
+        {"entity_id": "media_player.kitchen", "action": "join", "value": ["media_player.lounge"]},
+        {"entity_id": "media_player.lounge", "action": "unjoin"},
+        {"entity_id": "media_player.tv", "action": "turn_on"},
+        {"entity_id": "vacuum.robot", "action": "start"},
+        {"entity_id": "vacuum.robot", "action": "dock"},
+        {"entity_id": "scene.movie", "action": "run"},
+    ]
+    side = asyncio.create_task(_answer(box, n=len(good)))
+    for body in good:
+        assert (await client.post(url, headers=_hdr(user), json={**base, **body})).status_code == 200, body
+    asked = [a["args"] for a in await side]
+    assert [(a["entity"], a["action"], a["value"]) for a in asked] == [(b["entity_id"], b["action"], b.get("value")) for b in good]
+    for bad in (
+        {"entity_id": "climate.ac", "action": "mode", "value": "dry"},  # not one of its modes
+        {"entity_id": "climate.ac", "action": "fan", "value": "turbo"},  # not one of its fan speeds
+        {"entity_id": "climate.ac", "action": "temperature", "value": 12},  # below what it can be set to
+        {"entity_id": "climate.bed", "action": "fan", "value": "low"},  # a zone has no fan of its own
+        {"entity_id": "media_player.kitchen", "action": "prev"},  # it didn't say it can
+        {"entity_id": "media_player.kitchen", "action": "source", "value": "Bluetooth"},
+        {"entity_id": "media_player.kitchen", "action": "mute", "value": "yes"},
+        {"entity_id": "media_player.kitchen", "action": "turn_off"},  # a speaker with no power button
+        {"entity_id": "media_player.kitchen", "action": "join", "value": ["media_player.tv"]},  # the TV can't be grouped
+        {"entity_id": "media_player.kitchen", "action": "join", "value": ["media_player.kitchen"]},  # itself
+        {"entity_id": "media_player.kitchen", "action": "join", "value": ["light.lamp"]},
+        {"entity_id": "media_player.lounge", "action": "next"},
+        {"entity_id": "media_player.tv", "action": "play"},
+        {"entity_id": "vacuum.robot", "action": "locate"},
+        {"entity_id": "vacuum.robot", "action": "turn_on"},
+        {"entity_id": "fan.ceiling", "action": "oscillate", "value": True},  # this fan doesn't turn its head
+        {"entity_id": "scene.movie", "action": "turn_off"},
+        {"entity_id": "lawn_mower.back", "action": "start"},  # shown, with nothing to press yet
+        {"entity_id": "alarm_control_panel.house", "action": "disarm"},
+    ):
+        assert (await client.post(url, headers=_hdr(user), json={**base, **bad})).status_code == 400, bad
+    await box.hang_up()
+    await task
+
+
+async def test_a_kind_we_have_no_controls_for_is_still_shown_and_an_alarm_asks_first(user, client):
+    await _turn_on(client, user)
+    _prepared, _home_id, box, task = await _home_with(client, user, user, [MOWER, ALARM, ROBOT, MOVIE, AC, ZONE])
+    got = {e["id"]: e for e in (await client.get("/api/home", headers=_hdr(user))).json()["homes"][0]["entities"]}
+    assert got["lawn_mower.back"]["state"] == "docked" and got["lawn_mower.back"]["can_switch"] is False
+    assert got["alarm_control_panel.house"]["careful"] is True and got["vacuum.robot"]["careful"] is False
+    # A ducted system's zones say which unit they belong to.
+    assert got["climate.bed"]["x"]["zone"] is True and got["climate.bed"]["x"]["sys"] == "climate.ac" and got["climate.ac"]["x"]["last"] == "cool"
+    await box.hang_up()
+    await task
+
+
+def test_a_box_cannot_send_a_kind_of_thing_with_a_made_up_name_or_oversized_extras():
+    from app.home import relay
+
+    assert relay.clean_entity({"id": "Bad Domain.x", "domain": "Bad Domain", "name": "x", "state": "on"}) is None
+    assert relay.clean_entity({"id": "a" * 40 + ".x", "domain": "a" * 40, "name": "x", "state": "on"}) is None
+    x = relay.clean_entity({"id": "media_player.a", "domain": "media_player", "name": "a", "state": "playing", "x": {
+        "srcs": ["s" * 200] * 100, "members": ["media_player.b"] * 100, "can": ["play", True, {"no": 1}], "artist": "a" * 500, "art": "h" * 99, "zone": "yes", "junk": 1,
+    }})["x"]
+    assert len(x["srcs"]) == 40 and len(x["srcs"][0]) == 60 and len(x["members"]) == 32 and x["can"] == ["play"]
+    assert len(x["artist"]) == 120 and len(x["art"]) == 16 and "zone" not in x and "junk" not in x
+    assert relay.can_do({"domain": "media_player", "x": {}}, "next") is True  # an older box doesn't say: taken at its word
+    assert relay.can_do({"domain": "media_player", "x": {"can": []}}, "next") is False
+
+
+async def test_someone_in_another_home_cannot_command_or_see_a_pictures_of_this_ones_devices(user, client, db):
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home_with(client, user, user, [WIIM, AC])
+    other = await _other(db)
+    theirs_prepared = await _prepare(client, user, label="Next door")
+    theirs = (await client.post("/api/home/claim", headers=_hdr(other), json={"code": theirs_prepared["claim_code"]})).json()["home_id"]
+    mine_box, their_box = prepared["box"]["id"], theirs_prepared["box"]["id"]
+    for home, box_id in ((home_id, mine_box), (theirs, mine_box)):
+        r = await client.post(f"/api/home/{home}/act", headers=_hdr(other), json={"box_id": box_id, "entity_id": "climate.ac", "action": "turn_on"})
+        assert r.status_code == 404, (home, box_id)
+        assert (await client.get(f"/api/home/{home}/boxes/{box_id}/art/media_player.kitchen", headers=_hdr(other))).status_code == 404
+    # Their own box, asked for this home's speaker: nothing there.
+    assert (await client.get(f"/api/home/{theirs}/boxes/{their_box}/art/media_player.kitchen", headers=_hdr(other))).status_code == 404
+    await box.hang_up()
+    await task
+
+
+async def test_the_picture_of_what_is_playing_comes_through_only_as_a_small_image(user, client):
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home_with(client, user, user, [WIIM, WIIM2])
+    url = f"/api/home/{home_id}/boxes/{prepared['box']['id']}/art"
+    png = base64.b64encode(b"\x89PNG fake").decode()
+    side = asyncio.create_task(_answer(box, {"type": "image/png", "b64": png}))
+    r = await client.get(f"{url}/media_player.kitchen", headers=_hdr(user))
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.headers["x-content-type-options"] == "nosniff" and r.content == b"\x89PNG fake"
+    assert [(a["op"], a["args"]) for a in await side] == [("art", {"entity": "media_player.kitchen"})]
+    # Nothing playing a picture: not asked for at all. A page as "a picture", or a huge one: refused.
+    assert (await client.get(f"{url}/media_player.lounge", headers=_hdr(user))).status_code == 404
+    assert (await client.get(f"{url}/light.lamp", headers=_hdr(user))).status_code == 404
+    for data in ({"type": "text/html", "b64": png}, {"type": "image/svg+xml", "b64": png}, {"type": "image/png", "b64": base64.b64encode(b"x" * (300 * 1024 + 1)).decode()}, {"type": "image/png", "b64": "not base64!"}):
+        side = asyncio.create_task(_answer(box, data))
+        assert (await client.get(f"{url}/media_player.kitchen", headers=_hdr(user))).status_code == 404, data["type"]
+        await side
+    await box.hang_up()
+    await task
