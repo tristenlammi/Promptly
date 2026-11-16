@@ -182,6 +182,12 @@ def build_tools_system_prompt(
                 else ""
             )
         )
+    if "home" in categories:
+        guidelines.append(
+            "- Their home: `home_control` switches lights, scenes and speakers straight away, by the room or device "
+            "name they used (call `home_devices` first only if you need the names or what's on). If it says more than "
+            "one thing fits, ask which. It never unlocks, opens or disarms anything: say that's on the Home page."
+        )
     if "notes" in categories:
         guidelines.append(
             "- \"Add X to my shopping list\" → `add_to_note` with note 'shopping list' (their Shopping/Groceries "

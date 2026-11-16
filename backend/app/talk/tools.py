@@ -46,6 +46,8 @@ READS = (
     "maps_search", "maps_directions", "search_my_files", "search_photos", "recall",
     # Talk phase 2 (WP-T10): your notes and lists.
     "find_notes", "read_note",
+    # Promptly Home: what the home's devices are doing.
+    "home_devices",
 )
 # Changing anything waits for a yes.
 WRITES = (
@@ -56,6 +58,10 @@ WRITES = (
 # Adding to a checklist runs at once, with "undo" (owner decision 5, ``lists.py``),
 # unless the turn read outside content or it's going onto a text note.
 QUICK = ("add_to_note",)
+# Promptly Home: lights, scenes and speakers happen at once (a light is as
+# easily switched back); the tool never opens, unlocks or disarms anything.
+# On a turn that read outside content its own guard asks first.
+HOME = ("home_control",)
 # "Send that to my phone" (WP-T11, ``chat/tools/talk_phone.py``): offered when the
 # conversation has found something with a link; it ends the turn on what it said.
 SEND = ("send_to_phone",)
@@ -92,7 +98,7 @@ GUARDED = frozenset(
 )
 
 # Tool categories a spoken turn may draw from; the names above narrow them.
-CATEGORIES = frozenset({"calendar", "apps", "items", "mail", "phone", "photos", "memory", "search", "drive", "device", "notes"})
+CATEGORIES = frozenset({"calendar", "apps", "items", "mail", "phone", "photos", "memory", "search", "drive", "device", "notes", "home"})
 
 # ---- Talk phase 2 (WP-T9): in the car, or with a trip running.
 # The trip's own tools (``drive.py``), offered only while there's a trip.
@@ -150,6 +156,8 @@ LABELS = {
     "read_note": "Reading the note",
     "add_to_note": "Getting that ready",
     "create_note": "Getting that ready",
+    "home_devices": "Checking the house",
+    "home_control": "Doing that",
 }
 
 # How to say a result: the headline, the details are on the screen.
@@ -168,6 +176,8 @@ _SCREEN_NOTES = {
     # Notes phase 2 (N2.4).
     "find_notes": "Say the one or two notes that fit, by name; never read out ids.",
     "read_note": "For a list, say only the items not ticked yet, plainly and without ids; for a text note, the gist in one or two sentences.",
+    "home_devices": "Answer only what they asked, in one sentence; never read the whole list out.",
+    "home_control": "Say it's done in a few words, as the result puts it.",
 }
 _NO_SCREEN = "They can't see a screen: at most two short sentences."
 
@@ -178,7 +188,7 @@ def device_tools(caps: list[str] | None) -> set[str]:
 
 
 def voice_tool_names(caps: list[str] | None, *, device: str = "web", trip: bool = False, locked: bool = False) -> set[str]:
-    names = {*READS, *WRITES, *QUICK, *SEND, *device_tools(caps)}
+    names = {*READS, *WRITES, *QUICK, *SEND, *HOME, *device_tools(caps)}
     if locked:
         names -= PRIVATE
     if trip:
@@ -234,6 +244,11 @@ def prompt(names: set[str], *, device: str, driving: bool, locked: bool = False)
         lines.append(
             "- Adding things to their shopping list or another checklist (add_to_note, note='shopping list' for shopping) "
             "happens straight away, and they can say undo."
+        )
+    if set(HOME) & names:
+        lines.append(
+            "- At home: home_control switches lights, scenes and speakers straight away. Use the room or device name they "
+            "said; if it says more than one fits, ask which. It can't unlock, open or disarm anything."
         )
     phone = names & set(DEVICE)
     if phone:

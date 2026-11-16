@@ -730,7 +730,37 @@ class TalkSession:
             if hit is not None:
                 await self._command(turn, hit)
                 return
+            if await self._home_quick(turn):
+                return
         await self._start_model(turn)
+
+    async def _home_quick(self, turn: UserTurn) -> bool:
+        """ "Kitchen lights off", "pause the music": done from the home's own
+        room and device names, no model (``app/home/quick.py``). False when
+        it isn't one of those, or isn't certain: the model answers."""
+        from app.home import assistant as home
+
+        try:
+            ran = await home.quick_command(self.user.id, turn.text)
+        except Exception:  # noqa: BLE001 - fail open: the model still answers
+            logger.exception("talk: the home quick command failed")
+            return False
+        if ran is None:
+            return False
+        ok, said = ran
+        await self._set_state("thinking")
+        message_id = None
+        if turn.message_id is not None:
+            message_id = await chat.add_reply(
+                self.conv,
+                self.user,
+                turn.message_id,
+                said,
+                tool_calls=[{"id": voice_tools.new_call_id(), "name": "home_control", "ok": ok, "error": None if ok else said, "meta": {"source": "home_quick", "spoken": True, "summary": said}}],
+                voice={"spoken": True, "interrupted": False, "fast_path": True},
+            )
+        await self._speak(said, turn, message_id=message_id)
+        return True
 
     async def _briefing(self, turn: UserTurn) -> None:
         """ "Read me my day": written from Today, no model (WP-T12). In the car,

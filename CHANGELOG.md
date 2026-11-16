@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Home in chat and on the phone assistant: ask what's on at home ("are the kitchen lights on?", "what's playing?") and have it switch lights (on, off, brightness, colours, warm or cool white), plugs, fans, scenes and speakers (play, pause, next, previous, volume, mute). Only for people in a home, and only their own home. It never unlocks, opens or disarms anything: locks, garage doors, gates and alarms stay on the Home page.
+- Phone assistant: simple device commands happen at once, without waiting for the AI: "turn off the kitchen lights", "set lounge to 30%", "make the desk lamp warm white", "pause the music", "volume 40 in the study", "turn on movie night". It only does this when the room or device you named is exactly one thing; anything it isn't sure of goes to the AI, which can ask which you meant.
+- Home: "play preset 3" (spoken, or in a chat) starts a numbered favourite saved on a WiiM speaker in the WiiM Home app, such as a Tidal playlist. Needs the server's Home box to update (connector 0.6.0).
+
 ## [0.47.0] - 2026-11-17
 
 ### Added

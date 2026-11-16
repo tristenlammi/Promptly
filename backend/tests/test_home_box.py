@@ -115,6 +115,8 @@ def test_actions_become_home_assistant_services():
     assert pb.service_for("media_player", "volume", 35) == ("media_player", "volume_set", {"volume_level": 0.35})
     assert pb.service_for("lock", "unlock", None) == ("lock", "unlock", {})
     assert pb.service_for("cover", "position", 20) == ("cover", "set_cover_position", {"position": 20})
+    # A WiiM favourite by its number: the action its Home Assistant page gives.
+    assert pb.service_for("media_player", "preset", 3) == ("media_player", "play_media", {"media_content_type": "music", "media_content_id": "3"})
     assert pb.service_for("sensor", "turn_on", None) is None and pb.service_for("lock", "toggle", None) is None
     assert pb.extras("climate", {"temperature": 21, "current_temperature": 19.5, "hvac_modes": ["off", "heat"], "min_temp": 7, "max_temp": 35}) == {"target": 21, "cur": 19.5, "min": 7, "max": 35, "modes": ["off", "heat"], "can": []}
     assert pb.extras("media_player", {"volume_level": 0.4, "media_title": "Song", "is_volume_muted": False}) == {"vol": 40, "title": "Song", "muted": False, "can": []}
@@ -473,3 +475,17 @@ def test_the_server_and_the_box_agree_on_what_is_nobodys_device():
     from app.home import relay
 
     assert relay.NEVER == pb.HIDDEN
+
+
+def test_only_a_speaker_that_keeps_numbered_favourites_can_be_asked_for_one():
+    from app.home import relay
+
+    wiim = {"id": "media_player.a", "domain": "media_player", "x": {"can": ["play", "preset"]}}
+    cast = {"id": "media_player.b", "domain": "media_player", "x": {"can": ["play"]}}
+    old = {"id": "media_player.c", "domain": "media_player"}
+    assert relay.can_do(wiim, "preset") and not relay.can_do(cast, "preset") and not relay.can_do(old, "preset")
+    assert relay.clean_value("media_player", "preset", 4, wiim) == 4
+    for bad in (0, 21, "3", True, None):
+        with pytest.raises(ValueError):
+            relay.clean_value("media_player", "preset", bad, wiim)
+    assert "wiim" in pb.PRESET_BRANDS

@@ -155,6 +155,10 @@ REGISTRY.extend(DRIVE_TOOLS)
 from app.chat.tools.talk_phone import TALK_PHONE_TOOLS  # noqa: E402
 
 REGISTRY.extend(TALK_PHONE_TOOLS)
+# Promptly Home (category "home"): the person's own home, for anyone in one.
+from app.chat.tools.home import HOME_TOOLS  # noqa: E402
+
+REGISTRY.extend(HOME_TOOLS)
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the
 # registry on every model-emitted call. Built once at import time and

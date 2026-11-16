@@ -51,7 +51,7 @@ def test_the_voice_allowlist():
     from app.chat.tools.registry import get_tool
 
     names = voice_tools.voice_tool_names([])
-    assert set(voice_tools.READS) | set(voice_tools.WRITES) | set(voice_tools.QUICK) | set(voice_tools.SEND) == names
+    assert set(voice_tools.READS) | set(voice_tools.WRITES) | set(voice_tools.QUICK) | set(voice_tools.SEND) | set(voice_tools.HOME) == names
     for name in (*names, *voice_tools.DEVICE, *voice_tools.DRIVE):
         assert get_tool(name) is not None, name
     # What needs a screen and minutes, or deletes: never.

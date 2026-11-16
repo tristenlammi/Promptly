@@ -3697,6 +3697,11 @@ async def _talk_categories(
     # Talk phase 2: notes and lists; Rooms messages to people on this Promptly
     # (a first message opens the DM, so not only for people already in rooms).
     cats |= {"notes", "rooms"}
+    # Promptly Home: for anyone in a home (app/home/assistant.py).
+    from app.home.assistant import has_home
+
+    if await has_home(db, user.id):
+        cats.add("home")
     # "Send that to my phone", once something with a link has come up.
     if talk.get("links"):
         cats.add("talk")
@@ -5447,6 +5452,11 @@ async def _stream_generator(
                 enabled_categories.add("notes")
                 # Across the apps (my_day, find_person, search_apps): everyone.
                 enabled_categories.add("apps")
+                # Promptly Home: for anyone in a home.
+                from app.home.assistant import has_home
+
+                if await has_home(db, user.id):
+                    enabled_categories.add("home")
                 # Mail: for anyone who's connected a mailbox.
                 from app.chat.tools.mail import has_mail
 

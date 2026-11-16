@@ -41,7 +41,7 @@ from typing import Any
 
 import aiohttp
 
-VERSION = "0.5.1"
+VERSION = "0.6.0"
 log = logging.getLogger("promptly-box")
 
 # Kinds of thing Promptly has controls for. Anything else a brand brings is
@@ -80,6 +80,8 @@ SERVICES: dict[tuple[str, str], tuple[str, str]] = {
     ("media_player", "turn_off"): ("media_player", "turn_off"),
     ("media_player", "join"): ("media_player", "join"),
     ("media_player", "unjoin"): ("media_player", "unjoin"),
+    # A numbered favourite saved on the speaker in its maker's app.
+    ("media_player", "preset"): ("media_player", "play_media"),
     ("fan", "oscillate"): ("fan", "oscillate"),
     ("vacuum", "start"): ("vacuum", "start"),
     ("vacuum", "pause"): ("vacuum", "pause"),
@@ -103,6 +105,8 @@ CAN: dict[str, tuple[tuple[int, str], ...]] = {
     "fan": ((1, "speed"), (2, "osc")),
     "vacuum": ((4, "pause"), (8, "stop"), (16, "dock"), (512, "locate"), (8192, "start")),
 }
+# Brands whose speakers keep numbered favourites that can be started by number.
+PRESET_BRANDS = {"wiim"}
 # With nothing remembered and no word from the device, the mode to start in.
 MODE_ORDER = ("auto", "heat_cool", "cool", "heat", "fan_only", "dry")
 ART_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -521,6 +525,10 @@ def service_for(domain: str, action: str, value: Any, x: dict[str, Any] | None =
         data["is_volume_muted"] = bool(value)
     elif action == "source":
         data["source"] = value
+    elif action == "preset":
+        # WiiM: "media_player.play_media with a numeric preset ID" (its Home Assistant page).
+        data["media_content_type"] = "music"
+        data["media_content_id"] = str(int(value))
     elif action == "fan":
         data["fan_mode"] = value
     elif action == "oscillate":
@@ -761,6 +769,7 @@ class HomeAssistant:
         self.groups: dict[str, dict[str, Any]] = {}
         self._device_of: dict[str, str] = {}  # entity -> device
         self._model_of: dict[str, str] = {}  # device -> model
+        self._presets: set[str] = set()  # speakers with numbered favourites
         self._entry_of: dict[str, str] = {}  # entity -> the set-up it came with
         self._zones: dict[str, dict[str, Any]] = {}  # air-con units and their zones
         # The mode each air con was last on in, so "on" means "as it was" (last_modes.json).
@@ -1093,8 +1102,11 @@ class HomeAssistant:
         self._area_of, self._skip, self._names = {}, set(), {}
         self._model_of = {d["id"]: str(d.get("model") or "") for d in devices or []}
         self._device_of, self.groups, self._entry_of = {}, {}, {}
+        self._presets = set()
         for e in registry or []:
             eid = e["entity_id"]
+            if e.get("platform") in PRESET_BRANDS and eid.startswith("media_player."):
+                self._presets.add(eid)
             if e.get("device_id"):
                 self._device_of[eid] = e["device_id"]
             if e.get("config_entry_id"):
@@ -1150,6 +1162,8 @@ class HomeAssistant:
         if domain == "media_player" and speaker_group(attrs, self._model_of.get(device or "")):
             out["grp"] = True
         x = extras(domain, attrs)
+        if eid in self._presets and isinstance(x.get("can"), list):
+            x["can"].append("preset")
         if domain == "climate":
             x.update(self._zones.get(eid) or {})
             state = out["state"]

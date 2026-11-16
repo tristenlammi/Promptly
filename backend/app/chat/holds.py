@@ -34,6 +34,7 @@ HOLDABLE: dict[str, str] = {
     "add_to_note": "Add to a note",
     "tick_note_items": "Tick off a list",
     "draft_form": "Make a draft form",
+    "home_control": "Change something at home",
     # Reads of something private that a page could be fishing for: the yes
     # shows the result on the card.
     "timeline_day": "Look at your timeline",
@@ -144,6 +145,12 @@ def question(name: str, args: dict[str, Any]) -> str:
     if name == "draft_form":
         qs = args.get("questions") if isinstance(args.get("questions"), list) else []
         return f"Make a draft form “{_t(args.get('title'), 80)}” with {len(qs)} question{'' if len(qs) == 1 else 's'}?"
+    if name == "home_control":
+        doing = str(args.get("action") or "").replace("_", " ")
+        extra = "".join(
+            f", {k} {_t(args.get(k), 20)}" for k in ("brightness", "colour", "volume", "preset") if args.get(k) not in (None, "")
+        )
+        return f"At home: {doing} {_t(args.get('target'), 60) or 'the speaker'}{extra}?"
     if name == "timeline_day":
         end = str(args.get("end_date") or "").strip()
         return f"Look at your timeline for {_t(args.get('date'), 20)}{f' to {end[:10]}' if end else ''}?"

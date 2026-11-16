@@ -25,7 +25,7 @@ Protocol (JSON text frames, each with a ``t``)::
               "grp"?: true for several speakers that play as one}
     x (what a device's controls need; all optional) holds, among others:
       "can":   what it says it can do ("play","next","vol","src","group",
-               "temp","fan","pos","stop","start","dock"…). When a device
+               "temp","fan","pos","stop","start","dock","preset"…). When a device
                sends this, anything not in it is refused here.
       air con: "modes","target","cur","min","max","step","fans","fan","act",
                "last" (the mode it was last on in), and for ducted systems
@@ -116,7 +116,7 @@ ACTIONS: dict[str, frozenset[str]] = {
     "valve": frozenset({"open", "close"}),
     # On is "the way it was last on" (the box remembers), never "its first mode".
     "climate": frozenset({"turn_on", "turn_off", "temperature", "mode", "fan"}),
-    "media_player": frozenset({"turn_on", "turn_off", "play", "pause", "stop", "next", "prev", "volume", "mute", "source", "join", "unjoin"}),
+    "media_player": frozenset({"turn_on", "turn_off", "play", "pause", "stop", "next", "prev", "volume", "mute", "source", "join", "unjoin", "preset"}),
     "lock": frozenset({"lock", "unlock"}),
     "vacuum": frozenset({"start", "pause", "stop", "dock", "locate"}),
     "scene": frozenset({"run"}),
@@ -164,6 +164,9 @@ def can_do(entity: dict[str, Any], action: str) -> bool:
     """Whether this device says it can do this. One that doesn't say what it
     can do (an older box) is taken at its word."""
     can = (entity.get("x") or {}).get("can")
+    if (entity.get("domain"), action) == ("media_player", "preset"):
+        # A numbered favourite saved on the speaker: only one that says it has them (a WiiM).
+        return isinstance(can, list) and "preset" in can
     need = NEEDS.get((str(entity.get("domain")), action))
     return need is None or not isinstance(can, list) or need in can
 
@@ -176,6 +179,10 @@ def clean_value(domain: str, action: str, value: Any, entity: dict[str, Any], ot
     if (domain, action) in (("media_player", "mute"), ("fan", "oscillate")):
         if not isinstance(value, bool):
             raise ValueError("on or off")
+        return value
+    if (domain, action) == ("media_player", "preset"):
+        if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 20:
+            raise ValueError("a preset from 1 to 20")
         return value
     if (domain, action) == ("media_player", "source"):
         if not isinstance(value, str) or value not in (x.get("srcs") or []):
