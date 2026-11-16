@@ -229,6 +229,45 @@ class AssetLinkCache(private val now: () -> Long, private val load: () -> String
     }
 }
 
+/** What an app's own package and label say about whose it is. Only ever a guess: an app picks
+ *  both, so nothing is filled on this alone (A75). */
+object AppNames {
+    /** Package parts that say nothing about who made it. */
+    private val GENERIC = setOf(
+        "com", "org", "net", "edu", "gov", "app", "apps", "android", "mobile", "www", "the", "inc", "ltd", "pty", "main",
+        "client", "prod", "release", "phone", "lite", "beta", "free", "pro", "bank", "banking", "mail", "login", "secure",
+    )
+
+    private fun parts(pkg: String): List<String> = pkg.lowercase().split('.').filter { it.length >= 3 && it !in GENERIC }
+
+    private fun squash(s: String?): String? = s?.lowercase()?.filter { it.isLetterOrDigit() }?.takeIf { it.length >= 3 && it !in GENERIC }
+
+    /** The sites a package name spells backwards: `com.netflix.mediaclient` is netflix.com, and
+     *  `au.com.nab.mobile` is nab.com.au, which needs three parts to say. */
+    fun reversedDomains(pkg: String): List<String> {
+        val all = pkg.lowercase().split('.')
+        val out = LinkedHashSet<String>()
+        for (k in 2..minOf(4, all.size)) Match.baseDomain(all.take(k).reversed().joinToString("."))?.let { out += it }
+        return out.toList()
+    }
+
+    /** Does the package or the app's label name this site? "paypal" in `com.paypal.android.p2pmobile`,
+     *  "uber" starting `com.ubercab`, a label that reads "Netflix". */
+    fun names(pkg: String, label: String?, domain: String): Boolean {
+        val name = domain.substringBefore('.')
+        if (name.length < 3 || name in GENERIC) return false
+        if (domain in reversedDomains(pkg)) return true
+        if (name == squash(label)) return true
+        return parts(pkg).any { it == name || (name.length >= 4 && it.startsWith(name)) }
+    }
+
+    /** A login whose title is the app's name, whatever its site is called. */
+    fun titled(label: String?, title: String?): Boolean {
+        val l = squash(label) ?: return false
+        return l == squash(title)
+    }
+}
+
 /** Digital Asset Links: does this site say this app may use its credentials? */
 object AssetLinks {
     private const val RELATION = "delegate_permission/common.get_login_creds"
@@ -308,13 +347,9 @@ object AssetLinks {
     /** Sites worth asking about for an app we don't recognise: its reversed package name,
      *  plus vault domains whose name appears in the package. Never more than five. */
     fun candidates(pkg: String, vaultDomains: Set<String>): List<String> {
-        val parts = pkg.lowercase().split('.')
         val out = LinkedHashSet<String>()
-        if (parts.size >= 2) Match.baseDomain("${parts[1]}.${parts[0]}")?.let { out += it }
-        for (d in vaultDomains) {
-            val name = d.substringBefore('.')
-            if (name.length >= 4 && name in parts) out += d
-        }
+        out += AppNames.reversedDomains(pkg)
+        for (d in vaultDomains) if (AppNames.names(pkg, null, d)) out += d
         return out.take(5)
     }
 

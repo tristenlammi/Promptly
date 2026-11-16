@@ -29,6 +29,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 - Passwords extension 0.2.3: when a passkey is wanted and your vault is locked, the passkey window asks for your master password and nothing after it; the passkey PIN is only asked when the vault is already open (D139).
 - Workout on a phone: the set type is a small chip that opens the four choices, next to "Last" and Use; hold − or + to keep stepping; a second Finish button appears under the last exercise once every set is ticked; tap the rest countdown to fill the screen with it.
+- Passwords on Android (next Promptly for Android): in an app you haven't filled before, the logins that look like they belong to it are now listed by name above "Search Passwords" (for example your Netflix login in the Netflix app). Tapping one still checks the app first, and asks you if the site doesn't vouch for it.
+- Passwords on Android: a card on the main screen tells you when Chrome isn't using Passwords yet (Chrome only fills from Google until you pick "Autofill using another service" in its settings), with a button that opens that setting.
 
 ### Fixed
 
@@ -36,6 +38,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Rooms: a file attached to a message and never sent is now wiped after a day (it used to stay on the server for good), and one person can have at most 30 files waiting to be sent, so the disk can't be filled that way.
 - Chat on a phone in plain Chrome: the message box is no longer cut off at the bottom. The main layout now sizes itself to the part of the screen the browser actually shows, as the other apps already did.
 - P Maps: the message for a phone app that gives no location no longer tells an admin to add a Google Play key; it says to update the app and allow Location.
+- Passwords on Android: sign-in boxes labelled "Email address" got no suggestions unless the app marked them as an email box; they do now, and so do sign-ins that use a phone number, a customer ID or a client number.
+- Passwords on Android: long-pressing a box and choosing Autofill now always offers "Search Passwords", even on a box Passwords couldn't recognise.
+- Passwords on Android: apps with Australian or British style names (au.com.…, uk.co.…) are now matched to their sites.
 
 ## [0.46.0] - 2026-11-16
 

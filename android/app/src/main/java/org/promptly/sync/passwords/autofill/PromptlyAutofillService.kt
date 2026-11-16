@@ -98,7 +98,7 @@ class PromptlyAutofillService : AutofillService() {
         val pkg = structure.activityComponent.packageName
         if (pkg == packageName) return null
         val walked = walk(structure)
-        val form = FormParser.parse(walked.nodes)
+        val form = FormParser.parse(walked.nodes, manual = request.flags and FillRequest.FLAG_MANUAL_REQUEST != 0)
         if (form.isEmpty) return null
         val target = targetOf(pkg, form)
         val lookup = AutofillIndex.lookup(this)
@@ -119,8 +119,8 @@ class PromptlyAutofillService : AutofillService() {
         var added = 0
         val maxInline = if (Build.VERSION.SDK_INT >= 30 && inline != null) maxOf(1, inline.maxSuggestionCount - 1) else 0
 
-        fun addDataset(mode: String, itemId: String?, title: String, subtitle: String?, downgrade: Boolean = false) {
-            val intent = AutofillAuthActivity.intent(this, mode, itemId, target, form, downgrade)
+        fun addDataset(mode: String, itemId: String?, title: String, subtitle: String?, downgrade: Boolean = false, guess: Boolean = false) {
+            val intent = AutofillAuthActivity.intent(this, mode, itemId, target, form, downgrade, guess)
             val sender = PendingIntent.getActivity(this, code++, intent, PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_CANCEL_CURRENT).intentSender
             val builder = Dataset.Builder()
             val views = remote(title, subtitle)
@@ -156,6 +156,14 @@ class PromptlyAutofillService : AutofillService() {
                 // Labelled, so it's clear this one's for another service on the domain.
                 val sub = if (elsewhere) listOfNotNull(who, "Other login for $siteName").joinToString(" · ") else who
                 addDataset(AutofillAuthActivity.MODE_LOGIN, h.entry.itemId, h.entry.title ?: "Login for $site", sub, h.downgrade)
+            }
+            // An app nothing links yet: the logins its name points at, by name, so there's
+            // something to tap besides Search. Picking one checks the app before it fills (A75).
+            if (hits.isEmpty() && target is FillTarget.App) {
+                for (e in AutofillIndex.guesses(lookup, target, appLabel(pkg), recents)) {
+                    val who = e.username ?: if (Pw.unlocked) null else "Tap to unlock"
+                    addDataset(AutofillAuthActivity.MODE_LOGIN, e.itemId, e.title ?: "Login for $site", listOfNotNull(who, "Checks this app first").joinToString(" · "), guess = true)
+                }
             }
         }
         if (form.otps.isNotEmpty()) {

@@ -61,6 +61,15 @@ object ChromeSetup {
         }
     }.getOrNull()
 
+    /** Chrome channels on this phone that say they only fill from Google, while this is the phone's
+     *  autofill service. One that doesn't say (an old Chrome) isn't counted: nothing's known. */
+    fun notUsingUs(context: Context): List<String> {
+        val ours = runCatching { context.getSystemService(android.view.autofill.AutofillManager::class.java).hasEnabledAutofillServices() }.getOrDefault(false)
+        return if (ours) offChannels(installedChannels(context).associateWith { state(context, it) }) else emptyList()
+    }
+
+    fun offChannels(states: Map<String, Boolean?>): List<String> = states.filterValues { it == false }.keys.toList()
+
     fun open(context: Context, pkg: String) {
         val i = Intent(Intent.ACTION_APPLICATION_PREFERENCES)
             .addCategory(Intent.CATEGORY_DEFAULT)

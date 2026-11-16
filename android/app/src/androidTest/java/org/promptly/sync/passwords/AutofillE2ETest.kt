@@ -153,6 +153,47 @@ class AutofillE2ETest {
         Harness.suggestion(By.text("Site login"))
     }
 
+    /** An app nothing links yet: the login its package names is offered by name, and picking it
+     *  goes through the same question a searched-for login does (A75). */
+    @Test fun anUnlinkedAppIsOfferedTheLoginItsNamePointsAtAndAsksFirst() {
+        login("Pwtest account", "ana-guess", "pw-Guess-1!", LoginUrl("https://pwtest.example"))
+        login("Unrelated", "ana-other", "pw-Other-1!", LoginUrl("https://some-other-site.example"))
+        launch(TEST_APP, "LoginActivity")
+        tapField("username")
+        Harness.suggestion(By.text("Pwtest account"))
+        assertTrue(has(By.textContains("Checks this app first"), 800))
+        assertFalse(has(By.text("Unrelated"), 800))
+        Harness.waitSuggestion("Search Passwords")
+        Harness.pick("Pwtest account")
+        // Nothing fills on the name alone: the site doesn't list the app, so it asks.
+        waitFor(By.textContains("isn't linked to this app"), 25_000)
+        waitFor(By.res("confirm-remember")).click()
+        waitText("username-echo", "ana-guess")
+        waitText("password-echo", "pw-Guess-1!")
+        val item = client.allItems().first { it.body.title == "Pwtest account" }
+        assertEquals(TEST_APP, item.body.urls.mapNotNull { Match.parseAppUrl(it.url) }.single().pkg)
+    }
+
+    @Test fun aGuessedLoginCanBeTurnedDown() {
+        login("Pwtest account", "ana-guess", "pw-Guess-1!", LoginUrl("https://pwtest.example"))
+        launch(TEST_APP, "LoginActivity")
+        tapField("username")
+        Harness.pick("Pwtest account")
+        waitFor(By.res("confirm-cancel"), 25_000).click()
+        Thread.sleep(500)
+        assertEquals("", Harness.textOf("password-echo"))
+        assertTrue(client.allItems().first { it.body.title == "Pwtest account" }.body.urls.none { Match.parseAppUrl(it.url) != null })
+    }
+
+    /** A plain box labelled "Email address", with no hints: it used to get nothing at all. */
+    @Test fun anEmailAddressBoxWithNoHintsGetsSuggestions() {
+        login("Linked login", "ana-linked", "pw-Linked-1!", appLink())
+        launch(TEST_APP, "PlainLabelActivity")
+        tapField("Email address")
+        Harness.pick("Linked login")
+        waitText("Email address-echo", "ana-linked")
+    }
+
     @Test fun anUntrustedAppsWebViewCantClaimASite() {
         login("Bank", "ana-bank", "pw-Bank-1!", LoginUrl("https://pwtest.promptly.test"))
         launch(TEST_APP, "WebActivity")
