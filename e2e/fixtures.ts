@@ -24,14 +24,23 @@ async function pace(): Promise<void> {
   }
 }
 
+/** Count a context's API calls towards the per-minute budget. */
+function counted(context: BrowserContext): BrowserContext {
+  context.on("request", (r) => {
+    try {
+      if (new URL(r.url()).pathname.startsWith("/api/") && !r.url().includes("/api/m/")) apiCalls.push(Date.now());
+    } catch {
+      /* not a URL we care about */
+    }
+  });
+  return context;
+}
+
 async function signedIn(browser: Browser, user: keyof RunInfo["users"]): Promise<BrowserContext> {
   const context = await browser.newContext({ storageState: storageStateFile(user) });
   // A newer build than the one under test shows an "updated — Reload"
   // banner over the composer; the suite always tests what's deployed.
   await context.route("**/version.json*", (r) => r.abort());
-  context.on("request", (r) => {
-    if (new URL(r.url()).pathname.startsWith("/api/") && !r.url().includes("/api/m/")) apiCalls.push(Date.now());
-  });
   return context;
 }
 
@@ -81,7 +90,22 @@ export async function showRow(page: Page, name: string | Locator): Promise<void>
   }
 }
 
-export const test = base.extend<{ alice: Page; bob: Page; dana: Page; pace: void }>({
+export const test = base.extend<{ alice: Page; bob: Page; dana: Page; pace: void }, { countedBrowser: void }>({
+  // Every window a spec opens counts, not only the alice/bob/dana ones: a
+  // spec that made its own contexts (the installed-app windows in
+  // app-nav.spec.ts) used to spend the budget unseen, the backend then
+  // answered 429 to everything for the rest of that minute, the page said
+  // "Can't reach Promptly right now", and whichever test came next timed out
+  // (it passed when run alone, with a fresh budget).
+  countedBrowser: [
+    async ({ browser }, use) => {
+      const make = browser.newContext.bind(browser);
+      browser.newContext = (async (options?: Parameters<Browser["newContext"]>[0]) => counted(await make(options))) as Browser["newContext"];
+      await use();
+      browser.newContext = make;
+    },
+    { scope: "worker", auto: true },
+  ],
   pace: [
     async ({}, use) => {
       await pace();
