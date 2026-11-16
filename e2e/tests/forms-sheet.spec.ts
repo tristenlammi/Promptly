@@ -2,6 +2,10 @@ import type { Browser, BrowserContext, Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
 import { BASE_URL } from "../lib/stack";
+import { forgetFormSubmits } from "../lib/stack";
+
+// One address, many "people": see forgetFormSubmits.
+test.beforeEach(() => forgetFormSubmits());
 
 /** Forms WP-F1.5: a form's answers go live into a linked Sheet. The owner
  *  links a new sheet from Responses and opens it in another tab; people

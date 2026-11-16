@@ -11,6 +11,8 @@ import os from "node:os";
 import path from "node:path";
 
 import AxeBuilder from "@axe-core/playwright";
+
+import { seriousFindings } from "../lib/axe";
 import { chromium, type APIRequestContext, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
 
 import { expect, run, stamp, test } from "../fixtures";
@@ -185,9 +187,8 @@ async function axe(page: Page, what: string, include?: string): Promise<string[]
   let builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]);
   if (include) builder = builder.include(include);
   const { violations } = await builder.analyze();
-  return violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical")
-    .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 4).map((n) => n.target.join(" ")).join(" | ")}`);
+  // White on the brand terracotta is tracked on its own (lib/axe.ts).
+  return seriousFindings(page, what, violations);
 }
 
 async function api(req: APIRequestContext, auth: string, method: "GET" | "POST" | "DELETE" | "PUT", url: string, data?: unknown) {

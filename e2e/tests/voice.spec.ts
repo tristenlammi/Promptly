@@ -13,6 +13,8 @@ import os from "node:os";
 import path from "node:path";
 
 import AxeBuilder from "@axe-core/playwright";
+
+import { seriousFindings } from "../lib/axe";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 
 import { expect, run, stamp, test } from "../fixtures";
@@ -132,9 +134,8 @@ async function axe(page: Page, what: string, include?: string): Promise<string[]
   let builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]);
   if (include) builder = builder.include(include);
   const { violations } = await builder.analyze();
-  return violations
-    .filter((v) => v.impact === "serious" || v.impact === "critical")
-    .map((v) => `${what}: ${v.id} (${v.impact}) — ${v.help} — ${v.nodes.slice(0, 4).map((n) => n.target.join(" ")).join(" | ")}`);
+  // White on the brand terracotta is tracked on its own (lib/axe.ts).
+  return seriousFindings(page, what, violations);
 }
 
 /** Someone's 0..1 level as this page hears them (the voice engine's meter). */
@@ -488,8 +489,15 @@ test.describe("voice channels", () => {
     // Ctrl+K: join a channel by name.
     await alice.keyboard.press("Control+k");
     await alice.keyboard.type(`join ${lounge.toLowerCase()}`);
-    await expect(alice.getByRole("button", { name: new RegExp(`Join ${lounge}.*Lads`) })).toBeVisible();
-    await alice.keyboard.press("Enter");
+    const joinRow = alice.getByRole("button", { name: new RegExp(`Join ${lounge}.*Lads`) });
+    await expect(joinRow).toBeVisible();
+    // The list is still settling when the row first shows (the ranked results
+    // land a moment after the keyword ones), and an Enter in that moment is
+    // lost: press until the palette has taken it.
+    await expect(async () => {
+      if (await joinRow.isVisible()) await alice.keyboard.press("Enter");
+      await expect(joinRow).toBeHidden({ timeout: 1500 });
+    }).toPass({ timeout: 15_000 });
     await expect(panel(alice).getByTestId("voice-status")).toHaveText("Voice connected", { timeout: 30_000 });
     await alice.keyboard.press("Control+k");
     await alice.keyboard.type("leave");

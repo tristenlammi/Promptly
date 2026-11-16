@@ -38,7 +38,7 @@ test.describe("notes: across Promptly", () => {
   test("Today shows pinned notes, Ctrl+K finds one, and a [[ mention links it", async ({ alice: page }) => {
     test.setTimeout(150_000);
     const auth = await notesReady(page);
-    const gate = `Gate code ${stamp}`;
+    const gate = `Side gate code ${stamp}`; // (notes.spec has a "Gate code <stamp>" of its own)
     const picnic = `Picnic ${stamp}`;
     const gateId = await newNote(page, auth, { title: gate, text: `4471${stamp} then the side door`, pinned: true });
     const picnicId = await newNote(page, auth, {

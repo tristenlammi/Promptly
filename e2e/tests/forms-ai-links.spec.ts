@@ -1,6 +1,10 @@
 import type { Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
+import { forgetFormSubmits } from "../lib/stack";
+
+// One address, many "people": see forgetFormSubmits.
+test.beforeEach(() => forgetFormSubmits());
 
 /** Forms WP-F1.7, against the fake model (e2e/mock-llm): Make with AI
  *  suggests questions you add from a preview; Summarise reads written

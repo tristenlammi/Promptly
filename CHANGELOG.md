@@ -57,6 +57,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps (Android, phone and car): the time left and arrival time now come down as you drive. On a long stretch of one road (a motorway) the traffic check measured that road from where it began, not from where you were, so the time sat still until the next turn; a traffic answer is also dropped once it's old or far beyond the trip's own count.
 - P Maps on Android Auto: your speed now shows on the car's map, with or without a trip, beside the road's limit. It is the GPS's own speed reading, shown as each one arrives (about once a second), goes amber over the limit and red more than 3 km/h over, and shows dashes when there has been no reading for 3 seconds. With no trip on, the car now shows the road's limit too.
 - P Maps (Android, phone and car): the fixed speed cameras the map knows about are drawn on the map, around you and along a trip, with a Speed cameras choice (Show and warn / Off) in the Drive menu and the trip's options. From the map data already on your server and in offline areas; it doesn't know every camera.
+- Rooms: the red unread-count badge is readable in the dark theme (white on a deeper red; it was white on light red).
+- Passwords: importing a large file (thousands of logins) no longer slows to a crawl. Each saved item was making the vault and the browser extension reload everything; a 5,000-item import that ran past ten minutes now takes about half a minute.
 
 ## [0.46.0] - 2026-11-16
 

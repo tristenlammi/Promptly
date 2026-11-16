@@ -36,7 +36,9 @@ test("the sidebar's apps can be put in order from Edit", async ({ alice: page })
   await expect.poll(() => sidebarOrder(page)).toEqual(["Rooms", "Calendar", "Maps"]);
 
   try {
-    // By mouse: Maps to the top.
+    // By mouse: Maps to the top. The mouse works in window coordinates, so
+    // the list has to be on screen (apps other specs installed push it down).
+    await list.evaluate((el) => el.scrollIntoView({ block: "center" }));
     const from = (await list.getByRole("button", { name: "Move Maps" }).boundingBox())!;
     const to = (await list.getByRole("button", { name: "Move Rooms" }).boundingBox())!;
     await page.mouse.move(from.x + 40, from.y + from.height / 2);

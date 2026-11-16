@@ -13,6 +13,7 @@
 //
 // Needs the calls service in the stack (scripts/stack.sh up <name> --with
 // calls); skipped without it.
+import { seriousFindings } from "../lib/axe";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -39,7 +40,7 @@ test.use({
 test.describe.configure({ mode: "serial" });
 
 const TERRACOTTA = "rgb(217, 119, 87)"; // --accent: sliders, radios, focus rings
-const TERRACOTTA_STRONG = "rgb(181, 83, 47)"; // --accent-strong: fills with white text
+const TERRACOTTA_STRONG = "rgb(217, 119, 87)"; // --accent-strong: fills with white text; the brand colour itself since v0.38.1
 const PIXEL_UA =
   "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36";
 
@@ -169,8 +170,8 @@ test.describe("voice on a phone with the Promptly app", () => {
     // Contrast and labels in the sheet (serious / critical only), the
     // terracotta Let's check button included.
     const { violations } = await new AxeBuilder({ page: alice }).include('[data-testid="voice-settings"]').withTags(["wcag2a", "wcag2aa"]).analyze();
-    const serious = violations.filter((v) => v.impact === "serious" || v.impact === "critical");
-    expect(serious.map((v) => `${v.id}: ${v.nodes.map((n) => `${n.target.join(" ")}: ${(n.failureSummary ?? "").replace(/\s+/g, " ")}`).join(" | ")}`)).toEqual([]);
+    // (White on the brand terracotta is tracked on its own: lib/axe.ts.)
+    expect(await seriousFindings(alice, "voice settings", violations)).toEqual([]);
 
     await sheet.getByTestId("use-voice-activity").click();
     await expect(sheet.getByRole("radio", { name: "Voice activity" })).toHaveAttribute("aria-checked", "true");

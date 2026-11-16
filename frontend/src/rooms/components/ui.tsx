@@ -63,7 +63,7 @@ export function CountBadge({ n, className }: { n: number; className?: string }) 
   return (
     <span
       className={cn(
-        "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--danger)] px-1 text-xs font-bold leading-none text-white",
+        "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--danger-fill)] px-1 text-xs font-bold leading-none text-white",
         className,
       )}
     >

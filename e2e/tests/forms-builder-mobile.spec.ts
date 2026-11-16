@@ -2,6 +2,10 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
 import { expect, stamp, test } from "../fixtures";
+import { forgetFormSubmits } from "../lib/stack";
+
+// One address, many "people": see forgetFormSubmits.
+test.beforeEach(() => forgetFormSubmits());
 
 /** Forms WP-F1.2 on a phone (375×812): the Forms home's + button and
  *  template sheet, building with the bottom add bar, the full-screen
