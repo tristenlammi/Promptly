@@ -402,7 +402,10 @@ async def _box_of(db: AsyncSession, user: User, home_id: uuid.UUID, box_id: uuid
     return box
 
 
-_ID = r"^[A-Za-z0-9_.-]{1,80}$"
+# Ids of Home Assistant's own things (a set-up, an entry, a room). The box
+# puts some of them into a path, so never "." or "..": it starts with a
+# letter, a digit or an underscore.
+_ID = r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,79}$"
 SETUP = [Depends(_on), Depends(_setup_limit)]
 
 

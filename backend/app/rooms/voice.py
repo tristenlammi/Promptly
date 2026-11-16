@@ -138,9 +138,18 @@ def _att_path(att: RoomAttachment) -> str:
     return att_path(att)
 
 
-async def _run(*args: str) -> int:
+RUN_S = 120.0
+
+
+async def _run(*args: str, timeout: float = RUN_S) -> int:
+    """Run one command; a recording made to keep it busy is stopped."""
     proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-    await proc.wait()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return 124
     return proc.returncode or 0
 
 

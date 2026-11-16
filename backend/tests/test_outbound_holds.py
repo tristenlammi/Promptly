@@ -271,7 +271,7 @@ def test_an_address_of_their_own_words_opens_without_a_yes():
     for url in (
         "https://www.eckersleys.com.au/search?q=canson+mi+teintes+pastel+pad",
         "https://www.eckersleys.com.au/search?q=canson%20pastel%20pad",
-        "https://artsupplies.example/search?q=canson+pad",  # a host the search found
+        "https://eckersleys.com.au/collections/canson",
     ):
         guard_outbound(_ctx(turn), "opening a shop", url=url)
 
@@ -287,6 +287,19 @@ def test_an_address_of_their_own_words_opens_without_a_yes():
         "https://canson:pad@eckersleys.com.au/",  # credentials
         "https://eckersleys.com.au:8443/search?q=canson",  # an odd port
         "https://10.0.0.7/search?q=canson",
+        # Security review 2026-11: no slack a page could use as a code.
+        "https://artsupplies.example/search?q=canson+pad",  # a site the search found is where a hostile page comes from
+        "https://www.eckersleys.com.au/search?q=pad+canson",  # their words, but not in their order
+        "https://www.eckersleys.com.au/search?q=canson+canson+pad",  # a word twice
+        "https://www.eckersleys.com.au/shop/help/news/blog/docs?q=canson",  # furniture as a code
+        "https://www.eckersleys.com.au/search/search?q=canson",  # ...or said twice
+        "https://www.eckersleys.com.au/search?q=canson%2520pad",  # encoded twice
+        "https://eckersleys-canson.com.au/search?q=pad",  # their words joined into a name nobody typed
+        "https://xn--eckersleys-9ib.com.au/search?q=canson",  # letters that only look like theirs
+        "https://еckersleys.com.au/search?q=canson",  # the same, written out
+        r"https://eckersleys.com.au\@evil.example/search?q=canson",  # read two ways
+        "https://com.au/search?q=canson",  # no word of theirs in the site's name
+        "ftp://eckersleys.com.au/canson",
     ],
 )
 def test_anything_else_in_the_address_still_waits(url):
@@ -307,3 +320,13 @@ def test_words_searched_after_reading_outside_content_do_not_count():
     start_step(turn, ["fetch_url"])
     with pytest.raises(HoldForApproval):
         guard_outbound(_ctx(turn), "opening a site", url="https://eckersleys.com.au/search?q=secretnotes")
+
+
+def test_a_sub_agent_keeps_the_order_of_its_parents_words():
+    from app.chat.tools.base import inherit_words, url_is_plain
+
+    parent = _searched_turn("Is the Canson pad cheaper at Eckersley's?", "canson mi teintes pastel pad price")
+    sub = TurnState(untrusted=True, own_attachments_only=False)
+    inherit_words(sub, parent)
+    assert url_is_plain(sub, "https://www.eckersleys.com.au/search?q=canson+pastel+pad")
+    assert not url_is_plain(sub, "https://www.eckersleys.com.au/search?q=pad+canson")

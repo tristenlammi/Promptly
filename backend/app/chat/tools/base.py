@@ -342,48 +342,85 @@ def url_allowed(turn: dict[str, Any] | None, url: str) -> bool:
     return bool(k and turn and k in (turn.get("allowed_urls") or ()))
 
 
-# An address made only of the person's own words can't be carrying anything
+# An address made only of the person's own words can't be carrying much that
 # a page told the model to send: "eckersleys.com.au/search?q=canson+pastel+pad"
 # after they asked about Canson pads at Eckersley's. Such an address opens
 # without a yes. The words are what they typed this turn and what the turn
-# searched for *before* it had read anything from outside; every other part
-# of the address (host labels, path, parameter names and values) must be one
-# of those words or plain address furniture. Letters and digits a page could
-# spell data with ("/s/e/c/r/e/t", "?id=4471") are not furniture.
+# searched for *before* it had read anything from outside.
+#
+# A page that has got its instructions in front of the model would like to
+# use any slack in this rule as a code ("open /shop/help/news/blog/..." with
+# the order spelling out what the model knows). So the rule leaves very
+# little slack (security review, 2026-11):
+#
+# * the site is one the person named: every label of its name is one of
+#   their words or a plain ending (com, au, www...), and at least one is
+#   theirs. A site that only turned up in the search results doesn't count:
+#   that is where a hostile page comes from;
+# * after the site's name, their words come in the order they wrote them in
+#   one piece of text (their message, or one search), each at most once.
+#   Picking some of ten words in their own order says almost nothing;
+# * at most four other words, each a plain piece of an address ("search",
+#   "q", "products"), each once. Letters and digits a page could spell data
+#   with ("/s/e/c/r/e/t", "?id=4471") are not furniture.
+_HOST_FURNITURE = frozenset("www com net org edu gov co au nz uk us ca ie io app shop store".split())
 _URL_FURNITURE = frozenset(
     """
-    www com net org edu gov co au nz uk us ca ie io app shop store
     search find results result query q s k kw keyword keywords term terms text
     products product collections collection category categories catalog catalogue
     items item pages page blog news article articles help support docs
-    index html htm php aspx en
+    index html htm php aspx en shop store
     """.split()
 )
 _WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+MAX_PLAIN_FURNITURE = 4
+MAX_WORD_SOURCES = 12
+
+
+def _word_lists(text: str | None) -> list[list[str]]:
+    """The words of a piece of text in order, read both ways: "Eckersley's"
+    as "eckersley", "s" and as "eckersleys" (the way a site spells it)."""
+    low = (text or "").lower()
+    a = _WORD_RE.findall(low)
+    b = _WORD_RE.findall(re.sub(r"['\u2019\u2018`]", "", low))
+    return [a] if a == b else [a, b]
 
 
 def words_in(text: str | None) -> set[str]:
     """Lower-case words of a piece of text; "Eckersley's" also counts as
-    "eckersleys", the way a site spells it."""
-    low = (text or "").lower()
-    out = set(_WORD_RE.findall(low))
-    out.update(_WORD_RE.findall(re.sub(r"['\u2019\u2018`]", "", low)))
-    return out
+    "eckersleys"."""
+    return {w for words in _word_lists(text) for w in words}
 
 
 def allow_words(turn: dict[str, Any] | None, text: Any) -> None:
-    """Words the person typed (or the turn searched for before reading
-    anything): an address made only of them opens without a yes."""
-    if turn is None:
+    """One piece of the person's own text (their message, or a search the
+    turn made before reading anything): an address made of its words, in
+    its order, opens without a yes."""
+    if turn is None or not isinstance(text, str) or not text.strip():
         return
     words = turn.get("allowed_words")
     if not isinstance(words, set):
         words = set()
         dict.__setitem__(turn, "allowed_words", words)
-    if isinstance(text, (set, frozenset, list, tuple)):
-        words.update(str(w) for w in text)
-    else:
-        words.update(words_in(str(text or "")))
+    sources = turn.get("allowed_word_sources")
+    if not isinstance(sources, list):
+        sources = []
+        dict.__setitem__(turn, "allowed_word_sources", sources)
+    for one in _word_lists(text[:4000]):
+        words.update(one)
+        if one not in sources and len(sources) < MAX_WORD_SOURCES:
+            sources.append(one)
+
+
+def inherit_words(turn: dict[str, Any] | None, parent: dict[str, Any] | None) -> None:
+    """A sub-agent starts with its parent's words (and their order)."""
+    if turn is None or not parent:
+        return
+    words = parent.get("allowed_words")
+    sources = parent.get("allowed_word_sources")
+    if isinstance(words, set) and isinstance(sources, list):
+        dict.__setitem__(turn, "allowed_words", set(words))
+        dict.__setitem__(turn, "allowed_word_sources", [list(x) for x in sources if isinstance(x, list)])
 
 
 def note_search_query(turn: dict[str, Any] | None, query: Any) -> None:
@@ -396,35 +433,58 @@ def note_search_query(turn: dict[str, Any] | None, query: Any) -> None:
         allow_words(turn, query)
 
 
+def _in_order(tokens: list[str], source: list[str]) -> bool:
+    """``tokens`` appear in ``source`` in this order (not necessarily side by side)."""
+    at = 0
+    for t in tokens:
+        try:
+            at = source.index(t, at) + 1
+        except ValueError:
+            return False
+    return True
+
+
 def url_is_plain(turn: dict[str, Any] | None, url: str) -> bool:
-    """True when every word of the address is the person's own or address
-    furniture, so it can't carry anything else out."""
+    """True when the address goes to a site the person named and says only
+    their own words, in their own order (see above)."""
     if not turn or len(url or "") > 300:
         return False
     words = turn.get("allowed_words")
-    if not isinstance(words, set) or not words:
+    sources = turn.get("allowed_word_sources")
+    if not isinstance(words, set) or not words or not isinstance(sources, list):
         return False
     raw = (url or "").strip()
+    if any(c in raw for c in "\\\t\r\n") or raw != (url or ""):
+        return False  # nothing a browser and a parser could read two ways
     if not re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.I):
         raw = "http://" + raw
     try:
         parts = urlsplit(raw)
         host = (parts.hostname or "").lower()
-        if not host or parts.username or parts.password:
+        if parts.scheme.lower() not in ("http", "https") or not host or parts.username or parts.password:
             return False
         if parts.port and parts.port not in (80, 443):
             return False
     except ValueError:
         return False
-    if re.fullmatch(r"[0-9.]+|\[.*\]", host):
-        return False  # a bare IP address is nobody's word
-    allowed_hosts = {k.split("/", 1)[0].split("?", 1)[0] for k in (turn.get("allowed_urls") or ())}
-    bare = host[4:] if host.startswith("www.") else host
-    ok = words | _URL_FURNITURE
-    if bare not in allowed_hosts and not all(lbl in ok for lbl in _WORD_RE.findall(host)):
+    if not host.isascii() or re.fullmatch(r"[0-9.]+|\[.*\]", host):
+        return False  # a bare IP address, or letters that only look like theirs
+    labels = host.split(".")
+    if any(not re.fullmatch(r"[a-z0-9]+", lbl) for lbl in labels):
+        return False  # hyphens join words into names nobody typed; "xn--" hides others
+    if not all(lbl in words or lbl in _HOST_FURNITURE for lbl in labels) or not any(lbl in words and lbl not in _HOST_FURNITURE for lbl in labels):
         return False
     rest = unquote_plus(f"{parts.path} {parts.query} {parts.fragment}").lower()
-    return all(tok in ok for tok in _WORD_RE.findall(rest))
+    if "%" in rest:
+        return False  # encoded twice
+    tokens = _WORD_RE.findall(rest)
+    own = [t for t in tokens if t not in _URL_FURNITURE]
+    furniture = [t for t in tokens if t in _URL_FURNITURE]
+    if len(furniture) > MAX_PLAIN_FURNITURE or len(set(furniture)) != len(furniture):
+        return False
+    if len(set(own)) != len(own):
+        return False
+    return any(_in_order(own, src) for src in sources) if own else True
 
 
 def start_step(turn: dict[str, Any] | None, tool_names: Any) -> None:

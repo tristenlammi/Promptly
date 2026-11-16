@@ -268,6 +268,27 @@ async def create_subscription(
     )
 
 
+async def _push_address_ok(endpoint: str) -> None:
+    """A push address is somewhere this server will POST to on its own,
+    again and again, so it has to be a real push service out on the
+    internet: https, and not this machine, the home network or the
+    deployment's own services (anyone signed in could otherwise point the
+    server at them)."""
+    import asyncio
+
+    from app.net.safe_fetch import UnsafeURLError, assert_url_is_safe
+
+    bad = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That isn't a push service address.")
+    if not isinstance(endpoint, str) or not endpoint.lower().startswith("https://") or len(endpoint) > 2000:
+        raise bad
+    try:
+        await asyncio.to_thread(assert_url_is_safe, endpoint)
+    except UnsafeURLError as e:
+        if getattr(e, "reason", "") == "dns_failure":
+            return  # a name that goes nowhere can't be reached either
+        raise bad from e
+
+
 async def _upsert_subscription(
     db: AsyncSession,
     user: User,
@@ -279,6 +300,7 @@ async def _upsert_subscription(
     covered_by: str | None = None,
 ) -> SubscriptionSummary:
     """One row per (person, endpoint): a repeat updates it in place."""
+    await _push_address_ok(endpoint)
     p256dh = keys.get("p256dh")
     auth = keys.get("auth")
     if not p256dh or not auth:

@@ -24,6 +24,7 @@ logger = logging.getLogger("promptly.rooms.service")
 MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 MAX_ATTACHMENTS = 10
 THUMB_EDGE = 1440
+THUMB_MAX_PIXELS = 80_000_000
 
 
 async def dm_refusal(db: AsyncSession, room: Room, user_id: uuid.UUID) -> str | None:
@@ -256,6 +257,10 @@ def _thumbnail(att: RoomAttachment, path) -> None:  # noqa: ANN001
             # A GIF or animated WebP plays in the chat (the thumbnail below
             # is its first frame, for people who've asked for less motion).
             att.animated = bool(getattr(img, "is_animated", False)) and (getattr(img, "n_frames", 1) or 1) > 1
+            if img.width * img.height > THUMB_MAX_PIXELS:
+                # Too big to open safely: it stays a file to download.
+                att.width, att.height = img.size
+                return
             img = ImageOps.exif_transpose(img)
             att.width, att.height = img.size
             if img.mode not in ("RGB", "RGBA"):

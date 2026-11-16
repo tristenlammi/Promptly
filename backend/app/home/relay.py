@@ -360,6 +360,21 @@ def _note_bad(ip: str, now: float) -> None:
         _bad.clear()
 
 
+def _caller(ws: WebSocket) -> str:
+    """Who is dialling, for counting wrong hellos. Behind nginx every socket's
+    peer is nginx itself, so the peer alone would put the whole internet (and
+    this server's own box) in one bucket: ten wrong hellos from anyone would
+    turn every box away. The same spoof-resistant address the rate limiter
+    uses: the forwarded one only when the peer is our own proxy."""
+    from app.auth.audit import request_meta
+
+    try:
+        ip, _ua = request_meta(ws)  # type: ignore[arg-type]  # reads .headers and .client only
+    except Exception:  # noqa: BLE001
+        ip = ""
+    return ip or (ws.client.host if ws.client else "?")
+
+
 async def _close(ws: WebSocket, code: int) -> None:
     try:
         await ws.close(code=code)
@@ -429,7 +444,7 @@ def _snapshot_of(live: Link) -> dict[str, Any]:
 async def serve(ws: WebSocket) -> None:
     """One box's connection, start to finish."""
     await ws.accept()
-    ip = ws.client.host if ws.client else "?"
+    ip = _caller(ws)
     now = time.monotonic()
     if _too_many_bad(ip, now):
         await _close(ws, CLOSE_BUSY)

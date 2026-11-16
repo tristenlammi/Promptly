@@ -159,7 +159,7 @@ async def run_agent(
         # get past the parent's outbound holds by handing the agent a URL.
         # Here a hold is a refusal (nobody to ask); the addresses the person
         # gave the parent and its search found stay openable.
-        from app.chat.tools.base import TurnState, allow_urls, allow_words
+        from app.chat.tools.base import TurnState, allow_urls, inherit_words
         from app.search.deepseek import mark_turn
 
         sub_turn = TurnState(untrusted=False, own_attachments_only=False)
@@ -169,7 +169,7 @@ async def run_agent(
             if seen.get("untrusted"):
                 sub_turn["untrusted"] = True
             allow_urls(sub_turn, parent_turn.get("allowed_urls") or ())
-            allow_words(sub_turn, parent_turn.get("allowed_words") or set())
+            inherit_words(sub_turn, parent_turn)
         mark_turn(sub_turn, provider)  # DeepSeek's Search/Fetch on a DeepSeek model
         text_parts: list[str] = []
         sources: list[dict[str, Any]] = []
