@@ -1,9 +1,9 @@
 // Biometric unlock (plan 3.5). The derived unlock and auth keys are sealed under a
 // Keystore key that needs a strong biometric for every use and dies when a new biometric
-// is enrolled. The master password never reaches the Keystore. Reprompt uses `confirm`,
-// which has to open what's sealed under that same key. Passkeys ask for the passkey PIN
-// instead (D86), and after five wrong PINs a biometric won't unlock until the master
-// password has.
+// is enrolled. The master password never reaches the Keystore. Reprompt and passkeys use
+// `confirm`, which has to open what's sealed under that same key: one biometric is the one
+// proof for a passkey (A74). After five wrong passkey PINs a biometric won't unlock until
+// the master password has.
 package org.promptly.sync.passwords
 
 import android.content.Context
@@ -54,11 +54,11 @@ object Biometrics {
         return gen.generateKey()
     }
 
-    private fun prompt(activity: FragmentActivity, title: String, subtitle: String?, crypto: BiometricPrompt.CryptoObject?, onDone: (Result<BiometricPrompt.AuthenticationResult>) -> Unit) {
+    private fun prompt(activity: FragmentActivity, title: String, subtitle: String?, crypto: BiometricPrompt.CryptoObject?, negative: String = "Use master password", onDone: (Result<BiometricPrompt.AuthenticationResult>) -> Unit) {
         val info = BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
             .apply { if (subtitle != null) setSubtitle(subtitle) }
-            .setNegativeButtonText("Use master password")
+            .setNegativeButtonText(negative)
             .setAllowedAuthenticators(STRONG)
             .setConfirmationRequired(false)
             .build()
@@ -71,6 +71,9 @@ object Biometrics {
 
     class Failed(message: String, val code: Int) : Exception(message) {
         val cancelled: Boolean get() = code == BiometricPrompt.ERROR_NEGATIVE_BUTTON || code == BiometricPrompt.ERROR_USER_CANCELED || code == BiometricPrompt.ERROR_CANCELED
+
+        /** They pressed the prompt's own other-way button ("Use PIN", "Use master password"). */
+        val otherWay: Boolean get() = code == BiometricPrompt.ERROR_NEGATIVE_BUTTON
     }
 
     /** Biometrics changed since this was set up, so the key is gone: fall back and say so. */
@@ -96,9 +99,13 @@ object Biometrics {
     }
 
     /** Hands the wrapped keys back to `onDone`. The caller passes them to the client. */
-    fun unlock(activity: FragmentActivity, onDone: (Result<ByteArray>) -> Unit) = open(activity, "Unlock Passwords", null, onDone)
+    fun unlock(activity: FragmentActivity, title: String = "Unlock Passwords", onDone: (Result<ByteArray>) -> Unit) = open(activity, title, null, onDone = onDone)
 
-    private fun open(activity: FragmentActivity, title: String, subtitle: String?, onDone: (Result<ByteArray>) -> Unit) {
+    /** Set up, usable right now, and not shut out by wrong passkey PINs (D88). */
+    fun ready(context: Context): Boolean =
+        enrolled && available(context) && Pw.client()?.let { org.promptly.sync.passwords.core.PasskeyPin.lockedOut(it.store) } != true
+
+    private fun open(activity: FragmentActivity, title: String, subtitle: String?, negative: String = "Use master password", onDone: (Result<ByteArray>) -> Unit) {
         val blob = Pw.prefs.biometricBlob
         val iv = Pw.prefs.biometricIv
         val key = runCatching { store().getKey(ALIAS, null) as? SecretKey }.getOrNull()
@@ -118,15 +125,16 @@ object Biometrics {
             onDone(Result.failure(e))
             return
         }
-        prompt(activity, title, subtitle, BiometricPrompt.CryptoObject(cipher)) { r ->
+        prompt(activity, title, subtitle, BiometricPrompt.CryptoObject(cipher), negative) { r ->
             onDone(r.mapCatching { res -> (res.cryptoObject?.cipher ?: error("No cipher")).doFinal(fromB64u(blob)) })
         }
     }
 
-    /** For "reprompt" items. Not just a callback: the answer has
-     *  to open what's sealed under the key, which dies when a new fingerprint's enrolled. */
-    fun confirm(activity: FragmentActivity, title: String, subtitle: String?, onDone: (Result<Unit>) -> Unit) {
-        open(activity, title, subtitle) { r ->
+    /** For "reprompt" items and passkeys. Not just a callback: the answer has
+     *  to open what's sealed under the key, which dies when a new fingerprint's enrolled.
+     *  `negative` names the other way out on the prompt itself. */
+    fun confirm(activity: FragmentActivity, title: String, subtitle: String?, negative: String = "Use master password", onDone: (Result<Unit>) -> Unit) {
+        open(activity, title, subtitle, negative) { r ->
             onDone(r.map { it.fill(0) })
         }
     }

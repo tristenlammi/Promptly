@@ -1,8 +1,8 @@
 // Credential Manager (Android 14+), the two-phase flow in the official docs. The service's
 // first phase answers fast with entries, from what's in memory. Picking one opens
-// CredentialActivity, which validates the request, checks who's asking, asks for the passkey PIN
-// (a passkey) or a biometric or the master password (a password marked to ask), and only then
-// signs or hands a password over.
+// CredentialActivity, which validates the request, checks who's asking, asks for ONE proof (A74:
+// a biometric where it's set up, else the passkey PIN; whatever just unlocked the vault counts
+// and nothing more is asked), and only then signs or hands a password over.
 package org.promptly.sync.passwords.credentials
 
 import android.app.PendingIntent
@@ -85,8 +85,12 @@ import org.promptly.sync.passwords.autofill.appOrigin
 import org.promptly.sync.passwords.core.Item
 import org.promptly.sync.passwords.core.LoginUrl
 import org.promptly.sync.passwords.core.Match
+import org.promptly.sync.passwords.Biometrics
 import org.promptly.sync.passwords.core.PasskeyPin
+import org.promptly.sync.passwords.core.PasskeyProof
 import org.promptly.sync.passwords.core.Passkeys
+import org.promptly.sync.passwords.core.ProofAsk
+import org.promptly.sync.passwords.core.ProofKind
 import org.promptly.sync.passwords.core.VaultClient
 import org.promptly.sync.passwords.core.b64u
 import org.promptly.sync.passwords.core.isoNow
@@ -94,6 +98,7 @@ import org.promptly.sync.passwords.core.newBody
 import org.promptly.sync.passwords.ui.ConfirmIdentityPane
 import org.promptly.sync.passwords.ui.ErrorCard
 import org.promptly.sync.passwords.ui.LookalikeWarning
+import org.promptly.sync.passwords.ui.PasskeyBiometricPane
 import org.promptly.sync.passwords.ui.PasskeyPinPane
 import org.promptly.sync.passwords.ui.PwTheme
 import org.promptly.sync.passwords.ui.UnlockPane
@@ -269,6 +274,8 @@ class CredentialActivity : FragmentActivity() {
         data object Unlock : Step()
         data class Confirm(val title: String, val detail: String, val button: String = "Save", val go: () -> Unit) : Step()
         data class Biometric(val title: String, val detail: String, val go: () -> Unit) : Step()
+        /** One biometric for a passkey, with "Use PIN" as the other way. */
+        data class Finger(val title: String, val detail: String, val choosing: Boolean, val go: () -> Unit) : Step()
         /** The passkey PIN. `choosing`: none's set yet, so it's chosen here. */
         data class Pin(val title: String, val detail: String, val choosing: Boolean, val go: () -> Unit) : Step()
         data class Lookalike(val page: String, val looksLike: String, val go: () -> Unit) : Step()
@@ -279,6 +286,9 @@ class CredentialActivity : FragmentActivity() {
     // when Compose isn't running. A step's closures hold the login or the passkey.
     private var step by mutableStateOf<Step>(Step.Loading)
     private var unlocked by mutableStateOf(false)
+
+    /** What unlocked the vault in this window, a moment ago. It's the one proof (A74): used once. */
+    private var just: ProofKind? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -294,8 +304,27 @@ class CredentialActivity : FragmentActivity() {
     /** The vault locked while this was open. After the unlock, the request's looked at from the start. */
     private fun lockedOut() {
         unlocked = false
+        just = null
         step = Step.Loading
     }
+
+    /** The proof for this request, if one's already been given: by the unlock in this window, or
+     *  by Credential Manager's unlock step just before this pick, for this app and this site. */
+    private fun proofGiven(pkg: String, rpId: String?): ProofKind? {
+        val mine = just
+        just = null
+        return mine ?: Pw.proofGrants.take(pkg, rpId, android.os.SystemClock.elapsedRealtime())
+    }
+
+    /** What stands between a checked passkey request and using the passkey: nothing, or one ask. */
+    private fun passkeyStep(given: ProofKind?, reprompt: Boolean, title: String, detail: String, itemTitle: String, choosing: Boolean, go: () -> Unit): Step? =
+        when (PasskeyProof.next(given, Biometrics.ready(this), reprompt)) {
+            ProofAsk.NOTHING -> null
+            // "Ask again" items fall back to the master password, others to the PIN.
+            ProofAsk.BIOMETRIC -> if (reprompt) Step.Biometric(title, itemTitle, go) else Step.Finger(title, detail, choosing, go)
+            ProofAsk.MASTER -> Step.Biometric(title, itemTitle, go)
+            ProofAsk.PIN -> Step.Pin(title, detail, choosing, go)
+        }
 
     /** It can have been a while, and Android's timer doesn't tick in deep sleep. */
     override fun onStart() {
@@ -344,7 +373,7 @@ class CredentialActivity : FragmentActivity() {
                 if (intent.action == PromptlyCredentialProviderService.ACTION_CREATE) failCreate(CreateCredentialCancellationException())
                 else if (intent.action == PromptlyCredentialProviderService.ACTION_UNLOCK) finish()
                 else failGet(GetCredentialCancellationException())
-            })
+            }, onProof = { just = it })
             return
         }
         when (intent.action) {
@@ -361,6 +390,17 @@ class CredentialActivity : FragmentActivity() {
     private fun FinishUnlock() {
         LaunchedEffect(Unit) {
             val req = PendingIntentHandler.retrieveBeginGetCredentialRequest(intent)
+            // The unlock just done is the proof for the pick that follows: for this app, the sites
+            // this request named, one use, a minute (A74). Otherwise the pick would ask again.
+            val given = just
+            just = null
+            val pkg = req?.callingAppInfo?.packageName
+            if (given != null && req != null && pkg != null) {
+                val rpIds = req.beginGetCredentialOptions.filterIsInstance<BeginGetPublicKeyCredentialOption>()
+                    .mapNotNull { o -> runCatching { Passkeys.parseGet(o.requestJson).rpId }.getOrNull() }
+                val passwords = req.beginGetCredentialOptions.any { it is BeginGetPasswordOption }
+                Pw.proofGrants.give(given, pkg, rpIds, passwords, android.os.SystemClock.elapsedRealtime())
+            }
             val data = Intent()
             val response = if (req == null) BeginGetCredentialResponse() else {
                 withContext(Dispatchers.IO) {
@@ -406,7 +446,7 @@ class CredentialActivity : FragmentActivity() {
                     val hash = option.clientDataHash
                     // A browser's origin needn't be the site the passkey's for (Related Origin Requests).
                     val looks = caller.origin?.takeIf { o -> Match.hostOf(o)?.let { Match.baseDomain(it) } != (Match.baseDomain(req.rpId) ?: req.rpId) }?.let { credentialLookalike(client.allItems(), caller) }
-                    Triple(Triple(req, item, chosen), origin, hash) to (caller.origin to looks)
+                    Triple(Triple(req, item, chosen), origin, hash) to Triple(caller.origin, looks, caller.pkg)
                 }
             }
             if (!Pw.unlocked) {
@@ -417,14 +457,12 @@ class CredentialActivity : FragmentActivity() {
             r.onSuccess { (held, seen) ->
                 val (t, origin, hash) = held
                 val (req, item, chosen) = t
-                // The passkey PIN, every time (D86). UV is reported only after it. An item marked
-                // to ask for more still asks, after the PIN.
-                val sign = Step.Pin("Sign in to ${req.rpId}", "As ${chosen.passkey.userName}", choosing) {
-                    if (item.body.reprompt) step = Step.Biometric("Confirm it's you", item.body.title) { signPasskey(client, item, chosen, req.challenge, origin, hash) }
-                    else signPasskey(client, item, chosen, req.challenge, origin, hash)
-                }
+                // One proof, never two (A74). UV is reported only after it.
+                val go = { signPasskey(client, item, chosen, req.challenge, origin, hash) }
+                val ask = passkeyStep(proofGiven(seen.third, req.rpId), item.body.reprompt, "Sign in to ${req.rpId}", "As ${chosen.passkey.userName}", item.body.title, choosing, go)
+                val proceed = { if (ask != null) step = ask else go() }
                 val looks = seen.second
-                step = if (looks != null) Step.Lookalike(seen.first ?: "", looks) { step = sign } else sign
+                if (looks != null) step = Step.Lookalike(seen.first ?: "", looks) { proceed() } else proceed()
             }.onFailure {
                 Log.w(TAG, "get passkey refused: ${it.javaClass.simpleName}")
                 step = Step.Fail(it.message ?: "That request can't be answered.")
@@ -433,11 +471,11 @@ class CredentialActivity : FragmentActivity() {
         Render(step) { failGet(GetCredentialCancellationException()) }
     }
 
-    /** Signs, only ever after the passkey PIN. */
+    /** Signs, only ever after the one proof: a biometric, the passkey PIN or the master password. */
     private fun signPasskey(client: VaultClient, item: Item, chosen: Passkeys.Usable, challenge: String, origin: String, hash: ByteArray?) {
         lifecycleScopeLaunch {
             val json = withContext(Dispatchers.IO) {
-                // uv: the passkey PIN was just typed.
+                // uv: the one proof was just given.
                 val a = Passkeys.getAssertion(chosen.passkey, challenge, origin, true, hash)
                 runCatching {
                     val passkeys = item.body.passkeys.map { if (it.credentialId == chosen.passkey.credentialId) it.copy(lastUsedAt = isoNow()) else it }
@@ -471,20 +509,24 @@ class CredentialActivity : FragmentActivity() {
                     val found = passwordsFor(client, caller).firstOrNull { it.id == itemId } ?: throw SecurityException("That login isn't for this app.")
                     // A saved https login asked for by an http page: the same question as autofill.
                     val insecure = caller.origin?.let { o -> Match.matchItems(listOf(found), "$o/").firstOrNull()?.downgrade } == true
-                    Triple(found, insecure, caller.origin) to credentialLookalike(client.allItems(), caller)
+                    Triple(found, insecure, caller.origin) to (credentialLookalike(client.allItems(), caller) to caller.pkg)
                 }
             }
             if (!Pw.unlocked) {
                 lockedOut()
                 return@LaunchedEffect
             }
-            r.onSuccess { (held, looks) ->
+            r.onSuccess { (held, more) ->
                 val (item, insecure, origin) = held
+                val (looks, pkg) = more
                 val send = {
                     Pw.markUsed(item.id)
                     finishGet(password = PasswordCredential(item.body.username ?: "", item.body.password ?: ""))
                 }
-                val checked = { if (item.body.reprompt) step = Step.Biometric("Confirm it's you", item.body.title, send) else send() }
+                // "Ask again": a biometric or the master password, unless one of them has just
+                // unlocked the vault for this very request (A74).
+                val given = proofGiven(pkg, null)
+                val checked = { if (item.body.reprompt && given == null) step = Step.Biometric("Confirm it's you", item.body.title, send) else send() }
                 val secureEnough = {
                     if (insecure) {
                         step = Step.Confirm("Not a secure page", "$origin is http, and this login was saved for https. Anyone on the network could read it.", "Fill anyway") { checked() }
@@ -514,7 +556,7 @@ class CredentialActivity : FragmentActivity() {
                             val parsed = Passkeys.parseCreate(req.requestJson)
                             val caller = callerOf(this@CredentialActivity, request.callingAppInfo)
                             val origin = originForPasskey(caller, parsed.rpId)
-                            parsed to origin
+                            Triple(parsed, origin, caller.pkg)
                         }
                     }
                     if (!Pw.unlocked) {
@@ -522,14 +564,14 @@ class CredentialActivity : FragmentActivity() {
                         return@LaunchedEffect
                     }
                     val choosing = withContext(Dispatchers.IO) { pinToChoose(client) }
-                    prepared.onSuccess { (parsed, origin) ->
+                    prepared.onSuccess { (parsed, origin, _) ->
                         val existing = Passkeys.allPasskeys(client.allItems()).filter { it.passkey.rpId == parsed.rpId }.map { Passkeys.siteCredentialId(it.passkey.credentialId) }
                         if (parsed.excludeCredentials.any { it in existing }) {
                             failCreate(CreatePublicKeyCredentialDomException(InvalidStateError(), "A passkey for this account already exists here."))
                             return@onSuccess
                         }
-                        // The passkey PIN, every time (D86). UV is reported only after it.
-                        step = Step.Pin("Create a passkey for ${parsed.rpId}", "As ${parsed.userName}", choosing) {
+                        // One proof, never two (A74). UV is reported only after it.
+                        val make: () -> Unit = {
                             lifecycleScopeLaunch {
                                 // It goes in the vault off this thread, and a lock can come on the way.
                                 val r = withContext(Dispatchers.IO) {
@@ -551,6 +593,11 @@ class CredentialActivity : FragmentActivity() {
                                 }.onFailure { failCreate(CreateCredentialUnknownException(errorText(it))) }
                             }
                         }
+                        // Making a passkey has no earlier unlock step of its own: only this window's.
+                        val mine = just
+                        just = null
+                        val ask = passkeyStep(mine, false, "Create a passkey for ${parsed.rpId}", "As ${parsed.userName}", parsed.rpId, choosing, make)
+                        if (ask != null) step = ask else make()
                     }.onFailure {
                         Log.w(TAG, "create passkey refused: ${it.javaClass.simpleName}")
                         step = Step.Fail(it.message ?: "That request can't be answered.")
@@ -600,6 +647,9 @@ class CredentialActivity : FragmentActivity() {
                 TextButton(onClick = cancel, Modifier.testTag("credential-cancel")) { Text("Cancel") }
             }
             is Step.Biometric -> ConfirmIdentityPane(this, step.title, step.detail, true, whileOpen(step.go), cancel)
+            is Step.Finger -> key(step) {
+                PasskeyBiometricPane(this, step.title, step.detail, whileOpen(step.go), { this.step = Step.Pin(step.title, step.detail, step.choosing, step.go) }, cancel)
+            }
             is Step.Pin -> key(step) { PasskeyPinPane(step.title, step.detail, step.choosing, whileOpen(step.go), cancel) }
             is Step.Lookalike -> LookalikeWarning(step.page, step.looksLike, emptyList(), "Fill anyway", cancel, whileOpen(step.go))
         }

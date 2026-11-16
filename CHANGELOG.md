@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Passwords on Android (next Promptly for Android): using a passkey takes one step. With fingerprint unlock on, one touch signs you in whether the vault was locked or open. Without it, an open vault asks for your passkey PIN and a locked one for your master password, never one after the other. A login marked "ask again" isn't asked for twice either.
+- Passwords on Android: after you type your master password on a phone with a fingerprint set up, it asks once whether to use your fingerprint next time. It was only in Settings before.
+
 ## [0.45.0] - 2026-11-16
 
 ### Added

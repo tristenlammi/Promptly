@@ -57,6 +57,8 @@ object Harness {
         Pw.init(ctx)
         runCatching { Pw.forgetDevice() }
         Pw.prefs.setupGuideDone = true
+        // "Use your fingerprint next time?" is its own test's business (A74).
+        Pw.prefs.biometricOffered = true
         val secret = randomBytes(16)
         val salt = randomBytes(16)
         val accountId = randomUuid()

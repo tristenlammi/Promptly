@@ -123,7 +123,8 @@ private fun Root(activity: PasswordsActivity) {
             joining = false
             refresh++
         }
-        !client.unlocked -> UnlockPane(activity, "Unlock Passwords", { refresh++ })
+        // Still the unlock pane while it asks, once, about using a fingerprint (A74).
+        !client.unlocked || BiometricOfferHold.pending -> UnlockPane(activity, "Unlock Passwords", { refresh++ })
         else -> {
             // Once. If it's all on already there's nothing to lead anyone through.
             var guide by remember {

@@ -225,13 +225,83 @@ class CredentialManagerE2ETest {
         tap("passkey-pin-go")
         waitFor(By.textContains("Five wrong passkey PINs in a row"), 25_000)
         assertFalse(Pw.unlocked)
-        // No biometric offered, and the master password brings the PIN back.
+        // No biometric offered. The master password opens it, and is the one proof for this
+        // sign-in: no PIN on top (A74). The count starts again.
         assertFalse(has(By.res("use-biometric"), 500))
         Harness.fill("master-password", Harness.MASTER)
         tap("unlock")
+        assertTrue(result().startsWith("got:"))
+        assertEquals(0, org.promptly.sync.passwords.core.PasskeyPin.tries(client.store))
+    }
+
+    private fun userVerified(got: String): Boolean {
+        val auth = Json.parseToJsonElement(got.removePrefix("got:")).jsonObject.getValue("response").jsonObject
+        return (fromB64u(auth.getValue("authenticatorData").jsonPrimitive.content)[32].toInt() and 0x04) != 0
+    }
+
+    /** A74, the case that was "unlock, then the PIN": with the vault locked and no biometric, the
+     *  master password on Credential Manager's unlock step is the one proof. Picking the passkey
+     *  then signs, with nothing more asked. */
+    @Test fun aLockedVaultTakesTheMasterPasswordAndNoPin() {
+        serveAssetLinks(assetLinksFor(TEST_APP, certOf(TEST_APP)))
+        start("createPasskey", "--es json64 ${b64u(utf8(createJson))}")
+        pickOurEntry("Continue", "Save passkey to Passwords", "Create")
+        Harness.fill("passkey-pin", PIN)
+        Harness.fill("passkey-pin-again", PIN)
+        tap("passkey-pin-go")
+        assertTrue(result().startsWith("created:"))
+
+        client.lock()
+        start("getPasskey", "--es json64 ${b64u(utf8(getJson))}")
+        pickOurEntry("Unlock Passwords")
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        pickOurEntry("ana@passkey.test")
+        val got = result()
+        assertTrue(got, got.startsWith("got:"))
+        assertTrue("UV", userVerified(got))
+        assertFalse(Pw.proofGrants.waiting)
+
+        // That unlock was for that one sign-in. The next one, vault still open, asks for the PIN.
+        start("getPasskey", "--es json64 ${b64u(utf8(getJson))}")
+        pickOurEntry("ana@passkey.test")
         Harness.fill("passkey-pin", PIN)
         tap("passkey-pin-go")
         assertTrue(result().startsWith("got:"))
+    }
+
+    /** A74: making a passkey with the vault locked. The master password, then it's made. */
+    @Test fun makingAPasskeyWhileLockedAsksOnce() {
+        serveAssetLinks(assetLinksFor(TEST_APP, certOf(TEST_APP)))
+        client.lock()
+        start("createPasskey", "--es json64 ${b64u(utf8(createJson))}")
+        pickOurEntry("Continue", "Save passkey to Passwords", "Create")
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        val created = result()
+        assertTrue(created, created.startsWith("created:"))
+        assertTrue(client.allItems().any { it.body.kind == "passkey" })
+        // No PIN was asked for, so none was chosen.
+        assertEquals(null, org.promptly.sync.passwords.core.PasskeyPin.of(client))
+    }
+
+    /** A74: an "ask again" login with the vault locked. The unlock is the proof; it isn't asked twice. */
+    @Test fun anAskAgainLoginIsntAskedTwiceAfterAnUnlock() {
+        client.saveNew(client.personalVaultId(), newBody("login", "Guarded cred").withText("username", "guarded-user").withText("password", "cred-Guard-1!").withFlag("reprompt", true).withUrls(listOf(Match.appUrl(TEST_APP, certOf(TEST_APP)))))
+        client.lock()
+        start("getPassword")
+        pickOurEntry("Unlock Passwords")
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        pickOurEntry("guarded-user")
+        assertEquals("password:guarded-user:cred-Guard-1!", result())
+
+        // Open already: now it does ask.
+        start("getPassword")
+        pickOurEntry("guarded-user")
+        Harness.fill("confirm-password", Harness.MASTER)
+        tap("confirm")
+        assertEquals("password:guarded-user:cred-Guard-1!", result())
     }
 
     /** Which sites got asked about says which accounts you have, so it's kept sealed. */

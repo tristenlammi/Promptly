@@ -276,6 +276,11 @@ class PwPrefs(context: Context) {
         get() = prefs.getString("bio_iv", null)
         set(v) = prefs.edit().putString("bio_iv", v).apply()
 
+    /** "Use your fingerprint next time?" has been shown on this phone: it's asked once (A74). */
+    var biometricOffered: Boolean
+        get() = prefs.getBoolean("bio_offered", false)
+        set(v) = prefs.edit().putBoolean("bio_offered", v).apply()
+
     /** Sites where the person said never to offer saving. */
     var neverSave: Set<String>
         get() = prefs.getStringSet("never_save", emptySet())!!.toSet()
@@ -623,7 +628,11 @@ object Pw {
         }
     }
 
+    /** A proof given on Credential Manager's unlock step, for the pick that follows (A74). */
+    val proofGrants = org.promptly.sync.passwords.core.ProofGrants()
+
     fun lock(why: String = "user") {
+        proofGrants.clear()
         val c = clientInstance ?: return
         Log.i(TAG, "lock: $why")
         locking = true
