@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-16
+
 ### Changed
 
 - Passwords extension 0.2.2: clicking a card box on a checkout lists your saved cards (name, brand and last four digits). Pick one and the toolbar panel opens with it at the top; Fill there asks once, then fills every card box on the page. Cards still never fill from one click on the page.
