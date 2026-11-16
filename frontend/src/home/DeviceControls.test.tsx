@@ -67,6 +67,9 @@ describe("every kind of device", () => {
     expect(stateWords(entity({ id: "alarm_control_panel.house", domain: "alarm_control_panel", state: "armed_away" }))).toBe("Armed away");
     expect(stateWords(entity({ id: "scene.x", domain: "whatever", state: "2026-11-16T10:00:00+00:00" }))).toBe("");
     expect([modeWord("fan_only"), modeWord("heat_cool"), fanWord("intelligent_auto"), fanWord("diffuse"), fanWord("Level 3")]).toEqual(["Fan", "Auto", "Smart auto", "Quiet", "Level 3"]);
+    expect(stateWords(entity({ id: "sensor.gas", domain: "sensor", state: "0.028316846592", unit: "m³" }))).toBe("0.028 m³");
+    expect(stateWords(entity({ id: "sensor.t", domain: "sensor", state: "21.5", unit: "°C" }))).toBe("21.5 °C");
+    expect(stateWords(entity({ id: "sensor.mode", domain: "sensor", state: "eco" }))).toBe("Eco");
     expect(countWords("climate", 3)).toBe("3 air con and heaters");
     expect(countWords("vacuum", 1)).toBe("1 robot vacuum");
   });

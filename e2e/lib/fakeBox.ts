@@ -4,7 +4,7 @@
 // driven end to end: devices by room, a tap that changes one, going offline.
 import { BASE_URL } from "./stack";
 
-export type Entity = { id: string; domain: string; name: string; state: string; area?: string; unit?: string; cls?: string; dev?: string };
+export type Entity = { id: string; domain: string; name: string; state: string; area?: string; unit?: string; cls?: string; dev?: string; x?: Record<string, unknown> };
 type Setup = { s: string; b: string; k: string };
 
 export function readSetup(setup: string): Setup {
@@ -59,7 +59,12 @@ export class FakeBox {
       const e = this.entities.find((x) => x.id === args.entity);
       if (!e) return this.send({ t: "res", id, ok: false, error: "No such device" });
       const a = String(args.action);
-      e.state = a === "turn_on" ? "on" : a === "turn_off" ? "off" : e.state === "on" ? "off" : "on";
+      if (a === "turn_on") e.state = e.domain === "climate" ? String(e.x?.last ?? "fan_only") : "on";
+      else if (a === "turn_off") e.state = "off";
+      else if (a === "mode") e.state = String(args.value);
+      else if (a === "pause") e.state = "paused";
+      else if (a === "play") e.state = "playing";
+      else if (a === "toggle") e.state = e.state === "on" ? "off" : "on";
       this.send({ t: "res", id, ok: true, data: null });
       return this.send({ t: "state", e });
     }

@@ -376,7 +376,7 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
             )}
             {scenes.length > 0 && (
               // One line that scrolls sideways: a brand can bring a dozen scenes to a room.
-              <ul className={cn("-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:-mx-6 md:px-6", tiles.length > 0 && "mt-3")} aria-label={`${room} scenes`}>
+              <ul className={cn("-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [-ms-overflow-style:none] md:-mx-6 md:px-6 [&::-webkit-scrollbar]:hidden", tiles.length > 0 && "mt-3")} aria-label={`${room} scenes`}>
                 {scenes.map((e) => (
                   <li key={keyOf(e)} className="shrink-0">
                     <button type="button" disabled={!e.online || e.state === "unavailable" || runScene.isPending} onClick={() => runScene.mutate(e)} className="inline-flex h-10 max-w-52 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">

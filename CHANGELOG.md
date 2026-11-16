@@ -32,6 +32,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Home: turning an air conditioner on brings back the mode it was last in. Before, the system underneath chose for you, and chose heating before cooling.
 - Home: devices in a room are in a steadier order: lights, then air con, speakers and TVs, then the rest.
 - Home: a brand that needs you to sign in on its maker's own website now says plainly that it isn't supported yet, instead of stopping without a reason.
+- Home: when adding a device, the box asking for its network address is labelled "Address", and WiiM and AirTouch 5 say where to find it.
+- Home: long readings are shortened ("0.028 m³", not "0.028316846592 m³").
+
+### Fixed
+
+- Home: sorting several devices into a room no longer stops at the first one that can't be moved; the rest still go, and one that can't be renamed or placed says why in plain words.
 
 
 ## [0.46.0] - 2026-11-16

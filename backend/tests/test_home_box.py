@@ -61,7 +61,7 @@ LOGIN_WORDS = {"component.acme.config.step.user.description": "Sign in at {url} 
 def test_hue_asks_for_the_bridge_then_for_its_button():
     step = pb.shape_flow(HUE_MANUAL, HUE_WORDS, "Philips Hue")
     assert (step["kind"], step["title"]) == ("form", "Your Hue bridge's address")
-    assert step["fields"] == [{"name": "host", "label": "Host", "required": True, "type": "text"}]
+    assert step["fields"] == [{"name": "host", "label": "Address", "required": True, "type": "text"}]
 
     link = pb.shape_flow(HUE_LINK, HUE_WORDS, "Philips Hue")
     # No fields: "press the button, then Continue". Home Assistant is never named, and its picture is dropped.
@@ -439,7 +439,11 @@ def test_wiim_and_airtouch_ask_for_an_address_in_plain_words():
     assert step["title"] == "Your WiiM's address" and "WiiM Home app" in step["text"] and step["fields"][0]["type"] == "text"
     step = pb.shape_flow({"type": "form", "flow_id": "f", "handler": "airtouch5", "step_id": "user", "data_schema": host, "errors": {"base": "cannot_connect"}}, {}, "AirTouch 5")
     assert step["title"] == "Your AirTouch 5's address" and step["errors"]["base"].startswith("Couldn't reach it")
+    assert step["fields"][0]["label"] == "Address"  # not "Host"
     assert {"wiim", "airtouch5"} <= {b[0] for b in pb.BRANDS}
+    # Google Nest starts by sending you off to make a developer project: said plainly instead.
+    nest = pb.shape_flow({"type": "form", "flow_id": "f", "handler": "nest", "step_id": "create_cloud_project", "data_schema": [], "errors": {}}, {}, "Google Nest")
+    assert nest["kind"] == "elsewhere" and "doesn't support yet" in nest["text"]
 
 
 def test_the_server_and_the_box_agree_on_what_is_nobodys_device():

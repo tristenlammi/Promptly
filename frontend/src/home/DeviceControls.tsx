@@ -142,8 +142,11 @@ function Temperature({ e, disabled, onSet }: { e: HomeEntity; disabled: boolean;
 /** A small switch for a row (a zone in its unit's list). */
 function RowSwitch({ on, label, disabled, onFlip }: { on: boolean; label: string; disabled?: boolean; onFlip: () => void }) {
   return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={onFlip} className={cn("relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2", on ? "bg-[var(--accent-strong)]" : "bg-[var(--border)]")}>
-      <span className={cn("absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all", on ? "left-[22px]" : "left-0.5")} />
+    // The button is the finger-sized target; the track inside it is the switch you see.
+    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={onFlip} className="group inline-flex h-11 w-14 shrink-0 items-center justify-center rounded-full disabled:opacity-50 focus-visible:outline-none">
+      <span className={cn("relative block h-7 w-12 rounded-full transition group-focus-visible:ring-2 group-focus-visible:ring-[var(--accent)] group-focus-visible:ring-offset-2", on ? "bg-[var(--accent-strong)]" : "bg-[var(--border)]")}>
+        <span className={cn("absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all", on ? "left-[22px]" : "left-0.5")} />
+      </span>
     </button>
   );
 }
@@ -174,7 +177,7 @@ export function ClimateControls({ home, e, dead, busy, go, onOpen }: { home: Hom
             <HomeIcon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
             <span className="min-w-0 flex-1 text-sm">
               <span className="block truncate font-medium text-[var(--text)]">Part of {unit.name}</span>
-              <span className="block truncate text-[var(--text-muted)]">{unit.state === "off" ? (on ? "The air con is off, so nothing is blowing here yet" : "The air con is off") : stateWords(unit)}</span>
+              <span className="block text-[var(--text-muted)]">{unit.state === "off" ? (on ? "The air con is off, so nothing is blowing here yet" : "The air con is off") : stateWords(unit)}</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
           </button>

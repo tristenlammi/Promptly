@@ -26,7 +26,11 @@ export function stateWords(e: HomeEntity): string {
   if (!e.online) return "Offline";
   const s = e.state;
   if (s === "unavailable" || s === "unknown" || s === "") return "Not responding";
-  if (e.domain === "sensor") return e.unit ? `${s} ${e.unit}` : s;
+  if (e.domain === "sensor") {
+    // "0.028316846592 m³" is nobody's reading: three figures after the point at most.
+    const n = /^-?\d+\.\d{4,}$/.test(s) ? String(Number(Number(s).toFixed(3))) : s;
+    return e.unit ? `${n} ${e.unit}` : cap(n);
+  }
   if (e.domain === "binary_sensor") {
     const on = s === "on";
     if (e.cls === "door" || e.cls === "window" || e.cls === "opening" || e.cls === "garage_door") return on ? "Open" : "Closed";

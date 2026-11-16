@@ -187,6 +187,12 @@ OUR_STOPS: dict[tuple[str, str], str] = {
     ("*", "cloud_not_connected"): "This brand needs a paid cloud service, which Promptly doesn't use. It isn't supported yet.",
     ("*", "not_supported"): "This one isn't supported yet.",
 }
+CANT_PLACE = "This device can't be renamed or put in a room: it doesn't tell Promptly enough about itself."
+# Steps that send someone off to make a developer account with the maker
+# (Google Nest's "create a Cloud Project"): the same "not supported yet".
+DEVELOPER_STEPS = {"create_cloud_project", "cloud_project", "device_project", "pubsub", "pick_implementation"}
+# Home Assistant's label -> ours, where its word means nothing to most people.
+OUR_LABELS = {"Host": "Address", "IP address": "Address", "IP Address": "Address", "Hostname or IP address": "Address"}
 CLIENT_ID = "http://promptly-box.local/"
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 # Close codes the server uses to say "don't keep trying like this".
@@ -589,7 +595,8 @@ def found_one(flow: dict[str, Any], manifests: dict[str, dict[str, Any]], words:
 def shape_field(f: dict[str, Any], label: str, hint: str) -> dict[str, Any]:
     """One field of a Home Assistant form, as something to draw."""
     name = str(f.get("name") or "")
-    out: dict[str, Any] = {"name": name, "label": label or name.replace("_", " ").capitalize(), "required": bool(f.get("required")), "type": "unsupported"}
+    label = OUR_LABELS.get(label, label) or ("Address" if name == "host" else name.replace("_", " ").capitalize())
+    out: dict[str, Any] = {"name": name, "label": label, "required": bool(f.get("required")), "type": "unsupported"}
     if hint:
         out["hint"] = hint
     default = f.get("default")
@@ -672,7 +679,7 @@ def shape_flow(r: dict[str, Any], words: dict[str, str], brand_name: str) -> dic
         text = our_words(OUR_STOPS, brand, reason) or words.get(f"{base}.abort.{reason}") or "This couldn't be added."
         out.update(kind="stopped", reason=reason, text=_say(text, places))
         return out
-    if kind in ("external", "external_done"):
+    if kind in ("external", "external_done") or (kind in ("form", "menu") and step in DEVELOPER_STEPS):
         out.update(kind="elsewhere", text=ELSEWHERE)
         return out
     if kind in ("show_progress", "show_progress_done"):
@@ -1291,13 +1298,21 @@ class HomeAssistant:
         if op == "devices.place":
             area = str(a.get("area") or "")
             done: set[str] = set()
+            moved = failed = 0
             for eid in [str(i) for i in a.get("entities") or []][:200]:
                 device = self._device_of.get(eid)
                 if device in done:
                     continue
-                await self._device_update({"entity_id": eid, "device_id": device, "area": area})
+                # One that can't be moved doesn't stop the rest.
+                try:
+                    await self._device_update({"entity_id": eid, "device_id": device, "area": area})
+                    moved += 1
+                except RuntimeError:
+                    failed += 1
                 if device:
                     done.add(device)
+            if failed and not moved:
+                raise RuntimeError(CANT_PLACE)
             return None
         if op == "room.lights":
             area, action = str(a.get("area") or ""), str(a.get("action") or "")
@@ -1348,7 +1363,11 @@ class HomeAssistant:
         elif entity:
             if a.get("name"):
                 change["name"] = str(a["name"])[:80]
-            await self.ask({"type": "config/entity_registry/update", "entity_id": entity, **change})
+            try:
+                await self.ask({"type": "config/entity_registry/update", "entity_id": entity, **change})
+            except RuntimeError as e:
+                # A few devices give Home Assistant nothing to remember them by.
+                raise RuntimeError(CANT_PLACE if "not found" in str(e).lower() else str(e)) from e
         else:
             raise RuntimeError("Which device?")
 
