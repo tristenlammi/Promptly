@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- P Maps (Android, phone and car): the time left and arrival time now come down as you drive. On a long stretch of one road (a motorway) the traffic check measured that road from where it began, not from where you were, so the time sat still until the next turn; a traffic answer is also dropped once it's old or far beyond the trip's own count.
+
+### Changed
+
+- P Maps on Android Auto: the map is light by day and dark by night by the sun where you are (or your Always light / Always dark choice), as on the phone. It used to follow the car's own day/night signal alone, and some cars say night all day.
+
+### Added
+
+- P Maps (Android, phone and car): the fixed speed cameras the map knows about are drawn on the map, around you and along a trip, with a Speed cameras choice (Show and warn / Off) in the Drive menu and the trip's options. From the map data already on your server and in offline areas; it doesn't know every camera.
+
 ## [0.46.0] - 2026-11-16
 
 ### Changed

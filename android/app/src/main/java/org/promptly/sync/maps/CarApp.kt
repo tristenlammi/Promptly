@@ -103,7 +103,7 @@ class PromptlyCarSession : Session() {
 
     override fun onCarConfigurationChanged(newConfiguration: android.content.res.Configuration) {
         // The car's headlights came on, or went off.
-        Nav.loadCarStyle(styleScope, carContext.isDarkMode)
+        Nav.carSaid(styleScope, carContext.isDarkMode)
     }
 
     override fun onCreateScreen(intent: Intent): Screen {
@@ -311,7 +311,8 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
     override fun content() {
         val style by Nav.carStyle.collectAsState()
         val styleUri = style ?: return
-        val dark = carContext.isDarkMode
+        val carDark by Nav.carDark.collectAsState()
+        val dark = carDark ?: carContext.isDarkMode
         val area by screenSurfaceState(surfaceArea)
         val padding = surfaceStableFractionalPadding(area?.compositeArea)
         // You low on the screen, with the road ahead above you, as Waze has it.
@@ -400,6 +401,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             routeOverlayBuilder = routeLine,
             mapContent = { state ->
                 TrafficOnRoute()
+                CamerasOnMap(state.location?.coordinates?.let { it.lat to it.lng } ?: glide.current?.let { it.lat to it.lon })
                 PreviewRoutesOnMap()
                 // The one arrow: on a trip where the trip shows you (on the road, gliding
                 // with the camera), otherwise the glided position of the phone.
@@ -452,7 +454,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         )?.let { builder.setNavigationInfo(it) }
         state.progress?.let { progress ->
             val traffic = Nav.traffic.value
-            val arrive = traffic?.arriveAt ?: java.time.Instant.now().plusSeconds(progress.durationRemaining.toLong())
+            val arrive = Nav.arriveAt(progress.durationRemaining)
             val left = java.time.Duration.between(java.time.Instant.now(), arrive).coerceAtLeast(java.time.Duration.ZERO)
             val adds = traffic?.addsMinutes ?: 0
             builder.setDestinationTravelEstimate(

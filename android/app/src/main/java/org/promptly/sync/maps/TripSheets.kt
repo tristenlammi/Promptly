@@ -162,6 +162,7 @@ internal fun ShareTripSheet(sharedWith: List<Nav.Person>, onClose: () -> Unit) {
 internal fun TripOptionsSheet(onClose: () -> Unit) {
     val theme by Nav.themeNow.collectAsState()
     val speeding by Nav.speedWarningNow.collectAsState()
+    val cameras by Nav.showCamerasNow.collectAsState()
     Sheet(onClose) {
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
             Text("Map colours", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 4.dp).semantics { heading() })
@@ -169,6 +170,10 @@ internal fun TripOptionsSheet(onClose: () -> Unit) {
             Text("Speeding beep", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp).semantics { heading() })
             Text("A short beep when you go over the limit, where the map knows it.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             SpeedWarning.entries.forEach { choice -> Choice(choice.label, speeding == choice) { Nav.setSpeedWarning(choice) } }
+            Text("Speed cameras", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp).semantics { heading() })
+            Text("Fixed cameras the map knows about, shown on the map and warned about on a trip. It doesn't know every camera.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Choice("Show and warn", cameras) { Nav.setShowCameras(true) }
+            Choice("Off", !cameras) { Nav.setShowCameras(false) }
         }
         OutlinedButton(onClick = onClose) { Text("Done") }
     }

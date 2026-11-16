@@ -98,7 +98,17 @@ object Nav {
     private val _camera = MutableStateFlow<CameraAlert>(CameraAlert.None)
     val camera = _camera.asStateFlow()
     /** What traffic adds to the rest of the trip, and the arrival time with it. */
-    data class TrafficNow(val addsMinutes: Int, val arriveAt: Instant, val jams: List<Jam> = emptyList())
+    data class TrafficNow(val addsMinutes: Int, val arriveAt: Instant, val jams: List<Jam> = emptyList(), val at: Instant = Instant.now())
+
+    /** When you'll arrive: traffic's answer while it's fresh, else the trip's own count. */
+    fun arriveAt(secondsLeft: Double, now: Instant = Instant.now()): Instant {
+        val t = _traffic.value
+        return TripClock.arrive(now, t?.arriveAt, t?.at, secondsLeft)
+    }
+
+    /** The road still to drive, from where you are (not from the start of the step you're on). */
+    private fun roadAhead(state: com.stadiamaps.ferrostar.core.NavigationUiState): List<Pair<Double, Double>> =
+        TripClock.roadAhead(state.remainingSteps.orEmpty().map { s -> s.geometry.map { it.lat to it.lng } }, state.location?.coordinates?.let { it.lat to it.lng })
 
     /** A stretch of the road ahead that's slow ("slow") or nearly stopped ("jam"). */
     data class Jam(val kind: String, val line: List<Pair<Double, Double>>)
@@ -267,16 +277,48 @@ object Nav {
             }
     }
 
-    /** The car's map: light or dark by the car's own setting, not the phone's. */
+    /** The car's map: light or dark by the same rule as the phone's (the sun where you
+     *  are, or your Always light / Always dark choice). It used to follow the car's own
+     *  day/night signal alone, and some cars say "night" all day, so the map never went
+     *  light. The car's signal still counts when the choice is Automatic and the sun
+     *  can't be worked out. */
     private val _carStyle = MutableStateFlow<String?>(null)
     val carStyle = _carStyle.asStateFlow()
+    private val _carDark = MutableStateFlow<Boolean?>(null)
+    val carDark = _carDark.asStateFlow()
+    @Volatile private var carSaysDark = true
+    private val carTheming = Mutex()
 
-    fun loadCarStyle(scope: kotlinx.coroutines.CoroutineScope, dark: Boolean) {
+    /** Kept in step for as long as [scope] lives: sunset and sunrise mid-drive, and a
+     *  changed choice, change the colours. [carSays] is the car's own signal. */
+    fun loadCarStyle(scope: kotlinx.coroutines.CoroutineScope, carSays: Boolean) {
+        carSaysDark = carSays
         scope.launch {
-            runCatching { Maps.styleFile(app, dark) }
-                .onSuccess { _carStyle.value = it }
-                .onFailure { _error.value = it.message ?: "Couldn't load the map." }
+            while (isActive) {
+                applyCarTheme()
+                delay(if (_carStyle.value == null) 5_000 else 60_000)
+            }
         }
+        scope.launch { _theme.collect { applyCarTheme() } }
+    }
+
+    /** The car's headlights came on or went off. */
+    fun carSaid(scope: kotlinx.coroutines.CoroutineScope, dark: Boolean) {
+        carSaysDark = dark
+        scope.launch { applyCarTheme() }
+    }
+
+    private suspend fun applyCarTheme() = carTheming.withLock {
+        val fix = lastFix?.let { it.coordinates.lat to it.coordinates.lng }
+            ?: runCatching { locationProvider.lastLocation() }.getOrNull()?.let { it.latitude to it.longitude }
+        val dark = Daylight.carDark(_theme.value, fix, carSaysDark)
+        if (dark == _carDark.value && _carStyle.value != null) return@withLock
+        runCatching { Maps.styleFile(app, dark) }
+            .onSuccess {
+                _carStyle.value = it
+                _carDark.value = dark
+            }
+            .onFailure { if (_carStyle.value == null) _error.value = it.message ?: "Couldn't load the map." }
     }
 
     /** The view model the screens draw from. There's only ever one, so the phone's
@@ -406,12 +448,14 @@ object Nav {
             fun onPhone(): Boolean {
                 if (!downloaded.isFile) return false
                 cameras = OfflineCameras.along(OfflineCameras.all(downloaded), points)
+                _routeCameras.value = cameras
                 Log.i(TAG, "Cameras from the phone: ${cameras.size} on this route")
                 return true
             }
             if (!Offline.online(app) && onPhone()) return@launch
             try {
                 cameras = Maps.cameras(app, Maps.encodeShape(points))
+                _routeCameras.value = cameras
             } catch (e: java.io.IOException) {
                 Log.w(TAG, "Couldn't fetch cameras: ${e.message}")
                 if (onPhone()) return@launch
@@ -475,6 +519,7 @@ object Nav {
         warned.clear()
         closestSoFar.clear()
         cameras = emptyList()
+        _routeCameras.value = cameras
         camerasFor = null
         vm.viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -600,6 +645,49 @@ object Nav {
 
     private val speeding = SpeedAlert()
 
+    // ---- Speed cameras on the map (the ones the map data knows; see CameraPins)
+    private val _routeCameras = MutableStateFlow<List<Camera>>(emptyList())
+    val routeCameras = _routeCameras.asStateFlow()
+    private val _nearbyCameras = MutableStateFlow<List<Camera>>(emptyList())
+    val nearbyCameras = _nearbyCameras.asStateFlow()
+    @Volatile private var nearbyFor: Pair<Int, Int>? = null
+
+    private val _showCameras by lazy {
+        MutableStateFlow(app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).getBoolean("cameras", true))
+    }
+
+    /** Speed cameras: shown on the map and warned about on a trip, or neither. */
+    val showCamerasNow: kotlinx.coroutines.flow.StateFlow<Boolean> get() = _showCameras
+
+    fun setShowCameras(on: Boolean) {
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit().putBoolean("cameras", on).apply()
+        _showCameras.value = on
+        if (!on) _camera.value = CameraAlert.None
+    }
+
+    /** The cameras around the square you're in, from your server, or with no signal the
+     *  ones downloaded with your offline areas. Asked once per square. */
+    suspend fun loadNearbyCameras(cell: Pair<Int, Int>) {
+        if (cell == nearbyFor) return
+        nearbyFor = cell
+        val box = CameraPins.box(cell)
+        val found = withContext(Dispatchers.IO) {
+            val downloaded = java.io.File(Offline.store(app).baseDir, "cameras.json")
+            fun onPhone(): List<Camera>? = if (downloaded.isFile) CameraPins.inBox(OfflineCameras.all(downloaded), box) else null
+            if (!Offline.online(app)) onPhone()
+            else runCatching { Maps.camerasIn(app, box) }.getOrElse {
+                Log.w(TAG, "Couldn't fetch the cameras around here: ${it.message}")
+                onPhone()
+            }
+        }
+        if (found == null) {
+            // Nothing to show them from: this square is asked for again next time.
+            if (nearbyFor == cell) nearbyFor = null
+            return
+        }
+        if (nearbyFor == cell) _nearbyCameras.value = found
+    }
+
     /** Your speed and the road's limit just now, on a trip or just driving: a beep when
      *  you go over by more than you allowed. Muted means no beep; "Alerts only" beeps. */
     fun speedNow(kmh: Double?, limit: Int?) {
@@ -686,6 +774,10 @@ object Nav {
         // Anything else that switched it back on doesn't get to decide.
         voice?.let { if (it.isMuted != (sound() != Sound.ALL)) it.setMuted(sound() != Sound.ALL) }
         checkHazards()
+        if (!_showCameras.value) {
+            _camera.value = CameraAlert.None
+            return
+        }
         val point = FloatArray(1)
         var nearest: Pair<Camera, Float>? = null
         for (c in cameras) {
@@ -753,7 +845,7 @@ object Nav {
         if (!state.isNavigating() || progress == null) return null
         val to = destination ?: return null
         val traffic = _traffic.value
-        val arrive = traffic?.arriveAt ?: Instant.now().plusSeconds(progress.durationRemaining.toLong())
+        val arrive = arriveAt(progress.durationRemaining)
         val out = JSONObject()
             .put("to", JSONObject().put("name", to.name).put("lat", to.lat).put("lon", to.lon))
             .put("arrive_at", arrive.toString())
@@ -762,7 +854,7 @@ object Nav {
             .put("delay_min", traffic?.addsMinutes ?: 0)
         _addedStop.value?.let { out.put("next_stop", it.name) }
         state.location?.let { at -> out.put("lat", at.coordinates.lat).put("lon", at.coordinates.lng) }
-        val line = state.remainingSteps.orEmpty().flatMap { it.geometry }.map { it.lat to it.lng }
+        val line = roadAhead(state)
         if (line.size >= 2) out.put("shape", Maps.encodeShape(line))
         return out
     }
@@ -813,6 +905,7 @@ object Nav {
         arrivedAt = destination?.name?.takeIf { it.isNotBlank() && it != "Destination" }
         _arrived.value = true
         cameras = emptyList()
+        _routeCameras.value = cameras
         _camera.value = CameraAlert.None
         _hazard.value = null
         arrivalJob?.cancel()
@@ -927,7 +1020,7 @@ object Nav {
         val state = model?.navigationUiState?.value ?: return null
         val to = destination ?: return null
         val at = state.location ?: return null
-        val line = state.remainingSteps.orEmpty().flatMap { it.geometry }.map { it.lat to it.lng }
+        val line = roadAhead(state)
         if (line.size < 2) return null
         return Triple(Maps.encodeShape(line), Stop(at.coordinates.lat, at.coordinates.lng, "You"), to)
     }
@@ -945,12 +1038,12 @@ object Nav {
         }
         val progress = state.progress
         if (!state.isNavigating() || progress == null) return body
-        val line = state.remainingSteps.orEmpty().flatMap { it.geometry }.map { it.lat to it.lng }
+        val line = roadAhead(state)
         if (line.size >= 2) body.put("shapes", org.json.JSONArray().put(Maps.encodeShape(line)))
         body.put("seconds", progress.durationRemaining).put("km", progress.distanceRemaining / 1000.0)
         destination?.let { body.put("to", JSONObject().put("lat", it.lat).put("lon", it.lon).put("name", it.name)) }
         val traffic = _traffic.value
-        val arrive = traffic?.arriveAt ?: Instant.now().plusSeconds(progress.durationRemaining.toLong())
+        val arrive = arriveAt(progress.durationRemaining)
         body.put("arrive", arrive.atZone(zone).format(clock))
         traffic?.let { body.put("adds_minutes", it.addsMinutes) }
         _addedStop.value?.let { body.put("added_stop", it.name) }
@@ -1034,7 +1127,7 @@ object Nav {
                 val state = vm.navigationUiState.value
                 val progress = state.progress
                 if (!state.isNavigating() || progress == null) break
-                val ahead = state.remainingSteps.orEmpty().flatMap { it.geometry }.map { it.lat to it.lng }
+                val ahead = roadAhead(state)
                 if (ahead.size >= 2) {
                     val body = JSONObject()
                         .put("shapes", org.json.JSONArray().put(Maps.encodeShape(ahead)))
@@ -1068,7 +1161,7 @@ object Nav {
                                 Jam(j.getString("kind"), List(line.length()) { k -> line.getJSONArray(k).let { p -> p.getDouble(0) to p.getDouble(1) } })
                             }
                             TrafficNow(Math.round(it.getDouble("adds_seconds") / 60).toInt(), Instant.now().plusSeconds(it.getLong("seconds")), jams)
-                        }
+                        }?.takeIf { t -> TripClock.believable(java.time.Duration.between(t.at, t.arriveAt).seconds, progress.durationRemaining) }
                         offerFaster(answer.optJSONObject("faster"))
                         if (checkWarnings) {
                             lastWarningCheck = System.currentTimeMillis()
@@ -1150,6 +1243,7 @@ object Nav {
         hazards = emptyList()
         _hazard.value = null
         cameras = emptyList()
+        _routeCameras.value = cameras
         camerasFor = null
         cameraJob?.cancel()
         _camera.value = CameraAlert.None

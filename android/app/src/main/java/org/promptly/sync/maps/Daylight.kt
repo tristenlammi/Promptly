@@ -56,6 +56,14 @@ object Daylight {
         return hour >= 18 || hour < 6
     }
 
+    /** The car's map. Your choice wins; on Automatic it's the sun where you are, and
+     *  only with no position at all does the car's own day/night signal decide. */
+    fun carDark(theme: MapTheme, position: Pair<Double, Double>?, carSays: Boolean, at: Instant = Instant.now()): Boolean = when (theme) {
+        MapTheme.LIGHT -> false
+        MapTheme.DARK -> true
+        MapTheme.AUTO -> position?.let { dark(it.first, it.second, at) } ?: carSays
+    }
+
     /** Should the map be dark now? [position] is latitude then longitude, if known. */
     fun mapDark(
         theme: MapTheme,

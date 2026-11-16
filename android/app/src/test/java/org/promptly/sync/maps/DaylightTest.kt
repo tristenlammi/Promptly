@@ -55,4 +55,19 @@ class DaylightTest {
         assertFalse(Daylight.mapDark(MapTheme.AUTO, null, at("2026-11-11T20:00:00Z"), sydney))
         assertTrue(Daylight.mapDark(MapTheme.AUTO, null, at("2026-11-11T18:30:00Z"), sydney))
     }
+
+    @Test
+    fun `the car's map goes by the sun even when the car says night all day`() {
+        val noon = at("2026-11-11T01:30:00Z")
+        val night = at("2026-11-11T13:30:00Z")
+        val dubbo = -32.25 to 148.6
+        assertFalse(Daylight.carDark(MapTheme.AUTO, dubbo, carSays = true, at = noon))
+        assertTrue(Daylight.carDark(MapTheme.AUTO, dubbo, carSays = false, at = night))
+        // Your own choice wins over both.
+        assertFalse(Daylight.carDark(MapTheme.LIGHT, dubbo, carSays = true, at = night))
+        assertTrue(Daylight.carDark(MapTheme.DARK, dubbo, carSays = false, at = noon))
+        // No position yet: the car's own signal is all there is.
+        assertTrue(Daylight.carDark(MapTheme.AUTO, null, carSays = true, at = noon))
+        assertFalse(Daylight.carDark(MapTheme.AUTO, null, carSays = false, at = night))
+    }
 }

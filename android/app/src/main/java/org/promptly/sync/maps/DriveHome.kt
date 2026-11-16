@@ -416,6 +416,7 @@ fun DriveHome(
             options = MapOptions(ornamentOptions = OrnamentOptions.OnlyLogo),
         ) {
             RoutesOnMap(routes.orEmpty(), selected, DriveColours.route(dark))
+            CamerasOnMap(here?.let { it.latitude to it.longitude })
             Spot("promptly-picked", picked?.let { it.lat to it.lon }, DriveColours.picked(dark), 9)
             // An arrow facing the way you're going while you drive, a dot when you aren't.
             val at = here?.let { it.latitude to it.longitude }
@@ -527,6 +528,7 @@ private fun SearchBar(
     var menu by remember { mutableStateOf(false) }
     val theme by Nav.themeNow.collectAsState()
     val speeding by Nav.speedWarningNow.collectAsState()
+    val cameras by Nav.showCamerasNow.collectAsState()
     LaunchedEffect(start) { if (start) runCatching { focusRequester.requestFocus() } }
     Surface(shape = RoundedCornerShape(28.dp), shadowElevation = 4.dp, tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -601,6 +603,25 @@ private fun SearchBar(
                                 Nav.setSpeedWarning(choice)
                             },
                             modifier = Modifier.semantics { selected = speeding == choice },
+                        )
+                    }
+                    HorizontalDivider()
+                    // The fixed cameras the map knows (not every camera): on the map, and warned about on a trip.
+                    Text(
+                        "Speed cameras",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 2.dp).semantics { heading() },
+                    )
+                    listOf("Show and warn" to true, "Off" to false).forEach { (label, on) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            leadingIcon = { RadioButton(selected = cameras == on, onClick = null) },
+                            onClick = {
+                                menu = false
+                                Nav.setShowCameras(on)
+                            },
+                            modifier = Modifier.semantics { selected = cameras == on },
                         )
                     }
                     HorizontalDivider()
