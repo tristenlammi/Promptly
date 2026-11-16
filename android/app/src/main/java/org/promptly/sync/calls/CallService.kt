@@ -632,32 +632,18 @@ class CallService : Service() {
         val id = callId
         if (id != null && CallCenter.telecomRoute(id, routeId)) return
         val sw = room?.audioSwitchHandler ?: return
-        val pick = sw.availableAudioDevices.firstOrNull { switchId(it) == routeId } ?: return
-        sw.selectDevice(pick)
+        val pick = SwitchRoutes.select(sw, routeId) ?: return
         speaker = pick is AudioDevice.Speakerphone
         note(now = true)
         publish()
     }
-
-    private fun switchId(d: AudioDevice): String = d.javaClass.simpleName + ":" + d.name
 
     /** The list when this service routes the sound itself (Telecom has its own). */
     private fun switchRoutes(): List<AudioRoute> {
         val id = callId
         if (id != null && CallCenter.telecomHolds(id)) return emptyList()
         val sw = room?.audioSwitchHandler ?: return emptyList()
-        val now = sw.selectedAudioDevice
-        return Routing.options(
-            sw.availableAudioDevices.map { d ->
-                val kind = when (d) {
-                    is AudioDevice.BluetoothHeadset -> Routing.Kind.BLUETOOTH
-                    is AudioDevice.WiredHeadset -> Routing.Kind.WIRED
-                    is AudioDevice.Earpiece -> Routing.Kind.EARPIECE
-                    is AudioDevice.Speakerphone -> Routing.Kind.SPEAKER
-                }
-                AudioRoute(switchId(d), kind, Routing.label(kind, d.name), current = now != null && switchId(now) == switchId(d))
-            },
-        )
+        return SwitchRoutes.of(sw)
     }
 
     private fun syncMic() {

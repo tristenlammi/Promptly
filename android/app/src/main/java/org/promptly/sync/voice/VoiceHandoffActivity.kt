@@ -20,6 +20,9 @@ import kotlinx.coroutines.launch
  * notifications, and Bluetooth for headsets) when needed, starts
  * [VoiceService] and closes, leaving you on the channel page.
  *
+ * It also shows the sound picker for the channel you're in
+ * (`promptly://voice/sound`, the page's Sound button).
+ *
  * Only a session for the server this app is set up with is taken. The first
  * time (and whenever a different account hands over) it asks before using
  * the microphone, so no web page can quietly put your phone in a channel.
@@ -37,6 +40,8 @@ class VoiceHandoffActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState != null) return // permission prompt in flight across a rotation
         val uri = intent?.data
+        // promptly://voice/sound: the channel page's Sound button.
+        if (uri?.host == "voice" && uri.path == "/sound") return pickSound()
         val params = uri?.queryParameterNames?.associateWith { uri.getQueryParameter(it) } ?: emptyMap()
         val saved = getSharedPreferences("promptly", Context.MODE_PRIVATE).getString("server", null)
         val h = if (uri?.host == "voice") VoiceProtocol.parseHandoff(params, saved) else null
@@ -69,6 +74,29 @@ class VoiceHandoffActivity : ComponentActivity() {
             }
             .setNegativeButton("Not now") { _, _ -> declined(h) }
             .setOnCancelListener { declined(h) }
+            .show()
+    }
+
+    /**
+     * Where the channel's sound goes: the phone, its speaker, wired headphones,
+     * each Bluetooth device by name. The list lives here, on the phone, so the
+     * page (and the server) never learn what's paired with it.
+     */
+    private fun pickSound() {
+        val routes = VoiceService.routes()
+        if (routes.isNullOrEmpty()) {
+            Toast.makeText(this, "You're not in a voice channel on this phone.", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Sound")
+            .setSingleChoiceItems(routes.map { it.name }.toTypedArray(), routes.indexOfFirst { it.current }) { d, i ->
+                VoiceService.route(routes[i].id)
+                d.dismiss()
+            }
+            .setNegativeButton("Close", null)
+            .setOnDismissListener { finish() }
             .show()
     }
 

@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Voice rooms on Android: a Sound button on the channel page opens a list on the phone to send the sound to the phone, its speaker, wired headphones or a Bluetooth device by name. Needs the next phone app; the list stays on the phone.
+
 ### Changed
 
 - Passwords extension 0.2.3: when a passkey is wanted and your vault is locked, the passkey window asks for your master password and nothing after it; the passkey PIN is only asked when the vault is already open (D139).
