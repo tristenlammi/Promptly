@@ -28,6 +28,7 @@ import {
   MapPin,
   Navigation,
   StickyNote,
+  House,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -208,6 +209,19 @@ const TOOL_INFO: Record<
     once: true,
     noun: (n) => (n === 1 ? "photo change" : "photo changes"),
     icon: Images,
+  },
+  // Promptly Home (app/home).
+  home_devices: {
+    verb: "Checking the house",
+    past: "checked the house",
+    noun: (n) => (n === 1 ? "look" : "looks"),
+    icon: House,
+  },
+  home_control: {
+    verb: "Changing something at home",
+    past: "changed",
+    noun: (n) => (n === 1 ? "thing at home" : "things at home"),
+    icon: House,
   },
   // Notes (app/notes).
   find_notes: {

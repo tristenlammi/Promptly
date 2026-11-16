@@ -150,8 +150,10 @@ async def test_what_it_will_not_do_and_what_it_asks_about(user, client, db):  # 
         return str(e.value)
 
     # A lock, a garage door: not from here, whatever the action.
-    assert "no light or switch called" in await refused({"action": "turn_off", "target": "Front door"})
-    assert "no light or switch called" in await refused({"action": "turn_on", "target": "Garage"})
+    assert await refused({"action": "turn_off", "target": "Front door"}) == assistant.NOT_FROM_HERE
+    assert await refused({"action": "turn_on", "target": "Garage"}) == assistant.NOT_FROM_HERE
+    assert await refused({"action": "turn_on", "target": "Air con"}) == assistant.PARKED
+    assert "no light or switch called" in await refused({"action": "turn_on", "target": "Fish tank"})
     lock = next(d for d in await assistant.devices_for(db, user.id) if d["id"] == "lock.front")
     garage = next(d for d in await assistant.devices_for(db, user.id) if d["id"] == "cover.garage")
     await db.commit()

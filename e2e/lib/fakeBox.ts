@@ -68,6 +68,14 @@ export class FakeBox {
       this.send({ t: "res", id, ok: true, data: null });
       return this.send({ t: "state", e });
     }
+    if (op === "room.lights") {
+      const lights = this.entities.filter((x) => x.domain === "light" && x.area === args.area);
+      if (!lights.length) return this.send({ t: "res", id, ok: false, error: "There are no lights in that room." });
+      for (const e of lights) e.state = args.action === "turn_on" ? "on" : "off";
+      this.send({ t: "res", id, ok: true, data: null });
+      for (const e of lights) this.send({ t: "state", e });
+      return;
+    }
     if (op === "flows.found") return this.send({ t: "res", id, ok: true, data: [] });
     if (op === "entries.list") return this.send({ t: "res", id, ok: true, data: [] });
     this.send({ t: "res", id, ok: false, error: "The test box doesn't do that." });

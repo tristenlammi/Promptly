@@ -84,10 +84,18 @@ def _colour(raw: Any) -> dict[str, Any]:
     raise ToolError("Use a plain colour name (red, blue, warm white, daylight…) or a hex colour like #ff8800.")
 
 
-def _one(found: list[dict[str, Any]], target: str, what: str, many_homes: bool) -> dict[str, Any]:
+def _one(found: list[dict[str, Any]], target: str, what: str, many_homes: bool, everything: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     if len(found) == 1:
         return found[0]
     if not found:
+        # It's there, but it isn't something the assistant operates: say which.
+        from app.home import assistant
+
+        other = assistant.find(everything or [], target)
+        if other and all(d.get("careful") for d in other):
+            raise ToolError(assistant.NOT_FROM_HERE)
+        if other and all(d["domain"] not in assistant.CONTROLLED for d in other):
+            raise ToolError(assistant.PARKED)
         raise ToolError(f"There's no {what} called “{target}”. Call home_devices to see what there is.")
     names = "; ".join(f"{d['name']}{_where(d, many_homes)}" for d in found[:8])
     raise ToolError(f"More than one {what} could be “{target}”: {names}. Ask which one they mean.")
@@ -231,7 +239,7 @@ class HomeControlTool(Tool):
             return f"{name} lights {said}."
         if len(rooms) > 1:
             raise ToolError("More than one room could be meant: " + ", ".join(r[3] for r in rooms[:8]) + ". Ask which.")
-        d = _one(assistant.find(devices, target, kinds), target, "light or switch" if not setting else "light", many_homes)
+        d = _one(assistant.find(devices, target, kinds), target, "light or switch" if not setting else "light", many_homes, devices)
         await assistant.act(d, "set" if setting else action, value if setting else None)
         return f"{d['name']} {said}."
 
