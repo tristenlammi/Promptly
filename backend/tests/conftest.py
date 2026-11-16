@@ -364,6 +364,29 @@ def _own_restore_scratch(monkeypatch):
     monkeypatch.setattr(offsite, "_SCRATCH_DB", _TEST_DB.rsplit("/", 1)[1] + "_restore")
 
 
+# The tests that use the throwaway mail server (MAIL_TEST_HOST) empty it
+# between tests, so only one module of them may be at it at a time. With
+# several workers that needs a turn: a file lock, held for the module.
+_MAIL_SERVER_MODULES = {"test_mail", "test_mail_labels", "test_mail_sent_thread", "test_pw_aliases"}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _mail_server_turn(request):
+    name = request.module.__name__.rsplit(".", 1)[-1]
+    if name not in _MAIL_SERVER_MODULES or not os.environ.get("MAIL_TEST_HOST"):
+        yield
+        return
+    import fcntl
+
+    path = Path(tempfile.gettempdir()) / f"promptly-mail-{os.environ['MAIL_TEST_HOST']}.lock"
+    with open(path, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 @pytest.fixture(scope="session")
 def database():
     """A migrated scratch database, or skip.

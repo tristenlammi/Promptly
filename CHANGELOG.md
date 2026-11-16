@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Mail with Gmail: a new email that Promptly saw in All Mail before it saw it in the Inbox made that Inbox check fail, over and over for up to half an hour. Until then the email sat under Archive, you weren't told about it, and anything else that arrived with it was held back too. (Since v0.31.0; the tests that would have caught it need a real mail server and weren't being run. `scripts/check` now starts one.)
+
 ## [0.45.0] - 2026-11-16
 
 ### Added

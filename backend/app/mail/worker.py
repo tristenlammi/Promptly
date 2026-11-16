@@ -222,6 +222,10 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
                 archived.folder_id, archived.uid, archived.seen, archived.flagged, archived.answered = folder_id, uid, state["seen"], state["flagged"], state["answered"]
                 if folder.role == "inbox" and datetime.now(timezone.utc) - archived.sent_at < JUST_ARRIVED:
                     arrived.append(archived)
+                    # Who it was sent to, for the alias check below: without
+                    # this the whole batch failed (a KeyError) whenever Gmail
+                    # showed a new email in All Mail before the Inbox.
+                    sent_to[archived.id] = said
                 continue
             exists = await db.scalar(select(MailMessage.id).where(MailMessage.folder_id == folder_id, MailMessage.uid == uid))
             if exists:

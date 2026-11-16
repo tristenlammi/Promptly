@@ -8,6 +8,7 @@
 //   --skip android             run everything but these
 //   --with e2e                 also run the browser suite (about an hour)
 //   --workers 6                backend test processes (default: half the CPUs, 2-8)
+//   --tests "tests/test_mail.py -k sync"   backend: only these (passed to pytest)
 //   --list                     show the steps and stop
 //   --gate                     run nothing: say whether the last check covers this
 //                              exact code (exit 0) or not (exit 3). scripts/release asks.
@@ -45,7 +46,7 @@ const REQUIRED = ["static", "backend", "frontend"];
 
 function args() {
   const a = process.argv.slice(2);
-  const out = { only: null, skip: [], with: [], workers: 0, list: false, gate: false };
+  const out = { only: null, skip: [], with: [], workers: 0, list: false, gate: false, tests: "" };
   for (let i = 0; i < a.length; i++) {
     const k = a[i].replace(/^-+/, "").toLowerCase();
     const v = () => (a[++i] ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -53,10 +54,11 @@ function args() {
     else if (k === "skip") out.skip = v();
     else if (k === "with") out.with = v();
     else if (k === "workers") out.workers = Number(a[++i]) || 0;
+    else if (k === "tests") out.tests = a[++i] ?? "";
     else if (k === "list") out.list = true;
     else if (k === "gate") out.gate = true;
     else if (k === "h" || k === "help") {
-      console.log(fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 27).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+      console.log(fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 28).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
       process.exit(0);
     } else {
       console.error(`Unknown option: ${a[i]} (see --help)`);
@@ -229,6 +231,38 @@ function stepStatic() {
 }
 
 // ----------------------------------------------------------------- backend
+/** A throwaway mail server (GreenMail) for the tests that send, receive and
+ *  sync real mail: its own name on the stack's network, a certificate made
+ *  for this run, two made-up people. Returns its host name, or null when the
+ *  image isn't here and can't be pulled (those tests then skip and say so). */
+function mailServer(name) {
+  const image = "greenmail/standalone:2.1.8";
+  if (read("docker", ["image", "inspect", image, "--format", "{{.Id}}"]) === null && run("backend", "docker", ["pull", "-q", image]).code !== 0) return null;
+  const host = `${name}-mail`;
+  const dir = path.join(OUT, "mail");
+  fs.mkdirSync(dir, { recursive: true });
+  const made = run("backend", "docker", [
+    "run", "--rm", "-v", `${dir}:/m`, "--entrypoint", "sh", "promptly-backend:local", "-c",
+    `openssl req -x509 -newkey rsa:2048 -nodes -days 3 -subj "/CN=${host}" -addext "subjectAltName=DNS:${host}" -keyout /m/key.pem -out /m/cert.pem 2>/dev/null` +
+      " && openssl pkcs12 -export -inkey /m/key.pem -in /m/cert.pem -out /m/gm.p12 -passout pass:changeit && chmod 644 /m/gm.p12 /m/cert.pem",
+  ]);
+  if (made.code !== 0) return null;
+  const up = run("backend", "docker", [
+    "run", "-d", "--name", host, "--network", "promptly", "-v", `${dir}:/certs:ro`,
+    "-e", "GREENMAIL_OPTS=-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=alice:testpass@mailtest.example,bob:testpass@mailtest.example -Dgreenmail.users.login=email -Dgreenmail.tls.keystore.file=/certs/gm.p12 -Dgreenmail.tls.keystore.password=changeit",
+    image,
+  ]);
+  if (up.code !== 0) return null;
+  // Ready when its own API answers.
+  const probe = `for i in $(seq 60); do python -c "import urllib.request; urllib.request.urlopen('http://${host}:8080/api/service/readiness', timeout=2)" 2>/dev/null && exit 0; sleep 1; done; exit 1`;
+  const ready = run("backend", "docker", ["run", "--rm", "--network", "promptly", "--entrypoint", "sh", "promptly-backend:local", "-c", probe]);
+  if (ready.code !== 0) {
+    spawnSync("docker", ["rm", "-f", host], { stdio: "ignore", windowsHide: true });
+    return null;
+  }
+  return host;
+}
+
 function stepBackend() {
   if (!has("docker")) return record("backend", "skip", {}, "docker isn't installed", 0);
   const pg = read("docker", ["ps", "--filter", "name=^Promptly-Postgres$", "--filter", "status=running", "--format", "{{.Names}}"]);
@@ -242,10 +276,11 @@ function stepBackend() {
   const workers = OPT.workers || Math.max(2, Math.min(8, Math.floor(os.cpus().length / 2)));
   const cache = path.join(ROOT, ".check", "pip-cache");
   fs.mkdirSync(cache, { recursive: true });
+  const mail = mailServer(base.replace(/_/g, "-"));
   // The image may predate the two test plugins: add them for this run only.
   const inner = [
     "python -c 'import xdist, pytest_timeout' 2>/dev/null || pip install -q --disable-pip-version-check pytest-xdist==3.6.1 pytest-timeout==2.3.1",
-    `python -m pytest -n ${workers} --dist loadfile -p no:cacheprovider -q -rs --junitxml=/out/backend-junit.xml`,
+    `python -m pytest -n ${workers} --dist loadfile -p no:cacheprovider -q -rs --junitxml=/out/backend-junit.xml ${OPT.tests}`,
   ].join(" && ");
   const r = run("backend", "docker", [
     "run", "--rm", "--network", "promptly",
@@ -261,8 +296,10 @@ function stepBackend() {
     "-e", "PYTHONPATH=/app",
     "-e", "PYTHONDONTWRITEBYTECODE=1",
     "-e", `TEST_DATABASE_URL=postgresql+asyncpg://promptly:${encodeURIComponent(pw)}@postgres:5432/${base}`,
+    ...(mail ? ["-e", `MAIL_TEST_HOST=${mail}`, "-e", "SSL_CERT_FILE=/out/mail/cert.pem"] : []),
     "--entrypoint", "sh", "promptly-backend:local", "-c", inner,
   ]);
+  if (mail) spawnSync("docker", ["rm", "-f", mail], { stdio: "ignore", windowsHide: true });
   // Drop this run's databases whatever happened.
   const names = read("docker", ["exec", "Promptly-Postgres", "psql", "-U", "promptly", "-d", "postgres", "-Atc", `select datname from pg_database where datname like '${base}%'`]);
   for (const n of (names ?? "").split("\n").filter(Boolean)) {

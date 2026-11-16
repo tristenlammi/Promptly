@@ -8,6 +8,7 @@ param(
     [string]$Skip = "",
     [string]$With = "",
     [int]$Workers = 0,
+    [string]$Tests = "",
     [switch]$List,
     [switch]$Gate
 )
@@ -20,6 +21,7 @@ if ($Only) { $a += @('--only', $Only) }
 if ($Skip) { $a += @('--skip', $Skip) }
 if ($With) { $a += @('--with', $With) }
 if ($Workers -gt 0) { $a += @('--workers', "$Workers") }
+if ($Tests) { $a += @('--tests', $Tests) }
 if ($List) { $a += '--list' }
 if ($Gate) { $a += '--gate' }
 & node @a
