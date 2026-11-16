@@ -366,14 +366,13 @@ def _own_restore_scratch(monkeypatch):
 
 # The tests that use the throwaway mail server (MAIL_TEST_HOST) empty it
 # between tests, so only one module of them may be at it at a time. With
-# several workers that needs a turn: a file lock, held for the module.
-_MAIL_SERVER_MODULES = {"test_mail", "test_mail_labels", "test_mail_sent_thread", "test_pw_aliases"}
-
-
+# several workers that needs a turn: a file lock, held for the module. A
+# module is one of them if it has test_mail's ``live`` mark and its ``server``
+# fixture (test_mail itself, and whatever imports them from it).
 @pytest.fixture(scope="module", autouse=True)
 def _mail_server_turn(request):
-    name = request.module.__name__.rsplit(".", 1)[-1]
-    if name not in _MAIL_SERVER_MODULES or not os.environ.get("MAIL_TEST_HOST"):
+    uses = hasattr(request.module, "live") and hasattr(request.module, "server")
+    if not uses or not os.environ.get("MAIL_TEST_HOST"):
         yield
         return
     import fcntl

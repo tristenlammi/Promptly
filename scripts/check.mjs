@@ -108,6 +108,9 @@ function run(name, cmd, argv, opts = {}) {
     timeout: opts.timeout ?? 0,
     windowsHide: true,
   });
+  if (r.error || r.status !== 0) fs.writeSync(fd, `
+[check] ${cmd} ended with ${r.error ? r.error.message : `exit ${r.status}${r.signal ? `, signal ${r.signal}` : ""}`}
+`);
   fs.closeSync(fd);
   const code = r.error ? (r.error.code === "ENOENT" ? 127 : 1) : (r.status ?? 1);
   return { code, missing: r.error?.code === "ENOENT", timedOut: r.error?.code === "ETIMEDOUT", seconds: Math.round((Date.now() - started) / 1000), log };
