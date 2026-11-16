@@ -78,11 +78,14 @@ function ImportPanel() {
       for (const name of new Set(fresh.map((i) => i.folder).filter((x): x is string => !!x))) {
         if (!folders.has(name)) folders.set(name, (await vault.saveNew(vid, newBody("folder", name))).id);
       }
-      for (let i = 0; i < fresh.length; i++) {
-        const it = fresh[i];
-        await vault.saveNew(vid, { ...it.body, folderId: it.folder ? folders.get(it.folder) : it.body.folderId ?? null });
-        if (i % 25 === 0) setBusy(`Saved ${i + 1} of ${fresh.length}…`);
-      }
+      // One change at the end, not one per item (see VaultClient.quietly).
+      await vault.quietly(async () => {
+        for (let i = 0; i < fresh.length; i++) {
+          const it = fresh[i];
+          await vault.saveNew(vid, { ...it.body, folderId: it.folder ? folders.get(it.folder) : it.body.folderId ?? null });
+          if (i % 25 === 0) setBusy(`Saved ${i + 1} of ${fresh.length}…`);
+        }
+      });
       await vault.sync();
       bump();
       toast(`Imported ${fresh.length} items`);

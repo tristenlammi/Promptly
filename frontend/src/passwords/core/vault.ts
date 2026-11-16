@@ -56,6 +56,29 @@ export class WrongPasswordError extends Error {
 export class VaultClient {
   private state: Unlocked | null = null;
   onChange?: () => void;
+  private quiet = 0;
+  private changedQuietly = false;
+
+  private changed(): void {
+    if (this.quiet > 0) this.changedQuietly = true;
+    else this.onChange?.();
+  }
+
+  /** Many saves as one change. Each change redraws the vault and tells this browser's other
+   *  windows and the extension to read it again, so an import of thousands of items, telling
+   *  them once an item, took longer the more it had saved. */
+  async quietly<T>(work: () => Promise<T>): Promise<T> {
+    this.quiet++;
+    try {
+      return await work();
+    } finally {
+      this.quiet--;
+      if (this.quiet === 0 && this.changedQuietly) {
+        this.changedQuietly = false;
+        this.onChange?.();
+      }
+    }
+  }
   serverTimeOffsetMs = 0;
   minKdf: KdfParams | null = null;
   /** Vaults that can't open because whoever gave us the key now has a different one. */
@@ -392,7 +415,7 @@ export class VaultClient {
         this.api.session = null;
       }
     }
-    this.onChange?.();
+    this.changed();
   }
 
   // ---- Change the master password ------------------------------------------
@@ -977,7 +1000,7 @@ export class VaultClient {
       if (e instanceof OfflineError || (e instanceof ApiError && e.status >= 500)) out.offline = true;
       else throw e;
     }
-    this.onChange?.();
+    this.changed();
     return out;
   }
 
@@ -1281,7 +1304,7 @@ export class VaultClient {
     await this.store.putItems([{ id, vaultId, revision: 0, blob, deleted: false, purged: false, updatedAt: at, dirty: true, baseBlob: null }]);
     const item: Item = { id, vaultId, revision: 0, deleted: false, updatedAt: at, body: clean };
     this.index(item);
-    this.onChange?.();
+    this.changed();
     return item;
   }
 
@@ -1310,7 +1333,7 @@ export class VaultClient {
     ]);
     const item: Item = { ...prev, deleted: cached?.deleted ?? false, updatedAt: at, body: clean };
     this.index(item);
-    this.onChange?.();
+    this.changed();
     return item;
   }
 
@@ -1320,7 +1343,7 @@ export class VaultClient {
     await this.store.putItems([{ ...cached, deleted, dirty: true, baseBlob: cached.dirty ? cached.baseBlob : cached.blob }]);
     const item = this.get(id);
     if (item) item.deleted = deleted;
-    this.onChange?.();
+    this.changed();
   }
 
   trashItem = (id: string) => this.setDeleted(id, true);
@@ -1335,7 +1358,7 @@ export class VaultClient {
       await this.store.putItems([{ ...cached, dirty: true, purgeRequested: true }]);
     }
     this.unindex(id);
-    this.onChange?.();
+    this.changed();
   }
 
   /** Earlier versions, decrypted here. Failures are skipped: a version from before

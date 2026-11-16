@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Passwords: importing a large file (thousands of logins) no longer slows to a crawl. Each saved item was making the vault and the browser extension reload everything; a 5,000-item import that ran past ten minutes now takes about half a minute.
+
 ## [0.46.0] - 2026-11-16
 
 ### Changed
