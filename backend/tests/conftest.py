@@ -297,6 +297,24 @@ async def _stop_leftover_tasks() -> None:
             background._background_tasks.discard(t)
 
 
+@pytest.fixture(autouse=True)
+async def _background_tasks_end_with_their_test():
+    """Every test, not only the ones that take ``db``: forget tasks left on an
+    earlier test's (closed) loop before it starts, and end its own when it
+    finishes. A task left running was destroyed when the loop closed, and the
+    exception that raised was pinned on whichever test ran next."""
+    try:
+        from app import background
+
+        for t in list(background._background_tasks):
+            if t.done() or t.get_loop().is_closed():
+                background._background_tasks.discard(t)
+    except Exception:  # noqa: BLE001
+        pass
+    yield
+    await _stop_leftover_tasks()
+
+
 async def _empty_redis() -> None:
     """A clean Redis database for this session (never database 0)."""
     url = os.environ["REDIS_URL"]
