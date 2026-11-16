@@ -27,6 +27,11 @@ async function bearer(page: Page): Promise<string> {
   return (await seen).headers()["authorization"];
 }
 
+/** With SHOTS=<folder>: keep a picture of the page (for showing the owner). */
+async function shot(page: Page, name: string) {
+  if (process.env.SHOTS) await page.screenshot({ path: path.join(process.env.SHOTS, `${name}.png`) });
+}
+
 let dm = "";
 let aAuth = "";
 let policy: { max_bytes: number; direct_max_bytes: number; tus_endpoint: string | null } | null = null;
@@ -87,6 +92,7 @@ test("it shows in Files → Rooms uploads and counts in her storage, not his", a
   const row = alice.getByRole("listitem").filter({ hasText: bigName });
   await expect(row).toBeVisible();
   await expect(row).toContainText(run.users.bob.username);
+  await shot(alice, "rooms-uploads-list");
   const q = await (await alice.request.get("/api/files/quota", { headers: { Authorization: aAuth } })).json();
   expect(q.rooms_bytes).toBeGreaterThanOrEqual(policy!.direct_max_bytes);
   expect(q.used_bytes).toBeGreaterThanOrEqual(q.rooms_bytes);
@@ -110,6 +116,7 @@ test("removing it there leaves File removed on the message for both", async ({ a
   await expect(alice.getByRole("listitem").filter({ hasText: bigName })).toHaveCount(0);
   // Bob's open conversation hears about it with no reload.
   await expect(log(bob).getByText("File removed").last()).toBeVisible({ timeout: 20_000 });
+  await shot(bob, "rooms-uploads-file-removed");
   await expect(log(bob).getByText(`The big one ${stamp}`)).toBeVisible();
   await alice.goto(`/rooms/r/${dm}`);
   await expect(log(alice).getByText("File removed").last()).toBeVisible();
