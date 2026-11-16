@@ -298,6 +298,12 @@ class PwPrefs(context: Context) {
         get() = prefs.getBoolean("setup_guide_done", false)
         set(v) = prefs.edit().putBoolean("setup_guide_done", v).apply()
 
+    /** "Don't show again" on the notice that Chrome isn't using this autofill service. About this
+     *  phone's settings, like the guide. */
+    var chromeNoticeOff: Boolean
+        get() = prefs.getBoolean("chrome_notice_off", false)
+        set(v) = prefs.edit().putBoolean("chrome_notice_off", v).apply()
+
     /** When this phone first opened the vault. The export reminder counts from here. */
     var exportSince: Long
         get() = prefs.getLong("export_since", 0)
@@ -329,7 +335,8 @@ class PwPrefs(context: Context) {
     fun forgetDevice() {
         val keep = prefs.getString("server", null)
         val guide = setupGuideDone
-        prefs.edit().clear().putString("server", keep).putBoolean("setup_guide_done", guide).apply()
+        val chrome = chromeNoticeOff
+        prefs.edit().clear().putString("server", keep).putBoolean("setup_guide_done", guide).putBoolean("chrome_notice_off", chrome).apply()
     }
 }
 

@@ -81,6 +81,10 @@ class AutofillAuthActivity : FragmentActivity() {
     private var itemId: String? = null
     private lateinit var target: FillTarget
     private var downgrade = false
+
+    /** Offered on the app's name alone (A75): treated as a login the person searched for and
+     *  picked, so the app is checked and asked about before anything fills. */
+    private var guess = false
     private var frameDomain: String? = null
     private lateinit var usernames: ArrayList<AutofillId>
     private lateinit var passwords: ArrayList<AutofillId>
@@ -113,6 +117,7 @@ class AutofillAuthActivity : FragmentActivity() {
         itemId = i.getStringExtra(EXTRA_ITEM)
         target = readTarget(i)
         downgrade = i.getBooleanExtra(EXTRA_DOWNGRADE, false)
+        guess = i.getBooleanExtra(EXTRA_GUESS, false)
         frameDomain = i.getStringExtra(EXTRA_FRAME)
         usernames = ids(i, EXTRA_USERNAMES)
         passwords = ids(i, EXTRA_PASSWORDS)
@@ -282,7 +287,7 @@ class AutofillAuthActivity : FragmentActivity() {
                     lockedOut()
                     return@LaunchedEffect
                 }
-                if (item == null) step = Step.Fail("That item isn't in your vault any more.") else check(item, false)
+                if (item == null) step = Step.Fail("That item isn't in your vault any more.") else check(item, guess)
             }
             Pw.touch()
         }
@@ -632,6 +637,7 @@ class AutofillAuthActivity : FragmentActivity() {
         private const val EXTRA_CERT = "pw.target.cert"
         private const val EXTRA_DOWNGRADE = "pw.downgrade"
         private const val EXTRA_FRAME = "pw.frame"
+        private const val EXTRA_GUESS = "pw.guess"
         private const val EXTRA_USERNAMES = "pw.ids.usernames"
         private const val EXTRA_PASSWORDS = "pw.ids.passwords"
         private const val EXTRA_NEW_PASSWORDS = "pw.ids.new-passwords"
@@ -643,11 +649,12 @@ class AutofillAuthActivity : FragmentActivity() {
         private const val EXTRA_OPTION_IDS = "pw.ids.options"
         private const val EXTRA_OPTION_VALUES = "pw.values.options"
 
-        fun intent(context: Context, mode: String, itemId: String?, target: FillTarget, form: ParsedForm<AutofillId>, downgrade: Boolean): Intent {
+        fun intent(context: Context, mode: String, itemId: String?, target: FillTarget, form: ParsedForm<AutofillId>, downgrade: Boolean, guess: Boolean = false): Intent {
             val i = Intent(context, AutofillAuthActivity::class.java)
                 .putExtra(EXTRA_MODE, mode)
                 .putExtra(EXTRA_ITEM, itemId)
                 .putExtra(EXTRA_DOWNGRADE, downgrade)
+                .putExtra(EXTRA_GUESS, guess)
                 .putExtra(EXTRA_FRAME, form.frameDomain)
                 .putParcelableArrayListExtra(EXTRA_USERNAMES, ArrayList(form.usernames))
                 .putParcelableArrayListExtra(EXTRA_PASSWORDS, ArrayList(form.passwords))

@@ -57,13 +57,21 @@ class ParsedForm<T> {
 
 object FormParser {
     // Android's View.AUTOFILL_HINT_* values plus the HTML autocomplete tokens.
-    private val USERNAME_HINTS = setOf("username", "emailaddress", "email", "user", "login", "webauthn username", "phone number")
+    private val USERNAME_HINTS = setOf("username", "newusername", "emailaddress", "email", "user", "login", "webauthn username", "phone number")
     private val PASSWORD_HINTS = setOf("password", "current-password", "currentpassword")
     private val NEW_PASSWORD_HINTS = setOf("new-password", "newpassword")
     private val OTP_HINTS = setOf("one-time-code", "smsotpcode", "2facode", "otp", "smsotp")
 
     private val PASSWORD_WORDS = Regex("pass(word|wd|code)?|pwd|pin\\b|kennwort|contrase|mot.?de.?passe|senha|parol|wachtwoord|lösen|heslo", RegexOption.IGNORE_CASE)
-    private val USER_WORDS = Regex("user|login|e-?mail|account|identifier|nickname|logon|uname|benutzer|usuario|utilisateur|courriel", RegexOption.IGNORE_CASE)
+    private val USER_WORDS = Regex(
+        "user|login|e-?mail|account|identifier|nickname|logon|uname|benutzer|usuario|utilisateur|courriel|" +
+            "(member|customer|client|access).?(id\\b|no\\b|num)|\\bcrn\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** "Email address" is an email box, not a street address: read as "email" before the words
+     *  that rule a field out, or the commonest label there is counts as part of an address. */
+    private val EMAIL_ADDRESS = Regex("e-?mail[\\s_-]*addr(ess)?", RegexOption.IGNORE_CASE)
     private val OTP_WORDS = Regex("otp|2fa|mfa|totp|one.?time|verification.?code|security.?code|auth.?code|sms.?code|tfa|token", RegexOption.IGNORE_CASE)
     private val NOT_LOGIN = Regex("search|query|captcha|coupon|promo|voucher|address|city|zip|postcode|first.?name|last.?name|company", RegexOption.IGNORE_CASE)
     private val NEW_WORDS = Regex("new.?pass|confirm|repeat|retype|again|verify.?pass|create.?pass", RegexOption.IGNORE_CASE)
@@ -155,7 +163,9 @@ object FormParser {
     /** The form, and autocomplete's own `section-*`, `shipping` and `billing`. */
     private fun sectionOf(n: FieldNode<*>): String = n.section.orEmpty() + "/" + tokens(n).filter { SECTION_TOKEN.matches(it) }.joinToString(",")
 
-    fun <T> parse(nodes: List<FieldNode<T>>): ParsedForm<T> {
+    /** @param manual the person asked for autofill on this field themselves (long-press, Autofill):
+     *  they get an answer for it whatever it's called. */
+    fun <T> parse(nodes: List<FieldNode<T>>, manual: Boolean = false): ParsedForm<T> {
         val form = ParsedForm<T>()
         val focused = nodes.firstOrNull { it.focused }
         val domain = focused?.webDomain ?: nodes.firstOrNull { it.webDomain != null }?.webDomain
@@ -176,7 +186,7 @@ object FormParser {
         for ((index, n) in inFrame.withIndex()) {
             n.options?.let { form.options[n.id] = it }
             val tok = tokens(n)
-            val words = described(n)
+            val words = EMAIL_ADDRESS.replace(described(n), "email")
             val type = n.htmlAttrs["type"]?.lowercase()
 
             val card = tok.firstNotNullOfOrNull { CARD_HINTS[it.replace("_", "")] } ?: CARD_WORDS.firstOrNull { it.second.containsMatchIn(words) }?.first
@@ -198,12 +208,15 @@ object FormParser {
             }
             if (firstPassword < 0 && (n.id in form.passwords || n.id in form.newPasswords)) firstPassword = index
         }
-        // No description at all: the text field right before a password is the username.
+        // No description at all: the text field right before a password is the username. So is
+        // a phone number there, which is what plenty of apps sign in with.
         if (form.usernames.isEmpty() && firstPassword > 0) {
             for (i in firstPassword - 1 downTo 0) {
                 val n = inFrame[i]
-                if (n in plain) {
+                val phone = form.identity["phone"] == n.id
+                if (n in plain || phone) {
                     form.usernames += n.id
+                    if (phone) form.identity.remove("phone")
                     break
                 }
             }
@@ -214,6 +227,9 @@ object FormParser {
             form.newPasswords += form.passwords
             form.passwords.clear()
         }
+        // Asked for by hand on a box nothing here could name: it's offered Search, and what's
+        // picked goes in that box.
+        if (manual && form.isEmpty && focused != null && inFrame.any { it.id == focused.id }) form.usernames += focused.id
         return form
     }
 }

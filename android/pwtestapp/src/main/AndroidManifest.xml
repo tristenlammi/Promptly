@@ -13,6 +13,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".PlainLabelActivity" android:exported="true" android:windowSoftInputMode="stateHidden" />
         <activity android:name=".TwoStepActivity" android:exported="true" android:windowSoftInputMode="stateHidden" />
         <activity android:name=".OtpActivity" android:exported="true" android:windowSoftInputMode="stateHidden" />
         <activity android:name=".CardActivity" android:exported="true" android:windowSoftInputMode="stateHidden" />

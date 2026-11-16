@@ -266,6 +266,23 @@ object AutofillIndex {
         return hits.sortedWith(compareBy<Hit> { it.rank }.thenByDescending { recents[it.entry.itemId] ?: 0L }.thenBy { it.entry.title ?: "" })
     }
 
+    /** Logins that are probably for an app nothing links yet (A75): ones for the site its package
+     *  or label names, and ones titled with its name. Only the app's word for it, so these are
+     *  offered, never filled: picking one asks the site, and then the person, exactly as a login
+     *  found through Search does. Nothing for an app that's showing a web page: what page that is
+     *  can't be checked, and a login for it stays behind Search (A7). */
+    fun guesses(lookup: IndexLookup, target: FillTarget.App, label: String?, recents: Map<String, Long>, limit: Int = 3): List<IndexEntry> {
+        if (!target.claimedDomain.isNullOrEmpty()) return emptyList()
+        val out = LinkedHashSet<IndexEntry>()
+        for ((key, list) in lookup.byKey) if (AppNames.names(target.pkg, label, key)) out += list
+        // By title too, but not a login whose site is set never to match: that was a decision.
+        if (label != null) for (e in lookup.entries) {
+            if (e.kind != "login" || !AppNames.titled(label, e.title)) continue
+            if (e.urls.none { !it.url.startsWith(Match.APP_SCHEME) && Match.modeOf(it, e.match) == "never" }) out += e
+        }
+        return out.sortedWith(compareByDescending<IndexEntry> { recents[it.itemId] ?: 0L }.thenBy { it.title ?: "" }).take(limit)
+    }
+
     fun matches(entries: List<IndexEntry>, target: FillTarget, recents: Map<String, Long>, linked: (String) -> Boolean): List<Hit> =
         matches(IndexLookup(entries), target, recents, linked)
 }

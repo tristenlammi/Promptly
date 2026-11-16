@@ -346,9 +346,26 @@ fun MainNotices(
     }
     val changed = remember(version) { client.keyChanges.isNotEmpty() }
     val exportDue = remember(snoozed, p.exportLast) { ExportReminder.due(p.exportLast, p.exportSince, p.exportSnoozedUntil) }
-    val show = (state.requests > 0 && !onHereDevices) || (changed && !onHereShared) || (state.recoveryDue && !onHereSecurity) || (exportDue && !onHereExport)
+    // Autofill's on, and a Chrome here still only fills from Google: the commonest reason nothing
+    // shows on a website. Read again each time the app comes back, so it goes once it's switched.
+    val ctx = LocalContext.current
+    var chromeOff by remember { mutableStateOf<List<String>>(emptyList()) }
+    LifecycleResumeEffect(snoozed) {
+        chromeOff = if (p.chromeNoticeOff) emptyList() else ChromeSetup.notUsingUs(ctx)
+        onPauseOrDispose { }
+    }
+    val show = (state.requests > 0 && !onHereDevices) || (changed && !onHereShared) || (state.recoveryDue && !onHereSecurity) || (exportDue && !onHereExport) || chromeOff.isNotEmpty()
     if (!show) return
     Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (pkg in chromeOff) NoteCard("${ChromeSetup.label(pkg)} isn't using Passwords yet, so nothing shows on websites there. In its settings pick \"Autofill using another service\", then restart it.", "notice-chrome") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { ChromeSetup.open(ctx, pkg) }, Modifier.testTag("notice-chrome-open")) { Text("Open its settings") }
+                TextButton(onClick = {
+                    p.chromeNoticeOff = true
+                    snoozed++
+                }, Modifier.testTag("notice-chrome-off")) { Text("Don't show again") }
+            }
+        }
         if (state.requests > 0 && !onHereDevices) NoteCard("A new device wants to join your vault.", "notice-request") {
             OutlinedButton(onClick = onDevices, Modifier.testTag("notice-request-review")) { Text("Review") }
         }

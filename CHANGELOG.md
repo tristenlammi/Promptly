@@ -21,6 +21,17 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Passwords on Android (next Promptly for Android): in an app you haven't filled before, the logins that look like they belong to it are now listed by name above "Search Passwords" (for example your Netflix login in the Netflix app). Tapping one still checks the app first, and asks you if the site doesn't vouch for it.
+- Passwords on Android: a card on the main screen tells you when Chrome isn't using Passwords yet (Chrome only fills from Google until you pick "Autofill using another service" in its settings), with a button that opens that setting.
+
+### Fixed
+
+- Passwords on Android: sign-in boxes labelled "Email address" got no suggestions unless the app marked them as an email box; they do now, and so do sign-ins that use a phone number, a customer ID or a client number.
+- Passwords on Android: long-pressing a box and choosing Autofill now always offers "Search Passwords", even on a box Passwords couldn't recognise.
+- Passwords on Android: apps with Australian or British style names (au.com.…, uk.co.…) are now matched to their sites.
+
 ## [0.46.0] - 2026-11-16
 
 ### Changed
