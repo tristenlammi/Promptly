@@ -21,6 +21,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Security
+
+- Home: someone sending wrong keys to the home box's line could get every box turned away for ten minutes, this server's own included. Wrong tries are now counted per caller.
+- Chat: the rule that lets the assistant open an address made of your own words without asking is stricter. The site has to be one you named, and your words have to come in the order you wrote them, so a web page can't use such an address to pass anything along.
+- Notifications: a browser's push address has to be a real push service on the internet. Before, a signed-in person could register an address inside the server's own network.
+- Rooms: a voice message that keeps the converter busy is stopped after two minutes, and a picture too big to open safely (a link's preview, an attachment) is left unopened.
+- Home: ids passed on to the home box can no longer be "." or "..".
+
 ## [0.45.0] - 2026-11-16
 
 ### Added
