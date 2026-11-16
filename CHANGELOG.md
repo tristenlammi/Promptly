@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Passwords extension 0.2.3: when a passkey is wanted and your vault is locked, the passkey window asks for your master password and nothing after it; the passkey PIN is only asked when the vault is already open (D139).
+
 ## [0.46.0] - 2026-11-16
 
 ### Changed

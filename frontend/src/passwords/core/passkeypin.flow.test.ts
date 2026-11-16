@@ -13,7 +13,7 @@ import { MemoryStore } from "./store";
  *  `chrome` types. */
 const PASSKEYS = "../../../../passwords/extension/src/passkeys";
 type Sender = { tab?: { id: number }; frameId?: number; url?: string; origin?: string };
-type Guard = { store: MemoryStore; lockOut: () => Promise<void> };
+type Guard = { store: MemoryStore; lockOut: () => Promise<void>; unlock?: (password: string) => Promise<unknown> };
 type Handle = (msg: never, sender: Sender, client: () => never, isThePerson: () => Promise<boolean>, offersChanged?: () => void, guard?: Guard) => Promise<unknown>;
 let handlePasskey: Handle;
 const opened: string[] = [];
@@ -73,6 +73,7 @@ class FakeVault {
 
 const SITE: Sender = { tab: { id: 7 }, frameId: 0, url: "https://example.com/login", origin: "https://example.com" };
 const notThePerson = async () => false;
+const MASTER = "correct horse battery staple";
 
 function rig() {
   const vault = new FakeVault();
@@ -83,6 +84,12 @@ function rig() {
     lockOut: async () => {
       lockedOut++;
       vault.unlocked = false;
+    },
+    // What the background's unlock does: a wrong master password throws, a right one opens the vault.
+    unlock: async (password: string) => {
+      if (password !== MASTER) throw new Error("That isn't right");
+      vault.unlocked = true;
+      await clearPinTries(store);
     },
   };
   const send = (msg: Record<string, unknown>, sender: Sender) => handlePasskey(msg as never, sender, () => vault as never, notThePerson, () => undefined, guard) as Promise<Record<string, unknown>>;
@@ -194,5 +201,56 @@ describe("passkey PIN, in the extension's passkey window", () => {
     expect(unguarded).toEqual({ error: "locked" });
     await made.window({ t: "pkAnswer", action: "cancel" });
     await made.result;
+  });
+
+  it("a locked vault opened in the window with the master password asks for no PIN after it, once (D139)", async () => {
+    const r = rig();
+    const made = await r.ask("create", create);
+    await made.window({ t: "pkAnswer", action: "create", pin: "482913", newPin: "482913", newPinAgain: "482913" });
+    await made.result;
+    const item = [...r.vault.items.values()].find((i) => i.body.passkeys?.length)!;
+    const credentialId = item.body.passkeys![0].credentialId;
+    // An item marked to ask again is answered by the same master password.
+    r.vault.items.set(item.id, { ...item, body: { ...item.body, reprompt: true } });
+
+    r.vault.unlocked = false;
+    const { result, window } = await r.ask("get", get);
+    expect(await window({ t: "pkPrompt" })).toMatchObject({ unlocked: false });
+    await expect(window({ t: "pkUnlock", password: "not it" })).rejects.toThrow();
+    expect(r.vault.unlocked).toBe(false);
+    // Only the passkey window can unlock this way.
+    expect(await r.send({ t: "pkUnlock", password: MASTER }, SITE)).toBeNull();
+    expect(await window({ t: "pkUnlock", password: MASTER })).toEqual({ unlocked: true });
+    expect(await window({ t: "pkPrompt" })).toMatchObject({ unlocked: true, pin: "none" });
+    expect(await window({ t: "pkAnswer", action: "use", credentialId })).toEqual({ done: true });
+    const signed = await result;
+    expect(signed.ok).toBe(true);
+    expect(uvFlag((signed.result as { authenticatorData: string }).authenticatorData)).toBe(true);
+
+    // The next request, with the vault open, is back to the PIN.
+    const next = await r.ask("get", get);
+    expect(await next.window({ t: "pkPrompt" })).toMatchObject({ pin: "enter" });
+    expect(await next.window({ t: "pkAnswer", action: "use", credentialId })).toEqual({ error: "pin", left: 5 });
+    await next.window({ t: "pkAnswer", action: "cancel" });
+    await next.result;
+  });
+
+  it("a lock after the master password ends that proof", async () => {
+    const r = rig();
+    const made = await r.ask("create", create);
+    await made.window({ t: "pkAnswer", action: "create", pin: "482913", newPin: "482913", newPinAgain: "482913" });
+    await made.result;
+    const credentialId = [...r.vault.items.values()].find((i) => i.body.passkeys?.length)!.body.passkeys![0].credentialId;
+    r.vault.unlocked = false;
+    const { result, window } = await r.ask("get", get);
+    await window({ t: "pkUnlock", password: MASTER });
+    r.vault.unlocked = false;
+    expect(await window({ t: "pkAnswer", action: "use", credentialId })).toEqual({ error: "locked" });
+    // Opened again somewhere else (the panel, a short PIN): this window asks for the passkey PIN.
+    r.vault.unlocked = true;
+    expect(await window({ t: "pkPrompt" })).toMatchObject({ pin: "enter" });
+    expect(await window({ t: "pkAnswer", action: "use", credentialId })).toEqual({ error: "pin", left: 5 });
+    await window({ t: "pkAnswer", action: "cancel" });
+    await result;
   });
 });
