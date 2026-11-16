@@ -214,7 +214,19 @@ def _clean_name(name: str | None) -> str:
     return s[-200:]
 
 
+# Files attached to a message that hasn't been sent yet. One person can have
+# this many waiting; one that waits longer than a day was never going to be
+# sent, and is wiped (``purge_unsent``).
+MAX_UNSENT = 30
+UNSENT_KEPT = timedelta(hours=24)
+
+
 async def store_attachment(db: AsyncSession, room: Room, user: User, upload: UploadFile) -> RoomAttachment:
+    waiting = await db.scalar(
+        select(func.count()).select_from(RoomAttachment).where(RoomAttachment.uploader_id == user.id, RoomAttachment.message_id.is_(None))
+    )
+    if (waiting or 0) >= MAX_UNSENT:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Send or remove the files you've already attached first")
     att = RoomAttachment(id=uuid.uuid4(), room_id=room.id, uploader_id=user.id, filename=_clean_name(upload.filename))
     att.mime = (upload.content_type or mimetypes.guess_type(att.filename)[0] or "application/octet-stream")[:127]
     path = absolute_path(att_path(att))
@@ -340,6 +352,24 @@ async def purge_deleted(db: AsyncSession, *, older_than: timedelta = PURGE_AFTER
     await db.execute(delete(RoomPollVote).where(RoomPollVote.message_id.in_(ids)))
     await purge_sources(db, "room_msg", ids)
     await db.commit()
+    return len(rows)
+
+
+async def purge_unsent(db: AsyncSession, *, older_than: timedelta = UNSENT_KEPT) -> int:
+    """Wipe files that were attached and never sent. Until this, a file
+    someone attached and then thought better of stayed on the server for
+    good, and nothing stopped one person filling the disk that way."""
+    cutoff = datetime.now(timezone.utc) - older_than
+    rows = (
+        (await db.execute(select(RoomAttachment).where(RoomAttachment.message_id.is_(None), RoomAttachment.created_at < cutoff).limit(500)))
+        .scalars()
+        .all()
+    )
+    for a in rows:
+        remove_attachment_files(a)
+        await db.delete(a)
+    if rows:
+        await db.commit()
     return len(rows)
 
 

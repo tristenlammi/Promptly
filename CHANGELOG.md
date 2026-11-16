@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Rooms: a file attached to a message and never sent is now wiped after a day (it used to stay on the server for good), and one person can have at most 30 files waiting to be sent, so the disk can't be filled that way.
+
 ## [0.46.0] - 2026-11-16
 
 ### Changed
