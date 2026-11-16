@@ -329,6 +329,22 @@ async def _reset_redis() -> None:
         await redis.aclose()
     except Exception:  # noqa: BLE001 — best effort between tests
         pass
+    # The rate limiter keeps its own Redis connections (``rate_limit._storage``),
+    # with the same hazard: opened on one test's loop, then awaited on the next
+    # test's, where the reply never comes. A test that switched the limiter on
+    # would sit there until the timeout (the suite's old "hang" after
+    # test_forms_location). Each test gets a limiter on its own loop.
+    try:
+        from limits.aio.strategies import FixedWindowRateLimiter, MovingWindowRateLimiter
+
+        from app import rate_limit
+
+        storage = type(rate_limit._storage)(rate_limit._settings.REDIS_URL)
+        rate_limit._storage = storage
+        rate_limit._limiter = FixedWindowRateLimiter(storage)
+        rate_limit._moving_limiter = MovingWindowRateLimiter(storage)
+    except Exception:  # noqa: BLE001 — best effort between tests
+        pass
 
 
 @pytest.fixture(autouse=True)
