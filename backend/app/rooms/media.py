@@ -391,6 +391,7 @@ async def check_reaction(db: AsyncSession, room: Room, emoji: str) -> None:
 PREVIEW_HTML_BYTES = 3 * 1024 * 1024
 PREVIEW_IMAGE_BYTES = 8 * 1024 * 1024
 PREVIEW_EDGE = 640
+PREVIEW_MAX_PIXELS = 40_000_000
 PREVIEW_TIMEOUT = 6.0
 PREVIEW_CACHE_S = 6 * 3600
 PREVIEW_MISS_S = 30 * 60
@@ -522,6 +523,10 @@ def _thumb(raw: bytes) -> tuple[bytes, int, int] | None:
         from PIL import Image, ImageOps
 
         with Image.open(io.BytesIO(raw)) as img:
+            # Its size is in the header: a picture that would take hundreds of
+            # megabytes to open isn't opened (it came from someone else's site).
+            if img.width * img.height > PREVIEW_MAX_PIXELS:
+                return None
             img.seek(0)
             img = ImageOps.exif_transpose(img)
             if img.width < 40 or img.height < 40:
