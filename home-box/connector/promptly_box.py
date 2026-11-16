@@ -40,7 +40,7 @@ from typing import Any
 
 import aiohttp
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 log = logging.getLogger("promptly-box")
 
 SHOWN = {"light", "switch", "input_boolean", "fan", "sensor", "binary_sensor", "climate", "cover", "lock", "media_player"}
@@ -78,6 +78,17 @@ BRANDS: list[tuple[str, str, str]] = [
 ]
 # Set-up steps that aren't a device in anyone's home, or that Promptly does itself.
 NOT_BRANDS = {"sun", "backup", "hassio", "cloud", "analytics", "mobile_app", "person", "zone", "homeassistant", "onboarding", "go2rtc", "radio_browser", "shopping_list", "met", "google_translate"}
+# Home Assistant's general-purpose tools: they fetch an address, open a
+# database, read a file or look around the network for whoever sets them up.
+# None is a device in anyone's home, and on a box that shares a computer with
+# other things (this server's own box does) they'd let anyone in the home
+# reach those things. Never offered, and never started.
+NOT_BRANDS |= {
+    "scrape", "sql", "file", "local_file", "ping", "generic", "mjpeg", "ffmpeg", "command_line", "rest",
+    "systemmonitor", "filesize", "folder_watcher", "downloader", "dnsip", "cert_expiry", "local_ip",
+    "imap", "feedreader", "caldav", "webdav", "ftp", "telnet", "tcp", "nmap_tracker", "wake_on_lan",
+    "shell_command", "python_script", "webhook",
+}
 SECRET_NAMES = ("password", "token", "api_key", "apikey", "secret", "passcode", "access_key", "pin", "psk")
 # Home Assistant's own housekeeping, which isn't a device in anyone's home.
 NOT_DEVICES = {"sun", "backup", "hassio", "update", "analytics", "cloud", "person", "zone", "shopping_list", "tts", "stt"}
@@ -374,6 +385,17 @@ def flat_brands(descriptions: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def can_start(brand: str, manifests: dict[str, dict[str, Any]], can_set_up: set[str]) -> bool:
+    """May a set-up for this brand be started? Only what "Add a device"
+    itself offers: the well-known brands, and what a search can find. The
+    page only ever asks for those; anything else asking is turned away."""
+    if brand not in can_set_up or brand in NOT_BRANDS:
+        return False
+    if brand in {b[0] for b in BRANDS}:
+        return True
+    return (manifests.get(brand) or {}).get("integration_type") not in ("system", "entity", "helper")
+
+
 def brands_for(manifests: dict[str, dict[str, Any]], can_set_up: set[str], q: str) -> list[dict[str, Any]]:
     """The brands offered: the well-known ones first; with a search, every
     brand this Home Assistant can set up whose name matches."""
@@ -387,13 +409,13 @@ def brands_for(manifests: dict[str, dict[str, Any]], can_set_up: set[str], q: st
 
     featured = {b[0] for b in BRANDS}
     for domain, name, note in BRANDS:
-        if domain in can_set_up and (not q or q in name.lower() or q in domain):
+        if can_start(domain, manifests, can_set_up) and (not q or q in name.lower() or q in domain):
             out.append(one(domain, name, note, True))
     if q:
         rest = [
             one(d, str((manifests.get(d) or {}).get("name") or d), "", False)
             for d in can_set_up
-            if d not in featured and d not in NOT_BRANDS and (manifests.get(d) or {}).get("integration_type") not in ("system", "entity", "helper")
+            if d not in featured and can_start(d, manifests, can_set_up)
             and (q in d or q in str((manifests.get(d) or {}).get("name") or "").lower())
         ]
         out += sorted(rest, key=lambda b: b["name"].lower())[:40]
@@ -1015,6 +1037,8 @@ class HomeAssistant:
             return out
         if op == "flows.start":
             brand = str(a.get("brand") or "")
+            if not can_start(brand, await self.brand_names(), set(await self.rest("GET", "/config/config_entries/flow_handlers") or [])):
+                raise RuntimeError("That isn't something Promptly can add.")
             return await self._shaped(await self.rest("POST", "/config/config_entries/flow", {"handler": brand, "show_advanced_options": False}))
         if op == "flows.get":
             return await self._shaped(await self.rest("GET", f"/config/config_entries/flow/{a.get('flow')}"))

@@ -261,6 +261,45 @@ async def test_attachments_never_reach_files(client, db, people):
     assert (await db.execute(select(UserFile))).scalars().all() == []
 
 
+async def test_a_file_attached_and_never_sent_does_not_stay(client, db, people, monkeypatch):
+    """Attached then thought better of: wiped after a day, sent files left
+    alone. And one person can only have so many waiting."""
+    from datetime import timedelta
+
+    from app.files.storage import absolute_path
+    from app.rooms import service
+    from app.rooms.models import RoomAttachment
+
+    ann, bob, *_ = people
+    _sid, room = await make_space(client, ann, bob)
+
+    async def attach(name: str) -> dict:
+        r = await client.post(f"/api/rooms/rooms/{room}/attachments", headers=H(ann), files={"file": (name, b"private", "text/plain")})
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    sent, unsent = await attach("sent.txt"), await attach("changed-my-mind.txt")
+    await say(client, ann, room, "", attachment_ids=[sent["id"]])
+    kept = absolute_path(service.att_path(await db.get(RoomAttachment, uuid.UUID(sent["id"]))))
+    left = absolute_path(service.att_path(await db.get(RoomAttachment, uuid.UUID(unsent["id"]))))
+    assert kept.exists() and left.exists()
+
+    assert await service.purge_unsent(db) == 0  # still fresh: the message may yet be sent
+    assert await service.purge_unsent(db, older_than=timedelta(seconds=-5)) == 1
+    assert kept.exists() and not left.exists()
+    assert (await client.get(unsent["url"])).status_code == 404
+    assert (await client.get(sent["url"])).status_code == 200
+
+    monkeypatch.setattr(service, "MAX_UNSENT", 2)
+    await attach("one.txt")
+    await attach("two.txt")
+    r = await client.post(f"/api/rooms/rooms/{room}/attachments", headers=H(ann), files={"file": ("three.txt", b"x", "text/plain")})
+    assert r.status_code == 429
+    # Someone else's waiting files aren't counted against you.
+    r = await client.post(f"/api/rooms/rooms/{room}/attachments", headers=H(bob), files={"file": ("mine.txt", b"x", "text/plain")})
+    assert r.status_code == 201
+
+
 # ------------------------------------------------------------------ search
 
 

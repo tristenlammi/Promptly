@@ -270,10 +270,11 @@ async def memory_learning(ctx) -> dict[str, int]:
 async def rooms_purge_deleted(ctx) -> int:
     """Cron: wipe what deleted Rooms messages held, once Undo has run out."""
     from app.database import SessionLocal
-    from app.rooms.service import purge_deleted
+    from app.rooms.service import purge_deleted, purge_unsent
 
     async with SessionLocal() as db:
-        return await purge_deleted(db)
+        # …and files that were attached to a message nobody sent.
+        return await purge_deleted(db) + await purge_unsent(db)
 
 
 # Forms (WP-F1.4): telling owners their form closed, and the daily email.
