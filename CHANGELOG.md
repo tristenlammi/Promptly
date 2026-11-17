@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-17
+
 ### Added
 
 - Home: play music by name. Ask in a chat or out loud, "play Miles Davis in the lounge", "play the album Kind of Blue", "play Yesterday by The Beatles in the kitchen", and it plays from Tidal on that speaker. It starts straight away when one result is plainly what you asked for; when two things share the name it asks which you meant, and it never picks a speaker for you when more than one could be meant.
