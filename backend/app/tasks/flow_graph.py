@@ -95,6 +95,18 @@ class NodeType:
     # Workspace-output nodes: create a new note / sheet from the result.
     OUTPUT_NOTE = "output.note"
     OUTPUT_SHEET = "output.sheet"
+    # Home automations (``app/home/automations.py``): a flow that belongs to
+    # a home and switches its devices. These kinds run only there.
+    #   * the trigger: one of the home's devices changing ("when the front
+    #     door sensor turns on");
+    #   * the steps: switch or set one device, a room's lights, play music;
+    #   * the checks (true/false branches): the time of day, a device's state.
+    TRIGGER_HOME_STATE = "trigger.home_state"
+    HOME_DEVICE = "home.device"
+    HOME_LIGHTS = "home.lights"
+    HOME_MUSIC = "home.music"
+    HOME_STATE = "control.home_state"
+    TIME_WINDOW = "control.time"
 
 
 # Every terminal "what to do with the result" node kind. output.report is the
@@ -131,6 +143,21 @@ PROCESSING_TYPES = frozenset(
         NodeType.MEMORY,
         NodeType.MERGE,
         NodeType.DELAY,
+        NodeType.HOME_DEVICE,
+        NodeType.HOME_LIGHTS,
+        NodeType.HOME_MUSIC,
+    }
+)
+
+# The steps of a home automation that do something in the home.
+HOME_ACTION_TYPES = frozenset({NodeType.HOME_DEVICE, NodeType.HOME_LIGHTS, NodeType.HOME_MUSIC})
+TRIGGER_TYPES = frozenset(
+    {
+        NodeType.TRIGGER_SCHEDULE,
+        NodeType.TRIGGER_MANUAL,
+        NodeType.TRIGGER_WEBHOOK,
+        NodeType.TRIGGER_EVENT,
+        NodeType.TRIGGER_HOME_STATE,
     }
 )
 
@@ -138,7 +165,7 @@ PROCESSING_TYPES = frozenset(
 # Control-flow node kinds. They pass the upstream text straight through on the
 # branch(es) they select and skip the rest — the engine drives active-path
 # execution off the ``source_handle`` an edge leaves them by.
-CONTROL_TYPES = frozenset({NodeType.CONDITION, NodeType.ROUTER})
+CONTROL_TYPES = frozenset({NodeType.CONDITION, NodeType.ROUTER, NodeType.HOME_STATE, NodeType.TIME_WINDOW})
 
 
 # Stable node ids for the canonical 3-node "simple" graph. Deterministic so a
@@ -461,10 +488,79 @@ class RouterData(BaseModel):
     reasoning_effort: str | None = None
 
 
+class HomeDeviceData(BaseModel):
+    """Switch or set one device of the automation's home. ``box`` and
+    ``entity`` say which; ``name`` is what it was called when picked (shown
+    if the device has since gone). ``action`` and ``value`` are the Home
+    page's own (``app/home/relay.py::ACTIONS``), checked again at run time."""
+
+    box: str = ""
+    entity: str = ""
+    name: str = ""
+    action: str = "turn_on"
+    value: Any = None
+
+
+class HomeLightsData(BaseModel):
+    """All the lights in one room, on or off."""
+
+    box: str = ""
+    area: str = ""
+    name: str = ""
+    on: bool = True
+
+
+class HomeMusicData(BaseModel):
+    """Play music on one speaker. ``uri`` + ``label``: one thing picked from
+    the home's music service when the automation was made. Without a
+    ``uri``, ``query`` is a kind of music ("jazz", or empty for "something")
+    and a fitting mix is started."""
+
+    box: str = ""
+    entity: str = ""
+    name: str = ""
+    uri: str = ""
+    label: str = ""
+    query: str = ""
+    shuffle: bool = False
+    volume: int | None = None
+
+
+class HomeStateData(BaseModel):
+    """A check: is this device in this state now? ``state`` is ``on`` /
+    ``off`` (or a state word such as ``playing``, ``open``, ``home``)."""
+
+    box: str = ""
+    entity: str = ""
+    name: str = ""
+    state: str = "on"
+
+
+class TimeWindowData(BaseModel):
+    """A check: is it between ``start`` and ``end`` (HH:MM, the home's time
+    zone; a window that ends before it starts runs over midnight), on one of
+    ``days`` (0=Mon … 6=Sun; empty = every day)?"""
+
+    start: str = "18:00"
+    end: str = "23:00"
+    days: list[int] = Field(default_factory=list)
+    timezone: str = ""
+
+
+class HomeStateTriggerData(BaseModel):
+    """Starts the automation when a device of the home changes to ``state``
+    (``on`` / ``off`` / a state word)."""
+
+    box: str = ""
+    entity: str = ""
+    name: str = ""
+    state: str = "on"
+
+
 def branch_handles(node: FlowNode) -> list[str]:
     """The valid ``source_handle`` ids a control node can route to. Empty for a
     non-control node (its single implicit output handle is ``None``)."""
-    if node.type == NodeType.CONDITION:
+    if node.type in (NodeType.CONDITION, NodeType.HOME_STATE, NodeType.TIME_WINDOW):
         return ["true", "false"]
     if node.type == NodeType.ROUTER:
         try:
@@ -749,7 +845,7 @@ def topological_order(graph: FlowGraph) -> list[str]:
     return order
 
 
-def is_executable_graph(graph: FlowGraph, *, require_output: bool = True) -> bool:
+def is_executable_graph(graph: FlowGraph, *, require_output: bool = True, needs_output: bool = True) -> bool:
     """True when the graph is a runnable DAG (the shape the engine executes):
 
     * exactly one trigger, with no incoming edges;
@@ -767,24 +863,18 @@ def is_executable_graph(graph: FlowGraph, *, require_output: bool = True) -> boo
     ``require_output=False`` relaxes the "≥1 output" and "all reachable" rules
     for a **partial / test** run (run-to-here), where the user may still be
     wiring the flow and there's no output on the path yet.
+
+    ``needs_output=False`` drops only the "≥1 output" rule: a home automation
+    ends at whatever it switched, with no report to write. Every step must
+    still be connected.
     """
-    triggers = [
-        n
-        for n in graph.nodes
-        if n.type
-        in (
-            NodeType.TRIGGER_SCHEDULE,
-            NodeType.TRIGGER_MANUAL,
-            NodeType.TRIGGER_WEBHOOK,
-            NodeType.TRIGGER_EVENT,
-        )
-    ]
+    triggers = [n for n in graph.nodes if n.type in TRIGGER_TYPES]
     outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
     procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
     controls = [n for n in graph.nodes if n.type in CONTROL_TYPES]
     if len(triggers) != 1:
         return False
-    if require_output and len(outs) < 1:
+    if require_output and needs_output and len(outs) < 1:
         return False
     # No unknown/unsupported node types in the mix.
     if (

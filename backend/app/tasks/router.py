@@ -75,7 +75,8 @@ def _reindex_automations(
 
 async def _get_owned_task(task_id: uuid.UUID, user: User, db: AsyncSession) -> Task:
     row = await db.get(Task, task_id)
-    if row is None or row.user_id != user.id:
+    # A home's automations are looked after on the Home page (app/home).
+    if row is None or row.user_id != user.id or row.home_id is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
         )
@@ -273,7 +274,7 @@ async def list_tasks(
     # live in their workspace. ``scope=all`` adds them (with their home
     # workspace's title) so the Automations page can show everything that
     # runs on the account, grouped by home.
-    q = select(Task).where(Task.user_id == user.id)
+    q = select(Task).where(Task.user_id == user.id, Task.home_id.is_(None))
     if scope != "all":
         q = q.where(Task.workspace_id.is_(None))
     tasks = (
@@ -393,7 +394,7 @@ async def create_task(
 ) -> TaskResponse:
     count = (
         await db.execute(
-            select(func.count(Task.id)).where(Task.user_id == user.id)
+            select(func.count(Task.id)).where(Task.user_id == user.id, Task.home_id.is_(None))
         )
     ).scalar_one()
     if count >= MAX_TASKS_PER_USER:
@@ -474,7 +475,7 @@ async def duplicate_task(
     src = await _get_owned_task(task_id, user, db)
     count = (
         await db.execute(
-            select(func.count(Task.id)).where(Task.user_id == user.id)
+            select(func.count(Task.id)).where(Task.user_id == user.id, Task.home_id.is_(None))
         )
     ).scalar_one()
     if count >= MAX_TASKS_PER_USER:

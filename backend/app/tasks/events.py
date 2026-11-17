@@ -168,7 +168,7 @@ async def _dispatch(
                 Task.workspace_id == workspace_id
                 if workspace_id is not None
                 # Personal automations: owned by the actor, no home workspace.
-                else (Task.user_id == user_id) & Task.workspace_id.is_(None)
+                else (Task.user_id == user_id) & Task.workspace_id.is_(None) & Task.home_id.is_(None)
             )
             tasks = (
                 await db.execute(

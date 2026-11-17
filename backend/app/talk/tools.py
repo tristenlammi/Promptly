@@ -61,7 +61,7 @@ QUICK = ("add_to_note",)
 # Promptly Home: lights, scenes and speakers happen at once (a light is as
 # easily switched back); the tool never opens, unlocks or disarms anything.
 # On a turn that read outside content its own guard asks first.
-HOME = ("home_control", "home_music")
+HOME = ("home_control", "home_music", "home_automation")
 # "Send that to my phone" (WP-T11, ``chat/tools/talk_phone.py``): offered when the
 # conversation has found something with a link; it ends the turn on what it said.
 SEND = ("send_to_phone",)
@@ -159,6 +159,7 @@ LABELS = {
     "home_devices": "Checking the house",
     "home_control": "Doing that",
     "home_music": "Finding that music",
+    "home_automation": "Doing that",
 }
 
 # How to say a result: the headline, the details are on the screen.
@@ -180,6 +181,7 @@ _SCREEN_NOTES = {
     "home_devices": "Answer only what they asked, in one sentence; never read the whole list out.",
     "home_control": "Say it's done in a few words, as the result puts it.",
     "home_music": "If it played, say what started in a few words and nothing else. If it gave a list, ask which one in one short sentence, naming at most three.",
+    "home_automation": "Say what it reports in a few words. For a list, name at most three.",
 }
 _NO_SCREEN = "They can't see a screen: at most two short sentences."
 
@@ -250,7 +252,7 @@ def prompt(names: set[str], *, device: str, driving: bool, locked: bool = False)
     if set(HOME) & names:
         lines.append(
             "- At home: home_control switches lights, scenes and speakers straight away. Use the room or device name they "
-            "said; if it says more than one fits, ask which. It can't unlock, open or disarm anything. home_music plays an artist, album, song or playlist by name on a speaker; if it gives a list, ask which one. For a kind of music or a mood ('some jazz', 'something relaxing', just 'music') call home_music with mix true at once: never ask what exactly."
+            "said; if it says more than one fits, ask which. It can't unlock, open or disarm anything. home_music plays an artist, album, song or playlist by name on a speaker; if it gives a list, ask which one. For a kind of music or a mood ('some jazz', 'something relaxing', just 'music') call home_music with mix true at once: never ask what exactly. home_automation runs one of the home's own routines by its name or phrase ('movie time', 'run bedtime')."
         )
     phone = names & set(DEVICE)
     if phone:

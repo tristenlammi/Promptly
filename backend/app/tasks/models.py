@@ -62,6 +62,18 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
     )
     ws_position: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # A home automation (0482): its steps switch this home's devices. The
+    # home's owner makes and changes it (``app/home/automations.py``) and
+    # anyone in the home can run it; ``user_id`` is only who it runs as.
+    # Never listed with a person's own automations. Deleted with the home.
+    home_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("homes.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # What someone says or types to run a home automation ("movie time").
+    phrases: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     # The instruction the model runs each period.
     prompt: Mapped[str] = mapped_column(Text, nullable=False)

@@ -36,6 +36,7 @@ HOLDABLE: dict[str, str] = {
     "draft_form": "Make a draft form",
     "home_control": "Change something at home",
     "home_music": "Play music at home",
+    "home_automation": "Run a home automation",
     # Reads of something private that a page could be fishing for: the yes
     # shows the result on the card.
     "timeline_day": "Look at your timeline",
@@ -152,6 +153,8 @@ def question(name: str, args: dict[str, Any]) -> str:
             f", {k} {_t(args.get(k), 20)}" for k in ("brightness", "colour", "volume", "preset") if args.get(k) not in (None, "")
         )
         return f"At home: {doing} {_t(args.get('target'), 60) or 'the speaker'}{extra}?"
+    if name == "home_automation":
+        return f"At home: run “{_t(args.get('name'), 80)}”?"
     if name == "home_music":
         where = _t(args.get('target'), 60)
         what = _t(args.get('query'), 80) or ('some music' if args.get('mix') is True else 'that')

@@ -634,9 +634,15 @@ async def _from_box(live: Link, msg: dict[str, Any]) -> None:
     elif t == "state":
         e = clean_entity(msg.get("e"))
         if e is not None and (e["id"] in live.entities or len(live.entities) < MAX_ENTITIES):
-            if live.entities.get(e["id"]) != e:
+            old = live.entities.get(e["id"])
+            if old != e:
                 live.entities[e["id"]] = e
                 bump(live.home_id)
+                if old is not None and old.get("state") != e.get("state"):
+                    # An automation may be waiting for exactly this change.
+                    from . import automations
+
+                    await automations.on_state(live.home_id, live.box_id, old, e)
     elif t == "down":
         # The box is here but its Home Assistant isn't: what we hold is
         # last time's picture, to look at and not to switch.

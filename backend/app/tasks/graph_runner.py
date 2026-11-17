@@ -53,9 +53,11 @@ from app.tasks.flow_graph import (
     MemoryData,
     MergeData,
     DelayData,
+    HOME_ACTION_TYPES,
     NodeType,
     NoteOutputData,
     OUTPUT_TYPES,
+    TRIGGER_TYPES,
     RouterData,
     ScheduleTriggerData,
     SheetOutputData,
@@ -80,6 +82,7 @@ logger = logging.getLogger("promptly.tasks.graph_runner")
 # Longer waits belong to a future durable-reschedule mechanism, not a blocking
 # sleep inside the run.
 _DELAY_CAP_SECONDS = 600
+_HOME_DELAY_CAP_SECONDS = 1800
 
 # ``{{ var }}`` — literal, no-eval interpolation. Only whitelisted keys resolve;
 # an unknown reference is left verbatim so a stray brace can never blow up a run
@@ -1932,7 +1935,9 @@ async def run_graph_flow(
     the last processing node's output; each active action sink appends a note.
     """
     partial = stop_at is not None
-    if not is_executable_graph(graph, require_output=not partial):
+    # A home automation (app/home/automations.py) ends at what it switched.
+    home_id = getattr(task, "home_id", None)
+    if not is_executable_graph(graph, require_output=not partial, needs_output=home_id is None):
         raise TaskRunError(
             "This flow can't run yet — it needs one trigger, no loops, and "
             "connected steps."
@@ -2014,12 +2019,7 @@ async def run_graph_flow(
                 "separate automations, or lower a loop's item cap."
             )
 
-        if node.type in (
-            NodeType.TRIGGER_SCHEDULE,
-            NodeType.TRIGGER_MANUAL,
-            NodeType.TRIGGER_WEBHOOK,
-            NodeType.TRIGGER_EVENT,
-        ):
+        if node.type in TRIGGER_TYPES:
             active.add(nid)
             outputs[nid] = trigger_payload or ""
             structured[nid] = _try_json(trigger_payload or "")
@@ -2180,6 +2180,33 @@ async def run_graph_flow(
                     outputs[nid] = upstream
                     node_runs.append(record)
 
+                elif node.type in (NodeType.HOME_STATE, NodeType.TIME_WINDOW) or node.type in HOME_ACTION_TYPES:
+                    # A home automation's own steps and checks (app/home/flow_nodes.py).
+                    from app.home import flow_nodes as _home
+
+                    if home_id is None:
+                        raise TaskRunError("Home steps only work in a home's own automations.")
+                    try:
+                        if node.type in HOME_ACTION_TYPES:
+                            said = await _home.act(node, home_id=home_id, db=db)
+                            outputs[nid] = said
+                            last_processing_output = said
+                        else:
+                            result, said = await _home.check(node, home_id=home_id, db=db, now=run_started_at, tz_name=tz)
+                            selected[nid] = {"true" if result else "false"}
+                            outputs[nid] = upstream
+                    except _home.StepFailed as _e:
+                        raise TaskRunError(str(_e)) from _e
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": node.type,
+                            "label": _node_label(node),
+                            "status": "success",
+                            "output": said,
+                        }
+                    )
+
                 elif node.type == NodeType.MERGE:
                     data = MergeData.model_validate(node.data)
                     sep = {"blank": "\n\n", "newline": "\n", "space": " "}.get(
@@ -2201,9 +2228,14 @@ async def run_graph_flow(
                     )
 
                 elif node.type == NodeType.DELAY:
-                    secs = max(0, min(_DELAY_CAP_SECONDS, DelayData.model_validate(node.data).seconds or 0))
+                    # A home automation may wait longer ("lights off after 20
+                    # minutes"), and holds no database connection meanwhile.
+                    _cap = _HOME_DELAY_CAP_SECONDS if home_id is not None else _DELAY_CAP_SECONDS
+                    secs = max(0, min(_cap, DelayData.model_validate(node.data).seconds or 0))
                     # A test run doesn't wait — it would only eat its time limit.
                     if secs and not dry_run:
+                        if home_id is not None:
+                            await db.commit()
                         await asyncio.sleep(secs)
                     outputs[nid] = upstream  # pass the text through unchanged
                     node_runs.append(
@@ -2483,7 +2515,12 @@ async def run_graph_flow(
                     await asyncio.sleep(_retry_backoff(_retry_n))
                     structured.pop(nid, None)  # drop any partial state
                     continue  # retry this node
-                if (node.data or {}).get("on_error") != "continue":
+                # One lamp that won't answer doesn't stop the rest of a home
+                # automation: its steps carry on unless told otherwise.
+                _carry_on = (node.data or {}).get("on_error") == "continue" or (
+                    home_id is not None and node.type in HOME_ACTION_TYPES and (node.data or {}).get("on_error") != "stop"
+                )
+                if not _carry_on:
                     # Fail fast — but keep what ran: the steps before this
                     # one (some may have filed cards or posted messages), the
                     # tokens spent, and which step broke. A failed run used
@@ -2529,7 +2566,7 @@ async def run_graph_flow(
                         "label": "Error (continued)",
                         "status": "error",
                         "input": upstream,
-                        "output": f"Failed{_tail}: {str(_exc)[:500]}",
+                        "output": str(_exc)[:500] if home_id is not None else f"Failed{_tail}: {str(_exc)[:500]}",
                     }
                 )
             break
@@ -2608,6 +2645,11 @@ _NODE_LABELS = {
     "output.chat_message": "Post to chat",
     "output.note": "Write note",
     "output.sheet": "Add to sheet",
+    "home.device": "Device",
+    "home.lights": "Room lights",
+    "home.music": "Music",
+    "control.home_state": "Device check",
+    "control.time": "Time check",
 }
 
 

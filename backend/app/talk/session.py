@@ -730,9 +730,39 @@ class TalkSession:
             if hit is not None:
                 await self._command(turn, hit)
                 return
+            if await self._home_phrase(turn):
+                return
             if await self._home_quick(turn):
                 return
         await self._start_model(turn)
+
+    async def _home_phrase(self, turn: UserTurn) -> bool:
+        """ "It's morning time": the phrase of one of the home's automations
+        runs it, no model (``app/home/automations.py``). False when it isn't
+        exactly one automation's phrase: the model answers, and can ask."""
+        from app.home import automations
+
+        try:
+            ran = await automations.said(self.user.id, turn.text)
+        except Exception:  # noqa: BLE001 - fail open: the model still answers
+            logger.exception("talk: the home automation phrase failed")
+            return False
+        if ran is None:
+            return False
+        ok, said = ran
+        await self._set_state("thinking")
+        message_id = None
+        if turn.message_id is not None:
+            message_id = await chat.add_reply(
+                self.conv,
+                self.user,
+                turn.message_id,
+                said,
+                tool_calls=[{"id": voice_tools.new_call_id(), "name": "home_automation", "ok": ok, "error": None if ok else said, "meta": {"source": "home_phrase", "spoken": True, "summary": said}}],
+                voice={"spoken": True, "interrupted": False, "fast_path": True},
+            )
+        await self._speak(said, turn, message_id=message_id)
+        return True
 
     async def _home_quick(self, turn: UserTurn) -> bool:
         """ "Kitchen lights off", "pause the music": done from the home's own

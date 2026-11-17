@@ -717,6 +717,9 @@ from app.home.admin_router import router as home_admin_router  # noqa: E402
 from app.home.router import router as home_router  # noqa: E402
 
 app.include_router(home_router, prefix="/api/home", tags=["home"])
+from app.home.auto_router import router as home_auto_router  # noqa: E402
+
+app.include_router(home_auto_router, prefix="/api/home", tags=["home"])
 app.include_router(home_admin_router, prefix="/api/admin/home", tags=["home"])
 # Mail: the mailboxes people connect (app/mail).
 from app.mail.router import router as mail_router  # noqa: E402
