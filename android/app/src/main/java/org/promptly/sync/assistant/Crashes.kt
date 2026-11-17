@@ -37,9 +37,10 @@ object Crashes {
     data class Report(val key: String, val at: Long, val kind: String, val thread: String, val message: String, val stack: String)
 
     /** Call once, when the app starts. */
-    fun watch(context: Context) {
+    /** [listenerOnly]: the wake word's own process, which only leaves the note. */
+    fun watch(context: Context, listenerOnly: Boolean = false) {
         val app = context.applicationContext
-        VoiceTrail.init(app)
+        if (!listenerOnly) VoiceTrail.init(app)
         val before = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {
@@ -49,6 +50,7 @@ object Crashes {
             }
             before?.uncaughtException(thread, error)
         }
+        if (listenerOnly) return
         // Whatever stopped it last time. Not on the way in: starting up comes first.
         thread(name = "crash-reports") {
             runCatching {

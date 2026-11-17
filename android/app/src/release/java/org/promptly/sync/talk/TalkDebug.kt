@@ -6,4 +6,7 @@ import android.content.Context
 object TalkDebug {
     @Suppress("UNUSED_PARAMETER")
     fun mic(context: Context): MicSource? = null
+
+    @Suppress("UNUSED_PARAMETER")
+    fun wakeMic(context: Context): MicSource? = null
 }

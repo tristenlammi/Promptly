@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Promptly for Android: "Hey Promptly" is back, as a switch that is off until you turn it on (Phone assistant settings, this phone only). The listening happens on the phone and nothing is sent anywhere until you've said the phrase and then gone on to speak. It needs Promptly to be your phone's assistant, shows Android's green dot and a notification while it listens, and says so on the switch. Only "Hey Promptly" sets it off; "Promptly" on its own no longer does.
+- "Hey Promptly" gets out of the way by itself: it lets go of the microphone while you drive with P Maps, while the phone is connected to a car, during any call or voice room, and while another app is recording, and picks it up again afterwards. The notification says which.
+- "Hey Promptly" never turns your music down by mistake. When it thinks it heard the phrase, the assistant opens and waits a few seconds; only if you then speak does the music pause and the conversation start. If you don't, it closes without a sound. A conversation it started ends by itself a few seconds after the last answer.
+- "Hey Promptly": an optional "Answer when the phone is locked" switch (off by default). Off, a locked phone asks you to unlock first; on, it answers but anything private still waits for an unlock.
+
+### Changed
+
+- "Hey Promptly" runs apart from the rest of the app, so a fault in the listening can't stop Promptly, a trip or the car's screen. If it stops unexpectedly three times in ten minutes it turns itself off and tells you.
+- In the car, asked to call someone, the assistant now says "I can only call from your phone." The microphone button on the car's map is how you talk to it there; the car never listens for "Hey Promptly".
+
 ## [0.49.1] - 2026-11-17
 
 ### Added

@@ -5,6 +5,13 @@ import android.app.Application
 class SyncApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // The "Hey Promptly" listener has a process of its own (WakeService), so that
+        // nothing it does can stop the app. It needs none of what follows: only to
+        // leave a note if it falls over.
+        if (getProcessName().endsWith(":wake")) {
+            org.promptly.sync.assistant.Crashes.watch(this, listenerOnly = true)
+            return
+        }
         org.promptly.sync.assistant.Crashes.watch(this)
         Sync.channel(this)
         Sync.upgrade(this)
@@ -13,5 +20,7 @@ class SyncApp : Application() {
         org.promptly.sync.widgets.Widgets.upgrade(this)
         // Notifications shown by the app itself, once this phone is linked.
         org.promptly.sync.push.NativePush.start(this)
+        // "Hey Promptly", if you've turned it on (off unless you have).
+        org.promptly.sync.assistant.WakeWord.init(this)
     }
 }

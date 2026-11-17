@@ -30,3 +30,5 @@
 # GlanceAppWidget's class name; in 1.9.0 R8 merged the new ones into one class, so
 # refreshing the App panel redrew Meals & Macros (and others) as App panels.
 -keep class org.promptly.sync.widgets.** extends androidx.glance.appwidget.GlanceAppWidget { <init>(); }
+# The wake word library is called from native code.
+-keep class com.k2fsa.sherpa.onnx.** { *; }

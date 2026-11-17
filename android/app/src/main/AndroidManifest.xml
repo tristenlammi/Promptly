@@ -230,6 +230,14 @@
             </intent-filter>
             <meta-data android:name="android.voice_interaction" android:resource="@xml/voice_interaction_service" />
         </service>
+        <!-- "Hey Promptly", only if you turn it on. Its own process, so that the
+             listening can never take the app, a trip or the car's screen down with it. -->
+        <service
+            android:name=".assistant.WakeService"
+            android:exported="false"
+            android:foregroundServiceType="microphone"
+            android:process=":wake" />
+        <receiver android:name=".assistant.WakeReceiver" android:exported="false" />
         <service
             android:name=".assistant.PromptlySessionService"
             android:exported="true"

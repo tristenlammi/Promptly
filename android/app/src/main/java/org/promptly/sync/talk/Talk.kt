@@ -24,6 +24,7 @@ import org.json.JSONObject
 import org.promptly.sync.Store
 import org.promptly.sync.assistant.PhoneActions
 import org.promptly.sync.assistant.VoiceTrail
+import org.promptly.sync.assistant.WakeRules
 import org.promptly.sync.maps.Voice
 import java.io.IOException
 import java.util.Locale
@@ -84,17 +85,24 @@ object Talk {
      *  foreground service may only start from there (or the tile, a notification). */
     /** [locked]: started by a car's or headset's Bluetooth button on a locked phone,
      *  which you allowed in Account -> Voice: private reads stay behind the lock. */
-    fun start(context: Context, locked: Boolean = false) {
+    /** [wakeFloor]: "Hey Promptly" opened it, and this is how loud the room was just
+     *  before. Then it first waits, on the phone only, to hear you speak
+     *  ([WakeGate]): until you do nothing is sent, the music plays on and the
+     *  phone's audio is left alone, and if you don't it closes without a sound. */
+    fun start(context: Context, locked: Boolean = false, wakeFloor: Double? = null) {
         val app = context.applicationContext
+        appContext = app
         synchronized(this) {
             if (live) return
             starting = true
         }
-        _ui.value = TalkUi(phase = Phase.STARTING, startedAt = System.currentTimeMillis())
-        VoiceTrail.note("talk", "starting", _ui.value.startedAt)
+        cancelled = false
+        _ui.value = TalkUi(phase = Phase.STARTING, startedAt = System.currentTimeMillis(), waiting = wakeFloor != null)
+        VoiceTrail.note("talk", if (wakeFloor != null) "waiting" else "starting", _ui.value.startedAt)
         thread(name = "talk-start") {
             try {
-                begin(app, locked)
+                val gate = if (wakeFloor != null) heardYou(app, wakeFloor) ?: return@thread else null
+                begin(app, locked, gate)
             } catch (e: Exception) {
                 Log.w(TAG, "Talk couldn't start", e)
                 failed(app, TalkProblem("failed", "Talk couldn't start.", true))
@@ -104,7 +112,42 @@ object Talk {
         }
     }
 
-    private fun begin(app: Context, locked: Boolean) {
+    /** The wait after "Hey Promptly". Null when nobody spoke (or the microphone
+     *  couldn't be had): it has ended quietly, with nothing sent and nothing played
+     *  but the soft chime, which asks for no audio focus so music isn't turned down. */
+    private fun heardYou(app: Context, floor: Double): WakeGate? {
+        val source = TalkDebug.mic(app) ?: QuietMic.open()
+        if (source == null) {
+            wentQuiet()
+            return null
+        }
+        val gate = WakeGate(source, WakeRules.Follow(floor))
+        Voice.chime()
+        if (!gate.waitForSpeech { !cancelled }) {
+            gate.close()
+            wentQuiet()
+            return null
+        }
+        _ui.value = _ui.value.copy(waiting = false)
+        return gate
+    }
+
+    private fun wentQuiet() {
+        VoiceTrail.note("talk", "quiet", _ui.value.startedAt)
+        _ui.value = _ui.value.copy(phase = Phase.ENDED, endReason = "quiet", waiting = false)
+        Handler(Looper.getMainLooper()).post { appContext?.let { TalkService.stop(it) } }
+    }
+
+    private fun begin(app: Context, locked: Boolean, gate: WakeGate? = null) {
+        try {
+            beginWith(app, locked, gate)
+        } finally {
+            // It never got as far as a conversation: let go of the gate's microphone.
+            if (gate != null && current == null) gate.close()
+        }
+    }
+
+    private fun beginWith(app: Context, locked: Boolean, gate: WakeGate?) {
         val account = Store(app).account
         if (account == null) {
             failed(app, TalkProblem("not_linked", "Link this phone to your Promptly first.", false))
@@ -143,7 +186,20 @@ object Talk {
             carProjection = { carConnected(app) },
         )
         audio.open()
-        val source = TalkDebug.mic(app) ?: PhoneMic.open()
+        val source = when {
+            gate == null -> TalkDebug.mic(app) ?: PhoneMic.open()
+            // A debug build's test file carries on as the microphone.
+            TalkDebug.mic(app) != null -> gate.then(null)
+            else -> {
+                // Both open for a moment, so nothing you're saying is dropped. A phone
+                // that won't open two: let go of the first, then try again.
+                val phone = PhoneMic.open() ?: run {
+                    gate.close()
+                    PhoneMic.open()
+                }
+                phone?.let { gate.then(it) }
+            }
+        }
         if (source == null) {
             audio.close()
             failed(app, TalkProblem("mic_busy", "The microphone is busy. Another app may be using it.", false))
@@ -180,6 +236,7 @@ object Talk {
         mirror = scope.launch { made.ui.collect { if (it.phase != Phase.OFF) _ui.value = it } }
 
         made.start(captions)
+        if (gate != null) lingerThenEnd(session)
         thread(name = "talk-mic", priority = Thread.MAX_PRIORITY) {
             val frame = ShortArray(TalkProtocol.MIC_FRAME_BYTES / 2)
             while (current === session) {
@@ -224,8 +281,41 @@ object Talk {
         TalkService.stop(app)
     }
 
+    /** A conversation "Hey Promptly" started doesn't sit holding the audio (and your
+     *  music) for two quiet minutes: a short while after its last answer with
+     *  nothing more said, it ends. Say something in that time and it carries on. */
+    private fun lingerThenEnd(session: Live) {
+        thread(name = "talk-linger") {
+            var quietSince = 0L
+            while (current === session) {
+                Thread.sleep(250)
+                val u = _ui.value
+                // Nothing understood at all counts too: a noise after a false alarm
+                // mustn't leave it open.
+                val idle = u.phase == Phase.LIVE && u.state == "listening" && !u.hearing && u.ask == null &&
+                    !u.muted && !u.paused && !session.speaker.playing
+                if (!idle) {
+                    quietSince = 0L
+                    continue
+                }
+                val now = System.currentTimeMillis()
+                if (quietSince == 0L) quietSince = now
+                if (now - quietSince >= WAKE_LINGER_MS) {
+                    session.core.end()
+                    return@thread
+                }
+            }
+        }
+    }
+
+    private const val WAKE_LINGER_MS = 8_000L
+    @Volatile private var appContext: Context? = null
+    /** The sheet was closed while it waited for you to speak. */
+    @Volatile private var cancelled = false
+
     // ------------------------------------------------------------ controls
     fun end() {
+        cancelled = true
         core?.end() ?: run {
             if (_ui.value.phase != Phase.OFF) _ui.value = _ui.value.copy(phase = Phase.ENDED)
         }

@@ -16,6 +16,13 @@ object TalkDebug {
         return if (dir.isDirectory) FileMic(dir) else null
     }
 
+    /** The same for the "Hey Promptly" listener, from `files/wake-inject`: lets a test
+     *  say the phrase (or anything else) to it on the emulator. */
+    fun wakeMic(context: Context): MicSource? {
+        val dir = File(context.filesDir, "wake-inject")
+        return if (dir.isDirectory) FileMic(dir) else null
+    }
+
     private class FileMic(private val dir: File) : MicSource {
         private var file: File? = null
         private var raf: RandomAccessFile? = null

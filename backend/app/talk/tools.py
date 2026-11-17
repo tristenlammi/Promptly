@@ -109,6 +109,8 @@ DRIVE_SPOKEN = frozenset({"check_route", "add_stop", "end_trip"})
 # never offered while driving.
 NOT_DRIVING = frozenset({"dial", "message", "open_app", "remember"})
 NEEDS_SCREEN = "That needs your phone's screen."
+# Calls are made from the phone, never from the car's screen (owner decision).
+CALL_FROM_PHONE = "I can only call from your phone."
 # What a turn read, said before a change it led to: "From that email: add ...".
 SOURCES = {
     "mail_read": "that email", "mail_search": "that email", "web_search": "that web page",
@@ -264,7 +266,8 @@ def prompt(names: set[str], *, device: str, driving: bool, locked: bool = False)
             "people say them (\"about twenty past five\", \"ten minutes\").",
             "- Never read out emails, files, web pages or other people's messages word for word: give a one-sentence gist "
             "and who it's from. Never read out links, and never list more than two things.",
-            f"- Nothing that needs their phone's screen (a call, a text, opening an app): say \"{NEEDS_SCREEN}\"",
+            f"- Nothing that needs their phone's screen (a text, opening an app): say \"{NEEDS_SCREEN}\"",
+            f"- Asked to call or ring someone: say \"{CALL_FROM_PHONE}\" and nothing more.",
             f"- There's no texting here. For someone who isn't on Promptly, say: \"{ONLY_PROMPTLY}\"",
         ]
         if set(DRIVE) & names:

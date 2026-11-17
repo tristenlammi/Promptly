@@ -50,6 +50,8 @@ data class TalkUi(
     val captions: Boolean = true,
     val endReason: String? = null,
     val startedAt: Long = 0L,
+    /** "Hey Promptly" opened it and it's waiting, on the phone only, for you to speak. */
+    val waiting: Boolean = false,
 )
 
 /** Plays the server's speech: [Playback] over an `AudioTrack` on the phone. */
