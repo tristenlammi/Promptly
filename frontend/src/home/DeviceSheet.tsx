@@ -8,6 +8,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 
 import { btn, ClimateControls, field, MediaControls, Slide, strong, VacuumControls, type Go } from "./DeviceControls";
 import { can } from "./kinds";
+import { ASK_OWNER } from "./roles";
 import { stateWords } from "./words";
 
 /**
@@ -170,7 +171,8 @@ export function DeviceSheet({ home, entity, onClose, onOpen }: { home: Home; ent
           </>
         )}
 
-        <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4">
+        {!home.can_manage && <p className="border-t border-[var(--border)] pt-4 text-xs text-[var(--text-muted)]">Its name and room: {ASK_OWNER.charAt(0).toLowerCase() + ASK_OWNER.slice(1)}</p>}
+        {home.can_manage && <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4">
           <label className="flex flex-col gap-1.5 text-sm font-medium text-[var(--text)]">
             Name
             <input className={field} value={name} maxLength={80} onChange={(ev) => setName(ev.target.value)} />
@@ -184,7 +186,7 @@ export function DeviceSheet({ home, entity, onClose, onOpen }: { home: Home; ent
             </select>
           </label>
           {area === NEW_ROOM && <input className={field} value={room} maxLength={60} placeholder="Room name" aria-label="New room name" onChange={(ev) => setRoom(ev.target.value)} />}
-        </div>
+        </div>}
       </div>
     </Sheet>
   );

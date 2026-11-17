@@ -24,7 +24,7 @@ const LOUNGE = entity({ id: "media_player.lounge", domain: "media_player", cls: 
 const TV = entity({ id: "media_player.tv", domain: "media_player", cls: "tv", name: "TV", state: "off", x: { vol: 10, srcs: ["HDMI 1"], can: ["on", "off", "vol", "src"] } });
 const ROBOT = entity({ id: "vacuum.robot", domain: "vacuum", name: "Robot", state: "docked", x: { bat: 90, can: ["start", "dock", "pause"] } });
 const ALL = [AC, BED, STUDY, BED_VENT, STUDY_VENT, HEATER, KITCHEN, LOUNGE, TV, ROBOT];
-const HOME: Home = { id: "h1", name: "Home", role: "owner", members: [], rev: 1, boxes: [], areas: [{ id: "bed", name: "Main bedroom" }], entities: ALL };
+const HOME: Home = { id: "h1", name: "Home", role: "owner", can_manage: true, members: [], rev: 1, boxes: [], areas: [{ id: "bed", name: "Main bedroom" }], entities: ALL };
 
 const draw = (el: ReactElement) => renderToStaticMarkup(<QueryClientProvider client={new QueryClient()}>{el}</QueryClientProvider>);
 const noop = () => undefined;

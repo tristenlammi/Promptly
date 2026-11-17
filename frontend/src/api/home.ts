@@ -6,7 +6,8 @@ import { apiClient } from "@/api/client";
  * until an admin turns Home on. A home's devices are only ever its members'.
  */
 
-export type HomeRole = "owner" | "member";
+/** The owner; a co-owner the owner picked (sets the home up too); a member (uses it). */
+export type HomeRole = "owner" | "coowner" | "member";
 
 export interface HomeEntity {
   id: string;
@@ -190,6 +191,8 @@ export interface Home extends HomeDevices {
   id: string;
   name: string;
   role: HomeRole;
+  /** Owner or co-owner: can add devices, rooms, music and people. Members use the home. */
+  can_manage: boolean;
   members: { id: string; name: string; username: string; role: HomeRole }[];
 }
 
@@ -223,6 +226,12 @@ export const homeApi = {
   rename: (homeId: string, name: string) => apiClient.patch(`/home/${homeId}`, { name }).then(() => undefined),
   addMember: (homeId: string, username: string) => apiClient.post(`/home/${homeId}/members`, { username }).then(() => undefined),
   removeMember: (homeId: string, userId: string) => apiClient.delete(`/home/${homeId}/members/${userId}`).then(() => undefined),
+  /** The owner makes someone a co-owner, or takes that back. */
+  setRole: (homeId: string, userId: string, role: "coowner" | "member") => apiClient.patch(`/home/${homeId}/members/${userId}`, { role }).then(() => undefined),
+  /** The owner hands the home to someone in it, and stays on as a co-owner or leaves. */
+  passOn: (homeId: string, userId: string, leave: boolean) => apiClient.put(`/home/${homeId}/owner`, { user_id: userId, leave }).then(() => undefined),
+  /** The owner deletes the home. ``waiting``: boxes that were offline and forget it when they next connect. */
+  deleteHome: (homeId: string) => apiClient.delete<{ boxes: number; waiting: number }>(`/home/${homeId}`).then((r) => r.data),
   releaseBox: (homeId: string, boxId: string) =>
     apiClient.delete<{ claim_code: string }>(`/home/${homeId}/boxes/${boxId}`).then((r) => r.data.claim_code),
 

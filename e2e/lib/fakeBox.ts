@@ -22,6 +22,8 @@ export class FakeBox {
   entities: Entity[];
   /** Set it to give this box a music service (see ``Music``). */
   music: Music | null = null;
+  /** Brands and bridges the home has added (what a box forgets when it leaves a home). */
+  brands: { id: string; brand: string; brand_name: string; title: string; state: string }[] = [];
 
   constructor(private setup: Setup, areas: { id: string; name: string }[], entities: Entity[]) {
     this.areas = areas;
@@ -83,7 +85,15 @@ export class FakeBox {
     }
     if (op.startsWith("music.")) return this.musicOp(id, op, args);
     if (op === "flows.found") return this.send({ t: "res", id, ok: true, data: [] });
-    if (op === "entries.list") return this.send({ t: "res", id, ok: true, data: [] });
+    if (op === "entries.list") return this.send({ t: "res", id, ok: true, data: this.brands });
+    if (op === "entries.remove") {
+      this.brands = this.brands.filter((b) => b.id !== args.entry);
+      return this.send({ t: "res", id, ok: true, data: null });
+    }
+    if (op === "areas.delete") {
+      this.areas = this.areas.filter((a) => a.id !== args.area);
+      return this.send({ t: "res", id, ok: true, data: null });
+    }
     this.send({ t: "res", id, ok: false, error: "The test box doesn't do that." });
   }
 

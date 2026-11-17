@@ -3,17 +3,18 @@ import { useEffect, useState } from "react";
 
 import { homeApi, type Home, type HomeBox } from "@/api/home";
 import { Sheet } from "@/components/shared/Sheet";
-import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { MusicSection } from "./MusicSection";
+import { PeopleSection } from "./PeopleSection";
 
 /**
  * Looking after a home: its name, who's in it (only Promptly users who are
  * members see or control it; there are no guests), its box, and the brands
- * and bridges that have been added. The owner runs it; a member can leave.
+ * and bridges that have been added. The owner and co-owners run it; a member
+ * uses it and can leave (``PeopleSection``).
  */
 
 const btn =
@@ -35,15 +36,13 @@ function ago(iso: string | null): string {
 
 export function HomeSettingsSheet({ open, home, onClose, onAddBox, onLeft }: { open: boolean; home: Home; onClose: () => void; onAddBox: () => void; onLeft: () => void }) {
   const qc = useQueryClient();
-  const me = useAuthStore((s) => s.user?.id);
-  const owner = home.role === "owner";
+  // Owner or co-owner: everything here but the owner's own choices (PeopleSection).
+  const owner = home.can_manage;
   const [name, setName] = useState(home.name);
-  const [who, setWho] = useState("");
   const [code, setCode] = useState<string | null>(null);
   useEffect(() => {
     if (open) {
       setName(home.name);
-      setWho("");
       setCode(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,9 +51,6 @@ export function HomeSettingsSheet({ open, home, onClose, onAddBox, onLeft }: { o
   const oops = (fallback: string) => (e: unknown) => toast.error(apiErrorMessage(e, fallback));
 
   const rename = useMutation({ mutationFn: () => homeApi.rename(home.id, name.trim()), onSuccess: again, onError: oops("Couldn't rename it.") });
-  const add = useMutation({ mutationFn: () => homeApi.addMember(home.id, who.trim()), onSuccess: () => { setWho(""); again(); }, onError: oops("Couldn't add them.") });
-  const remove = useMutation({ mutationFn: (id: string) => homeApi.removeMember(home.id, id), onSuccess: again, onError: oops("Couldn't do that.") });
-  const leave = useMutation({ mutationFn: () => homeApi.removeMember(home.id, me ?? ""), onSuccess: () => { again(); onLeft(); }, onError: oops("Couldn't leave.") });
   const release = useMutation({ mutationFn: (boxId: string) => homeApi.releaseBox(home.id, boxId), onSuccess: (c) => { setCode(c); again(); }, onError: oops("Couldn't release it.") });
 
   return (
@@ -72,31 +68,7 @@ export function HomeSettingsSheet({ open, home, onClose, onAddBox, onLeft }: { o
           )}
         </section>
 
-        <section aria-label="People">
-          <h3 className={heading}>People in this home</h3>
-          <p className="mb-2 text-xs text-[var(--text-muted)]">Only the people here can see and control this home's devices. Nobody else on this Promptly can, admins included.</p>
-          <ul className="flex flex-col divide-y divide-[var(--border)]">
-            {home.members.map((m) => (
-              <li key={m.id} className="flex min-h-11 items-center gap-3 py-1.5">
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-[var(--text)]">{m.name}{m.id === me ? " (you)" : ""}</span>
-                  <span className="block text-xs text-[var(--text-muted)]">{m.role === "owner" ? "Owner" : "Member"}</span>
-                </span>
-                {owner && m.role !== "owner" && (
-                  <button type="button" className={btn} disabled={remove.isPending} onClick={() => { if (window.confirm(`Take ${m.name} out of ${home.name}?`)) remove.mutate(m.id); }}>Remove</button>
-                )}
-              </li>
-            ))}
-          </ul>
-          {owner ? (
-            <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (who.trim()) add.mutate(); }}>
-              <input className={field} value={who} maxLength={64} placeholder="Their Promptly username" aria-label="Username to add" autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => setWho(e.target.value)} />
-              <button type="submit" className={strong} disabled={add.isPending || !who.trim()}>Add</button>
-            </form>
-          ) : (
-            <button type="button" className={cn(btn, "mt-3")} disabled={leave.isPending} onClick={() => { if (window.confirm(`Leave ${home.name}? You won't see its devices any more.`)) leave.mutate(); }}>Leave this home</button>
-          )}
-        </section>
+        <PeopleSection open={open} home={home} onLeft={onLeft} />
 
         {home.boxes.length > 0 && (
           <section aria-label="Music">
@@ -120,10 +92,12 @@ export function HomeSettingsSheet({ open, home, onClose, onAddBox, onLeft }: { o
               <code className="mt-2 block select-all rounded-lg bg-[var(--hover)] px-3 py-2 text-center font-mono text-lg tracking-widest text-[var(--text)]">{code}</code>
             </div>
           )}
-          <details className="mt-3">
-            <summary className="cursor-pointer text-xs text-[var(--text-muted)]">Have a separate home box with a code?</summary>
-            <button type="button" className={cn(btn, "mt-2")} onClick={onAddBox}>Add a box with its code</button>
-          </details>
+          {owner && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs text-[var(--text-muted)]">Have a separate home box with a code?</summary>
+              <button type="button" className={cn(btn, "mt-2")} onClick={onAddBox}>Add a box with its code</button>
+            </details>
+          )}
         </section>
       </div>
     </Sheet>
@@ -132,7 +106,7 @@ export function HomeSettingsSheet({ open, home, onClose, onAddBox, onLeft }: { o
 
 function BoxRow({ home, box, owner, busy, onRelease }: { home: Home; box: HomeBox; owner: boolean; busy: boolean; onRelease: () => void }) {
   const qc = useQueryClient();
-  const connected = useQuery({ queryKey: ["home", "connected", home.id, box.id], queryFn: () => homeApi.connected(home.id, box.id), enabled: box.online });
+  const connected = useQuery({ queryKey: ["home", "connected", home.id, box.id], queryFn: () => homeApi.connected(home.id, box.id), enabled: box.online && owner });
   const drop = useMutation({
     mutationFn: (id: string) => homeApi.disconnect(home.id, box.id, id),
     onSuccess: () => {
@@ -154,12 +128,12 @@ function BoxRow({ home, box, owner, busy, onRelease }: { home: Home; box: HomeBo
           </span>
         </span>
         {owner && !box.builtin && (
-          <button type="button" className={btn} disabled={busy} onClick={() => { if (window.confirm("Take this box out of your home? Its devices will go from your Home page, and you'll get a code for whoever has it next.")) onRelease(); }}>
+          <button type="button" className={btn} disabled={busy} onClick={() => { if (window.confirm("Take this box out of your home? It forgets the brands, devices, music and rooms you set up on it, and you'll get a code for whoever has it next.")) onRelease(); }}>
             Move or give away
           </button>
         )}
       </div>
-      {box.online && (
+      {box.online && owner && (
         <div className="mt-3 border-t border-[var(--border)] pt-3">
           <p className="mb-1 text-xs font-medium text-[var(--text-muted)]">Brands and bridges added</p>
           {connected.isLoading && <p className="text-sm text-[var(--text-muted)]">Looking…</p>}

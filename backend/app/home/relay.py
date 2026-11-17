@@ -98,6 +98,8 @@ CLOSE_BAD = 4401
 CLOSE_REVOKED = 4403
 CLOSE_REPLACED = 4409
 CLOSE_BUSY = 4429
+# "Dial again": the box was just wiped, and its next hello starts clean.
+CLOSE_AGAIN = 4412
 
 # What a page may be shown: any kind of device the box sends (it leaves out
 # Home Assistant's own odds and ends). One we have no controls for is shown
@@ -256,6 +258,9 @@ class Link:
     note: dict[str, Any] | None = None
     pending: dict[str, asyncio.Future] = field(default_factory=dict)
     got_snapshot: bool = False
+    # It has left a home and not yet forgotten that home's devices
+    # (``manage.py``): nothing it says is shown to anyone until it has.
+    hold: bool = False
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def send(self, msg: dict[str, Any]) -> None:
@@ -571,6 +576,9 @@ async def serve(ws: WebSocket) -> None:
     if old is not None:  # the same box dialled again: the newer line wins
         await _close(old.ws, CLOSE_REPLACED)
     live = Link(box_id=box_id, home_id=home_id, ws=ws, version=_text(hello.get("v"), 32))
+    from . import manage
+
+    live.hold = await manage.pending(box_id)
     _links[box_id] = live
     pinger = asyncio.create_task(_ping(live))
     try:
@@ -615,6 +623,14 @@ async def _ping(live: Link) -> None:
 
 async def _from_box(live: Link, msg: dict[str, Any]) -> None:
     t = msg.get("t")
+    if live.hold and t in ("snapshot", "state", "gone", "down"):
+        # Still to forget the home it left: its devices are nobody's to see.
+        if t == "snapshot":
+            from . import manage
+
+            live.areas = _clean_areas(msg.get("areas"))
+            manage.wipe_when_ready(live.box_id)
+        return
     if t == "snapshot":
         entities: dict[str, dict[str, Any]] = {}
         for raw in msg.get("entities") if isinstance(msg.get("entities"), list) else []:

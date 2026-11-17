@@ -123,14 +123,16 @@ export function HomePage() {
         actions={
           home && (
             <div className="flex items-center gap-2">
-              {home.boxes.some((b) => b.ready) && (
+              {home.can_manage && home.boxes.some((b) => b.ready) && (
                 <button type="button" onClick={() => setAddingDevice(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-3 text-xs font-medium text-white hover:opacity-90">
                   <Plus className="h-3.5 w-3.5" /> Add a device
                 </button>
               )}
-              <button type="button" onClick={() => setRooms(true)} aria-label="Rooms" title="Rooms" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
-                <LayoutGrid className="h-4 w-4" />
-              </button>
+              {home.can_manage && (
+                <button type="button" onClick={() => setRooms(true)} aria-label="Rooms" title="Rooms" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
+                  <LayoutGrid className="h-4 w-4" />
+                </button>
+              )}
               <button type="button" onClick={() => setSettings(true)} aria-label="Home settings" title="Home settings" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
                 <Settings className="h-4 w-4" />
               </button>
@@ -267,7 +269,8 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
     return out;
   }, [home.areas, home.entities]);
   const loose = useMemo(() => looseDevices(home.entities).length, [home.entities]);
-  const noted = home.boxes.filter((b) => b.note);
+  // Setting-up things (a note to tidy, devices to sort, adding) are for whoever runs the home.
+  const noted = home.can_manage ? home.boxes.filter((b) => b.note) : [];
   const gotIt = useMutation({
     mutationFn: (boxId: string) => homeApi.clearNote(home.id, boxId),
     onMutate: (boxId) => qc.setQueryData<Home[]>(KEY, (old) => old?.map((h) => (h.id === home.id ? { ...h, boxes: h.boxes.map((b) => (b.id === boxId ? { ...b, note: null } : b)) } : h))),
@@ -332,8 +335,8 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
         <EmptyState
           icon={<Lightbulb className="h-5 w-5" />}
           title="No devices yet"
-          description="Your box is connected. Add your lights, plugs and bridges, and they'll show here."
-          action={<button type="button" className={primary} onClick={onAddDevice}><Plus className="h-4 w-4" /> Add a device</button>}
+          description={home.can_manage ? "Your box is connected. Add your lights, plugs and bridges, and they'll show here." : "This home has no devices yet. Its owner or a co-owner can add them."}
+          action={home.can_manage ? <button type="button" className={primary} onClick={onAddDevice}><Plus className="h-4 w-4" /> Add a device</button> : undefined}
         />
       )}
       {rooms.map(({ id, name: room, list }) => {
@@ -363,7 +366,7 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
                   <Lightbulb className="h-3.5 w-3.5" aria-hidden /> All lights {anyOn ? "on" : "off"}
                 </button>
               )}
-              {!id && loose > 0 && home.boxes.some((b) => b.ready) && (
+              {!id && loose > 0 && home.can_manage && home.boxes.some((b) => b.ready) && (
                 <button type="button" onClick={onSort} className="inline-flex h-9 shrink-0 items-center rounded-full border border-[var(--border)] px-3 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
                   Sort into rooms
                 </button>

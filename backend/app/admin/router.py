@@ -649,6 +649,10 @@ class _DeletionPreviewResponse(BaseModel):
     # Shared workspaces only; private ones are just counted.
     workspaces: list[_DeletionWorkspace]
     private_workspace_count: int
+    # Promptly Home, as counts only: homes they own that pass to someone in
+    # them, and ones (nobody else in them) that are wiped.
+    homes_passed: int = 0
+    homes_wiped: int = 0
 
 
 class _DeleteUserRequest(BaseModel):
@@ -696,6 +700,8 @@ async def user_deletion_preview(
             for w in shared
         ],
         private_workspace_count=len(p.workspaces) - len(shared),
+        homes_passed=p.homes_passed,
+        homes_wiped=p.homes_wiped,
     )
 
 

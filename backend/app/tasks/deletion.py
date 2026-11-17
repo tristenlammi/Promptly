@@ -18,6 +18,10 @@ Now deletion is an offboarding step:
   work exports it first (Export my library);
 * invitations the user sent and workspace-visible chats they started in
   workspaces that survive are handed to that workspace's owner;
+* a home they own (Promptly Home) passes to someone in it: its
+  longest-standing co-owner, else its longest-standing member. A home with
+  nobody else in it is wiped, and its box forgets its devices
+  (:mod:`app.home.manage`). The admin is told how many, never which;
 * the user's own bytes are tombstoned, not unlinked — recoverable for 14 days;
 * an ``user_deleted`` audit event records who did it and what went.
 """
@@ -72,6 +76,11 @@ class DeletionPreview:
     file_bytes: int = 0
     conversation_count: int = 0
     workspaces: list[OwnedWorkspace] = field(default_factory=list)
+    # Homes they own (Promptly Home), as counts only: an admin never sees
+    # inside a home. Ones with other people in them pass to one of those
+    # people; ones with nobody else are wiped.
+    homes_passed: int = 0
+    homes_wiped: int = 0
 
 
 async def deletion_preview(db: AsyncSession, user: User) -> DeletionPreview:
@@ -87,6 +96,14 @@ async def deletion_preview(db: AsyncSession, user: User) -> DeletionPreview:
         await db.execute(select(func.count(Conversation.id)).where(Conversation.user_id == user.id))
     ).scalar_one()
     out = DeletionPreview(file_count=int(count), file_bytes=int(total), conversation_count=int(convs))
+    from app.home import manage as home_manage
+    from app.home.models import Home
+
+    for (home_id,) in (await db.execute(select(Home.id).where(Home.owner_id == user.id))).all():
+        if await home_manage.heirs(db, home_id, leaving=user.id):
+            out.homes_passed += 1
+        else:
+            out.homes_wiped += 1
     for ws in (
         await db.execute(select(Workspace).where(Workspace.user_id == user.id).order_by(Workspace.title))
     ).scalars():
@@ -222,6 +239,12 @@ async def purge_user(
         is_dir=True,
     )
 
+    # Homes they own: passed to someone in them, or wiped (before the
+    # account's own cascade would take the home and strand its box).
+    from app.home import manage as home_manage
+
+    homes = await home_manage.before_user_deleted(db, user)
+
     from app.auth.audit import record_event
 
     deleted_ws = sum(1 for w in preview.workspaces if w.id not in transfers)
@@ -231,6 +254,7 @@ async def purge_user(
         + f"; files={int(remaining_files)}"
         + f"; transferred={transferred}; deleted_workspaces={deleted_ws}"
         + f"; chats_handed_over={handed_chats}"
+        + f"; homes_passed={homes['passed']}; homes_wiped={homes['wiped']}"
     )
     await record_event(
         db,
@@ -251,6 +275,7 @@ async def purge_user(
     # can edit) cascade with the user.
     await db.delete(user)
     await db.commit()
+    home_manage.after_user_deleted(homes)
     logger.info("purged user %s: transferred=%d deleted_workspaces=%d", uid, transferred, deleted_ws)
     return True
 

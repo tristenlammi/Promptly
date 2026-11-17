@@ -15,14 +15,14 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 from app.db_types import CreatedAtMixin, UUIDPKMixin
 
-ROLES = ("owner", "member")
+ROLES = ("owner", "coowner", "member")
 
 
 class Home(UUIDPKMixin, CreatedAtMixin, Base):
@@ -33,8 +33,11 @@ class Home(UUIDPKMixin, CreatedAtMixin, Base):
 
 
 class HomeMember(Base):
-    """owner: everything. member: the home's devices, adding devices and a
-    box. There are no guests: only Promptly users who are in a home see it."""
+    """owner: everything. coowner (picked by the owner): everything but
+    choosing co-owners, passing the home on and deleting it. member: uses the
+    home's devices and the assistant; doesn't set the home up
+    (``manage.py``). There are no guests: only Promptly users who are in a
+    home see it."""
 
     __tablename__ = "home_members"
 
@@ -66,3 +69,7 @@ class HomeBox(UUIDPKMixin, CreatedAtMixin, Base):
     # while the box is offline. The home's own; cleared when it leaves a home.
     snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # It has left a home and still has that home's brands, sign-ins and rooms
+    # on it. Cleared once the box has forgotten them (``manage.py``); until
+    # then nothing it says is shown to anyone.
+    wipe_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

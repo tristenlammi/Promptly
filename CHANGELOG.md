@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Home: co-owners. A home's owner can make someone in it a co-owner, and take that back (Home settings, People). A co-owner can set the home up like the owner: add devices, rooms, music and people. Only the owner chooses co-owners, passes the home on or deletes it.
+- Home: the owner can pass a home to someone in it, and either stay on as a co-owner or leave ("Leave or delete this home" in Home settings). Nothing in the home changes.
+- Home: the owner can delete a home. Everyone is taken out of it, and its box forgets the brands and bridges that were added (with their devices and sign-ins), linked music and rooms. A box that's offline forgets them when it next connects, and shows nobody anything until it has.
+
+### Changed
+
+- Home: people who are in a home but don't run it now only use it: devices, room lights, speakers and the assistant. Adding or removing devices and brands, rooms, naming and moving devices, boxes, music and people are for the owner and co-owners, and the page no longer shows those controls to members. Before, any member could add devices, change rooms and add a box.
+- Home: moving a box out of a home ("Move or give away") now also makes it forget that home's brands, sign-ins, linked music and rooms. Before, they stayed on the box for whoever had it next.
+- When an admin deletes the account of someone who owns a home, the home passes to someone in it: its longest-standing co-owner, or if there is none, whoever has been in it longest. A home nobody else is in is deleted and its box wiped. The admin is told how many homes, never which or what's in them. Before, the home was deleted along with the account whoever else was in it.
+
 ## [0.49.1] - 2026-11-17
 
 ### Added

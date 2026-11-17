@@ -123,6 +123,10 @@ export interface UserDeletionPreview {
   }[];
   /** Workspaces only they use: deleted with the account, never named. */
   private_workspace_count: number;
+  /** Promptly Home, counts only: homes they own that pass to someone in them. */
+  homes_passed?: number;
+  /** ...and homes with nobody else in them, which are wiped. */
+  homes_wiped?: number;
 }
 
 export interface DeleteUserPayload {

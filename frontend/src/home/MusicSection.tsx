@@ -14,7 +14,7 @@ import { musicSummary } from "./words";
  * streaming service here; the assistant then plays from it on the home's
  * speakers. Linking happens on the service's own site with a short code, so
  * no password is ever typed into Promptly. Everyone in the home sees what's
- * linked; only the owner links and unlinks.
+ * linked; only the owner or a co-owner links and unlinks.
  */
 
 const btn =
@@ -140,7 +140,7 @@ export function MusicSection({ home, box, owner }: { home: Home; box: HomeBox; o
               Link {b.name}
             </button>
           ) : (
-            <p key={b.id} className="text-sm text-[var(--text-muted)]">{b.name} isn't linked. The home's owner can link it here.</p>
+            <p key={b.id} className="text-sm text-[var(--text-muted)]">{b.name} isn't linked. The home's owner or a co-owner can link it here.</p>
           ),
         )}
 

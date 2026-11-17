@@ -275,6 +275,20 @@ export function DeleteUserModal({
                 </p>
               )}
 
+              {(preview.data?.homes_passed ?? 0) > 0 && (
+                <p>
+                  {preview.data?.homes_passed === 1 ? "A home they own" : `${preview.data?.homes_passed} homes they own`} in
+                  Promptly Home will pass to someone in it: a co-owner if there is one, otherwise
+                  whoever has been in it longest.
+                </p>
+              )}
+              {(preview.data?.homes_wiped ?? 0) > 0 && (
+                <p>
+                  {preview.data?.homes_wiped === 1 ? "A home only they are in" : `${preview.data?.homes_wiped} homes only they are in`} will
+                  be deleted, and its box will forget its devices.
+                </p>
+              )}
+
               <label className="block space-y-1">
                 <span className="block text-[var(--text-muted)]">
                   Type <span className="font-mono">{username}</span> to confirm

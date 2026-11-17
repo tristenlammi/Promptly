@@ -287,7 +287,8 @@ async def test_another_home_and_the_admin_see_nothing(user, client, db):
 
 
 async def test_members_use_the_home_and_only_the_owner_runs_it(user, client, db):
-    """Owner and member, nothing else: there are no guests."""
+    """Members use it and the owner runs it (co-owners: test_home_manage).
+    There are no guests."""
     await _turn_on(client, user)
     sam, kim = await _other(db), await _other(db)
     prepared = await _prepare(client, user)
@@ -300,9 +301,10 @@ async def test_members_use_the_home_and_only_the_owner_runs_it(user, client, db)
     assert (await client.post(f"/api/home/{home_id}/members", headers=_hdr(kim), json={"username": user.username})).status_code == 403
     assert (await client.delete(f"/api/home/{home_id}/boxes/{prepared['box']['id']}", headers=_hdr(kim))).status_code == 403
     assert (await client.patch(f"/api/home/{home_id}", headers=_hdr(sam), json={"name": "Sam and Kim's"})).status_code == 200
-    # A member can add a second box to the home they're in.
+    # A second box into this home: the owner adds it, a member can't.
     second = await _prepare(client, user)
-    r = await client.post("/api/home/claim", headers=_hdr(kim), json={"code": second["claim_code"], "home_id": home_id})
+    assert (await client.post("/api/home/claim", headers=_hdr(kim), json={"code": second["claim_code"], "home_id": home_id})).status_code == 403
+    r = await client.post("/api/home/claim", headers=_hdr(sam), json={"code": second["claim_code"], "home_id": home_id})
     assert r.status_code == 200 and r.json()["home_id"] == home_id
     # They can leave; the owner can't.
     assert (await client.delete(f"/api/home/{home_id}/members/{sam.id}", headers=_hdr(sam))).status_code == 409
@@ -325,21 +327,39 @@ async def test_releasing_a_box_forgets_the_home_and_gives_a_new_code(user, clien
     await box.say({"t": "snapshot", "areas": [], "entities": [LAMP]})
     await box.hear("welcome")
     await _wait(lambda: _has_snapshot(prepared["box"]["id"]))
+    # Leaving, it's asked to forget what the home put on it: here, nothing.
+    asked: list[str] = []
+
+    async def box_answers() -> None:
+        while True:
+            ask = await box.hear("req")
+            asked.append(ask["op"])
+            await box.say({"t": "res", "id": ask["id"], "ok": True, "data": [] if ask["op"] == "entries.list" else {"sources": []} if ask["op"] == "music.status" else None})
+
+    answering = asyncio.create_task(box_answers())
     r = await client.delete(f"/api/home/{home_id}/boxes/{prepared['box']['id']}", headers=_hdr(sam))
+    answering.cancel()
     code = r.json()["claim_code"]
-    assert (await box.hear("released")) == {"t": "released"}
+    assert r.json()["wiped"] is True and asked[0] == "entries.list" and "music.status" in asked
+    # Wiped, it's told to dial again, so its next word is the whole picture.
+    await task
+    assert box.closed == 4412
     from sqlalchemy import select
 
     row = (
         await db.execute(select(HomeBox).where(HomeBox.id == uuid.UUID(prepared["box"]["id"])).execution_options(populate_existing=True))
     ).scalar_one()
-    assert row.home_id is None and row.snapshot is None and row.claimed_by is None
+    assert row.home_id is None and row.snapshot is None and row.claimed_by is None and row.wipe_pending is False
     assert (await client.get("/api/home", headers=_hdr(sam))).json()["homes"][0]["entities"] == []
-    # Its next home.
+    # Its next home: the box dials in again, and has only what it now says.
+    box, task = await _dial(prepared)
+    await box.hear("welcome")
     assert (await client.post("/api/home/claim", headers=_hdr(ann), json={"code": code})).status_code == 200
     assert (await box.hear("claimed")) == {"t": "claimed"}
+    await box.say({"t": "snapshot", "areas": [], "entities": [TEMP]})
+    await _wait(lambda: _has_snapshot(prepared["box"]["id"]))
     ann_home = (await client.get("/api/home", headers=_hdr(ann))).json()["homes"][0]
-    assert {e["id"] for e in ann_home["entities"]} == {"light.lamp"}
+    assert {e["id"] for e in ann_home["entities"]} == {"sensor.temp"}
     await box.hang_up()
     await task
 
