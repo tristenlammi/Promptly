@@ -64,7 +64,7 @@ test("a home automation: made in the flow editor, run by its button, its phrase 
     const ours = new Set(boxes.filter((b) => (b.label ?? "").startsWith("e2e-automations ")).map((b) => b.id));
     for (const h of homes) {
       const autos = ((await (await call(alice, aAuth, "GET", `/home/${h.id}/automations`)).json()).automations ?? []) as { id: string; name: string }[];
-      for (const a of autos) if (/^Movie time/.test(a.name)) await call(alice, aAuth, "DELETE", `/home/${h.id}/automations/${a.id}`);
+      for (const a of autos) if (/^(Movie time|Morning routine)/.test(a.name)) await call(alice, aAuth, "DELETE", `/home/${h.id}/automations/${a.id}`);
       for (const m of h.members ?? []) if (m.username === readRun().users.bob.username) await call(alice, aAuth, "DELETE", `/home/${h.id}/members/${m.id}`);
       for (const b of h.boxes ?? []) if (ours.has(b.id)) await call(alice, aAuth, "DELETE", `/home/${h.id}/boxes/${b.id}`);
     }
@@ -114,7 +114,7 @@ test("a home automation: made in the flow editor, run by its button, its phrase 
     const step = alice.getByRole("complementary", { name: "This step" });
     await step.getByLabel("Room").selectOption({ label: "Lounge" });
     await step.getByLabel("Turn them").selectOption("off");
-    await expect(alice.getByText("Turn off the Lounge lights")).toBeVisible();
+    await expect(alice.getByText("Turn off the Lounge lights").first()).toBeVisible();
     // The speaker: pause. A lock is never on the list.
     await alice.getByRole("button", { name: "Add a step" }).click();
     await alice.getByRole("menuitem", { name: /^A device/ }).click();
@@ -151,6 +151,42 @@ test("a home automation: made in the flow editor, run by its button, its phrase 
     expect((await clash.json()).detail).toContain("already what runs “Movie time”");
     await call(alice, aAuth, "DELETE", `/home/${homeId}/automations/${other.id}`);
 
+    // ---- a fuller one, with a time, a check and a wait (made through the API; looked at in the editor).
+    const boxId = prepared.box.id as string;
+    const morning = await (await call(alice, aAuth, "POST", `/home/${homeId}/automations`, { name: "Morning routine" })).json();
+    const at = (x: number, y: number) => ({ x, y });
+    const saved = await call(alice, aAuth, "PUT", `/home/${homeId}/automations/${morning.id}`, {
+      phrases: ["It's morning time", "Good morning"],
+      graph: {
+        version: 1,
+        mode: "advanced",
+        nodes: [
+          { id: "trigger", type: "trigger.schedule", position: at(0, 0), data: { frequency: "weekly", hour: 6, minute: 30, weekdays: [0, 1, 2, 3, 4], weekday: 0, timezone: "Australia/Brisbane" } },
+          { id: "lights", type: "home.lights", position: at(0, 130), data: { box: boxId, area: "lounge", on: true } },
+          { id: "playing", type: "control.home_state", position: at(0, 260), data: { box: boxId, entity: "media_player.kitchen", state: "on" } },
+          { id: "music", type: "home.music", position: at(150, 390), data: { box: boxId, entity: "media_player.kitchen", query: "jazz", volume: 25 } },
+          { id: "wait", type: "flow.delay", position: at(150, 520), data: { seconds: 600 } },
+          { id: "lamp", type: "home.device", position: at(150, 650), data: { box: boxId, entity: "light.lamp", action: "set", value: { bri: 40, k: 2700 } } },
+        ],
+        edges: [
+          { source: "trigger", target: "lights" },
+          { source: "lights", target: "playing" },
+          { source: "playing", target: "music", source_handle: "false" },
+          { source: "music", target: "wait" },
+          { source: "wait", target: "lamp" },
+        ],
+      },
+    });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    expect((await saved.json()).trigger).toEqual({ kind: "schedule", words: "Weekdays at 6:30 am" });
+    await alice.goto(`/home/automations/${homeId}/${morning.id}`);
+    await ready(alice);
+    await expect(alice.getByText("It's 6:30 am, weekdays")).toBeVisible();
+    await expect(alice.getByText("Play some jazz on Kitchen speaker")).toBeVisible();
+    await alice.getByText("Play some jazz on Kitchen speaker").click();
+    await expect(alice.getByRole("complementary", { name: "This step" }).getByLabel("What kind")).toHaveValue("jazz");
+    if (shots) await alice.screenshot({ path: `${shots}/hauto-09-editor-morning-routine.png` });
+
     // ---- on the Home page: the list, and its Run button.
     await alice.goto("/home");
     await ready(alice);
@@ -183,6 +219,7 @@ test("a home automation: made in the flow editor, run by its button, its phrase 
     await ask(alice, "movie time");
     await expect(lastReply(alice)).toContainText("Tool said: Done: Okay, Movie time is done.", { timeout: 30_000 });
     expect(box.asked.length).toBe(typedBefore + 2);
+    await expect(alice.getByText(/ran 1 home automation/i).first()).toBeVisible();
     await expect(alice.getByRole("button", { name: "Send message" })).toBeVisible();
     if (shots) await alice.screenshot({ path: `${shots}/hauto-06-chat-run.png` });
 
@@ -190,6 +227,8 @@ test("a home automation: made in the flow editor, run by its button, its phrase 
     await bob.goto("/tasks");
     await ready(bob);
     await expect(bob.getByRole("tab", { name: "AI tasks" })).toHaveAttribute("aria-selected", "true");
+    await expect(bob.getByRole("heading", { name: "No AI tasks yet" })).toBeVisible();
+    await expect(bob.getByRole("button", { name: /Morning news/ })).toBeVisible();
     if (shots) await bob.screenshot({ path: `${shots}/hauto-08-ai-tasks.png` });
 
     // ---- said out loud (needs the stack's own speech): no model.

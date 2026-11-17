@@ -141,6 +141,19 @@ def test_phrases_are_tidied_and_silly_ones_refused():
         automations.clean_phrases("movie time")
 
 
+def test_a_schedule_is_said_the_way_a_person_would():
+    from app.home.automations import schedule_words
+    from app.tasks.flow_graph import ScheduleTriggerData as S
+
+    assert schedule_words(S(frequency="daily", hour=6, minute=30)) == "Every day at 6:30 am"
+    assert schedule_words(S(frequency="daily", hour=0, minute=5)) == "Every day at 12:05 am"
+    assert schedule_words(S(frequency="weekly", hour=19, minute=0, weekdays=[4, 0, 1, 2, 3])) == "Weekdays at 7:00 pm"
+    assert schedule_words(S(frequency="weekly", hour=9, minute=0, weekdays=[5, 6])) == "Weekends at 9:00 am"
+    assert schedule_words(S(frequency="weekly", hour=12, minute=0, weekdays=[1, 3])) == "Tue, Thu at 12:00 pm"
+    assert schedule_words(S(frequency="weekly", hour=8, minute=0, weekday=2)) == "Wed at 8:00 am"
+    assert schedule_words(S(frequency="hourly", minute=15)) == "Hourly · at :15"
+
+
 def test_time_checks_over_midnight_and_by_day():
     from app.home.flow_nodes import in_window
     from app.tasks.flow_graph import TimeWindowData
@@ -297,7 +310,7 @@ async def test_what_a_flow_may_and_may_not_hold(user, client, db):  # noqa: F811
     r = await _save(client, user, home_id, made["id"], graph=good)
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["trigger"] == {"kind": "schedule", "words": "Daily · 06:30"} and out["steps"] == 3 and out["next_run_at"]
+    assert out["trigger"] == {"kind": "schedule", "words": "Every day at 6:30 am"} and out["steps"] == 3 and out["next_run_at"]
     names = {n["id"]: n["data"].get("name") for n in out["graph"]["nodes"]}
     assert names["r"] == "Kitchen" and names["m"] == "Kitchen speaker" and names["s"] == "Movie night"
     # Switched off: the clock leaves it alone. On again: it's back on the clock.

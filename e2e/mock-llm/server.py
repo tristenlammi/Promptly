@@ -168,9 +168,9 @@ def _tool_call_for(body: dict) -> tuple[str, str] | None:
             return "home_music", json.dumps({"query": "Blue by Joni Mitchell", "uri": "tidal://album/300", "target": "Lounge"})
         # A home automation by its phrase, typed (said out loud, an exact
         # phrase never gets here: app/home/automations.py).
-        if re.search(r"movie time", text, re.I) and "home_automation" in offered:
+        if re.search(r"\bmovie time\b", text, re.I) and "home_automation" in offered:
             return "home_automation", json.dumps({"name": "movie time"})
-        if re.search(r"what automations", text, re.I) and "home_automation" in offered:
+        if re.search(r"\bwhat automations\b", text, re.I) and "home_automation" in offered:
             return "home_automation", json.dumps({})
         # Talk phase 2: "send that to my phone" (the latest thing it found).
         if re.search(r"\bphone\b", text, re.I) and "send_to_phone" in offered:

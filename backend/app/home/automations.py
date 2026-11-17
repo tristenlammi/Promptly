@@ -209,18 +209,38 @@ def trigger_words(graph: FlowGraph) -> tuple[str, str]:
     if trig is None or trig.type == NodeType.TRIGGER_MANUAL:
         return "asked", "When someone asks"
     if trig.type == NodeType.TRIGGER_SCHEDULE:
-        from app.tasks.recurrence import describe_schedule
-
         try:
-            s = ScheduleTriggerData.model_validate(trig.data)
-            return "schedule", describe_schedule(
-                frequency=s.frequency, hour=s.hour, minute=s.minute, weekday=s.weekday, day_of_month=s.day_of_month,
-                tz_name=s.timezone, interval_minutes=s.interval_minutes, weekdays=s.weekdays,
-            ).split(" (")[0]
+            return "schedule", schedule_words(ScheduleTriggerData.model_validate(trig.data))
         except Exception:  # noqa: BLE001
             return "schedule", "On a schedule"
     d = HomeStateTriggerData.model_validate(trig.data)
     return "device", f"When {d.name or 'a device'} turns {d.state}"
+
+
+_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def schedule_words(s: ScheduleTriggerData) -> str:
+    """ "Every day at 6:30 am", "Weekdays at 7:00 am", "Sat, Sun at 9:00 am"."""
+    from app.tasks.recurrence import describe_schedule
+
+    hour, minute = int(s.hour or 0), int(s.minute or 0)
+    at = f"{hour % 12 or 12}:{minute:02d} {'am' if hour < 12 else 'pm'}"
+    if s.frequency == "daily":
+        return f"Every day at {at}"
+    if s.frequency == "weekly":
+        days = sorted({int(d) for d in (s.weekdays or ([s.weekday] if s.weekday is not None else [])) if 0 <= int(d) <= 6})
+        if days == [0, 1, 2, 3, 4]:
+            return f"Weekdays at {at}"
+        if days == [5, 6]:
+            return f"Weekends at {at}"
+        if len(days) in (0, 7):
+            return f"Every day at {at}"
+        return f"{', '.join(_DAYS[d] for d in days)} at {at}"
+    return describe_schedule(
+        frequency=s.frequency, hour=s.hour, minute=s.minute, weekday=s.weekday, day_of_month=s.day_of_month,
+        tz_name=s.timezone, interval_minutes=s.interval_minutes, weekdays=s.weekdays,
+    ).split(" (")[0]
 
 
 async def validate(db: AsyncSession, home_id: uuid.UUID, graph: FlowGraph, *, tz_default: str = "") -> FlowGraph:
