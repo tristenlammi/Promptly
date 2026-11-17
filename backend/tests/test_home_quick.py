@@ -190,6 +190,11 @@ def test_with_two_playing_or_none_nothing_is_guessed():
     assert quick.parse("play", quiet) is None  # nothing paused to carry on with
     paused = [{**d, "state": "paused"} if d["id"] == "media_player.study" else {**d, "state": "idle"} if d["domain"] == "media_player" else d for d in house()]
     assert steps(quick.parse("resume the music", paused)) == [("do", "media_player.study", "play", None)]
+    assert steps(quick.parse("play music", paused)) == [("do", "media_player.study", "play", None)]
+    # "Play music in the kitchen" with nothing paused there asks for music: the assistant starts some.
+    assert quick.parse("play music in the kitchen", quiet) is None
+    assert quick.parse("play the music in the study", house()) is None
+    assert steps(quick.parse("play music in the study", paused)) == [("do", "media_player.study", "play", None)]
 
 
 def test_speakers_playing_as_a_group_are_paused_as_the_group():

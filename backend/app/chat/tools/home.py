@@ -412,7 +412,7 @@ class HomeMusicTool(Tool):
         item, grow = picked
         await assistant.music_play(speaker, item["uri"], shuffle=not grow and item["kind"] in ("playlist", "artist"), mix=grow)
         said = f"Playing {music.describe_mix(item, grow)} on {speaker['name']}."
-        return ToolResult(content=f"Done: {said} Say just that, in a few words.", meta={"summary": said, "spoken": said})
+        return ToolResult(content=f"Done: {said}", meta={"summary": said, "spoken": said})
 
     @staticmethod
     def _speaker(assistant: Any, devices: list[dict[str, Any]], target: str, many_homes: bool) -> dict[str, Any]:

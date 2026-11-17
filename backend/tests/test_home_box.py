@@ -663,6 +663,10 @@ def test_a_mix_is_asked_for_as_music_assistant_wants_it_and_falls_back_to_plain_
     with pytest.raises(RuntimeError, match="isn't answering"):
         asyncio.run(m.op("music.play", {"entity": "media_player.lounge", "uri": "tidal://artist/100", "radio": True}))
     assert len(m.calls) == 1
+    # Its bare "Internal server error" is put in words a person can use.
+    m = _music({"player_queues/play_media": RuntimeError("Internal server error")})
+    with pytest.raises(RuntimeError, match="couldn't start that on the speaker"):
+        asyncio.run(m.op("music.play", {"entity": "media_player.lounge", "uri": "tidal://artist/100"}))
     # A mix can't be a way round what may be played.
     m = _music({})
     for bad in ("spotify://artist/1", "radio_playlist://playlist/http://evil.example/x", "http://169.254.169.254/x"):

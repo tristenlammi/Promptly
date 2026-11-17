@@ -404,7 +404,7 @@ async def test_some_jazz_just_plays_and_says_what_started(user, client, db):  # 
     side = Box(box, {"jazz": [JAZZ_BAND, JAZZ_ALBUM, JAZZ_LIST], "relaxing": [YESTERDAY, MILES], "miles davis": [MILES, KOB]})
     # The model said it's a kind of music.
     result = await HomeMusicTool().run(_ctx(db, user), {"query": "jazz", "mix": True})
-    assert result.content.startswith("Done: Playing the playlist Jazz Essentials on Lounge speaker.")
+    assert result.content == "Done: Playing the playlist Jazz Essentials on Lounge speaker."
     assert result.meta["spoken"] == "Playing the playlist Jazz Essentials on Lounge speaker."
     assert side.asked == [
         ("music.search", {"q": "jazz", "kinds": ["playlist", "artist", "track"], "limit": 5}),

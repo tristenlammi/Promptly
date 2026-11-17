@@ -423,6 +423,10 @@ def _media(home: _Home, s: str) -> Plan | None:
             if not d.get("live"):
                 return _offline(d["name"])
             return Plan(f"Playing preset {n} on {d['name']}.", [Step("do", d["box_id"], device=d, action="preset", value=n)])
+        if what == "play" and s.startswith("play") and d.get("state") != "paused":
+            # "Play music in the kitchen" with nothing paused there asks for
+            # music, not for a pause to end: the assistant starts some.
+            return None
         if what == "pause" and not _can(d, "pause"):
             what = "stop"
             if not _can(d, "stop"):

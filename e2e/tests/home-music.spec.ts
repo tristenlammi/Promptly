@@ -8,17 +8,27 @@
 // question: something fitting starts, and the reply says what.
 //
 // Home is off by default: the spec turns it on, and puts everything back.
-import type { APIResponse, Page } from "@playwright/test";
+import { chromium, type APIResponse, type Browser, type Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
 import { FakeBox, readSetup } from "../lib/fakeBox";
-import { BASE_URL, readRun } from "../lib/stack";
+import { BASE_URL, readRun, storageStateFile } from "../lib/stack";
+import { clip, fakeMic, say } from "../lib/talkSpeech";
 
 test.describe.configure({ mode: "serial" });
 
 const shots = process.env.E2E_SHOTS_DIR;
 const composer = (page: Page) => page.getByPlaceholder(/^Message Promptly/);
 const lastReply = (page: Page) => page.locator(".promptly-message:not(.flex-row-reverse)").last();
+const panel = (page: Page) => page.getByRole("complementary", { name: "Talk to Promptly" }).or(page.getByRole("dialog", { name: "Talk to Promptly" }));
+
+/** A browser whose microphone is a recording. */
+async function talker(wav: string): Promise<{ browser: Browser; page: Page }> {
+  const browser = await chromium.launch({ args: fakeMic(wav) });
+  const context = await browser.newContext({ storageState: storageStateFile("alice"), viewport: { width: 1280, height: 800 }, permissions: ["microphone"] });
+  await context.route("**/version.json*", (r) => r.abort());
+  return { browser, page: await context.newPage() };
+}
 
 async function bearer(page: Page): Promise<string> {
   const seen = page.waitForRequest((r) => !!r.headers()["authorization"] && r.url().includes("/api/"));
@@ -195,10 +205,36 @@ test("music by name: the owner links Tidal on Tidal's own site, and the assistan
     await expect(alice.getByRole("button", { name: "Send message" })).toBeVisible();
     if (shots) await alice.screenshot({ path: `${shots}/music-11-play-music.png` });
 
+    // ---- spoken, the same: it plays and says what, with no question back (needs the stack's own speech).
+    const voice = await call(alice, aAuth, "GET", "/talk/config");
+    if (voice.ok() && (await voice.json()).enabled) {
+      const playsBefore = asked("music.play").length;
+      const wav = clip("music-some-jazz", [2.0, await say(alice.request, aAuth, "Play some jazz."), 8]);
+      const phone = await talker(wav);
+      try {
+        await phone.page.goto("/chat");
+        await expect(phone.page.getByText("Loading Promptly...")).toHaveCount(0, { timeout: 20_000 });
+        // Home tools need a model that takes tools.
+        await phone.page.locator('button[aria-haspopup="listbox"]').first().click();
+        await phone.page.getByRole("option", { name: /E2E Mock Tools/ }).click();
+        await expect(phone.page.locator('button[aria-haspopup="listbox"]').first()).toContainText(/E2E Mock Tools/);
+        await phone.page.getByRole("button", { name: "Talk to Promptly" }).first().click();
+        await expect(panel(phone.page)).toBeVisible();
+        await expect(panel(phone.page).locator('[data-caption="you"]').first()).toContainText(/jazz/i, { timeout: 40_000 });
+        await expect(panel(phone.page).locator('[data-caption="reply"]').first()).toContainText("Jazz Essentials", { timeout: 60_000 });
+        await expect.poll(() => asked("music.play").length).toBe(playsBefore + 1);
+        expect(asked("music.play").at(-1)).toEqual({ entity: "media_player.lounge", uri: "tidal://playlist/jz-1", shuffle: true });
+        if (shots) await phone.page.screenshot({ path: `${shots}/music-12-spoken-some-jazz.png` });
+        await panel(phone.page).getByRole("button", { name: /^End$/ }).click();
+      } finally {
+        await phone.browser.close();
+      }
+    }
+
     // ---- the Home page shows what it started.
     await alice.goto("/home");
     await ready(alice);
-    await expect(alice.getByText("Playing · So What").first()).toBeVisible({ timeout: 20_000 });
+    await expect(alice.getByText(/Playing · (So What|Jazz Essentials)/).first()).toBeVisible({ timeout: 20_000 });
     if (shots) await alice.screenshot({ path: `${shots}/music-06-home-playing.png` });
 
     // ---- unlinking takes it away again.

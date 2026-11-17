@@ -1765,7 +1765,14 @@ class Music:
         while True:
             try:
                 await self.ha.ready.wait()
-                await self._bind()
+                try:
+                    await self._bind()
+                except RuntimeError as e:
+                    if str(e) == MUSIC_DOWN:
+                        raise
+                    # Music matters more than where its page answers: carry on, and say so.
+                    log.warning("music service: its own page stays where it was: %s", e)
+                    self._bound = True
                 await self._tidy()
                 await self._look()
                 if not self.up:
@@ -2002,7 +2009,13 @@ class Music:
                     args["shuffle"] = True
             elif a.get("shuffle") is True:
                 args["shuffle"] = True
-            await self.call("player_queues/play_media", timeout=40.0, **args)
+            try:
+                await self.call("player_queues/play_media", timeout=40.0, **args)
+            except RuntimeError as e:
+                if str(e) == MUSIC_DOWN or "server error" not in str(e).lower():
+                    raise
+                # Its own "Internal server error" says nothing to a person.
+                raise RuntimeError("The music service couldn't start that on the speaker. Try again, or ask for something else.") from e
             return None
         raise RuntimeError("This box doesn't know how to do that yet. It may need updating.")
 
