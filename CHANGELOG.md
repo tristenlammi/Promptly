@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Home: your own page. "Customise this page" (under your devices) turns the page into widgets you can drag by their handle, make small, medium or large, and take off. Add a single device (bigger sizes show a light's brightness, a fan's speed, a speaker's playback, or an air con's temperature), a room, Favourites or any group of devices with one switch for them all, scene buttons, and Music (what's playing, with a choice of speaker). It is saved for you alone in that home and follows you to every device; "Reset" puts the page back as it came. Nothing changes for anyone until they customise, and a room added later still shows up under "Everything else". A lock, garage door, gate or alarm in a widget still opens its own controls and asks first. A widget whose device has left the home says so and can be removed.
+
 ## [0.49.1] - 2026-11-17
 
 ### Added

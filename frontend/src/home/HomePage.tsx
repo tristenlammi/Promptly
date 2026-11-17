@@ -36,6 +36,10 @@ import { noteLine } from "./words";
  * "Add a home box" takes the code on the box's card (the card's QR opens
  * this page with the code filled in).
  *
+ * The devices themselves are drawn by ``board/Board``: as rooms, the way
+ * they always were, until the person customises their own page (widgets
+ * they add, size, drag and remove; see ``board/layout.ts``).
+ *
  * Live: while the page is in front it asks the server every two seconds
  * whether anything changed (one number comes back when nothing has).
  */
@@ -273,7 +277,7 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
           action={<button type="button" className={primary} onClick={onAddDevice}><Plus className="h-4 w-4" /> Add a device</button>}
         />
       )}
-      <Board home={home} onOpen={setOpenKey} onSort={onSort} />
+      <Board key={home.id} home={home} onOpen={setOpenKey} onSort={onSort} />
       <DeviceSheet home={home} entity={opened} onClose={() => setOpenKey(null)} onOpen={(other) => setOpenKey(keyOf(other))} />
     </>
   );
