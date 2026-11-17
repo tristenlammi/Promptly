@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-17
+
 ### Added
 
 - Home in chat and on the phone assistant: ask what's on at home ("are the kitchen lights on?", "what's playing?") and have it switch lights (on, off, brightness, colours, warm or cool white), plugs, fans, scenes and speakers (play, pause, next, previous, volume, mute). Only for people in a home, and only their own home. It never unlocks, opens or disarms anything: locks, garage doors, gates and alarms stay on the Home page.
