@@ -136,14 +136,14 @@ final class CameraController: UIViewController, AVCaptureMetadataOutputObjectsDe
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        let session = session
-        queue.async { if !session.isRunning { session.startRunning() } }
+        let camera = self.session
+        queue.async { if !camera.isRunning { camera.startRunning() } }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        let session = session
-        queue.async { if session.isRunning { session.stopRunning() } }
+        let camera = self.session
+        queue.async { if camera.isRunning { camera.stopRunning() } }
     }
 
     func metadataOutput(

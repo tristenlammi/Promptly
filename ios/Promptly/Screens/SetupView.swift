@@ -35,7 +35,7 @@ struct SetupView: View {
                     .focused($typing)
                     .onSubmit(go)
                     .padding(12)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .accessibilityLabel("Server address")
 
                 if let problem {
