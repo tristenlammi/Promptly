@@ -350,7 +350,7 @@ function ReportRow({ r, everyone, onDone }: { r: ReportItem; everyone: string; o
             <button type="button" className={cn(btn, "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]")} disabled={busy} onClick={() => void decide("keep")}>
               Keep it
             </button>
-            <button type="button" className={cn(btn, "bg-[var(--danger)] text-white hover:brightness-95")} disabled={busy} onClick={() => void decide("remove")}>
+            <button type="button" className={cn(btn, "bg-[var(--danger-fill)] text-white hover:brightness-95")} disabled={busy} onClick={() => void decide("remove")}>
               {t.type === "comment" ? "Remove comment" : `Remove from ${everyone}`}
             </button>
           </>

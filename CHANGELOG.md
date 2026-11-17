@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Ctrl+K: Enter pressed the moment a row appeared was sometimes lost, and search results landing threw away a row you had picked with the arrows. The highlighted row is now always the one Enter takes, and a row you picked stays picked while results come in.
+- Dark theme: white words on red were hard to read in 13 places (the "New" line and marker in Rooms, the live marker and the leave and screen-share buttons in voice rooms, Remove and Delete buttons in Mail, Notes, Porch admin and app items, and the Passwords error message). They now sit on a deeper red.
+
 ## [0.49.1] - 2026-11-17
 
 ### Added

@@ -108,11 +108,12 @@ async def everyone_id(client, u) -> str:
     return (await boot(client, u))["everyone"]["id"]
 
 
-def jpeg(size=(1200, 900), colour=(200, 80, 40)) -> bytes:
+def jpeg(size=(1200, 900), colour=(200, 80, 40), *, tag: str = "") -> bytes:
     from PIL import Image
 
     buf = io.BytesIO()
-    Image.new("RGB", size, colour).save(buf, "JPEG", quality=85)
+    # `tag` goes in as a JPEG comment: two pictures that look alike are still two files.
+    Image.new("RGB", size, colour).save(buf, "JPEG", quality=85, **({"comment": tag.encode()} if tag else {}))
     return buf.getvalue()
 
 
@@ -127,7 +128,10 @@ async def upload(client, u, name="IMG_0001.jpg", data: bytes | None = None, mime
 
 
 async def photo(client, u, name="IMG_0001.jpg", data: bytes | None = None, *, ingest=True) -> str:
-    fid = await upload(client, u, name, data or jpeg(colour=(uuid.uuid4().int % 255, 90, 40)))
+    # Every photo is its own file. A random colour alone isn't enough: one time in 255 two of
+    # them matched byte for byte, the upload gave back the first one's id, and a test that
+    # counted "two photos" was counting one.
+    fid = await upload(client, u, name, data or jpeg(colour=(uuid.uuid4().int % 255, 90, 40), tag=uuid.uuid4().hex))
     if ingest:
         from app.files.media_pipeline import ingest as run
 

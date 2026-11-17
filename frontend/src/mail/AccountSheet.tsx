@@ -132,7 +132,7 @@ export function MailboxSheet({ accounts, current, onPick, onAdd, onEdit, onClose
                 <p>This removes it from Promptly. Your mail stays in the mailbox itself.</p>
                 <div className="mt-2 flex justify-end gap-2">
                   <button type="button" onClick={() => setRemoving(null)} className="h-8 rounded-lg px-3 text-[var(--text-muted)]">Keep it</button>
-                  <button type="button" disabled={busy} onClick={() => void remove(a.id)} className="h-8 rounded-lg bg-[var(--danger)] px-3 font-medium text-white disabled:opacity-50">Remove</button>
+                  <button type="button" disabled={busy} onClick={() => void remove(a.id)} className="h-8 rounded-lg bg-[var(--danger-fill)] px-3 font-medium text-white disabled:opacity-50">Remove</button>
                 </div>
               </div>
             )}

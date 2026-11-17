@@ -379,7 +379,7 @@ export function MessageList({
                     {newLine && (
                       <div data-new-line className="relative my-1 flex items-center px-4" role="separator" aria-label="New messages">
                         <span className="h-px flex-1 bg-[var(--danger)]" />
-                        <span className="ml-2 rounded bg-[var(--danger)] px-1.5 text-xs font-bold uppercase tracking-wide text-white">New</span>
+                        <span className="ml-2 rounded bg-[var(--danger-fill)] px-1.5 text-xs font-bold uppercase tracking-wide text-white">New</span>
                       </div>
                     )}
                     <MessageItem m={m} grouped={!newDay && !newLine && groupsWith(prev, m)} highlight={highlightId === m.id} ctx={listCtx} />

@@ -262,7 +262,7 @@ export const ItemButton = forwardRef<
         variant === "primary" && "bg-[var(--item-accent-fill)] text-white shadow-[var(--shadow-sm)] hover:brightness-95 active:brightness-90",
         variant === "secondary" && "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]",
         variant === "ghost" && "text-[var(--text)] hover:bg-[var(--hover)]",
-        variant === "danger" && "bg-[var(--danger)] text-white hover:brightness-95",
+        variant === "danger" && "bg-[var(--danger-fill)] text-white hover:brightness-95",
         block && "w-full",
         className,
       )}

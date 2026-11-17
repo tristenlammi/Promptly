@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays,
@@ -25,6 +25,7 @@ import type { ConversationSearchHit } from "@/api/types";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { sanitizeSnippet } from "@/lib/sanitizeSnippet";
+import { cursorFor, step, type PalettePick } from "@/lib/paletteCursor";
 import { SearchDateFilter, type DateRange } from "./SearchDateFilter";
 import { ActionRows, usePaletteActions, type PaletteAction } from "./usePaletteActions";
 import { itemKindWord } from "@/components/workspaces/itemKindWord";
@@ -83,7 +84,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   const [everyday, setEveryday] = useState<EverydaySearch | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cursor, setCursor] = useState(0);
+  const [pick, setPick] = useState<PalettePick | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const { actions, sureTop, cycleTarget } = usePaletteActions(open ? query : "", { navigate, setQuery });
 
@@ -109,7 +110,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
       setWsGroups([]);
       setEveryday(null);
       setError(null);
-      setCursor(0);
+      setPick(null);
       setLoading(false);
       return;
     }
@@ -212,9 +213,17 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   // nothing selected, so Enter does nothing until the person picks).
   const nActions = actions.length;
   const defaultCursor = sureTop ? 0 : flat.length ? nActions : -1;
-  useEffect(() => {
-    setCursor(defaultCursor);
-  }, [defaultCursor, query, hits]);
+  // Worked out from the list in this same render (lib/paletteCursor): the
+  // keyboard and the screen can't disagree about which row Enter takes.
+  const rowKeys = useMemo(
+    () => [...actions.map((a) => `a:${a.key}`), ...flat.map((h) => `h:${h.message_id}`)],
+    [actions, flat],
+  );
+  const cursor = cursorFor(pick, query, rowKeys, defaultCursor);
+  const pickIndex = (idx: number) => {
+    const key = rowKeys[idx];
+    if (key) setPick({ query, key });
+  };
 
   const runAction = async (a: PaletteAction) => {
     if (busyKey) return;
@@ -230,9 +239,16 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
 
   // Handle global keyboard inside the modal. Keep arrow keys from
   // reaching the underlying page (e.g. scrolling the chat log).
+  // The listener reads the list as it was last put on screen, not as it
+  // was when the listener was added.
+  const live = useRef({ actions, flat, cursor, nActions, rowKeys, query, cycleTarget, onClose, runAction, openHit: (_: ConversationSearchHit) => {} });
+  useLayoutEffect(() => {
+    live.current = { actions, flat, cursor, nActions, rowKeys, query, cycleTarget, onClose, runAction, openHit };
+  });
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      const { actions, flat, cursor, nActions, rowKeys, query, cycleTarget, onClose, runAction, openHit } = live.current;
       // While the date popover is open it owns the keyboard — don't let
       // Escape close the whole palette or arrows move the result cursor.
       if (dateOpenRef.current) return;
@@ -243,10 +259,12 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
       }
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setCursor((c) => Math.min(nActions + flat.length - 1, c + 1));
+        const key = step(cursor, 1, rowKeys);
+        if (key) setPick({ query, key });
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setCursor((c) => Math.max(0, c - 1));
+        const key = step(cursor, -1, rowKeys);
+        if (key) setPick({ query, key });
       } else if (e.key === "Tab" && cursor >= 0 && actions[cursor]?.target && cycleTarget(e.shiftKey ? -1 : 1)) {
         // Tab on a task / expense row: write to the next file instead.
         e.preventDefault();
@@ -265,7 +283,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [open, flat, cursor, onClose, actions, nActions, cycleTarget, busyKey]);
+  }, [open]);
 
   // Keep the cursored row visible as the user arrows down past the
   // visible viewport of the scrollable list.
@@ -342,7 +360,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
               cursor={cursor}
               busyKey={busyKey}
               onRun={(a) => void runAction(a)}
-              onHover={setCursor}
+              onHover={pickIndex}
               onCycle={() => cycleTarget(1)}
             />
           )}
@@ -395,7 +413,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
               baseIndex={nActions}
               cursor={cursor}
               onSelect={openHit}
-              onHover={setCursor}
+              onHover={pickIndex}
             />
           )}
           {shared.length > 0 && (
@@ -406,7 +424,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
               baseIndex={nActions + owned.length}
               cursor={cursor}
               onSelect={openHit}
-              onHover={setCursor}
+              onHover={pickIndex}
             />
           )}
 

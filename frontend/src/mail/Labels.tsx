@@ -284,7 +284,7 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
                   <p>This removes the label and its rules from Promptly. No email is deleted, and a folder in your mailbox stays there.{r.hasChildren && " Labels inside it stay too."}</p>
                   <div className="mt-2 flex justify-end gap-2">
                     <button type="button" onClick={() => setRemoving(null)} className="h-8 rounded-lg px-3 text-[var(--text-muted)]">Keep it</button>
-                    <button type="button" onClick={() => void attempt(() => mailApi.removeLabel(l.id), "Couldn't remove that.").then((ok) => { if (ok) { setEditing(null); setRemoving(null); onRemoved(l.id); } })} className="h-8 rounded-lg bg-[var(--danger)] px-3 font-medium text-white">Remove</button>
+                    <button type="button" onClick={() => void attempt(() => mailApi.removeLabel(l.id), "Couldn't remove that.").then((ok) => { if (ok) { setEditing(null); setRemoving(null); onRemoved(l.id); } })} className="h-8 rounded-lg bg-[var(--danger-fill)] px-3 font-medium text-white">Remove</button>
                   </div>
                 </div>
               ) : (
