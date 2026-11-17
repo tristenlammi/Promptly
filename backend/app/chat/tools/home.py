@@ -5,7 +5,8 @@
   what each is doing now.
 * ``home_control``: switch or set the everyday ones (lights, plugs, fans,
   scenes, speakers).
-* ``home_music``: play an artist, album, song or playlist by name on one of
+* ``home_music``: play a kind of music ("some jazz": it just starts a mix) or
+  an artist, album, song or playlist by name on one of
   the home's speakers, from the streaming service the home has linked
   (``app/home/music.py``). It plays only what is plainly the thing asked
   for; otherwise it hands back a short list to ask the person about.
@@ -317,15 +318,18 @@ class HomeMusicTool(Tool):
         "artist, an album, a song or a playlist. `query` is what to play, in their words ('Miles Davis', 'Kind of Blue', "
         "'Yesterday by The Beatles'); set `kind` when they said which it is. `target` is the speaker's or room's name. "
         "It starts straight away when one result is plainly what they asked for. Otherwise it returns a short list: ask "
-        "the user which one, then call again with that result's `uri`. Never pick from the list yourself. For pause, "
-        "skip and volume use home_control."
+        "the user which one, then call again with that result's `uri`. Never pick from the list yourself. "
+        "When they asked for a kind of music or a mood rather than a named thing ('some jazz', 'something relaxing', "
+        "'90s rock', or just 'music'), set `mix` true: it picks a fitting mix and starts it straight away. Never ask them "
+        "what exactly they'd like first. For pause, skip and volume use home_control."
     )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "What to play, e.g. 'Miles Davis' or 'Blue in Green by Miles Davis'."},
+            "query": {"type": "string", "description": "What to play, e.g. 'Miles Davis' or 'Blue in Green by Miles Davis'; with `mix`, the kind of music ('jazz', 'relaxing', '90s rock'), or leave it out for just 'music'."},
+            "mix": {"type": "boolean", "description": "True when they asked for a kind of music, a mood or just 'music', not a named artist, album, song or playlist."},
             "kind": {"type": "string", "enum": ["artist", "album", "track", "playlist"], "description": "Only when the user said which it is."},
-            "target": {"type": "string", "description": "The speaker's name or a room's name. May be left out when the home has one speaker that plays music."},
+            "target": {"type": "string", "description": "The speaker's name or a room's name, only if they said one. May be left out when the home has one speaker that plays music, or one that is playing now."},
             "uri": {"type": "string", "description": "A result's uri from an earlier home_music answer, once the user has said which one."},
             "shuffle": {"type": "boolean", "description": "Shuffle it (playlists, an artist)."},
         },
@@ -339,7 +343,9 @@ class HomeMusicTool(Tool):
         uri = str(args.get("uri") or "").strip()[:260]
         kind = args.get("kind") if args.get("kind") in music.KINDS else None
         target = str(args.get("target") or "").strip()[:120]
-        if not query and not uri:
+        # A kind of music, not a named thing: said so, or plain from the words.
+        loose = not uri and kind is None and (args.get("mix") is True or music.vague(query, plainly=True))
+        if not query and not uri and not loose:
             raise ToolError("Say what to play.")
         devices = await assistant.devices_for(ctx.db, ctx.user.id)
         # Nothing of ours holds a database connection while a box is asked.
@@ -355,9 +361,14 @@ class HomeMusicTool(Tool):
                     raise ToolError("That uri isn't one of the results. Search again with `query`.")
                 item = picked[0]
                 said = f"Playing {query} on {speaker['name']}." if query else f"Playing that on {speaker['name']}."
+            elif loose:
+                return await self._mix(assistant, music, speaker, query)
             else:
                 results = await assistant.music_search(speaker["box_id"], query, [kind] if kind else None)
                 item, options = music.choose(results, query, kind)
+                if item is None and kind is None and music.vague(query) and not music.named(results, query):
+                    # "90s rock music": reads like a kind of music, and nothing is called that.
+                    return await self._mix(assistant, music, speaker, query)
                 if item is None:
                     if not options:
                         raise ToolError(f"Nothing called “{query}” was found in their music service. Ask them to say it another way.")
@@ -378,8 +389,36 @@ class HomeMusicTool(Tool):
         return ToolResult(content=f"Done: {said}", meta={"summary": said, "spoken": said})
 
     @staticmethod
+    async def _mix(assistant: Any, music: Any, speaker: dict[str, Any], query: str) -> ToolResult:
+        """A kind of music ("some jazz"), or just "music": start something
+        fitting straight away. Never a list and never a question about what:
+        nobody named a thing, so the closest fit is the answer."""
+        about, whole = music.topic(query), music.topic(query, whole=True)
+        picked = None
+        if about:
+            if whole != about:  # "roxy music" could be the band, not a kind of music
+                picked = music.pick_called(await assistant.music_search(speaker["box_id"], whole, ["playlist", "artist"]), whole)
+            if picked is None:
+                picked = music.pick_mix(await assistant.music_search(speaker["box_id"], about, ["playlist", "artist", "track"]), about)
+            if picked is None:
+                raise ToolError(f"Their music service found nothing for “{about}”. Tell them so in a few words; they can say it another way.")
+        else:
+            picked = music.pick_any(await assistant.music_suggest(speaker["box_id"]))
+            if picked is None:
+                # Nothing played here yet and nothing suggested: something everyone knows.
+                picked = music.pick_mix(await assistant.music_search(speaker["box_id"], "top hits", ["playlist"]), "hits")
+            if picked is None:
+                raise ToolError("There's nothing to go on yet: nothing has been played here before. Ask what kind of music they'd like.")
+        item, grow = picked
+        await assistant.music_play(speaker, item["uri"], shuffle=not grow and item["kind"] in ("playlist", "artist"), mix=grow)
+        said = f"Playing {music.describe_mix(item, grow)} on {speaker['name']}."
+        return ToolResult(content=f"Done: {said} Say just that, in a few words.", meta={"summary": said, "spoken": said})
+
+    @staticmethod
     def _speaker(assistant: Any, devices: list[dict[str, Any]], target: str, many_homes: bool) -> dict[str, Any]:
-        """The one speaker meant; never a guess between two."""
+        """The one speaker meant; never a guess between two. With none
+        said: the home's only speaker that plays music, or the only one of
+        them playing right now (changing the music means that one)."""
         speakers = [d for d in devices if d["domain"] == "media_player"]
         able = [d for d in speakers if assistant.plays_music(d)]
         if target:
@@ -393,6 +432,9 @@ class HomeMusicTool(Tool):
                 found = [d for d in found if assistant.plays_music(d)]
             d = _one(found, target, "speaker", many_homes)
         else:
+            playing = [d for d in able if d.get("state") == "playing" and d.get("live")]
+            if len(able) != 1 and len(playing) == 1:
+                able = playing
             if len(able) != 1:
                 names = ", ".join(f"{d['name']}{_where(d, many_homes)}" for d in (able or speakers)[:8])
                 if not speakers:

@@ -23,9 +23,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 
+- Home: ask for a kind of music and it just plays. "Play some jazz", "put on something relaxing", "play 90s rock in the kitchen" or simply "play music" starts a mix straight away, and the assistant says what it put on in a few words instead of coming back with a list or a question. It picks a playlist named for what you asked if Tidal has one, otherwise a mix that doesn't end, grown from the closest artist or song. "Play music" carries on from what was played at home last, or what Tidal suggests for the account. A named thing is still never guessed: two albums called "Blue" is still a question. Needs the server's Home box to update (connector 0.8.0).
+- Home: with more than one speaker and none named, music goes to the one that is already playing. If none or several are playing, it still asks which.
 - Home: play music by name. Ask in a chat or out loud, "play Miles Davis in the lounge", "play the album Kind of Blue", "play Yesterday by The Beatles in the kitchen", and it plays from Tidal on that speaker. It starts straight away when one result is plainly what you asked for; when two things share the name it asks which you meant, and it never picks a speaker for you when more than one could be meant.
 - Home → settings → Music: the home's owner links Tidal there. You sign in on Tidal's own site (link.tidal.com) with a short code, so your Tidal password is never typed into Promptly, and what Tidal hands back stays on the home's box. Everyone in the home can see it's linked; only the owner can link or unlink. It also lists which of the home's speakers can play music by name.
 - The server's Home box gains a music service (Music Assistant, out of sight like Home Assistant) for this. It is set up by itself on the next update, and only looks for the kinds of speaker the home has added (a WiiM, for example): nothing joins a home by itself. About 3.2 GB more disk and 450 MB of memory; set `HOME_MUSIC_URL=` in `.env` to leave it out. Needs the Home box to update (connector 0.7.0). On Docker Desktop (Windows, macOS) music can be linked and searched but not played, because speakers can't reach the music service there.
+
+### Changed
+
+- Home: the music service's own web page (port 8095) no longer answers on your home network, only on the server itself. Nobody needs it there: speakers fetch music and cover art from its other port (8097), which is unchanged. It was behind a sign-in only the Home box has; now it isn't reachable at all. Applies on Linux and Unraid servers after the Home box updates; `HOME_MUSIC_BIND=` (empty) in `.env` puts it back.
 
 ## [0.48.0] - 2026-11-17
 

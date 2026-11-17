@@ -4,6 +4,8 @@
 // linked but can't change it, and in a chat "play Miles Davis in the lounge"
 // reaches the box as one search and one play. Two albums with the name asked
 // for is a question back, and nothing plays until the person says which.
+// A kind of music ("play some jazz") or a bare "play music" is never a
+// question: something fitting starts, and the reply says what.
 //
 // Home is off by default: the spec turns it on, and puts everything back.
 import type { APIResponse, Page } from "@playwright/test";
@@ -99,7 +101,14 @@ test("music by name: the owner links Tidal on Tidal's own site, and the assistan
           { uri: "tidal://album/300", kind: "album", name: "Blue", artist: "Joni Mitchell" },
           { uri: "tidal://album/301", kind: "album", name: "Blue", artist: "Weezer" },
         ],
+        // A band and an album are called "Jazz" too: a kind of music takes the playlist named for it.
+        jazz: [
+          { uri: "tidal://artist/78", kind: "artist", name: "Jazz" },
+          { uri: "tidal://album/77", kind: "album", name: "Jazz", artist: "Queen" },
+          { uri: "tidal://playlist/jz-1", kind: "playlist", name: "Jazz Essentials", by: "TIDAL" },
+        ],
       },
+      recent: [{ uri: "tidal://track/9", kind: "track", name: "So What", artist: "Miles Davis" }],
     };
     await box.up();
     const have = ((await (await call(alice, aAuth, "GET", "/home")).json()).homes ?? []) as { id: string; role: string }[];
@@ -171,10 +180,25 @@ test("music by name: the owner links Tidal on Tidal's own site, and the assistan
     await expect(alice.getByRole("button", { name: "Send message" })).toBeVisible();
     if (shots) await alice.screenshot({ path: `${shots}/music-05b-chat-plays-the-one-chosen.png` });
 
+    // ---- a kind of music just plays: no list, no question, and the reply says what started.
+    await ask(alice, "play some jazz");
+    await expect(lastReply(alice)).toContainText("Tool said: Done: Playing the playlist Jazz Essentials on Lounge speaker.", { timeout: 30_000 });
+    expect(asked("music.search").at(-1)).toEqual({ q: "jazz", kinds: ["playlist", "artist", "track"], limit: 5 });
+    expect(asked("music.play").at(-1)).toEqual({ entity: "media_player.lounge", uri: "tidal://playlist/jz-1", shuffle: true });
+    await expect(alice.getByRole("button", { name: "Send message" })).toBeVisible();
+    if (shots) await alice.screenshot({ path: `${shots}/music-10-some-jazz-just-plays.png` });
+    // Nothing said at all: a mix grown from what was played here last.
+    await ask(alice, "just play music");
+    await expect(lastReply(alice)).toContainText("Tool said: Done: Playing a mix based on So What by Miles Davis on Lounge speaker.", { timeout: 30_000 });
+    expect(asked("music.suggest").length).toBe(1);
+    expect(asked("music.play").at(-1)).toEqual({ entity: "media_player.lounge", uri: "tidal://track/9", shuffle: false, radio: true });
+    await expect(alice.getByRole("button", { name: "Send message" })).toBeVisible();
+    if (shots) await alice.screenshot({ path: `${shots}/music-11-play-music.png` });
+
     // ---- the Home page shows what it started.
     await alice.goto("/home");
     await ready(alice);
-    await expect(alice.getByText("Playing · Blue").first()).toBeVisible({ timeout: 20_000 });
+    await expect(alice.getByText("Playing · So What").first()).toBeVisible({ timeout: 20_000 });
     if (shots) await alice.screenshot({ path: `${shots}/music-06-home-playing.png` });
 
     // ---- unlinking takes it away again.

@@ -101,10 +101,20 @@ What to know:
   takes those away and gives it only the kinds of speaker the home has added
   (a WiiM: its WiiM support), and it can only play to speakers that are in the
   home. Music lists which ones under "Plays on".
-- **Ports.** On Linux and Unraid it shares the server's network: its web page
-  is on port **8095** and the music itself on **8097**, both reachable from
-  your home network (speakers fetch the music from 8097). The page is behind a
-  sign-in only the connector has. Both ports must be free.
+- **Ports.** On Linux and Unraid it shares the server's network. The music
+  itself is on port **8097**, reachable from your home network: speakers fetch
+  the music (and the cover art) from there. Its own web page is on port
+  **8095** and answers on the server itself only (127.0.0.1), not on your
+  home network: the connector tells it so the first time it starts, and it
+  stays that way (`HOME_MUSIC_BIND=` in `.env`, empty, puts it back on every
+  address). Both ports must be free. A box on another computer set up from
+  `home-box/compose` with the Linux file still has that page on the home
+  network, behind a sign-in only the connector has.
+- **A kind of music.** "Play some jazz", "put on something relaxing" or just
+  "play music" starts a mix straight away, with no question back: a playlist
+  named for it if the service has one, otherwise a mix that doesn't end, grown
+  from the closest artist or song. "Play music" picks up from what was played
+  here last, or what the service suggests for the account.
 - **Docker Desktop (Windows, macOS):** linking and searching work, but nothing
   plays: a speaker can't fetch music from inside Docker Desktop.
 - **Leaving it out:** put `HOME_MUSIC_URL=` (empty) in `.env`, then

@@ -21,6 +21,10 @@ Configuration, in this order:
   Assistant, out of sight like Home Assistant) answers. With it, a home can
   link a streaming service and ask for music by name. The connector sets a
   fresh one up by itself and keeps its sign-in in ``DATA_DIR``.
+  ``MUSIC_BIND`` (optional): the one address Music Assistant's own page
+  should answer on, when the connector reaches it there (``127.0.0.1`` where
+  both share the computer's network). Speakers never use that page: they
+  fetch music from its other port.
 * Home Assistant: as an add-on (``SUPERVISOR_TOKEN`` is set) it uses the
   Supervisor's proxy and needs nothing else. Otherwise ``HA_URL`` (default
   ``http://homeassistant:8123``) and ``HA_TOKEN``; with no token it sets up a
@@ -45,7 +49,7 @@ from typing import Any
 
 import aiohttp
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 log = logging.getLogger("promptly-box")
 
 # Kinds of thing Promptly has controls for. Anything else a brand brings is
@@ -1623,6 +1627,37 @@ def shape_results(found: Any, kinds: list[str], sources: set[str], limit: int) -
     return out
 
 
+_SUGGEST_KINDS = ("playlist", "album", "artist", "track")
+
+
+def shape_listed(items: Any, sources: set[str], limit: int) -> list[dict[str, Any]]:
+    """Things Music Assistant lists by itself (played lately, suggested by
+    the linked service), as the same short plain list a search gives. Only
+    what this home may play; something from its own library only when the
+    list says which service it came from."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or len(out) >= limit:
+            continue
+        uri, kind = str(item.get("uri") or ""), str(item.get("media_type") or "")
+        got = music_uri(uri, sources)
+        name = str(item.get("name") or "").strip()[:120]
+        if got is None or got[1] != kind or kind not in _SUGGEST_KINDS or not name or uri in seen or item.get("is_playable") is False:
+            continue
+        if uri.startswith("library://"):
+            domains = {str(m.get("provider_domain") or "") for m in item.get("provider_mappings") or [] if isinstance(m, dict)}
+            if not domains & sources:
+                continue
+        seen.add(uri)
+        one: dict[str, Any] = {"uri": uri, "kind": kind, "name": name}
+        artists = [str(a.get("name") or "") for a in item.get("artists") or [] if isinstance(a, dict) and a.get("name")]
+        if artists:
+            one["artist"] = ", ".join(artists[:3])[:120]
+        out.append(one)
+    return out
+
+
 def shape_link(step: Any, brand: str) -> dict[str, Any]:
     """One answer from a "link your account" flow. ``state``: ``open`` (go to
     the service's own site, with this code), ``wait``, ``done``, ``stopped``."""
@@ -1658,6 +1693,7 @@ class Music:
         self._flows: dict[str, str] = {}  # link flows this box started -> brand
         self.up = False
         self._welcomed = False
+        self._bound = False
         self._wiim_ips: list[str] | None = None
 
     # -- signing in (nobody ever sees Music Assistant's own screens)
@@ -1729,6 +1765,7 @@ class Music:
         while True:
             try:
                 await self.ha.ready.wait()
+                await self._bind()
                 await self._tidy()
                 await self._look()
                 if not self.up:
@@ -1744,6 +1781,43 @@ class Music:
                 self.ha.set_music({})
                 attempt += 1
                 await asyncio.sleep(backoff(attempt))
+
+    async def _bind(self) -> None:
+        """Music Assistant's own page answers on every address the computer
+        has unless told otherwise, which on a shared network is the whole
+        home network. Nobody needs it there: speakers fetch music from its
+        other port (the stream server, which also hands them the cover art).
+        With ``MUSIC_BIND`` it is told to answer on that one address only.
+
+        Only when that is where this connector reaches it: an address the
+        connector can't dial would lock the box out of its own music."""
+        want = os.environ.get("MUSIC_BIND", "").strip()
+        if not want or self._bound:
+            return
+        if _host_of(self.base + "/") != want:
+            log.warning("music service: MUSIC_BIND=%s isn't where MUSIC_URL reaches it, so its page stays as it is", want)
+            self._bound = True
+            return
+        if await self.call("config/core/get_value", domain="webserver", key="bind_ip") == want:
+            self._bound = True
+            return
+        try:
+            await self.call("config/core/save", domain="webserver", values={"bind_ip": want}, timeout=30.0)
+        except RuntimeError as e:
+            # It restarts its web server under this very call: no answer is the usual answer.
+            if str(e) != MUSIC_DOWN:
+                raise
+        for _ in range(10):
+            await asyncio.sleep(2)
+            try:
+                if await self.call("config/core/get_value", domain="webserver", key="bind_ip") == want:
+                    log.info("music service: its own page now answers on %s only", want)
+                    self._bound = True
+                    return
+            except RuntimeError as e:
+                if str(e) != MUSIC_DOWN:
+                    raise
+        raise RuntimeError("the music service didn't come back after being told where to answer")
 
     async def _tidy(self) -> None:
         """Music Assistant starts out looking for every AirPlay, Chromecast
@@ -1788,6 +1862,57 @@ class Music:
 
     def _allowed(self, sources: list[dict[str, str]]) -> set[str]:
         return {s["brand"] for s in sources} | (self.extra - set(MUSIC_PLAYERS.values()))
+
+    async def _whole(self, items: Any, limit: int) -> list[dict[str, Any]]:
+        """A list that names things from the library without saying which
+        service each came from: look the first few up, so that is known."""
+        out: list[dict[str, Any]] = []
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict) or len(out) >= limit:
+                continue
+            uri = str(item.get("uri") or "")
+            if uri.startswith("library://") and not item.get("provider_mappings") and _MUSIC_URI.match(uri):
+                try:
+                    full = await self.call("music/item_by_uri", uri=uri)
+                except RuntimeError as e:
+                    if str(e) == MUSIC_DOWN:
+                        raise
+                    continue
+                item = full if isinstance(full, dict) else item
+            out.append(item)
+        return out
+
+    async def _suggest(self, allowed: set[str], limit: int) -> list[dict[str, Any]]:
+        """Something to put on when nobody said what: what was played here
+        lately, then what the linked service suggests for this account."""
+        recent = await self.call("music/recently_played_items", limit=12, media_types=list(_SUGGEST_KINDS), fully_played_only=False)
+        out = shape_listed(await self._whole(recent, 6), allowed, limit)
+        if len(out) >= limit:
+            return out
+        try:
+            rows = await self.call("music/recommendations", timeout=40.0)
+        except RuntimeError as e:
+            if str(e) == MUSIC_DOWN:
+                raise
+            rows = []
+        # The linked service's own rows first (its mixes and playlists), then the library's.
+        rows = [r for r in rows or [] if isinstance(r, dict) and r.get("provider") and r.get("item_id")]
+        rows.sort(key=lambda r: str(r["provider"]).split("--", 1)[0] not in allowed)
+        for row in rows[:5]:
+            items = row.get("items")
+            if not items:
+                try:
+                    items = await self.call("music/recommendations/items", provider=str(row["provider"]), item_id=str(row["item_id"]), timeout=40.0)
+                except RuntimeError as e:
+                    if str(e) == MUSIC_DOWN:
+                        raise
+                    continue
+            for one in shape_listed(await self._whole(items, 4), allowed, limit):
+                if one["uri"] not in {o["uri"] for o in out}:
+                    out.append(one)
+            if len(out) >= limit:
+                break
+        return out[:limit]
 
     async def op(self, op: str, a: dict[str, Any]) -> Any:
         """One thing the server asked for about music. Plain data out; a
@@ -1851,6 +1976,11 @@ class Music:
                 raise RuntimeError("No music service is linked to this home yet.")
             found = await self.call("music/search", search_query=q, media_types=kinds, limit=limit, timeout=40.0)
             return shape_results(found, kinds, allowed, limit)
+        if op == "music.suggest":
+            allowed = self._allowed(await self.sources())
+            if not allowed:
+                raise RuntimeError("No music service is linked to this home yet.")
+            return await self._suggest(allowed, 5)
         if op == "music.play":
             entity = str(a.get("entity") or "")
             player = self.ha.music_of.get(entity)
@@ -1859,7 +1989,18 @@ class Music:
             if music_uri(a.get("uri"), self._allowed(await self.sources())) is None:
                 raise RuntimeError("That isn't something from this home's music.")
             args: dict[str, Any] = {"queue_id": player, "media": str(a["uri"]), "option": "replace"}
-            if a.get("shuffle") is True:
+            if a.get("radio") is True:
+                # A mix that never ends, starting from this artist, song or
+                # playlist: its own songs and ones like them.
+                try:
+                    await self.call("player_queues/play_media", timeout=40.0, **{**args, "media": f"radio_playlist://playlist/{a['uri']}"})
+                    return {"mix": True}
+                except RuntimeError as e:
+                    if str(e) == MUSIC_DOWN:
+                        raise
+                    log.info("music service: no mix from %s (%s); playing it as it is", a["uri"], str(e)[:120])
+                    args["shuffle"] = True
+            elif a.get("shuffle") is True:
                 args["shuffle"] = True
             await self.call("player_queues/play_media", timeout=40.0, **args)
             return None

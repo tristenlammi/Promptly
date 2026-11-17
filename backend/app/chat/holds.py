@@ -154,7 +154,8 @@ def question(name: str, args: dict[str, Any]) -> str:
         return f"At home: {doing} {_t(args.get('target'), 60) or 'the speaker'}{extra}?"
     if name == "home_music":
         where = _t(args.get('target'), 60)
-        return f"At home: play {_t(args.get('query'), 80) or 'that'}{f' on {where}' if where else ''}?"
+        what = _t(args.get('query'), 80) or ('some music' if args.get('mix') is True else 'that')
+        return f"At home: play {what}{f' on {where}' if where else ''}?"
     if name == "timeline_day":
         end = str(args.get("end_date") or "").strip()
         return f"Look at your timeline for {_t(args.get('date'), 20)}{f' to {end[:10]}' if end else ''}?"

@@ -1169,10 +1169,12 @@ services:
   # About 3.2 GB more on disk and 450 MB of memory; to leave it out, set
   # HOME_MUSIC_URL= (empty) in .env and stop its container.
   #   home          shares the host's network (speakers fetch the music
-  #                 from it, and it finds them by broadcast). Its own web
-  #                 page is on port 8095 and its music on 8097, on your
-  #                 home network; the page is behind a sign-in only the
-  #                 connector has. Both ports must be free.
+  #                 from it, and it finds them by broadcast). Its music is
+  #                 on port 8097, on your home network: that is the one
+  #                 speakers use. Its own web page (port 8095) answers on
+  #                 this machine only (127.0.0.1): the connector tells it
+  #                 so on its first start, and it stays that way. Both
+  #                 ports must be free.
   #   home-desktop  on the promptly network with nothing published:
   #                 linking and searching work, but speakers can't fetch
   #                 music from inside Docker Desktop, so nothing plays.
@@ -1213,6 +1215,9 @@ services:
       - PROMPTLY_SERVER=http://${NGINX_BIND:-127.0.0.1}:${NGINX_HTTP_PORT:-8087}
       - HA_URL=http://127.0.0.1:${HOME_HA_PORT:-8123}
       - MUSIC_URL=${HOME_MUSIC_URL-http://127.0.0.1:8095}
+      # Music Assistant's own page answers on this address only (not the
+      # home network). Empty leaves it on every address.
+      - MUSIC_BIND=${HOME_MUSIC_BIND-127.0.0.1}
       # Advanced: more of Music Assistant's own sources to allow (its ids, comma-separated).
       - MUSIC_EXTRA=${HOME_MUSIC_EXTRA:-}
     volumes:

@@ -179,7 +179,7 @@ _SCREEN_NOTES = {
     "read_note": "For a list, say only the items not ticked yet, plainly and without ids; for a text note, the gist in one or two sentences.",
     "home_devices": "Answer only what they asked, in one sentence; never read the whole list out.",
     "home_control": "Say it's done in a few words, as the result puts it.",
-    "home_music": "If it played, say so in a few words. If it gave a list, ask which one in one short sentence, naming at most three.",
+    "home_music": "If it played, say what started in a few words and nothing else. If it gave a list, ask which one in one short sentence, naming at most three.",
 }
 _NO_SCREEN = "They can't see a screen: at most two short sentences."
 
@@ -250,7 +250,7 @@ def prompt(names: set[str], *, device: str, driving: bool, locked: bool = False)
     if set(HOME) & names:
         lines.append(
             "- At home: home_control switches lights, scenes and speakers straight away. Use the room or device name they "
-            "said; if it says more than one fits, ask which. It can't unlock, open or disarm anything. home_music plays an artist, album, song or playlist by name on a speaker; if it gives a list, ask which one."
+            "said; if it says more than one fits, ask which. It can't unlock, open or disarm anything. home_music plays an artist, album, song or playlist by name on a speaker; if it gives a list, ask which one. For a kind of music or a mood ('some jazz', 'something relaxing', just 'music') call home_music with mix true at once: never ask what exactly."
         )
     phone = names & set(DEVICE)
     if phone:

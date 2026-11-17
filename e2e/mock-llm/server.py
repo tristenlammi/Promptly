@@ -27,6 +27,8 @@ Spoken turns (Talk, WP-T4) can't carry markers, so plain words do:
     "miles davis" + tools   call home_music: Miles Davis in the Lounge (Home, music by name)
     "play blue" + tools     call home_music for "Blue" (two albums have that name: it asks which)
     "joni" + tools          call home_music again with the Joni Mitchell album's uri
+    "some jazz" + tools     call home_music with mix: a kind of music, no speaker said (it just plays)
+    "just play music" + tools  call home_music with mix and nothing else
     "pausecheck" + tools
              read something from outside (the person's files), then open
              example.com at an address they never wrote: the reply stops
@@ -152,6 +154,10 @@ def _tool_call_for(body: dict) -> tuple[str, str] | None:
         if re.search(r"\bunlock\b", text, re.I) and "home_control" in offered:
             return "home_control", json.dumps({"action": "turn_off", "target": "Front door"})
         # Music by name: one plain request, one that needs a question back, and the answer to it.
+        if re.search(r"\bsome jazz\b", text, re.I) and "home_music" in offered:
+            return "home_music", json.dumps({"query": "jazz", "mix": True})
+        if re.search(r"\bjust play music\b", text, re.I) and "home_music" in offered:
+            return "home_music", json.dumps({"mix": True})
         if re.search(r"\bmiles davis\b", text, re.I) and "home_music" in offered:
             return "home_music", json.dumps({"query": "Miles Davis", "target": "Lounge"})
         if re.search(r"\bplay blue\b", text, re.I) and "home_music" in offered:

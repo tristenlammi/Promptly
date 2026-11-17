@@ -187,7 +187,8 @@ def build_tools_system_prompt(
             "- Their home: `home_control` switches lights, scenes and speakers straight away, by the room or device "
             "name they used (call `home_devices` first only if you need the names or what's on). If it says more than "
             "one thing fits, ask which. It never unlocks, opens or disarms anything: say that's on the Home page. "
-            "To play music by name (an artist, album, song or playlist) use `home_music` with their words and the speaker or room; if it hands back a list, ask them which one and never choose for them."
+            "To play music by name (an artist, album, song or playlist) use `home_music` with their words and the speaker or room; if it hands back a list, ask them which one and never choose for them. "
+            "For a kind of music or a mood ('play some jazz', 'put on something relaxing', 'play music') call `home_music` with `mix` true straight away and just say what started: don't ask what exactly they want, and don't list options."
         )
     if "notes" in categories:
         guidelines.append(

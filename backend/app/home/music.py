@@ -10,6 +10,10 @@ server's side: what a box's answers may contain, and choosing what to play.
 
 Choosing never guesses. One search result is played only when it is plainly
 the thing asked for; otherwise the person is asked which one they meant.
+
+A kind of music is different ("some jazz", "something relaxing", "90s rock",
+or just "music"): nobody named a thing, so there is no wrong one to pick.
+That starts a mix straight away (``mix``, ``topic``, ``pick_mix``).
 """
 from __future__ import annotations
 
@@ -170,6 +174,116 @@ def choose(results: list[dict[str, str]], query: str, kind: str | None = None) -
         if seen[r["kind"]] <= (MAX_OPTIONS if kind else 2):
             few.append(r)
     return None, few[:MAX_OPTIONS]
+
+
+# ------------------------------------------------------------------ a kind of music
+
+
+# Words around the kind of music that aren't part of it.
+_FRONT = (
+    "play ", "put on ", "me ", "us ", "some ", "a bit of ", "a little ", "something ", "anything ", "any ", "a ", "the ",
+    "good ", "nice ", "more ",
+)
+_BACK = (" music", " songs", " song", " tunes", " tracks", " stuff", " mix", " playlist", " radio", " vibes", " please", " for me", " for us")
+_NOTHING = {"", "music", "something", "anything", "whatever", "good", "nice", "some", "tunes", "songs", "a song", "stuff"}
+_VAGUE_FRONT = ("some ", "something ", "anything ", "a bit of ", "any ", "a little ")
+_VAGUE_BACK = (" music", " songs", " tunes", " vibes", " mix", " radio", " stuff")
+
+
+def topic(query: str, whole: bool = False) -> str:
+    """The kind of music in a loose request: "some relaxing jazz music" is
+    "relaxing jazz"; "something good" and "music" are nothing in
+    particular (``""``). ``whole`` keeps the last word ("jazz music",
+    "roxy music"): a band can be called that."""
+    q = quick.key(query)
+    changed = True
+    while changed:
+        changed = False
+        for lead in _FRONT:
+            if q.startswith(lead):
+                q, changed = q[len(lead):].strip(), True
+        for tail in () if whole else _BACK:
+            if q.endswith(tail):
+                q, changed = q[: -len(tail)].strip(), True
+        if q in _NOTHING:
+            return ""
+    return q
+
+
+def vague(query: str, plainly: bool = False) -> bool:
+    """The words themselves say no one thing was named: "some jazz",
+    "something relaxing", "music" (``plainly``), and also "90s rock music"
+    or "a jazz mix", which could still be somebody's name ("Roxy Music",
+    "Little Mix"): those are a kind of music only when nothing is called
+    that. "Something by Miles Davis" names him, so that isn't."""
+    q = quick.key(query)
+    if q in _NOTHING or not topic(query):
+        return True
+    if " by " in f" {q} ":
+        return False
+    return q.startswith(_VAGUE_FRONT) or (not plainly and q.endswith(_VAGUE_BACK))
+
+
+def named(results: list[dict[str, str]], query: str, kind: str | None = None) -> bool:
+    """Something in the results has, by name, exactly what was asked for."""
+    pool = [r for r in results if kind is None or r["kind"] == kind]
+    return any(_is(r, what, who) for what, who in _wanted(query) for r in pool)
+
+
+def pick_called(results: list[dict[str, str]], name: str) -> tuple[dict[str, str], bool] | None:
+    """The artist or playlist called exactly this ("Roxy Music"), for a
+    request that read like a kind of music."""
+    for r in results:
+        if r["kind"] in ("artist", "playlist") and quick.key(r["name"]) == quick.key(name):
+            return r, r["kind"] == "artist"
+    return None
+
+
+def pick_mix(results: list[dict[str, str]], about: str) -> tuple[dict[str, str], bool] | None:
+    """What to put on for a kind of music, and whether to grow it into a mix
+    that doesn't end (``True``) or play it as it is, shuffled (``False``).
+
+    A playlist named for it comes first (a service's "Jazz Essentials" is
+    exactly this), then the artist by that name, then whatever playlist,
+    artist or song the service thought closest. Never a question: nobody
+    named a thing, so the closest fit is the answer."""
+    words = [w for w in quick.key(about).split() if w]
+    by_kind: dict[str, list[dict[str, str]]] = {}
+    for r in results:
+        by_kind.setdefault(r["kind"], []).append(r)
+    for p in by_kind.get("playlist", []):
+        name = f" {quick.key(p['name'])} "
+        if words and all(f" {w} " in name or f" {w}s " in name for w in words):
+            return p, False
+    for a in by_kind.get("artist", []):
+        if quick.key(a["name"]) == quick.key(about):
+            return a, True
+    for kind, grow in (("playlist", False), ("artist", True), ("track", True), ("album", False)):
+        if by_kind.get(kind):
+            return by_kind[kind][0], grow
+    return None
+
+
+def pick_any(listed: list[dict[str, str]]) -> tuple[dict[str, str], bool] | None:
+    """What to put on when they only said "music": the first thing the box
+    offers (what was played here lately, then what the service suggests).
+    A song or an artist grows into a mix; a playlist or album plays as it is."""
+    for item in listed:
+        if item["kind"] in ("playlist", "album"):
+            return item, False
+        if item["kind"] in ("artist", "track"):
+            return item, True
+    return None
+
+
+def describe_mix(item: dict[str, str], grown: bool) -> str:
+    """What started, in a few words: "a mix based on Miles Davis", "the
+    playlist Jazz Essentials"."""
+    if grown:
+        by = f" by {item['artist']}" if item["kind"] == "track" and item.get("artist") else ""
+        return f"a mix based on {item['name']}{by}"
+    kind = {"playlist": "the playlist", "album": "the album", "track": "the song", "artist": "", "radio": "the station"}[item["kind"]]
+    return f"{kind} {item['name']}".strip()
 
 
 def describe(item: dict[str, str]) -> str:

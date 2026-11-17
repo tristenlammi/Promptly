@@ -233,12 +233,30 @@ async def music_search(box_id: uuid.UUID, query: str, kinds: list[str] | None = 
     return music.clean_results(await _music(box_id, "music.search", {"q": query[:120], "kinds": asked, "limit": 5}, relay.SETUP_S))
 
 
-async def music_play(device: dict[str, Any], uri: str, shuffle: bool = False) -> None:
-    """Play one search result on one speaker of the home."""
+async def music_suggest(box_id: uuid.UUID) -> list[dict[str, str]]:
+    """Something to put on when nobody said what: what was played in this
+    home lately, then what its linked service suggests. A box too old to
+    know how gives nothing."""
+    from . import music
+
+    try:
+        return music.clean_results(await _music(box_id, "music.suggest", {}, relay.SETUP_S))
+    except CantDo as e:
+        if "may need updating" in str(e):
+            return []
+        raise
+
+
+async def music_play(device: dict[str, Any], uri: str, shuffle: bool = False, mix: bool = False) -> None:
+    """Play one search result on one speaker of the home. ``mix``: grow it
+    into a mix that doesn't end (its own songs and ones like them)."""
     from . import music
 
     if device.get("careful") or not plays_music(device):
         raise CantDo(f"{device['name']} can't play from a music service.")
     if not music.clean_results([{"uri": uri, "kind": uri.split("://", 1)[-1].split("/", 1)[0], "name": "x"}]):
         raise CantDo("That isn't something to play. Search again.")
-    await _music(device["box_id"], "music.play", {"entity": device["id"], "uri": uri, "shuffle": bool(shuffle)}, relay.SETUP_S)
+    args: dict[str, Any] = {"entity": device["id"], "uri": uri, "shuffle": bool(shuffle)}
+    if mix:
+        args["radio"] = True
+    await _music(device["box_id"], "music.play", args, relay.SETUP_S)

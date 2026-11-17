@@ -8,7 +8,7 @@ export type Entity = { id: string; domain: string; name: string; state: string; 
 type Setup = { s: string; b: string; k: string };
 export type Found = { uri: string; kind: string; name: string; artist?: string; album?: string; by?: string };
 /** A box with a music service: what's linked, and what a search finds for each set of words. */
-export type Music = { linked: boolean; finds: Record<string, Found[]>; approved: boolean };
+export type Music = { linked: boolean; finds: Record<string, Found[]>; approved: boolean; /** What was played here lately (for a bare "play music"). */ recent?: Found[] };
 
 export function readSetup(setup: string): Setup {
   const body = setup.replace(/^pbox1\./, "").replace(/-/g, "+").replace(/_/g, "/");
@@ -117,9 +117,13 @@ export class FakeBox {
       const kinds = (args.kinds as string[] | undefined) ?? [];
       return ok((m.finds[String(args.q).toLowerCase()] ?? []).filter((r) => kinds.includes(r.kind)));
     }
+    if (op === "music.suggest") {
+      if (!m.linked) return no("No music service is linked to this home yet.");
+      return ok(m.recent ?? []);
+    }
     if (op === "music.play") {
       const e = this.entities.find((x) => x.id === args.entity);
-      const found = Object.values(m.finds).flat().find((r) => r.uri === args.uri);
+      const found = [...Object.values(m.finds).flat(), ...(m.recent ?? [])].find((r) => r.uri === args.uri);
       if (!e || !found) return no("That isn't something from this home's music.");
       e.state = "playing";
       e.x = { ...e.x, title: found.name, artist: found.artist ?? "" };

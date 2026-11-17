@@ -613,3 +613,142 @@ def test_an_old_box_or_one_without_the_music_service_says_so():
     ha.music = None
     with pytest.raises(RuntimeError, match="no music service"):
         asyncio.run(ha.op("music.status", {}))
+
+
+# ---------------------------------------------------------------- a kind of music, and its own page
+class _FakeHA:
+    def __init__(self):
+        self.music_of = {"media_player.lounge": "upd3a7a53b"}
+        self.entities = {"media_player.lounge": {}}
+        self.speakers, self.speaker_brands = {}, set()
+
+
+def _music(answers, base="http://127.0.0.1:8095"):
+    """The connector's music side with Music Assistant's answers scripted:
+    ``answers[command]`` is a value, an error to raise, or a function of the
+    arguments."""
+    m = pb.Music(None, _FakeHA(), base)
+    m.calls = []
+
+    async def call(command, timeout=30.0, **args):
+        m.calls.append((command, args))
+        got = answers.get(command)
+        if callable(got):
+            got = got(args)
+        if isinstance(got, Exception):
+            raise got
+        return got
+
+    m.call = call
+
+    async def sources():
+        return [{"id": "tidal--Ab12", "brand": "tidal", "name": "Tidal"}]
+
+    m.sources = sources
+    return m
+
+
+def test_a_mix_is_asked_for_as_music_assistant_wants_it_and_falls_back_to_plain_play():
+    import asyncio
+
+    m = _music({"player_queues/play_media": None})
+    assert asyncio.run(m.op("music.play", {"entity": "media_player.lounge", "uri": "tidal://artist/100", "radio": True})) == {"mix": True}
+    assert m.calls == [("player_queues/play_media", {"queue_id": "upd3a7a53b", "media": "radio_playlist://playlist/tidal://artist/100", "option": "replace"})]
+    # No mix to be had from it (the service can't say what is like it): the thing itself, shuffled.
+    m = _music({"player_queues/play_media": lambda a: RuntimeError("No base tracks available") if a["media"].startswith("radio_playlist://") else None})
+    assert asyncio.run(m.op("music.play", {"entity": "media_player.lounge", "uri": "tidal://artist/100", "radio": True})) is None
+    assert m.calls[-1] == ("player_queues/play_media", {"queue_id": "upd3a7a53b", "media": "tidal://artist/100", "option": "replace", "shuffle": True})
+    # The music service not answering is said, not papered over with a second try.
+    m = _music({"player_queues/play_media": RuntimeError(pb.MUSIC_DOWN)})
+    with pytest.raises(RuntimeError, match="isn't answering"):
+        asyncio.run(m.op("music.play", {"entity": "media_player.lounge", "uri": "tidal://artist/100", "radio": True}))
+    assert len(m.calls) == 1
+    # A mix can't be a way round what may be played.
+    m = _music({})
+    for bad in ("spotify://artist/1", "radio_playlist://playlist/http://evil.example/x", "http://169.254.169.254/x"):
+        with pytest.raises(RuntimeError, match="isn't something from this home"):
+            asyncio.run(m.op("music.play", {"entity": "media_player.lounge", "uri": bad, "radio": True}))
+    assert m.calls == []
+
+
+def test_just_music_offers_what_was_played_lately_then_what_the_service_suggests():
+    import asyncio
+
+    recent = [
+        {"uri": "tidal--Ab12://track/9", "media_type": "track", "name": "So What", "artists": [{"name": "Miles Davis"}]},
+        {"uri": "library://album/4", "media_type": "album", "name": "In the library"},
+        {"uri": "spotify://track/1", "media_type": "track", "name": "From a service nobody linked"},
+        {"uri": "tidal://podcast/1", "media_type": "podcast", "name": "Not music"},
+        {"uri": "http://evil.example/x", "media_type": "track", "name": "A bare address"},
+    ]
+    rows = [
+        {"provider": "recommendations", "item_id": "random_albums", "items": []},
+        {"provider": "tidal--Ab12", "item_id": "mixes", "items": [{"uri": "tidal--Ab12://playlist/m-1", "media_type": "playlist", "name": "My Daily Discovery"}]},
+        {"provider": "tidal--Ab12", "item_id": "for_you", "items": []},
+    ]
+    answers = {
+        "music/recently_played_items": recent,
+        "music/recommendations": rows,
+        "music/recommendations/items": lambda a: [{"uri": "tidal--Ab12://album/7", "media_type": "album", "name": "Kind of Blue"}] if a["item_id"] == "for_you" else [],
+        # The library item is looked up, so it's known which service it came from.
+        "music/item_by_uri": lambda a: {"uri": a["uri"], "media_type": "album", "name": "In the library", "provider_mappings": [{"provider_domain": "tidal"}]},
+    }
+    m = _music(answers)
+    got = asyncio.run(m.op("music.suggest", {}))
+    assert got == [
+        {"uri": "tidal--Ab12://track/9", "kind": "track", "name": "So What", "artist": "Miles Davis"},
+        {"uri": "library://album/4", "kind": "album", "name": "In the library"},
+        {"uri": "tidal--Ab12://playlist/m-1", "kind": "playlist", "name": "My Daily Discovery"},
+        {"uri": "tidal--Ab12://album/7", "kind": "album", "name": "Kind of Blue"},
+    ]
+    # The linked service's rows were read before the library's.
+    asked = [a["item_id"] for c, a in m.calls if c == "music/recommendations/items"]
+    assert asked[0] == "for_you"
+    # A library item from a source nobody linked is left out.
+    m = _music({**answers, "music/item_by_uri": lambda a: {"uri": a["uri"], "media_type": "album", "name": "x", "provider_mappings": [{"provider_domain": "filesystem_local"}]}})
+    assert "library://album/4" not in [g["uri"] for g in asyncio.run(m.op("music.suggest", {}))]
+    # Suggestions failing is no reason to say nothing was played lately.
+    m = _music({**answers, "music/recommendations": RuntimeError("Internal server error")})
+    assert [g["uri"] for g in asyncio.run(m.op("music.suggest", {}))][:1] == ["tidal--Ab12://track/9"]
+
+
+def test_the_music_services_own_page_is_told_to_answer_only_where_the_connector_is(monkeypatch):
+    import asyncio
+
+    async def no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(pb.asyncio, "sleep", no_sleep)
+    # Not asked for: nothing is touched.
+    monkeypatch.delenv("MUSIC_BIND", raising=False)
+    m = _music({})
+    asyncio.run(m._bind())
+    assert m.calls == []
+    # Asked for, and that's where the connector reaches it: saved once, then left alone.
+    monkeypatch.setenv("MUSIC_BIND", "127.0.0.1")
+    state = {"bind": "0.0.0.0"}
+
+    def save(a):
+        state["bind"] = a["values"]["bind_ip"]
+        return RuntimeError(pb.MUSIC_DOWN)  # it restarts its web server under the call
+
+    m = _music({"config/core/get_value": lambda a: state["bind"], "config/core/save": save})
+    asyncio.run(m._bind())
+    assert ("config/core/save", {"domain": "webserver", "values": {"bind_ip": "127.0.0.1"}}) in m.calls and m._bound
+    before = len(m.calls)
+    asyncio.run(m._bind())
+    assert len(m.calls) == before
+    # Already so: no save.
+    m = _music({"config/core/get_value": "127.0.0.1"})
+    asyncio.run(m._bind())
+    assert [c for c, _a in m.calls] == ["config/core/get_value"]
+    # The connector reaches it somewhere else (another container, by name): never told, or
+    # the box would lock itself out of its own music.
+    for base in ("http://music:8095", "http://home-music:8095", "http://host.docker.internal:8095", "http://192.168.1.20:8095"):
+        m = _music({"config/core/get_value": "0.0.0.0"}, base=base)
+        asyncio.run(m._bind())
+        assert m.calls == [] and m._bound, base
+    # It never came back saying so: that's a failure to report, not a quiet pass.
+    m = _music({"config/core/get_value": "0.0.0.0", "config/core/save": None})
+    with pytest.raises(RuntimeError, match="didn't come back"):
+        asyncio.run(m._bind())
