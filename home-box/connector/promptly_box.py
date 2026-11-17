@@ -17,6 +17,10 @@ Configuration, in this order:
 * ``PROMPTLY_SETUP``: the setup string from Admin → Home ("pbox1.…"), or the
   ``setup`` option in ``/data/options.json`` (a Home Assistant add-on's
   options).
+* Music (optional): ``MUSIC_URL``, where the box's music service (Music
+  Assistant, out of sight like Home Assistant) answers. With it, a home can
+  link a streaming service and ask for music by name. The connector sets a
+  fresh one up by itself and keeps its sign-in in ``DATA_DIR``.
 * Home Assistant: as an add-on (``SUPERVISOR_TOKEN`` is set) it uses the
   Supervisor's proxy and needs nothing else. Otherwise ``HA_URL`` (default
   ``http://homeassistant:8123``) and ``HA_TOKEN``; with no token it sets up a
@@ -41,7 +45,7 @@ from typing import Any
 
 import aiohttp
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 log = logging.getLogger("promptly-box")
 
 # Kinds of thing Promptly has controls for. Anything else a brand brings is
@@ -770,6 +774,12 @@ class HomeAssistant:
         self._device_of: dict[str, str] = {}  # entity -> device
         self._model_of: dict[str, str] = {}  # device -> model
         self._presets: set[str] = set()  # speakers with numbered favourites
+        # For the music service: each speaker as its maker knows it, the brands
+        # the home's speakers came with, and which speakers it can play to.
+        self.speakers: dict[str, dict[str, Any]] = {}
+        self.speaker_brands: set[str] = set()
+        self.music_of: dict[str, str] = {}  # entity -> the music service's player
+        self.music: Music | None = None
         self._entry_of: dict[str, str] = {}  # entity -> the set-up it came with
         self._zones: dict[str, dict[str, Any]] = {}  # air-con units and their zones
         # The mode each air con was last on in, so "on" means "as it was" (last_modes.json).
@@ -1103,8 +1113,12 @@ class HomeAssistant:
         self._model_of = {d["id"]: str(d.get("model") or "") for d in devices or []}
         self._device_of, self.groups, self._entry_of = {}, {}, {}
         self._presets = set()
+        by_id = {d["id"]: d for d in devices or []}
+        speakers: dict[str, dict[str, Any]] = {}
         for e in registry or []:
             eid = e["entity_id"]
+            if eid.startswith("media_player.") and not (e.get("hidden_by") or e.get("disabled_by")):
+                speakers[eid] = speaker_facts(by_id.get(e.get("device_id")) or {}, e)
             if e.get("platform") in PRESET_BRANDS and eid.startswith("media_player."):
                 self._presets.add(eid)
             if e.get("device_id"):
@@ -1129,6 +1143,23 @@ class HomeAssistant:
             if entity is not None:
                 entities[entity["id"]] = entity
         self.entities = entities
+        self.speakers = {eid: {**facts, "name": entities[eid].get("name") or facts["name"]} for eid, facts in speakers.items() if eid in entities}
+        self.speaker_brands = {str(f.get("brand")) for f in self.speakers.values()}
+        self.changes.put_nowait(("snapshot", None))
+
+    def set_music(self, playing_to: dict[str, str]) -> None:
+        """Which speakers the music service can play to has changed."""
+        if playing_to == self.music_of:
+            return
+        self.music_of = dict(playing_to)
+        for eid, e in self.entities.items():
+            can = (e.get("x") or {}).get("can")
+            if e["domain"] != "media_player" or not isinstance(can, list):
+                continue
+            if eid in self.music_of and "music" not in can:
+                can.append("music")
+            elif eid not in self.music_of and "music" in can:
+                can.remove("music")
         self.changes.put_nowait(("snapshot", None))
 
     def _entity(self, s: dict[str, Any]) -> dict[str, Any] | None:
@@ -1164,6 +1195,8 @@ class HomeAssistant:
         x = extras(domain, attrs)
         if eid in self._presets and isinstance(x.get("can"), list):
             x["can"].append("preset")
+        if eid in self.music_of and isinstance(x.get("can"), list):
+            x["can"].append("music")
         if domain == "climate":
             x.update(self._zones.get(eid) or {})
             state = out["state"]
@@ -1368,6 +1401,10 @@ class HomeAssistant:
         if op == "device.update":
             await self._device_update(a)
             return None
+        if op.startswith("music."):
+            if self.music is None:
+                raise RuntimeError(NO_MUSIC)
+            return await self.music.op(op, a)
         raise RuntimeError("This box doesn't know how to do that yet. It may need updating.")
 
     async def _merge_rooms(self, gone: str, into: str) -> None:
@@ -1435,6 +1472,406 @@ class HomeAssistant:
                 log.warning("couldn't list what was added: %s", e)
                 out.update(things=[], summary=[], loose=0)
         return out
+
+
+# ------------------------------------------------------------------ music
+#
+# "Play Miles Davis in the lounge": a streaming service, played to a speaker
+# the home already has. Home Assistant can't do that by itself (Tidal can only
+# be started from Tidal's own app), so the box also runs Music Assistant, out
+# of sight like Home Assistant. This talks to it directly (its JSON API), not
+# through Home Assistant's add-in for it: that would put every speaker in the
+# home a second time.
+#
+# Nothing joins by itself here either: Music Assistant only gets the ways of
+# playing that the home's own speakers need (``wanted_players``), and only
+# plays to speakers that are in the home (``music_map``).
+
+NO_MUSIC = "This home's box has no music service. It may need updating."
+MUSIC_DOWN = "The music service on the home's box isn't answering. Try again in a minute."
+# Streaming services a home can link: Music Assistant's id -> its name.
+MUSIC_BRANDS: dict[str, str] = {"tidal": "Tidal"}
+# The brand a speaker came with (Home Assistant's id) -> how Music Assistant plays to it.
+MUSIC_PLAYERS: dict[str, str] = {
+    "wiim": "wiim", "linkplay": "wiim", "sonos": "sonos", "cast": "chromecast", "dlna_dmr": "dlna",
+    "heos": "heos", "bluesound": "bluesound", "yamaha_musiccast": "musiccast", "apple_tv": "airplay",
+}
+MUSIC_KINDS = ("artist", "album", "track", "playlist", "radio")
+_PLURAL = {"artist": "artists", "album": "albums", "track": "tracks", "playlist": "playlists", "radio": "radio"}
+_MUSIC_URI = re.compile(r"^([a-z0-9_]{1,40}(?:--[A-Za-z0-9]{1,24})?)://(artist|album|track|playlist|radio)/([^\s/?#][^\s?#]{0,199})$")
+
+
+def ident_key(v: Any) -> str:
+    """An id as two programs might each write it: case, "uuid:" and
+    punctuation don't count."""
+    text = str(v or "").strip().lower()
+    for lead in ("wiim_", "uuid:", "urn:"):
+        if text.startswith(lead):
+            text = text[len(lead):]
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+def name_key(v: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(v or "").lower()).strip()
+
+
+def _host_of(url: Any) -> str:
+    m = re.match(r"^https?://\[?([0-9a-fA-F:.]+?)\]?(?::\d+)?(?:/|$)", str(url or ""))
+    return m.group(1) if m else ""
+
+
+def speaker_facts(device: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+    """What tells one speaker from another, from Home Assistant's lists."""
+    idents = {ident_key(i[1]) for i in device.get("identifiers") or [] if isinstance(i, (list, tuple)) and len(i) == 2}
+    idents.add(ident_key(entry.get("unique_id")))
+    macs = {ident_key(c[1]) for c in device.get("connections") or [] if isinstance(c, (list, tuple)) and len(c) == 2 and c[0] == "mac"}
+    return {
+        "name": str(device.get("name_by_user") or device.get("name") or entry.get("original_name") or ""),
+        "idents": sorted(i for i in idents if len(i) >= 8),
+        "macs": sorted(m for m in macs if len(m) == 12),
+        "ip": _host_of(device.get("configuration_url")),
+        "brand": str(entry.get("platform") or ""),
+    }
+
+
+def music_map(speakers: dict[str, dict[str, Any]], players: list[dict[str, Any]]) -> dict[str, str]:
+    """Which of Music Assistant's players is which speaker in the home:
+    entity -> player id. By the device's own id, then its network card, then
+    its address, and last by a name only one of each has. A player that is
+    nobody's speaker here is left out: it can't be played to."""
+    facts: dict[str, dict[str, Any]] = {}
+    for p in players:
+        if not isinstance(p, dict) or not p.get("player_id") or p.get("type", "player") != "player" or p.get("enabled") is False:
+            continue
+        info = p.get("device_info") if isinstance(p.get("device_info"), dict) else {}
+        ids = info.get("identifiers") if isinstance(info.get("identifiers"), dict) else {}
+        facts[str(p["player_id"])] = {
+            "idents": {ident_key(p["player_id"]), *(ident_key(v) for k, v in ids.items() if k in ("uuid", "serial_number", "cast_uuid"))} - {""},
+            "mac": ident_key(ids.get("mac_address")),
+            "ip": str(ids.get("ip_address") or ""),
+            "name": name_key(p.get("display_name") or p.get("name")),
+        }
+    out: dict[str, str] = {}
+    taken: set[str] = set()
+
+    def pair(match: Any) -> None:
+        for eid in sorted(speakers):
+            if eid in out:
+                continue
+            fits = [pid for pid, f in facts.items() if pid not in taken and match(speakers[eid], f)]
+            if len(fits) == 1:
+                out[eid] = fits[0]
+                taken.add(fits[0])
+
+    pair(lambda s, f: bool(set(s.get("idents") or []) & f["idents"]))
+    pair(lambda s, f: bool(f["mac"]) and f["mac"] in (s.get("macs") or []))
+    pair(lambda s, f: bool(f["ip"]) and f["ip"] == s.get("ip"))
+    names: dict[str, int] = {}
+    for s in speakers.values():
+        names[name_key(s.get("name"))] = names.get(name_key(s.get("name")), 0) + 1
+    theirs: dict[str, int] = {}
+    for f in facts.values():
+        theirs[f["name"]] = theirs.get(f["name"], 0) + 1
+    pair(lambda s, f: bool(f["name"]) and f["name"] == name_key(s.get("name")) and names.get(f["name"]) == 1 and theirs.get(f["name"]) == 1)
+    return out
+
+
+def wanted_players(brands: set[str], extra: set[str]) -> set[str]:
+    """The ways of playing Music Assistant should have: the ones this home's
+    speakers need, and no others."""
+    return {MUSIC_PLAYERS[b] for b in brands if b in MUSIC_PLAYERS} | (extra & set(MUSIC_PLAYERS.values()))
+
+
+def music_uri(uri: Any, sources: set[str]) -> tuple[str, str] | None:
+    """``(source, kind)`` of something to play, or None when it isn't one of
+    this home's: never an address to fetch, only a search result's own name."""
+    m = _MUSIC_URI.match(str(uri or ""))
+    if not m:
+        return None
+    source = m.group(1)
+    if source != "library" and source.split("--", 1)[0] not in sources:
+        return None
+    return source, m.group(2)
+
+
+def shape_results(found: Any, kinds: list[str], sources: set[str], limit: int) -> list[dict[str, Any]]:
+    """Music Assistant's search answer, as a short plain list."""
+    out: list[dict[str, Any]] = []
+    for kind in kinds:
+        n = 0
+        for item in (found if isinstance(found, dict) else {}).get(_PLURAL[kind]) or []:
+            if not isinstance(item, dict) or n >= limit:
+                continue
+            uri = str(item.get("uri") or "")
+            domains = {str(m.get("provider_domain") or "") for m in item.get("provider_mappings") or [] if isinstance(m, dict)}
+            if music_uri(uri, sources) is None or (uri.startswith("library://") and not domains & sources):
+                continue
+            one: dict[str, Any] = {"uri": uri, "kind": kind, "name": str(item.get("name") or "").strip()[:120]}
+            artists = [str(a.get("name") or "") for a in item.get("artists") or [] if isinstance(a, dict) and a.get("name")]
+            if artists:
+                one["artist"] = ", ".join(artists[:3])[:120]
+            album = item.get("album")
+            if isinstance(album, dict) and album.get("name"):
+                one["album"] = str(album["name"])[:120]
+            if kind == "playlist" and isinstance(item.get("owner"), str) and item["owner"]:
+                one["by"] = item["owner"][:80]
+            if isinstance(item.get("version"), str) and item["version"]:
+                one["version"] = item["version"][:60]
+            if one["name"]:
+                out.append(one)
+                n += 1
+    return out
+
+
+def shape_link(step: Any, brand: str) -> dict[str, Any]:
+    """One answer from a "link your account" flow. ``state``: ``open`` (go to
+    the service's own site, with this code), ``wait``, ``done``, ``stopped``."""
+    name = MUSIC_BRANDS.get(brand, brand)
+    if not isinstance(step, dict):
+        return {"state": "stopped", "brand": brand, "text": f"Linking {name} stopped. Start again."}
+    kind = step.get("type")
+    if kind == "finish":
+        return {"state": "done", "brand": brand, "name": name}
+    url = str(step.get("url") or "")
+    if kind == "external" and url.startswith("https://"):
+        out: dict[str, Any] = {"state": "open", "brand": brand, "name": name, "flow": str(step.get("flow_id") or ""), "url": url[:300]}
+        code = url.rstrip("/").rsplit("/", 1)[-1]
+        if re.fullmatch(r"[A-Za-z0-9-]{4,12}", code):
+            out["code"] = code
+        if isinstance(step.get("expires_at"), (int, float)):
+            out["until"] = int(step["expires_at"])
+        return out
+    if kind == "progress":
+        return {"state": "wait", "brand": brand, "name": name, "flow": str(step.get("flow_id") or "")}
+    return {"state": "stopped", "brand": brand, "text": f"{name} couldn't be linked. Start again."}
+
+
+class Music:
+    """The box's music service (Music Assistant), kept as out of sight as
+    Home Assistant: set up by the connector, its sign-in kept on the box."""
+
+    def __init__(self, session: aiohttp.ClientSession, ha: HomeAssistant, base: str) -> None:
+        self.session, self.ha, self.base = session, ha, base.rstrip("/")
+        # Advanced: more of Music Assistant's own sources or ways of playing to allow (its ids, comma-separated).
+        self.extra = {x.strip() for x in os.environ.get("MUSIC_EXTRA", "").split(",") if x.strip()}
+        self._token: str | None = None
+        self._flows: dict[str, str] = {}  # link flows this box started -> brand
+        self.up = False
+        self._welcomed = False
+        self._wiim_ips: list[str] | None = None
+
+    # -- signing in (nobody ever sees Music Assistant's own screens)
+
+    async def _post(self, path: str, body: dict[str, Any], token: str | None = None, timeout: float = 30.0) -> tuple[int, Any]:
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        async with self.session.post(f"{self.base}{path}", json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+            text = await r.text()
+            try:
+                return r.status, json.loads(text) if text else None
+            except ValueError:
+                return r.status, text[:200]
+
+    async def token(self) -> str:
+        if self._token:
+            return self._token
+        saved = DATA_DIR / "music_token"
+        if saved.exists():
+            self._token = saved.read_text().strip()
+            return self._token
+        return await self._sign_in()
+
+    async def _sign_in(self) -> str:
+        owner = DATA_DIR / "music_owner.json"
+        if owner.exists():
+            creds = json.loads(owner.read_text())
+            status, got = await self._post("/auth/login", {"provider_id": "builtin", "credentials": creds, "device_name": "Promptly box"})
+            if status != 200 or not isinstance(got, dict) or not got.get("token"):
+                raise RuntimeError("the music service refused the box's own sign-in")
+        else:
+            # A Music Assistant nobody has opened: make its one account.
+            creds = {"username": "promptly", "password": secrets.token_urlsafe(24)}
+            status, got = await self._post("/setup", {**creds, "device_name": "Promptly box"})
+            if status != 200 or not isinstance(got, dict) or not got.get("token"):
+                raise RuntimeError(
+                    "This music service is already set up and the box has no sign-in for it. "
+                    "Start from a fresh one (delete its data folder), or leave MUSIC_URL out."
+                )
+            log.info("set up a fresh music service")
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            owner.write_text(json.dumps(creds))
+            owner.chmod(0o600)
+        self._token = str(got["token"])
+        saved = DATA_DIR / "music_token"
+        saved.write_text(self._token)
+        saved.chmod(0o600)
+        return self._token
+
+    async def call(self, command: str, timeout: float = 30.0, **args: Any) -> Any:
+        for attempt in (0, 1):
+            try:
+                status, got = await self._post("/api", {"message_id": "1", "command": command, "args": args}, await self.token(), timeout)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise RuntimeError(MUSIC_DOWN) from e
+            if status == 401 and attempt == 0:
+                self._token = None
+                (DATA_DIR / "music_token").unlink(missing_ok=True)
+                continue
+            if status != 200:
+                said = (got.get("details") or got.get("error")) if isinstance(got, dict) else got
+                raise RuntimeError(str(said or MUSIC_DOWN)[:200])
+            return got
+        raise RuntimeError(MUSIC_DOWN)
+
+    # -- keeping it in step with the home
+
+    async def run(self) -> None:
+        attempt = 0
+        while True:
+            try:
+                await self.ha.ready.wait()
+                await self._tidy()
+                await self._look()
+                if not self.up:
+                    log.info("music service: ready, %d of the home's speakers can play from it", len(self.ha.music_of))
+                self.up, attempt = True, 0
+                await asyncio.sleep(20)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                if self.up or attempt == 0:
+                    log.warning("music service: %s", e)
+                self.up = False
+                self.ha.set_music({})
+                attempt += 1
+                await asyncio.sleep(backoff(attempt))
+
+    async def _tidy(self) -> None:
+        """Music Assistant starts out looking for every AirPlay, Chromecast
+        and DLNA speaker on the network. Leave it only the ways of playing
+        this home's own speakers need, and finish its welcome."""
+        if not self._welcomed:
+            try:
+                await self.call("config/onboard_complete")
+            except RuntimeError as e:
+                if str(e) == MUSIC_DOWN:
+                    raise
+            self._welcomed = True
+        want = wanted_players(self.ha.speaker_brands, self.extra)
+        have = {str(p.get("domain")): str(p.get("instance_id")) for p in await self.call("config/providers", provider_type="player") or [] if isinstance(p, dict)}
+        for domain, instance in have.items():
+            if domain in set(MUSIC_PLAYERS.values()) and domain not in want:
+                await self.call("config/providers/remove", instance_id=instance)
+                log.info("music service: not looking for %s speakers (none in this home)", domain)
+        for domain in sorted(want - set(have)):
+            await self.call("config/providers/setup", provider_domain=domain)
+            log.info("music service: can now play to %s speakers", domain)
+        # A speaker added by its address (no finding on this network): say where it is.
+        if "wiim" in want:
+            ips = sorted({s["ip"] for s in self.ha.speakers.values() if s.get("brand") in ("wiim", "linkplay") and s.get("ip")})
+            if ips and ips != self._wiim_ips:
+                try:
+                    await self.call("config/providers/save", provider_domain="wiim", instance_id=have.get("wiim") or "wiim", values={"manual_discovery_ip_addresses": ips})
+                    self._wiim_ips = ips
+                except RuntimeError as e:
+                    log.warning("music service: couldn't tell it where the WiiM speakers are: %s", e)
+
+    async def _look(self) -> None:
+        players = [p for p in await self.call("players/all") or [] if isinstance(p, dict) and p.get("available")]
+        self.ha.set_music(music_map(self.ha.speakers, players))
+
+    async def sources(self) -> list[dict[str, str]]:
+        return [
+            {"id": str(p["instance_id"]), "brand": str(p["domain"]), "name": MUSIC_BRANDS[str(p["domain"])]}
+            for p in await self.call("config/providers", provider_type="music") or []
+            if isinstance(p, dict) and p.get("domain") in MUSIC_BRANDS and p.get("enabled", True)
+        ]
+
+    def _allowed(self, sources: list[dict[str, str]]) -> set[str]:
+        return {s["brand"] for s in sources} | (self.extra - set(MUSIC_PLAYERS.values()))
+
+    async def op(self, op: str, a: dict[str, Any]) -> Any:
+        """One thing the server asked for about music. Plain data out; a
+        streaming service's sign-in never leaves the box."""
+        if op == "music.status":
+            return {
+                "brands": [{"id": b, "name": n} for b, n in MUSIC_BRANDS.items()],
+                "sources": await self.sources(),
+                "speakers": sorted(self.ha.music_of),
+            }
+        if op == "music.link.start":
+            brand = str(a.get("brand") or "")
+            if brand not in MUSIC_BRANDS:
+                raise RuntimeError("That isn't a music service Promptly can link.")
+            if any(s["brand"] == brand for s in await self.sources()):
+                raise RuntimeError(f"{MUSIC_BRANDS[brand]} is already linked.")
+            for flow, b in list(self._flows.items()):  # one at a time: the last one asked for
+                if b == brand:
+                    await self._abort(flow)
+            shaped = shape_link(await self.call("config/providers/setup", provider_domain=brand), brand)
+            if shaped.get("flow"):
+                self._flows[shaped["flow"]] = brand
+            return shaped
+        if op == "music.link.get":
+            flow = str(a.get("flow") or "")
+            brand = self._flows.get(flow)
+            if brand is None:
+                raise RuntimeError("That link has ended. Start again.")
+            try:
+                step = await self.call("config/flows/get", flow_id=flow)
+            except RuntimeError as e:
+                if str(e) == MUSIC_DOWN:
+                    raise
+                # Gone: it finished (the service is there now) or it ran out.
+                self._flows.pop(flow, None)
+                done = any(s["brand"] == brand for s in await self.sources())
+                return shape_link({"type": "finish"} if done else None, brand)
+            shaped = shape_link(step, brand)
+            if shaped["state"] in ("done", "stopped"):
+                self._flows.pop(flow, None)
+            return shaped
+        if op == "music.link.abort":
+            await self._abort(str(a.get("flow") or ""))
+            return None
+        if op == "music.unlink":
+            wanted = str(a.get("source") or "")
+            if not any(s["id"] == wanted for s in await self.sources()):
+                raise RuntimeError("That isn't linked.")
+            await self.call("config/providers/remove", instance_id=wanted)
+            return None
+        if op == "music.search":
+            q = str(a.get("q") or "").strip()[:120]
+            asked = a.get("kinds") if isinstance(a.get("kinds"), list) else []
+            kinds = [k for k in asked if k in MUSIC_KINDS] or list(MUSIC_KINDS[:4])
+            limit = a.get("limit") if isinstance(a.get("limit"), int) and not isinstance(a.get("limit"), bool) else 5
+            limit = min(max(limit, 1), 10)
+            allowed = self._allowed(await self.sources())
+            if not q:
+                raise RuntimeError("What should be played?")
+            if not allowed:
+                raise RuntimeError("No music service is linked to this home yet.")
+            found = await self.call("music/search", search_query=q, media_types=kinds, limit=limit, timeout=40.0)
+            return shape_results(found, kinds, allowed, limit)
+        if op == "music.play":
+            entity = str(a.get("entity") or "")
+            player = self.ha.music_of.get(entity)
+            if player is None or entity not in self.ha.entities:
+                raise RuntimeError("That speaker can't play from a music service.")
+            if music_uri(a.get("uri"), self._allowed(await self.sources())) is None:
+                raise RuntimeError("That isn't something from this home's music.")
+            args: dict[str, Any] = {"queue_id": player, "media": str(a["uri"]), "option": "replace"}
+            if a.get("shuffle") is True:
+                args["shuffle"] = True
+            await self.call("player_queues/play_media", timeout=40.0, **args)
+            return None
+        raise RuntimeError("This box doesn't know how to do that yet. It may need updating.")
+
+    async def _abort(self, flow: str) -> None:
+        if self._flows.pop(flow, None) is None:
+            return
+        try:
+            await self.call("config/flows/abort", flow_id=flow)
+        except RuntimeError:
+            pass  # already over
 
 
 # ------------------------------------------------------------------ the Promptly server
@@ -1564,6 +2001,9 @@ async def main() -> None:
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_connect=15)) as session:
         ha = HomeAssistant(session)
         tasks = [asyncio.create_task(ha.run()), asyncio.create_task(Server(session, setup, ha).run())]
+        if os.environ.get("MUSIC_URL", "").strip():
+            ha.music = Music(session, ha, os.environ["MUSIC_URL"].strip())
+            tasks.append(asyncio.create_task(ha.music.run()))
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):

@@ -49,7 +49,7 @@ EXTRAS = {
     "calls": ["livekit-desktop"],
     # Promptly Home: the bundled Home Assistant and its connector, bridged
     # (the image is about 3.5 GB; pulled once).
-    "home": ["home-assistant-desktop", "home-connector-desktop"],
+    "home": ["home-assistant-desktop", "home-connector-desktop", "home-music-desktop"],
 }
 # What `--e2e` adds: what the e2e suite exercises beyond the core.
 # voice: the Talk and voice-note specs speak through the real whisper + tts.

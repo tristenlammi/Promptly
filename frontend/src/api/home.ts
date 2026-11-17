@@ -193,6 +193,21 @@ export interface Home extends HomeDevices {
   members: { id: string; name: string; username: string; role: HomeRole }[];
 }
 
+/** Music by name: what can be linked, what is, and the speakers it plays to. */
+export interface MusicStatus {
+  brands: { id: string; name: string }[];
+  sources: { id: string; brand: string; name: string }[];
+  /** Entity ids of the speakers the music service can play to. */
+  speakers: string[];
+}
+
+/** One step of linking a music service. The link is the service's own page. */
+export type MusicLink =
+  | { state: "open"; brand: string; name: string; flow: string; url: string; site: string; code?: string; until?: number }
+  | { state: "wait"; brand: string; name: string; flow: string }
+  | { state: "done"; brand: string; name: string }
+  | { state: "stopped"; brand: string; text: string };
+
 export type HomeState = ({ changed: true } & HomeDevices) | { changed: false; rev: number };
 
 export const homeApi = {
@@ -227,6 +242,14 @@ export const homeApi = {
   deleteRoom: (h: string, b: string, area: string) => apiClient.delete(`/home/${h}/boxes/${b}/rooms/${area}`).then(() => undefined),
   updateDevice: (h: string, b: string, body: { device_id?: string; entity_id?: string; name?: string; area?: string }) =>
     apiClient.patch(`/home/${h}/boxes/${b}/devices`, body).then(() => undefined),
+  // ---- music by name (a streaming service linked to the home's box) ----
+  /** ``null``: this box has no music service (an older box). */
+  music: (h: string, b: string) => apiClient.get<{ music: MusicStatus | null }>(`/home/${h}/boxes/${b}/music`).then((r) => r.data.music),
+  musicLink: (h: string, b: string, brand: string) => apiClient.post<MusicLink>(`/home/${h}/boxes/${b}/music/link`, { brand }).then((r) => r.data),
+  musicLinkGet: (h: string, b: string, brand: string, flow: string) => apiClient.get<MusicLink>(`/home/${h}/boxes/${b}/music/link/${brand}/${flow}`).then((r) => r.data),
+  musicLinkAbort: (h: string, b: string, brand: string, flow: string) =>
+    apiClient.delete(`/home/${h}/boxes/${b}/music/link/${brand}/${flow}`).then(() => undefined).catch(() => undefined),
+  musicUnlink: (h: string, b: string, id: string) => apiClient.delete(`/home/${h}/boxes/${b}/music/sources/${encodeURIComponent(id)}`).then(() => undefined),
   renameBox: (h: string, b: string, name: string) => apiClient.patch(`/home/${h}/boxes/${b}`, { name }).then(() => undefined),
   /** Everything in ``area`` moves to ``into``, and ``area`` goes. */
   mergeRooms: (h: string, b: string, area: string, into: string) => apiClient.post(`/home/${h}/boxes/${b}/rooms/${area}/merge`, { into }).then(() => undefined),

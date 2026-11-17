@@ -95,7 +95,7 @@ fi
 # files, rewritten whole, not a database mid-write (its history database and
 # logs are left out).
 if [[ -d data/home ]]; then
-  if tar --exclude='home-assistant_v2.db*' --exclude='*.log*' --exclude='ha/tts' --exclude='ha/deps' -cf "$WORK/home.tar" -C data home 2>/dev/null; then
+  if tar --exclude='home-assistant_v2.db*' --exclude='*.log*' --exclude='ha/tts' --exclude='ha/deps' --exclude='music/.cache' -cf "$WORK/home.tar" -C data home 2>/dev/null; then
     PARTS+=(home.tar)
   else
     rm -f "$WORK/home.tar"

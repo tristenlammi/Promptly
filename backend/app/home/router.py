@@ -21,7 +21,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 
-from . import builtin, codes, relay
+from . import builtin, codes, music, relay
 from .models import Home, HomeBox, HomeMember
 
 router = APIRouter()
@@ -513,6 +513,70 @@ async def disconnect(home_id: uuid.UUID, box_id: uuid.UUID, entry_id: str, db: A
     if not re.match(_ID, entry_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     await _ask_box(db, box.id, "entries.remove", {"entry": entry_id}, timeout=relay.SETUP_S)
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------ music
+#
+# A box with a music service can have a streaming service linked to it, so
+# the assistant can play music by name (``music.py``). Linking happens on the
+# service's own site, with a short code: no password is typed into Promptly,
+# and what the service hands back stays on the box. Anyone in the home sees
+# what's linked; only its owner links and unlinks.
+
+
+@router.get("/{home_id}/boxes/{box_id}/music", dependencies=SETUP)
+async def music_status(home_id: uuid.UUID, box_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    """What can be linked, what is, and which speakers it plays to; or
+    ``music: null`` for a box with no music service."""
+    box = await _box_of(db, user, home_id, box_id)
+    await db.close()
+    try:
+        return {"music": music.clean_status(await relay.request(box.id, "music.status", {}, timeout=relay.SETUP_S))}
+    except relay.BoxOffline as e:
+        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "The home box didn't answer. Check it has power and internet, then try again.") from e
+    except relay.BoxSaidNo as e:
+        return {"music": None, "why": str(e)[:200]}
+
+
+class LinkBody(BaseModel):
+    brand: str = Field(pattern=r"^[a-z][a-z0-9_]{0,31}$")
+
+
+@router.post("/{home_id}/boxes/{box_id}/music/link", dependencies=SETUP)
+async def music_link(home_id: uuid.UUID, box_id: uuid.UUID, body: LinkBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    await _owner(db, user, home_id)
+    box = await _box_of(db, user, home_id, box_id)
+    if body.brand not in music.LINK_HOSTS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    return music.clean_link(await _ask_box(db, box.id, "music.link.start", {"brand": body.brand}, timeout=relay.SETUP_S), body.brand)
+
+
+@router.get("/{home_id}/boxes/{box_id}/music/link/{brand}/{flow_id}", dependencies=SETUP)
+async def music_link_get(home_id: uuid.UUID, box_id: uuid.UUID, brand: str, flow_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Any:
+    await _owner(db, user, home_id)
+    box = await _box_of(db, user, home_id, box_id)
+    if brand not in music.LINK_HOSTS or not re.match(_ID, flow_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    return music.clean_link(await _ask_box(db, box.id, "music.link.get", {"flow": flow_id}, timeout=relay.SETUP_S), brand)
+
+
+@router.delete("/{home_id}/boxes/{box_id}/music/link/{brand}/{flow_id}", dependencies=SETUP)
+async def music_link_abort(home_id: uuid.UUID, box_id: uuid.UUID, brand: str, flow_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    await _owner(db, user, home_id)
+    box = await _box_of(db, user, home_id, box_id)
+    if re.match(_ID, flow_id):
+        await _ask_box(db, box.id, "music.link.abort", {"flow": flow_id})
+    return {"ok": True}
+
+
+@router.delete("/{home_id}/boxes/{box_id}/music/sources/{source_id}", dependencies=SETUP)
+async def music_unlink(home_id: uuid.UUID, box_id: uuid.UUID, source_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, bool]:
+    await _owner(db, user, home_id)
+    box = await _box_of(db, user, home_id, box_id)
+    if not re.match(_ID, source_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    await _ask_box(db, box.id, "music.unlink", {"source": source_id}, timeout=relay.SETUP_S)
     return {"ok": True}
 
 

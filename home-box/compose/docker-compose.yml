@@ -1,5 +1,6 @@
-# A Promptly Home box on any computer with Docker: a fresh Home Assistant and
-# the Promptly connector. See ../README.md.
+# A Promptly Home box on any computer with Docker: a fresh Home Assistant, a
+# fresh Music Assistant (for music by name) and the Promptly connector. See
+# ../README.md.
 #
 #   1. put the setup string from Promptly (Admin -> Home -> Prepare a box)
 #      into a file called .env here:   PROMPTLY_SETUP=pbox1....
@@ -27,12 +28,25 @@ services:
     ports:
       - "127.0.0.1:${HA_PORT:-8123}:8123"
 
+  # Music Assistant: plays a linked streaming service (Tidal) to the home's
+  # speakers. Pinned: the connector sets a fresh one up through its API.
+  music:
+    image: ghcr.io/music-assistant/server:2.10.12
+    restart: unless-stopped
+    volumes:
+      - music-data:/data
+    environment:
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=warning
+
   connector:
     build: ../connector
     restart: unless-stopped
     environment:
       - PROMPTLY_SETUP=${PROMPTLY_SETUP:?Put PROMPTLY_SETUP=... (from Admin -> Home -> Prepare a box) in a .env file next to this one}
       - HA_URL=${HA_URL:-http://homeassistant:8123}
+      # Music by name. Set MUSIC_URL= (empty) in .env to leave it out.
+      - MUSIC_URL=${MUSIC_URL-http://music:8095}
       # Only if the box should dial somewhere other than the address in the
       # setup string.
       - PROMPTLY_SERVER=${PROMPTLY_SERVER:-}
@@ -47,3 +61,4 @@ services:
 volumes:
   ha-config:
   box-data:
+  music-data:

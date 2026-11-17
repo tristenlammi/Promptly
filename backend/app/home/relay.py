@@ -45,6 +45,15 @@ what a speaker is playing: ``{"type","b64"}``), ``flows.found``,
 ``devices.place`` (several into a room at once), ``room.lights`` (all of a
 room's lights on or off), ``note.clear``.
 
+Music by name (a box with a music service; ``music.py``): ``music.status``
+(the services that can be linked, the ones that are, the speakers it can play
+to), ``music.link.start`` / ``music.link.get`` / ``music.link.abort`` (linking
+an account on the service's own site: ``{"state":"open","flow","url","code"}``
+then ``done``), ``music.unlink``, ``music.search`` (``{"q","kinds","limit"}``
+-> ``[{"uri","kind","name","artist"?…}]``) and ``music.play``
+(``{"entity","uri","shuffle"?}``). A speaker it can play to says ``"music"``
+in its ``can``. A service's sign-in stays on the box: it never comes here.
+
 Rooms are Promptly's: the page makes, names, merges and orders them. The
 box keeps them (they are Home Assistant's areas underneath, which no one is
 told). A brand's own rooms and zones of lights, and its bridges, never come

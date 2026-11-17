@@ -239,3 +239,25 @@ def test_names_are_compared_the_way_people_say_them():
     sams = [dev("light.s", "Ceiling", "Sam's Room")]
     assert steps(quick.parse("turn off sams room lights", sams)) == [("lights", "sam's_room", "turn_off")]
     assert steps(quick.parse("Turn off Sam’s room lights", sams)) == [("lights", "sam's_room", "turn_off")]
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "play miles davis in the lounge",
+        "play kind of blue",
+        "play some jazz in the kitchen",
+        "play yesterday by the beatles on the kitchen speaker",
+        "play my discover playlist in the study",
+        "put on some music by miles davis",
+        "play the album blue in the kitchen",
+        "hey promptly play the song next to me in the study",
+        "play something relaxing",
+    ],
+)
+def test_music_by_name_is_never_guessed_here_it_goes_to_the_model(said):
+    """Which song, album or artist is meant can need a question back, so
+    these are left to the assistant's ``home_music`` tool."""
+    music = [{**d, "x": {**(d.get("x") or {}), "can": [*((d.get("x") or {}).get("can") or []), "music"]}} if d["domain"] == "media_player" else d for d in house()]
+    assert quick.parse(said, music) is None
+    assert quick.parse(said, house()) is None

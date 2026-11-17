@@ -8,6 +8,8 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
+import { MusicSection } from "./MusicSection";
+
 /**
  * Looking after a home: its name, who's in it (only Promptly users who are
  * members see or control it; there are no guests), its box, and the brands
@@ -95,6 +97,15 @@ export function HomeSettingsSheet({ open, home, onClose, onAddBox, onLeft }: { o
             <button type="button" className={cn(btn, "mt-3")} disabled={leave.isPending} onClick={() => { if (window.confirm(`Leave ${home.name}? You won't see its devices any more.`)) leave.mutate(); }}>Leave this home</button>
           )}
         </section>
+
+        {home.boxes.length > 0 && (
+          <section aria-label="Music">
+            <h3 className={heading}>Music</h3>
+            <div className="flex flex-col gap-4">
+              {home.boxes.map((b) => <MusicSection key={b.id} home={home} box={b} owner={owner} />)}
+            </div>
+          </section>
+        )}
 
         <section aria-label="Home box">
           <h3 className={heading}>Home box</h3>

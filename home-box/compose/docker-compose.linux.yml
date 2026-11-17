@@ -10,6 +10,13 @@ services:
       - ha-config:/config
       - /run/dbus:/run/dbus:ro
 
+  # Speakers fetch the music from it (port 8097) and it finds them by
+  # broadcast, so it shares the home's network too. Ports 8095 and 8097 must
+  # be free on this computer.
+  music:
+    network_mode: host
+
   connector:
     environment:
       - HA_URL=http://host.docker.internal:8123
+      - MUSIC_URL=${MUSIC_URL-http://host.docker.internal:8095}

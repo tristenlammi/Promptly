@@ -117,6 +117,15 @@ export function noteLine(note: BoxNote): string {
   return `${what}${from} that appeared on ${note.n === 1 ? "its" : "their"} own ${verb} waiting under Add a device → Found on your network. Nothing joins your home unless you add it.`;
 }
 
+/** Under Music: which of the home's speakers can be asked to play something by name. */
+export function musicSummary(names: string[], speakers: number): string {
+  if (speakers === 0) return "This home has no speakers yet. Add one with Add a device on your Home page.";
+  if (names.length === 0) return "None of this home's speakers can play music by name yet. A speaker can take a minute to show up here after it's added.";
+  const sorted = [...names].sort((a, b) => a.localeCompare(b));
+  const list = sorted.length <= 2 ? sorted.join(" and ") : `${sorted.slice(0, -1).join(", ")} and ${sorted[sorted.length - 1]}`;
+  return `Plays on: ${list}.${names.length < speakers ? " Your other speakers can still be paused, skipped and turned up or down." : ""}`;
+}
+
 /** Same room name? Ignores case and spacing only: "Lounge Room" is never "Living Room". */
 export function sameRoom(a: string, b: string): boolean {
   const flat = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");

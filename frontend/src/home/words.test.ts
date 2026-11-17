@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { HomeEntity } from "@/api/home";
 
 import { looseDevices } from "./SortSheet";
-import { addedLine, countWords, noteLine, sameRoom, stateWords } from "./words";
+import { addedLine, countWords, musicSummary, noteLine, sameRoom, stateWords } from "./words";
 
 const entity = (over: Partial<HomeEntity>): HomeEntity => ({ id: "light.a", box_id: "b1", domain: "light", name: "A", state: "on", online: true, can_switch: true, careful: false, ...over });
 
@@ -58,5 +58,13 @@ describe("sorting into rooms", () => {
       ["Guest mode", ["input_boolean.guest"]],
       ["Kitchen Speaker", ["media_player.kitchen"]],
     ]);
+  });
+
+  it("says which speakers can play music by name", () => {
+    expect(musicSummary([], 0)).toBe("This home has no speakers yet. Add one with Add a device on your Home page.");
+    expect(musicSummary([], 2)).toContain("None of this home's speakers can play music by name yet");
+    expect(musicSummary(["Lounge"], 1)).toBe("Plays on: Lounge.");
+    expect(musicSummary(["Study", "Lounge"], 2)).toBe("Plays on: Lounge and Study.");
+    expect(musicSummary(["Study", "Lounge", "Kitchen"], 4)).toBe("Plays on: Kitchen, Lounge and Study. Your other speakers can still be paused, skipped and turned up or down.");
   });
 });

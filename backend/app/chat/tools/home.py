@@ -5,6 +5,10 @@
   what each is doing now.
 * ``home_control``: switch or set the everyday ones (lights, plugs, fans,
   scenes, speakers).
+* ``home_music``: play an artist, album, song or playlist by name on one of
+  the home's speakers, from the streaming service the home has linked
+  (``app/home/music.py``). It plays only what is plainly the thing asked
+  for; otherwise it hands back a short list to ask the person about.
 
 Only the person's own homes (``app/home/assistant.py``); an admin gets no
 more than anyone. Locks, garage doors, gates and alarms are listed but never
@@ -302,4 +306,113 @@ class HomeControlTool(Tool):
         return f"Playing preset {preset} on {d['name']}."
 
 
-HOME_TOOLS: list[Tool] = [HomeDevicesTool(), HomeControlTool()]
+class HomeMusicTool(Tool):
+    name = "home_music"
+    category = "home"
+    max_per_turn = 4
+    timeout_seconds = 60.0
+    max_content_chars = 4_000
+    description = (
+        "Play music by name on a speaker in the user's home, from the streaming service the home has linked (Tidal): an "
+        "artist, an album, a song or a playlist. `query` is what to play, in their words ('Miles Davis', 'Kind of Blue', "
+        "'Yesterday by The Beatles'); set `kind` when they said which it is. `target` is the speaker's or room's name. "
+        "It starts straight away when one result is plainly what they asked for. Otherwise it returns a short list: ask "
+        "the user which one, then call again with that result's `uri`. Never pick from the list yourself. For pause, "
+        "skip and volume use home_control."
+    )
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to play, e.g. 'Miles Davis' or 'Blue in Green by Miles Davis'."},
+            "kind": {"type": "string", "enum": ["artist", "album", "track", "playlist"], "description": "Only when the user said which it is."},
+            "target": {"type": "string", "description": "The speaker's name or a room's name. May be left out when the home has one speaker that plays music."},
+            "uri": {"type": "string", "description": "A result's uri from an earlier home_music answer, once the user has said which one."},
+            "shuffle": {"type": "boolean", "description": "Shuffle it (playlists, an artist)."},
+        },
+    }
+
+    async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+        from app.home import assistant, music
+
+        guard_write(ctx, "playing music at home")
+        query = str(args.get("query") or "").strip()[:120]
+        uri = str(args.get("uri") or "").strip()[:260]
+        kind = args.get("kind") if args.get("kind") in music.KINDS else None
+        target = str(args.get("target") or "").strip()[:120]
+        if not query and not uri:
+            raise ToolError("Say what to play.")
+        devices = await assistant.devices_for(ctx.db, ctx.user.id)
+        # Nothing of ours holds a database connection while a box is asked.
+        await ctx.db.commit()
+        if not devices:
+            raise ToolError("They aren't in a home with any devices yet. Devices are added on the Home page.")
+        many_homes = len({d["home_id"] for d in devices}) > 1
+        speaker = self._speaker(assistant, devices, target, many_homes)
+        try:
+            if uri:
+                picked = music.clean_results([{"uri": uri, "kind": uri.split("://", 1)[-1].split("/", 1)[0], "name": query or "that"}])
+                if not picked:
+                    raise ToolError("That uri isn't one of the results. Search again with `query`.")
+                item = picked[0]
+                said = f"Playing {query} on {speaker['name']}." if query else f"Playing that on {speaker['name']}."
+            else:
+                results = await assistant.music_search(speaker["box_id"], query, [kind] if kind else None)
+                item, options = music.choose(results, query, kind)
+                if item is None:
+                    if not options:
+                        raise ToolError(f"Nothing called “{query}” was found in their music service. Ask them to say it another way.")
+                    lines = [f"- {music.describe(o)}  (uri: {o['uri']})" for o in options]
+                    return ToolResult(
+                        content=(
+                            f"Nothing is playing yet: more than one thing could be “{query}”. Ask the user which of these "
+                            f"they mean (read out the names, never the uris), then call home_music again with that uri and "
+                            f"target “{speaker['name']}”:\n" + "\n".join(lines)
+                        ),
+                        meta={"summary": "Asked which one", "result_count": len(options)},
+                    )
+                said = f"Playing {music.describe(item)} on {speaker['name']}."
+            await assistant.music_play(speaker, item["uri"], args.get("shuffle") is True)
+        except assistant.CantDo as e:
+            text = str(e)
+            raise ToolError(music.NOT_LINKED if "linked" in text and "No music service" in text else text) from e
+        return ToolResult(content=f"Done: {said}", meta={"summary": said, "spoken": said})
+
+    @staticmethod
+    def _speaker(assistant: Any, devices: list[dict[str, Any]], target: str, many_homes: bool) -> dict[str, Any]:
+        """The one speaker meant; never a guess between two."""
+        speakers = [d for d in devices if d["domain"] == "media_player"]
+        able = [d for d in speakers if assistant.plays_music(d)]
+        if target:
+            found = assistant.find(speakers, target, _SPEAKERS)
+            if not found:
+                rooms = assistant.rooms_called(devices, target)
+                if len(rooms) == 1:
+                    there = [d for d in speakers if d["box_id"] == rooms[0][1] and str(d.get("area")) == rooms[0][2]]
+                    found = [d for d in there if assistant.plays_music(d)] or [d for d in there if not d.get("grp")]
+            if len(found) > 1 and len([d for d in found if assistant.plays_music(d)]) == 1:
+                found = [d for d in found if assistant.plays_music(d)]
+            d = _one(found, target, "speaker", many_homes)
+        else:
+            if len(able) != 1:
+                names = ", ".join(f"{d['name']}{_where(d, many_homes)}" for d in (able or speakers)[:8])
+                if not speakers:
+                    raise ToolError("There are no speakers in their home yet. They're added on the Home page.")
+                raise ToolError(f"Which speaker? Ask them. Speakers: {names}." if able else _no_music(speakers))
+            d = able[0]
+        if not d.get("live"):
+            raise ToolError(assistant.OFFLINE)
+        if not assistant.plays_music(d):
+            raise ToolError(_no_music([d]))
+        return d
+
+
+def _no_music(speakers: list[dict[str, Any]]) -> str:
+    who = speakers[0]["name"] if len(speakers) == 1 else "Their speakers"
+    return (
+        f"{who} can't play music by name yet: the home's music service hasn't found "
+        f"{'it' if len(speakers) == 1 else 'them'}, or isn't set up. They can still start music from their music app and "
+        "ask me to pause, skip or change the volume."
+    )
+
+
+HOME_TOOLS: list[Tool] = [HomeDevicesTool(), HomeControlTool(), HomeMusicTool()]

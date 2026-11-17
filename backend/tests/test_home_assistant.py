@@ -248,7 +248,7 @@ def test_the_tools_are_offered_to_people_in_a_home_and_on_spoken_turns():
     from app.chat.tools.registry import get_tool, list_openai_tools
     from app.talk import tools as voice
 
-    assert {t["function"]["name"] for t in list_openai_tools({"home"})} == {"home_devices", "home_control"}
+    assert {t["function"]["name"] for t in list_openai_tools({"home"})} == {"home_devices", "home_control", "home_music"}
     assert get_tool("home_control").category == "home"
     names = voice.voice_tool_names([], device="android")
     assert {"home_devices", "home_control"} <= names

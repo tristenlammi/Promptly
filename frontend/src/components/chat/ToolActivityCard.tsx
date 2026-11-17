@@ -223,6 +223,12 @@ const TOOL_INFO: Record<
     noun: (n) => (n === 1 ? "thing at home" : "things at home"),
     icon: House,
   },
+  home_music: {
+    verb: "Finding that music",
+    past: "found music",
+    noun: (n) => (n === 1 ? "piece of music" : "pieces of music"),
+    icon: House,
+  },
   // Notes (app/notes).
   find_notes: {
     verb: "Looking through your notes",

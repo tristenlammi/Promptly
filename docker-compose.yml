@@ -1159,6 +1159,25 @@ services:
   #                 themselves there; add them by brand with their address.
   # Its data is ./data/home (Home Assistant's settings and what it has
   # learned about your devices, and the connector's token for it).
+  #
+  # Music by name ("play Miles Davis in the lounge"): Music Assistant
+  # (Apache-2.0), out of sight the same way. A home's owner links Tidal in
+  # Home -> settings -> Music (on Tidal's own site: no password comes to
+  # Promptly), and it streams to the speakers the home already has. The
+  # connector sets it up by itself and leaves it only the kinds of speaker
+  # the home has added. PINNED like Home Assistant, for the same reason.
+  # About 3.2 GB more on disk and 450 MB of memory; to leave it out, set
+  # HOME_MUSIC_URL= (empty) in .env and stop its container.
+  #   home          shares the host's network (speakers fetch the music
+  #                 from it, and it finds them by broadcast). Its own web
+  #                 page is on port 8095 and its music on 8097, on your
+  #                 home network; the page is behind a sign-in only the
+  #                 connector has. Both ports must be free.
+  #   home-desktop  on the promptly network with nothing published:
+  #                 linking and searching work, but speakers can't fetch
+  #                 music from inside Docker Desktop, so nothing plays.
+  # Its data is ./data/home/music (the linked account's sign-in lives
+  # there, and nowhere else).
   home-assistant:
     image: ghcr.io/home-assistant/home-assistant:2026.11.1
     container_name: Promptly-Home
@@ -1193,6 +1212,9 @@ services:
       # nginx on this host: wherever NGINX_BIND opened it (loopback when unset).
       - PROMPTLY_SERVER=http://${NGINX_BIND:-127.0.0.1}:${NGINX_HTTP_PORT:-8087}
       - HA_URL=http://127.0.0.1:${HOME_HA_PORT:-8123}
+      - MUSIC_URL=${HOME_MUSIC_URL-http://127.0.0.1:8095}
+      # Advanced: more of Music Assistant's own sources to allow (its ids, comma-separated).
+      - MUSIC_EXTRA=${HOME_MUSIC_EXTRA:-}
     volumes:
       - ./data/home/box:/data
     <<: *hardened
@@ -1201,6 +1223,41 @@ services:
     restart: unless-stopped
     depends_on:
       - home-assistant
+
+  home-music:
+    image: ghcr.io/music-assistant/server:2.10.12
+    container_name: Promptly-HomeMusic
+    profiles: ["home"]
+    logging: *default-logging
+    network_mode: host
+    environment:
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=warning
+    volumes:
+      - ./data/home/music:/data
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    restart: unless-stopped
+
+  home-music-desktop:
+    image: ghcr.io/music-assistant/server:2.10.12
+    container_name: Promptly-HomeMusic-Desktop
+    profiles: ["home-desktop"]
+    logging: *default-logging
+    environment:
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=warning
+    volumes:
+      - ./data/home/music:/data
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    restart: unless-stopped
+    networks:
+      promptly:
+        aliases:
+          - home-music
 
   home-assistant-desktop:
     image: ghcr.io/home-assistant/home-assistant:2026.11.1
@@ -1237,6 +1294,9 @@ services:
       # Straight to the backend inside the deployment, not out and back in.
       - PROMPTLY_SERVER=http://backend:8000
       - HA_URL=http://home-assistant:8123
+      - MUSIC_URL=${HOME_MUSIC_URL-http://home-music:8095}
+      # Advanced: more of Music Assistant's own sources to allow (its ids, comma-separated).
+      - MUSIC_EXTRA=${HOME_MUSIC_EXTRA:-}
     volumes:
       - ./data/home/box:/data
     <<: *hardened

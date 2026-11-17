@@ -489,3 +489,127 @@ def test_only_a_speaker_that_keeps_numbered_favourites_can_be_asked_for_one():
         with pytest.raises(ValueError):
             relay.clean_value("media_player", "preset", bad, wiim)
     assert "wiim" in pb.PRESET_BRANDS
+
+
+# ---------------------------------------------------------------- music by name
+# As Music Assistant 2.10 answers ``players/all`` (trimmed).
+MA_WIIM = {"player_id": "wiim_uuid:FF31F09E-5C5A-4D8A-A1B2-AAAA00001111", "type": "player", "name": "Lounge", "available": True, "enabled": True, "device_info": {"identifiers": {"ip_address": "192.168.1.40", "mac_address": "AA:BB:CC:00:11:22"}}}
+MA_AIRPLAY = {"player_id": "upd3a7a53b", "type": "player", "name": "Kitchen Speaker", "display_name": "Kitchen Speaker", "available": True, "enabled": True, "device_info": {"identifiers": {"mac_address": "9A:57:73:5F:CF:2C", "ip_address": "192.168.1.41", "airplay_id": "ap9a57735fcf2c"}}}
+MA_STRANGER = {"player_id": "cc_neighbours_tv", "type": "player", "name": "Next door's TV", "available": True, "enabled": True, "device_info": {"identifiers": {"ip_address": "192.168.1.99"}}}
+
+
+def test_a_speaker_is_recognised_by_its_own_id_then_its_card_address_or_name():
+    # As Home Assistant's WiiM integration registers one: its UPnP id, and its address as a link.
+    wiim = pb.speaker_facts(
+        {"identifiers": [["wiim", "uuid:FF31F09E-5C5A-4D8A-A1B2-AAAA00001111"]], "connections": [], "configuration_url": "http://192.168.1.40", "name": "WiiM Pro", "name_by_user": "Lounge speaker"},
+        {"unique_id": "uuid:FF31F09E-5C5A-4D8A-A1B2-AAAA00001111", "platform": "wiim"},
+    )
+    assert wiim == {"name": "Lounge speaker", "idents": ["ff31f09e5c5a4d8aa1b2aaaa00001111"], "macs": [], "ip": "192.168.1.40", "brand": "wiim"}
+    by_mac = {"name": "Kitchen", "idents": [], "macs": ["9a57735fcf2c"], "ip": "", "brand": "apple_tv"}
+    by_ip = {"name": "Study", "idents": [], "macs": [], "ip": "192.168.1.41", "brand": "dlna_dmr"}
+    by_name = {"name": "kitchen speaker!", "idents": [], "macs": [], "ip": "", "brand": "cast"}
+    players = [MA_WIIM, MA_AIRPLAY, MA_STRANGER]
+    assert pb.music_map({"media_player.lounge": wiim}, players) == {"media_player.lounge": MA_WIIM["player_id"]}
+    assert pb.music_map({"media_player.k": by_mac}, players) == {"media_player.k": "upd3a7a53b"}
+    assert pb.music_map({"media_player.s": by_ip}, players) == {"media_player.s": "upd3a7a53b"}
+    assert pb.music_map({"media_player.k": by_name}, players) == {"media_player.k": "upd3a7a53b"}
+    # Nobody's speaker here is never played to, whatever Music Assistant can see.
+    assert "cc_neighbours_tv" not in pb.music_map({"media_player.lounge": wiim, "media_player.k": by_mac}, players).values()
+    assert pb.music_map({}, players) == {}
+
+
+def test_a_name_two_speakers_share_matches_neither():
+    one = {"name": "Speaker", "idents": [], "macs": [], "ip": "", "brand": "cast"}
+    players = [{**MA_AIRPLAY, "name": "Speaker", "display_name": "Speaker"}]
+    assert pb.music_map({"media_player.a": one, "media_player.b": dict(one)}, players) == {}
+    twins = [{**MA_AIRPLAY, "name": "Speaker", "display_name": "Speaker"}, {**MA_STRANGER, "name": "Speaker"}]
+    assert pb.music_map({"media_player.a": one}, twins) == {}
+    # Switched off or gone in Music Assistant: not played to.
+    assert pb.music_map({"media_player.a": {**one, "name": "Kitchen Speaker"}}, [{**MA_AIRPLAY, "enabled": False}]) == {}
+    # One player is one speaker: a second speaker can't claim it too.
+    same = {"name": "x", "idents": [], "macs": ["9a57735fcf2c"], "ip": "", "brand": "cast"}
+    assert pb.music_map({"media_player.a": same, "media_player.b": dict(same)}, [MA_AIRPLAY]) == {"media_player.a": "upd3a7a53b"}
+
+
+def test_music_assistant_only_gets_the_ways_of_playing_the_homes_speakers_need():
+    assert pb.wanted_players({"wiim", "hue", "demo"}, set()) == {"wiim"}
+    assert pb.wanted_players({"cast", "sonos", "linkplay"}, set()) == {"chromecast", "sonos", "wiim"}
+    assert pb.wanted_players(set(), set()) == set()  # no speakers: it looks for nothing
+    assert pb.wanted_players(set(), {"airplay", "radiobrowser"}) == {"airplay"}
+
+
+def test_only_a_search_results_own_name_can_be_played():
+    assert pb.music_uri("tidal://album/1234", {"tidal"}) == ("tidal", "album")
+    assert pb.music_uri("tidal--Ab12Cd://track/99", {"tidal"}) == ("tidal--Ab12Cd", "track")
+    assert pb.music_uri("library://artist/7", {"tidal"}) == ("library", "artist")
+    for bad in (
+        "http://169.254.169.254/latest", "https://example.com/a.mp3", "file:///etc/passwd", "builtin://track/http%3A%2F%2Fx",
+        "tidal://album/1 2", "tidal://album/1?x=1", "tidal://album/", "tidal://station/1", "spotify://track/1", "", None, 5,
+        "tidal://track//etc", "TIDAL://track/1",
+    ):
+        assert pb.music_uri(bad, {"tidal"}) is None, bad
+    assert pb.music_uri("tidal://album/1", set()) is None  # nothing linked
+
+
+def test_search_answers_are_cut_to_a_short_plain_list():
+    found = {
+        "artists": [{"uri": "tidal://artist/100", "name": "Miles Davis", "media_type": "artist", "provider_mappings": [{"provider_domain": "tidal"}], "metadata": {"images": ["…"]}}],
+        "albums": [
+            {"uri": "tidal://album/200", "name": "Kind of Blue", "version": "Legacy Edition", "artists": [{"name": "Miles Davis"}], "provider_mappings": [{"provider_domain": "tidal"}]},
+            {"uri": "library://album/3", "name": "From a source nobody linked", "provider_mappings": [{"provider_domain": "filesystem_local"}]},
+            {"uri": "library://album/4", "name": "In the library, from Tidal", "provider_mappings": [{"provider_domain": "tidal"}]},
+        ],
+        "tracks": [{"uri": "tidal://track/300", "name": "So What", "artists": [{"name": "Miles Davis"}, {"name": "John Coltrane"}], "album": {"name": "Kind of Blue"}}],
+        "playlists": [{"uri": "tidal://playlist/abc-1", "name": "Miles Davis Essentials", "owner": "TIDAL"}],
+        "radio": [{"uri": "radiobrowser://radio/1", "name": "Jazz FM"}, {"uri": "http://stream.example/jazz", "name": "A bare address"}],
+    }
+    got = pb.shape_results(found, ["artist", "album", "track", "playlist", "radio"], {"tidal"}, 5)
+    assert got == [
+        {"uri": "tidal://artist/100", "kind": "artist", "name": "Miles Davis"},
+        {"uri": "tidal://album/200", "kind": "album", "name": "Kind of Blue", "artist": "Miles Davis", "version": "Legacy Edition"},
+        {"uri": "library://album/4", "kind": "album", "name": "In the library, from Tidal"},
+        {"uri": "tidal://track/300", "kind": "track", "name": "So What", "artist": "Miles Davis, John Coltrane", "album": "Kind of Blue"},
+        {"uri": "tidal://playlist/abc-1", "kind": "playlist", "name": "Miles Davis Essentials", "by": "TIDAL"},
+    ]
+    assert len(pb.shape_results({"tracks": [{"uri": f"tidal://track/{i}", "name": f"T{i}"} for i in range(30)]}, ["track"], {"tidal"}, 5)) == 5
+    assert pb.shape_results(None, ["track"], {"tidal"}, 5) == [] and pb.shape_results("x", ["track"], {"tidal"}, 5) == []
+
+
+def test_linking_an_account_is_a_page_to_open_a_code_and_then_done():
+    # As Music Assistant 2.10 answers ``config/providers/setup`` for Tidal.
+    step = {
+        "flow_id": "b810c74ef6674117971a2c0a5fd6a2d3", "step_id": "device_login", "type": "external", "title": "Link your Tidal account",
+        "description": "Your code is FKGQW. Use the button below to open Tidal…", "entries": [], "errors": {}, "url": "https://link.tidal.com/FKGQW",
+        "expires_at": 1794878617.5173671, "result": None, "reason": None,
+    }
+    assert pb.shape_link(step, "tidal") == {
+        "state": "open", "brand": "tidal", "name": "Tidal", "flow": "b810c74ef6674117971a2c0a5fd6a2d3",
+        "url": "https://link.tidal.com/FKGQW", "code": "FKGQW", "until": 1794878617,
+    }
+    assert pb.shape_link({"type": "finish", "result": {"instance_id": "tidal--Ab12"}}, "tidal") == {"state": "done", "brand": "tidal", "name": "Tidal"}
+    assert pb.shape_link({"type": "progress", "flow_id": "f"}, "tidal")["state"] == "wait"
+    assert pb.shape_link(None, "tidal")["state"] == "stopped"
+    assert pb.shape_link({"type": "external", "url": "http://plain.example/x"}, "tidal")["state"] == "stopped"
+    assert pb.shape_link({"type": "form", "entries": [{"key": "password"}]}, "tidal")["state"] == "stopped"  # never a form to type into
+    assert set(pb.MUSIC_BRANDS) == {"tidal"}
+
+
+def test_the_server_and_the_box_agree_on_what_can_be_linked_and_played():
+    from app.home import music, relay
+
+    assert set(pb.MUSIC_BRANDS) == set(music.LINK_HOSTS)
+    assert set(pb.MUSIC_KINDS) == set(music.KINDS)
+    # A speaker that can play music says so in the same word both ends know.
+    e = relay.clean_entity({"id": "media_player.a", "domain": "media_player", "name": "A", "state": "idle", "x": {"can": ["play", "music"]}})
+    assert "music" in e["x"]["can"]
+    for uri in ("tidal://album/200", "tidal--Ab12Cd://track/99", "library://artist/7"):
+        assert pb.music_uri(uri, {"tidal"}) and music.clean_results([{"uri": uri, "kind": uri.split("://")[1].split("/")[0], "name": "x"}])
+
+
+def test_an_old_box_or_one_without_the_music_service_says_so():
+    import asyncio
+
+    ha = pb.HomeAssistant.__new__(pb.HomeAssistant)
+    ha.music = None
+    with pytest.raises(RuntimeError, match="no music service"):
+        asyncio.run(ha.op("music.status", {}))

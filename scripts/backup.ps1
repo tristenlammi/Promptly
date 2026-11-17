@@ -87,7 +87,7 @@ try {
     }
     # Promptly Home's device pairings (small settings files; its history and logs are left out).
     if (Test-Path "data/home") {
-        tar --exclude="home-assistant_v2.db*" --exclude="*.log*" --exclude="ha/tts" --exclude="ha/deps" -cf (Join-Path $work "home.tar") -C data home 2>$null
+        tar --exclude="home-assistant_v2.db*" --exclude="*.log*" --exclude="ha/tts" --exclude="ha/deps" --exclude="music/.cache" -cf (Join-Path $work "home.tar") -C data home 2>$null
         if ($LASTEXITCODE -eq 0) { $parts += "home.tar" } else { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $work "home.tar") }
     }
     tar -C $work -cf $archive @parts

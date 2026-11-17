@@ -204,3 +204,41 @@ def rooms_called(devices: list[dict[str, Any]], target: str) -> list[tuple[uuid.
             seen[(d["home_id"], d["box_id"], str(d["area"]))] = str(d["room"])
     exact = [(h, b, a, n) for (h, b, a), n in seen.items() if quick.key(n) in (t, f"{t} room")]
     return exact or [(h, b, a, n) for (h, b, a), n in seen.items() if t and t in quick.key(n)]
+
+
+# ------------------------------------------------------------------ music by name
+def plays_music(device: dict[str, Any]) -> bool:
+    """A speaker the home's music service can play to."""
+    return device.get("domain") == "media_player" and "music" in ((device.get("x") or {}).get("can") or [])
+
+
+async def _music(box_id: uuid.UUID, op: str, args: dict[str, Any], timeout: float) -> Any:
+    live = relay.link(box_id)
+    if live is None or not live.got_snapshot:
+        raise CantDo(OFFLINE)
+    try:
+        return await relay.request(box_id, op, args, timeout=timeout)
+    except relay.BoxOffline as e:
+        raise CantDo(NO_ANSWER) from e
+    except relay.BoxSaidNo as e:
+        raise CantDo(str(e)) from e
+
+
+async def music_search(box_id: uuid.UUID, query: str, kinds: list[str] | None = None) -> list[dict[str, str]]:
+    """What the home's linked music has for these words. No database
+    connection is held while the box is asked."""
+    from . import music
+
+    asked = [k for k in kinds or [] if k in music.KINDS] or list(music.DEFAULT_KINDS)
+    return music.clean_results(await _music(box_id, "music.search", {"q": query[:120], "kinds": asked, "limit": 5}, relay.SETUP_S))
+
+
+async def music_play(device: dict[str, Any], uri: str, shuffle: bool = False) -> None:
+    """Play one search result on one speaker of the home."""
+    from . import music
+
+    if device.get("careful") or not plays_music(device):
+        raise CantDo(f"{device['name']} can't play from a music service.")
+    if not music.clean_results([{"uri": uri, "kind": uri.split("://", 1)[-1].split("/", 1)[0], "name": "x"}]):
+        raise CantDo("That isn't something to play. Search again.")
+    await _music(device["box_id"], "music.play", {"entity": device["id"], "uri": uri, "shuffle": bool(shuffle)}, relay.SETUP_S)
