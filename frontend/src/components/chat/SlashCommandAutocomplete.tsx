@@ -180,7 +180,7 @@ export function SlashCommandAutocomplete({
                   onClick={() => navigate("/tasks")}
                   className="font-medium text-[var(--accent-text)] underline-offset-2 hover:underline"
                 >
-                  Automations
+                  AI tasks
                 </button>
                 .
               </>

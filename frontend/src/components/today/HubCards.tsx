@@ -1125,7 +1125,7 @@ export function PasswordsCard({ p }: { p: NonNullable<Sections["passwords"]> }) 
 
 export function AutomationsCard({ a }: { a: NonNullable<Sections["automations"]> }) {
   return (
-    <HubCard icon={Workflow} title="Automations" to={a.url} open="All">
+    <HubCard icon={Workflow} title="AI tasks" to={a.url} open="All">
       {a.failed_24h > 0 && (
         <Link to={a.url} className="mb-1 flex items-center gap-2 rounded-lg bg-[var(--danger-bg)] px-2 py-1.5 text-sm text-[var(--text)]">
           <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--danger)]" />

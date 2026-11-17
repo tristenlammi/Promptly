@@ -171,7 +171,7 @@ const SECTIONS: { key: string; label: string; grid: boolean }[] = [
   { key: "porch", label: "Porch", grid: true },
   { key: "work", label: "Workspace cards and shifts", grid: true },
   { key: "rooms", label: "Unread rooms", grid: true },
-  { key: "automations", label: "Automations", grid: true },
+  { key: "automations", label: "AI tasks", grid: true },
   { key: "photos", label: "On this day", grid: true },
   { key: "discover", label: "Suggested apps", grid: true },
   { key: "morning", label: "Morning summary", grid: false },
