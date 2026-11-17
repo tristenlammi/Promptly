@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.49.1] - 2026-11-17
+
 ### Added
 
 - Home: ask for a kind of music and it just plays. "Play some jazz", "put on something relaxing", "play 90s rock in the kitchen" or simply "play music" starts a mix straight away, and the assistant says what it put on in a few words instead of coming back with a list or a question. It picks a playlist named for what you asked if Tidal has one, otherwise a mix that doesn't end, grown from the closest artist or song. "Play music" carries on from what was played at home last, or what Tidal suggests for the account. A named thing is still never guessed: two albums called "Blue" is still a question. Needs the server's Home box to update (connector 0.8.0).
