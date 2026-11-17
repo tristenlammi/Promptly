@@ -260,6 +260,10 @@ def _reply_for(body: dict) -> tuple[list[str], float, bool]:
     if messages and messages[-1].get("role") == "tool":
         result = _text_of(messages[-1].get("content"))[0]
         first = next((ln for ln in result.splitlines() if ln.strip() and not ln.startswith("<")), "")
+        if first.startswith("Nothing is playing yet"):
+            # home_music handed back a list: ask which, by name, as a model would.
+            names = [re.sub(r"\s+\(uri: [^)]*\)$", "", ln[2:].strip()) for ln in result.splitlines() if ln.startswith("- ")]
+            return [w + " " for w in ("Which one did you mean: " + " or ".join(names) + "?").split(" ")], 0.02, False
         return [w + " " for w in f"Tool said: {first.strip()[:200]}".split(" ")], 0.02, False
     last_user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
     text, images = _text_of(last_user.get("content"))

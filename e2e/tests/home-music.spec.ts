@@ -10,7 +10,7 @@ import type { APIResponse, Page } from "@playwright/test";
 
 import { expect, ready, stamp, test } from "../fixtures";
 import { FakeBox, readSetup } from "../lib/fakeBox";
-import { BASE_URL } from "../lib/stack";
+import { BASE_URL, readRun } from "../lib/stack";
 
 test.describe.configure({ mode: "serial" });
 
@@ -135,10 +135,11 @@ test("music by name: the owner links Tidal on Tidal's own site, and the assistan
     await alice.keyboard.press("Escape");
 
     // ---- a member sees it's linked and can't change it; the server refuses too.
-    const added = await call(alice, aAuth, "POST", `/home/${homeId}/members`, { username: "bob" });
+    const added = await call(alice, aAuth, "POST", `/home/${homeId}/members`, { username: readRun().users.bob.username });
     expect(added.ok(), await added.text()).toBe(true);
     const members = (((await (await call(alice, aAuth, "GET", "/home")).json()).homes as { id: string; members: { id: string; username: string }[] }[]).find((h) => h.id === homeId)?.members) ?? [];
-    bobId = members.find((m) => m.username === "bob")?.id ?? "";
+    bobId = readRun().users.bob.id;
+    void members;
     const theirs = await openMusic(bob);
     await expect(theirs.getByText("Linked")).toBeVisible();
     await expect(theirs.getByRole("button", { name: "Unlink" })).toHaveCount(0);
@@ -160,16 +161,15 @@ test("music by name: the owner links Tidal on Tidal's own site, and the assistan
 
     // ---- two albums are called "Blue": it asks, and nothing plays until the person says which.
     await ask(alice, "play blue in the lounge");
-    await expect(lastReply(alice)).toContainText("Nothing is playing yet", { timeout: 30_000 });
-    await expect(lastReply(alice)).toContainText("Blue, the album by Joni Mitchell");
-    await expect(lastReply(alice)).toContainText("Blue, the album by Weezer");
+    await expect(lastReply(alice)).toContainText("Which one did you mean: Blue, the album by Joni Mitchell or Blue, the album by Weezer?", { timeout: 30_000 });
     expect(asked("music.play").length).toBe(1);
     await expect(alice.getByRole("button", { name: "Send message" })).toBeVisible();
+    if (shots) await alice.screenshot({ path: `${shots}/music-05-chat-asks-which.png` });
     await ask(alice, "the joni one", false);
     await expect(lastReply(alice)).toContainText("Tool said: Done: Playing Blue by Joni Mitchell on Lounge speaker.", { timeout: 30_000 });
     expect(asked("music.play").at(-1)).toEqual({ entity: "media_player.lounge", uri: "tidal://album/300", shuffle: false });
     await expect(alice.getByRole("button", { name: "Send message" })).toBeVisible();
-    if (shots) await alice.screenshot({ path: `${shots}/music-05-chat-asks-which.png`, fullPage: false });
+    if (shots) await alice.screenshot({ path: `${shots}/music-05b-chat-plays-the-one-chosen.png` });
 
     // ---- the Home page shows what it started.
     await alice.goto("/home");
