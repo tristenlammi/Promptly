@@ -225,7 +225,7 @@ const TOOL_INFO: Record<
   },
   home_music: {
     verb: "Finding that music",
-    past: "found music",
+    past: "looked for",
     noun: (n) => (n === 1 ? "piece of music" : "pieces of music"),
     icon: House,
   },

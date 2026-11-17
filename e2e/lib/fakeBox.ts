@@ -6,6 +6,9 @@ import { BASE_URL } from "./stack";
 
 export type Entity = { id: string; domain: string; name: string; state: string; area?: string; unit?: string; cls?: string; dev?: string; x?: Record<string, unknown> };
 type Setup = { s: string; b: string; k: string };
+export type Found = { uri: string; kind: string; name: string; artist?: string; album?: string; by?: string };
+/** A box with a music service: what's linked, and what a search finds for each set of words. */
+export type Music = { linked: boolean; finds: Record<string, Found[]>; approved: boolean };
 
 export function readSetup(setup: string): Setup {
   const body = setup.replace(/^pbox1\./, "").replace(/-/g, "+").replace(/_/g, "/");
@@ -17,6 +20,8 @@ export class FakeBox {
   readonly asked: { op: string; args: Record<string, unknown> }[] = [];
   areas: { id: string; name: string }[];
   entities: Entity[];
+  /** Set it to give this box a music service (see ``Music``). */
+  music: Music | null = null;
 
   constructor(private setup: Setup, areas: { id: string; name: string }[], entities: Entity[]) {
     this.areas = areas;
@@ -76,9 +81,52 @@ export class FakeBox {
       for (const e of lights) this.send({ t: "state", e });
       return;
     }
+    if (op.startsWith("music.")) return this.musicOp(id, op, args);
     if (op === "flows.found") return this.send({ t: "res", id, ok: true, data: [] });
     if (op === "entries.list") return this.send({ t: "res", id, ok: true, data: [] });
     this.send({ t: "res", id, ok: false, error: "The test box doesn't do that." });
+  }
+
+  /** Music by name, as a real box answers (backend/app/home/relay.py). */
+  private musicOp(id: string, op: string, args: Record<string, unknown>) {
+    const m = this.music;
+    const ok = (data: unknown) => this.send({ t: "res", id, ok: true, data });
+    const no = (error: string) => this.send({ t: "res", id, ok: false, error });
+    if (!m) return no("This home's box has no music service. It may need updating.");
+    const open = { state: "open", brand: "tidal", name: "Tidal", flow: "e2eflow1", url: "https://link.tidal.com/E2EAB", code: "E2EAB", until: Math.floor(Date.now() / 1000) + 300 };
+    if (op === "music.status") {
+      return ok({
+        brands: [{ id: "tidal", name: "Tidal" }],
+        sources: m.linked ? [{ id: "tidal--e2e", brand: "tidal", name: "Tidal" }] : [],
+        speakers: this.entities.filter((e) => ((e.x?.can as string[] | undefined) ?? []).includes("music")).map((e) => e.id),
+      });
+    }
+    if (op === "music.link.start") return m.linked ? no("Tidal is already linked.") : ok(open);
+    if (op === "music.link.get") {
+      if (m.approved) m.linked = true;
+      return ok(m.linked ? { state: "done", brand: "tidal", name: "Tidal" } : open);
+    }
+    if (op === "music.link.abort") return ok(null);
+    if (op === "music.unlink") {
+      m.linked = false;
+      m.approved = false;
+      return ok(null);
+    }
+    if (op === "music.search") {
+      if (!m.linked) return no("No music service is linked to this home yet.");
+      const kinds = (args.kinds as string[] | undefined) ?? [];
+      return ok((m.finds[String(args.q).toLowerCase()] ?? []).filter((r) => kinds.includes(r.kind)));
+    }
+    if (op === "music.play") {
+      const e = this.entities.find((x) => x.id === args.entity);
+      const found = Object.values(m.finds).flat().find((r) => r.uri === args.uri);
+      if (!e || !found) return no("That isn't something from this home's music.");
+      e.state = "playing";
+      e.x = { ...e.x, title: found.name, artist: found.artist ?? "" };
+      ok(null);
+      return this.send({ t: "state", e });
+    }
+    return no("The test box doesn't do that.");
   }
 
   /** Something changed at the device itself. */

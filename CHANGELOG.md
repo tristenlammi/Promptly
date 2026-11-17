@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Home: play music by name. Ask in a chat or out loud, "play Miles Davis in the lounge", "play the album Kind of Blue", "play Yesterday by The Beatles in the kitchen", and it plays from Tidal on that speaker. It starts straight away when one result is plainly what you asked for; when two things share the name it asks which you meant, and it never picks a speaker for you when more than one could be meant.
+- Home → settings → Music: the home's owner links Tidal there. You sign in on Tidal's own site (link.tidal.com) with a short code, so your Tidal password is never typed into Promptly, and what Tidal hands back stays on the home's box. Everyone in the home can see it's linked; only the owner can link or unlink. It also lists which of the home's speakers can play music by name.
+- The server's Home box gains a music service (Music Assistant, out of sight like Home Assistant) for this. It is set up by itself on the next update, and only looks for the kinds of speaker the home has added (a WiiM, for example): nothing joins a home by itself. About 3.2 GB more disk and 450 MB of memory; set `HOME_MUSIC_URL=` in `.env` to leave it out. Needs the Home box to update (connector 0.7.0). On Docker Desktop (Windows, macOS) music can be linked and searched but not played, because speakers can't reach the music service there.
+
 ## [0.48.0] - 2026-11-17
 
 ### Added

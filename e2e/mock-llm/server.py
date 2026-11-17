@@ -24,6 +24,9 @@ Spoken turns (Talk, WP-T4) can't carry markers, so plain words do:
     "phone" + tools    call send_to_phone for the latest thing (Talk phase 2)
     "cosy" + tools     call home_control: the lounge lights at 20%, warm white (Home)
     "unlock" + tools   call home_control on the front door (it refuses: Home page only)
+    "miles davis" + tools   call home_music: Miles Davis in the Lounge (Home, music by name)
+    "play blue" + tools     call home_music for "Blue" (two albums have that name: it asks which)
+    "joni" + tools          call home_music again with the Joni Mitchell album's uri
     "pausecheck" + tools
              read something from outside (the person's files), then open
              example.com at an address they never wrote: the reply stops
@@ -148,6 +151,13 @@ def _tool_call_for(body: dict) -> tuple[str, str] | None:
             return "home_control", json.dumps({"action": "set_light", "target": "Lounge", "brightness": 20, "colour": "warm white"})
         if re.search(r"\bunlock\b", text, re.I) and "home_control" in offered:
             return "home_control", json.dumps({"action": "turn_off", "target": "Front door"})
+        # Music by name: one plain request, one that needs a question back, and the answer to it.
+        if re.search(r"\bmiles davis\b", text, re.I) and "home_music" in offered:
+            return "home_music", json.dumps({"query": "Miles Davis", "target": "Lounge"})
+        if re.search(r"\bplay blue\b", text, re.I) and "home_music" in offered:
+            return "home_music", json.dumps({"query": "Blue", "target": "Lounge"})
+        if re.search(r"\bjoni\b", text, re.I) and "home_music" in offered:
+            return "home_music", json.dumps({"query": "Blue by Joni Mitchell", "uri": "tidal://album/300", "target": "Lounge"})
         # Talk phase 2: "send that to my phone" (the latest thing it found).
         if re.search(r"\bphone\b", text, re.I) and "send_to_phone" in offered:
             return "send_to_phone", json.dumps({"item": 1})

@@ -17,6 +17,9 @@ outside a home sees its devices, admins included.
 - Two containers: `Promptly-Home` (Home Assistant, pinned to a version) and
   `Promptly-HomeConnector`. About **3.5 GB** of disk for the image, downloaded
   once, and roughly **half a gigabyte of memory** while running.
+- A third container, `Promptly-HomeMusic` (Music Assistant, pinned to a
+  version), for playing music by name: about **3.2 GB** more disk and
+  **450 MB of memory**. See "Music by name" below.
 - One line in `.env`: `HOME_BOX_SECRET`, which the connector proves itself to
   the backend with. Nobody needs to see it.
 - A token in `COMPOSE_PROFILES`: `home` on Linux and Unraid, `home-desktop` on
@@ -76,6 +79,41 @@ device's or bridge's address. Brands that are happy with an address should
 work (Philips Hue, TP-Link Kasa and Tapo, Shelly, LIFX, WiZ, ESPHome); ones
 that rely on finding the device or being called back (Google Cast, Sonos)
 won't work well. None of these has been tried with real hardware yet.
+
+## Music by name
+
+"Play Miles Davis in the lounge." Home Assistant can pause, skip and change
+the volume of a speaker, but it can't start an artist or an album from a
+streaming service. Music Assistant can, so it runs next to Home Assistant,
+just as out of sight: the connector sets it up, and nobody opens its screens.
+
+1. The home's owner opens **Home → settings → Music → Link Tidal**.
+2. The page shows a short code and a button to **link.tidal.com**, Tidal's own
+   site. Sign in to Tidal there and approve. No password is typed into
+   Promptly, and what Tidal hands back is kept in `./data/home/music` on this
+   server only.
+3. Ask the assistant for music, typed or spoken.
+
+What to know:
+
+- **Only the home's own speakers.** Music Assistant would normally look for
+  every AirPlay, Chromecast and DLNA speaker on the network. The connector
+  takes those away and gives it only the kinds of speaker the home has added
+  (a WiiM: its WiiM support), and it can only play to speakers that are in the
+  home. Music lists which ones under "Plays on".
+- **Ports.** On Linux and Unraid it shares the server's network: its web page
+  is on port **8095** and the music itself on **8097**, both reachable from
+  your home network (speakers fetch the music from 8097). The page is behind a
+  sign-in only the connector has. Both ports must be free.
+- **Docker Desktop (Windows, macOS):** linking and searching work, but nothing
+  plays: a speaker can't fetch music from inside Docker Desktop.
+- **Leaving it out:** put `HOME_MUSIC_URL=` (empty) in `.env`, then
+  `docker compose up -d` and `docker compose stop home-music`.
+- **Its version is pinned** like Home Assistant's, for the same reason: the
+  connector sets a fresh one up through its API. Bump the tag in
+  `docker-compose.yml` (both variants, and `home-box/compose`) on purpose and
+  try it on a private copy first.
+- Only Tidal can be linked so far.
 
 ## Changing the Home Assistant version
 
