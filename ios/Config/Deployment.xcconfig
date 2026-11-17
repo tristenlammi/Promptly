@@ -1,0 +1,21 @@
+// One build of the iPhone app belongs to one Promptly server and one Apple
+// account. These are the values that differ between them. The defaults below
+// are enough for an unsigned build in the simulator; the release job in
+// .github/workflows/ios.yml passes the real ones on the xcodebuild command
+// line (from the repository's variables), so nobody's details live in git.
+
+// The app's id at Apple, e.g. org.promptly.home.yourname
+PROMPTLY_BUNDLE_ID = org.promptly.ios.dev
+
+// The Apple team that signs it (10 characters). Empty = unsigned.
+PROMPTLY_TEAM_ID =
+
+// The server this build opens, name only (no https, no slash). Empty = ask on first run.
+PROMPTLY_SERVER_HOST =
+
+// Links and saved sign-ins for that server. Only set for a signed build:
+// Promptly/Promptly.entitlements
+PROMPTLY_ENTITLEMENTS =
+
+PROMPTLY_VERSION = 0.1.0
+PROMPTLY_BUILD = 1

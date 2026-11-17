@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Only used by a signed build (see Config/Deployment.xcconfig). Lets links
+	     to the server open in the app, and lets the phone offer passkeys and
+	     saved sign-ins for the server inside the app. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:$(PROMPTLY_SERVER_HOST)</string>
+		<string>webcredentials:$(PROMPTLY_SERVER_HOST)</string>
+	</array>
+</dict>
+</plist>

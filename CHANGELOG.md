@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- iPhone app, first pieces (not installable yet): a native app that shows your own server, with a first-run screen, pairing by QR code, downloads to the share sheet, links to other sites in a Safari sheet, and quick actions on the icon. It lives in `ios/` and is built on GitHub's Mac runners. Installing it needs an Apple Developer account; the steps are in `ios/README.md`.
+
 ## [0.49.1] - 2026-11-17
 
 ### Added

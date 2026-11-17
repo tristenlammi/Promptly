@@ -1,0 +1,217 @@
+name: iPhone app
+
+# The iPhone app can only be compiled on a Mac, and there isn't one: GitHub's
+# Mac runners are the build machine.
+#
+#   core       : the plain-logic package's tests, on Linux (fast, no simulator).
+#   app        : generate the Xcode project from ios/project.yml, build the app
+#                for the simulator with no signing, run the package's tests on
+#                macOS, then start the app in a simulator and keep a screenshot.
+#   testflight : by hand only, from main. Signs with the owner's Apple account
+#                and uploads to TestFlight. Needs the `ios-release` environment's
+#                secrets and the repository variables listed in ios/README.md;
+#                until those exist it has nothing to run with.
+#
+# Standard runners only (free on a public repository). Nothing here reads a
+# secret except the testflight job.
+
+on:
+  push:
+    branches: [main, iphone]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: "Sign and upload to TestFlight (main only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Logic tests (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: swift:6.1-jammy
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test
+        working-directory: ios/PromptlyCore
+        run: swift test
+
+  app:
+    name: Build for the simulator
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tools
+        run: |
+          xcodebuild -version
+          swift --version
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Logic tests (macOS)
+        working-directory: ios/PromptlyCore
+        run: swift test
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build (no signing)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Promptly.xcodeproj \
+            -scheme Promptly \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build.log | grep -E "error:|warning:|BUILD|\*\*" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: Keep the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios/build.log
+          if-no-files-found: ignore
+
+      # Proof it starts: the first-run screen, as a picture anyone can open.
+      - name: Start it in a simulator
+        working-directory: ios
+        run: |
+          set -e
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          for runtime, devices in json.load(sys.stdin)['devices'].items():
+              if 'iOS' not in runtime: continue
+              for d in devices:
+                  if d['name'].startswith('iPhone'):
+                      print(d['udid']); sys.exit(0)
+          sys.exit(1)")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Promptly.app
+          mkdir -p shots
+          xcrun simctl launch "$UDID" org.promptly.ios.dev
+          sleep 12
+          xcrun simctl io "$UDID" screenshot shots/01-first-run.png
+          # The app must still be running: a crash at launch would leave no process.
+          xcrun simctl spawn "$UDID" launchctl list | grep -q "org.promptly.ios.dev"
+          xcrun simctl openurl "$UDID" "promptly://settings"
+          sleep 5
+          xcrun simctl io "$UDID" screenshot shots/02-this-iphone.png
+          xcrun simctl shutdown "$UDID"
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots
+          path: ios/shots
+          if-no-files-found: ignore
+
+  testflight:
+    name: Sign and upload to TestFlight
+    if: github.event_name == 'workflow_dispatch' && inputs.testflight && github.ref == 'refs/heads/main'
+    needs: [core, app]
+    runs-on: macos-26
+    timeout-minutes: 45
+    environment: ios-release
+    env:
+      IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+      IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+      IOS_SERVER_HOST: ${{ vars.IOS_SERVER_HOST }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the settings are there
+        run: |
+          for name in IOS_TEAM_ID IOS_BUNDLE_ID IOS_SERVER_HOST ASC_KEY_ID ASC_ISSUER_ID; do
+            if [ -z "${!name}" ]; then echo "Missing $name (see ios/README.md)"; exit 1; fi
+          done
+
+      - name: The App Store Connect key, for this run only
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ]; then echo "Missing ASC_KEY_P8 (see ios/README.md)"; exit 1; fi
+          umask 077
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Archive
+        working-directory: ios
+        run: |
+          set -o pipefail
+          VERSION=$(grep '^PROMPTLY_VERSION' Config/Deployment.xcconfig | cut -d= -f2 | tr -d ' ')
+          xcodebuild \
+            -project Promptly.xcodeproj \
+            -scheme Promptly \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Promptly.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            PROMPTLY_TEAM_ID="$IOS_TEAM_ID" \
+            PROMPTLY_BUNDLE_ID="$IOS_BUNDLE_ID" \
+            PROMPTLY_SERVER_HOST="$IOS_SERVER_HOST" \
+            PROMPTLY_ENTITLEMENTS=Promptly/Promptly.entitlements \
+            PROMPTLY_VERSION="$VERSION" \
+            PROMPTLY_BUILD="${{ github.run_number }}" \
+            archive 2>&1 | grep -E "error:|warning: |ARCHIVE|\*\*" || true
+          test -d "$RUNNER_TEMP/Promptly.xcarchive"
+
+      - name: Upload to TestFlight
+        working-directory: ios
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${IOS_TEAM_ID}</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Promptly.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"

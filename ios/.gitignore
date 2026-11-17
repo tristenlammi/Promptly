@@ -1,0 +1,7 @@
+# Made by `xcodegen generate` from project.yml
+*.xcodeproj/
+build/
+DerivedData/
+.build/
+.swiftpm/
+*.xcarchive
