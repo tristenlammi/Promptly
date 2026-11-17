@@ -21,7 +21,10 @@ import { HOMES_KEY, iconOf, Tile, useFlip } from "./Tile";
  * which opens its controls: that's where "are you sure?" is asked.
  */
 
-export const card = "flex h-full min-w-0 flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3";
+const shape = "flex h-full min-w-0 flex-col gap-3 rounded-2xl border p-3";
+const plain = "border-[var(--border)] bg-[var(--surface)]";
+const glow = "border-[var(--accent)]/50 bg-[color-mix(in_srgb,var(--accent)_9%,var(--surface))]";
+export const card = `${shape} ${plain}`;
 const more =
   "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
 const round =
@@ -91,7 +94,7 @@ export function DeviceWidget({ home, entity, size, onOpen }: { home: Home; entit
     body = <p className="truncate text-2xl font-semibold tabular-nums text-[var(--text)]">{stateWords(entity)}</p>;
   }
   return (
-    <div className={cn(card, on && !dead && "border-[var(--accent)]/50 bg-[color-mix(in_srgb,var(--accent)_9%,var(--surface))]", dead && "opacity-60")}>
+    <div className={cn(shape, on && !dead ? glow : plain, dead && "opacity-60")}>
       <div className="flex items-center gap-1">
         {switches ? (
           <button type="button" role="switch" aria-checked={on} aria-label={entity.name} disabled={dead || flip.isPending} onClick={() => flip.mutate()} className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed">

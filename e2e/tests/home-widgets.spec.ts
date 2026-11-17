@@ -134,18 +134,22 @@ test("the Home page is laid out your own way, saved for you alone, and reset put
     await alice.getByRole("button", { name: "Add a widget" }).first().click();
     await alice.getByRole("dialog", { name: "Add a widget" }).getByRole("button", { name: /^Music/ }).click();
     expect(await handles(alice)).toEqual(["Lounge", "Kitchen", lampName, "Favourites", "Music", "Everything else"]);
+    await expect(alice.getByRole("dialog")).toHaveCount(0);
+    if (process.env.SHOTS_DIR) await alice.waitForTimeout(500); // the sheet's closing fade
     await shot(alice, "hwidgets-02-edit-desktop.png");
 
     // Drag with the pointer: the lamp to the top.
-    await drag(alice, alice.getByRole("button", { name: `Move ${lampName}` }), alice.getByRole("button", { name: "Move Lounge" }));
+    await drag(alice, alice.getByRole("button", { name: `Move ${lampName}`, exact: true }), alice.getByRole("button", { name: "Move Lounge", exact: true }));
     await expect.poll(() => handles(alice)).toEqual([lampName, "Lounge", "Kitchen", "Favourites", "Music", "Everything else"]);
     // ...and with the keyboard: Music up two places (Space picks it up, arrows move it, Space puts it down).
-    const music = alice.getByRole("button", { name: "Move Music" });
+    const music = alice.getByRole("button", { name: "Move Music", exact: true });
     await music.focus();
     await alice.keyboard.press("Space");
+    await alice.waitForTimeout(300);
     await alice.keyboard.press("ArrowUp");
-    await alice.waitForTimeout(150);
+    await alice.waitForTimeout(300);
     await alice.keyboard.press("Space");
+    await alice.waitForTimeout(300);
     const afterKeys = await handles(alice);
     expect(afterKeys.indexOf("Music")).toBeLessThan(5);
     expect(afterKeys.indexOf("Music")).not.toBe(4);
@@ -205,10 +209,11 @@ test("the Home page is laid out your own way, saved for you alone, and reset put
       await shot(phone, "hwidgets-04-custom-phone.png");
       await phone.getByRole("button", { name: "Customise this page" }).click();
       const was = await handles(phone);
+      await phone.getByRole("region", { name: "Customise this page" }).scrollIntoViewIfNeeded();
       await shot(phone, "hwidgets-05-edit-phone.png");
       // A touch drag, as the browser reports a finger: pointer events of type "touch".
-      const from = phone.getByRole("button", { name: `Move ${was[1]}` });
-      const to = phone.getByRole("button", { name: `Move ${was[0]}` });
+      const from = phone.getByRole("button", { name: `Move ${was[1]}`, exact: true });
+      const to = phone.getByRole("button", { name: `Move ${was[0]}`, exact: true });
       await from.scrollIntoViewIfNeeded();
       const a = (await from.boundingBox())!;
       const b = (await to.boundingBox())!;
