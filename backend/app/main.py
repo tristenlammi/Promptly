@@ -77,6 +77,11 @@ async def lifespan(_: FastAPI):
     # Phase 1 (v2) — start the scheduled-tasks runner. Polls for due
     # automations every minute and dispatches headless runs.
     scheduler_task = start_scheduler()
+    # A home automation runs in this process (it's where a home's box is
+    # connected), so one that was mid-run when the server stopped is over.
+    from app.home.automations import close_interrupted
+
+    await close_interrupted()
     # Phase 7 (v2) — start the semantic conversation indexer. Continuously
     # embeds messages lacking an up-to-date vector so the search palette
     # can blend keyword + meaning-based recall. No-op when embeddings

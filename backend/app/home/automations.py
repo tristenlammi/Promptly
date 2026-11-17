@@ -473,6 +473,28 @@ def start(run_id: uuid.UUID) -> asyncio.Task[Any] | None:
     return spawn(execute(run_id), name=f"home_auto_run_{run_id}")
 
 
+INTERRUPTED = "The server restarted while this was running, so the rest didn't happen."
+
+
+async def close_interrupted() -> int:
+    """At start-up: runs of home automations left pending or running belong
+    to the process that just went away. Closed out, so "it's already
+    running" never outlives a restart. Never raises."""
+    try:
+        async with SessionLocal() as db:
+            home_tasks = select(Task.id).where(Task.home_id.is_not(None))
+            done = await db.execute(
+                update(TaskRun)
+                .where(TaskRun.status.in_(("pending", "running")), TaskRun.task_id.in_(home_tasks))
+                .values(status="failed", error=INTERRUPTED, finished_at=datetime.now(timezone.utc))
+            )
+            await db.commit()
+            return int(done.rowcount or 0)
+    except Exception:  # noqa: BLE001 - never the reason the server doesn't start
+        logger.warning("home: couldn't close interrupted automation runs", exc_info=True)
+        return 0
+
+
 def summary(node_runs: list[dict[str, Any]] | None) -> str:
     """What a run did, a line a step, for the run's record."""
     lines: list[str] = []

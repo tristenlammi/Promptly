@@ -199,7 +199,7 @@ export function HomeFlowEditor({ home, automation }: { home: Home; automation: H
         nextEdges = [...edges.filter((e) => e.source !== anchor.id), edgeOf(anchor.id, id, null), ...(isCheck(kind) ? after.map((e) => edgeOf(id, e.target, "true")) : after.map((e) => edgeOf(id, e.target, null)))];
       }
     }
-    const nextNodes = tidy([...nodes, { id, type: made.type, position: made.position, data: made.data }], nextEdges);
+    const nextNodes = tidy([...nodes.map((n) => ({ ...n, selected: false })), { id, type: made.type, position: made.position, data: made.data, selected: true }], nextEdges);
     setNodes(nextNodes);
     setEdges(nextEdges);
     setPicked(id);

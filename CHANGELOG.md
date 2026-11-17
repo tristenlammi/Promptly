@@ -21,6 +21,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Home: automations. On the Home page, the home's owner can make an automation in the flow editor: "when someone asks", "at a time" or "when a device changes", then what happens: a device (a light, plug, fan, scene or speaker), a room's lights, music, a wait, and "only if" checks on a device or the time of day. Everyone in the home sees them and can run one with its button. Locks, garage doors, gates and alarms can't be steps.
+- Home: phrases for automations. Give one a phrase like "it's morning time". Said to the assistant out loud, the exact phrase (with or without "Hey Promptly" and "please") runs it straight away without the AI; "run" and its name works too. Typed in a chat, the assistant runs it by its name or phrase, and can list the home's automations. Anything that isn't exactly a phrase is left to the assistant, which asks rather than guesses. Two automations in a home can't share a phrase.
+- Home: each automation shows how its last runs went, step by step ("Kitchen lights: turned off"), and says so in plain words when a step didn't work. One step failing doesn't stop the rest. If one that runs by itself fails three times in a row, the home's owner is told once.
+
+### Changed
+
+- Automations is now "AI tasks": the place for things the AI does for you on a schedule, like a morning news digest. "New AI task" opens one simple form, with three ready-made ones to start from, and no longer asks "simple or advanced?" first. Flows you already have are still listed there, still run and still open in the flow editor; building a new flow is a link at the bottom of the page on a computer. Automations for your home's devices are made on the Home page.
+
 ## [0.49.1] - 2026-11-17
 
 ### Added

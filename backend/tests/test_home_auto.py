@@ -639,6 +639,44 @@ async def test_the_clock_starts_it_here_whoever_owns_it_and_never_queues_it(user
     await task
 
 
+async def test_a_run_cut_off_by_a_restart_is_closed_and_does_not_block_the_next(user, client, db):  # noqa: F811
+    from app.home import automations
+    from app.tasks.models import Task, TaskRun
+
+    await _turn_on(client, user)
+    prepared, home_id, box, task = await _home(client, user, user)
+    made = await _make(client, user, home_id, "Evening")
+    assert (await _save(client, user, home_id, made["id"], graph=_chain(_asked(), _light("a", prepared)))).status_code == 200
+    # As the last process left it: running, and nothing is running it.
+    stuck = TaskRun(task_id=uuid.UUID(made["id"]), status="running", trigger="schedule", started_at=datetime.now(timezone.utc))
+    mine = TaskRun(task_id=(await _own_task(db, user)).id, status="running", trigger="schedule")
+    db.add_all([stuck, mine])
+    await db.commit()
+    row = await db.get(Task, uuid.UUID(made["id"]))
+    with pytest.raises(automations.Problem, match="already running"):
+        await automations.run_now(db, row, "manual")
+    assert await automations.close_interrupted() == 1
+    await db.refresh(stuck)
+    await db.refresh(mine)
+    assert stuck.status == "failed" and "restarted" in stuck.error
+    assert mine.status == "running"  # someone's own automation is the worker's to look after
+    side = asyncio.create_task(_answer(box, n=1))
+    ran = (await client.post(f"/api/home/{home_id}/automations/{made['id']}/run", headers=_hdr(user))).json()
+    await side
+    assert ran["ok"] is True
+    await box.hang_up()
+    await task
+
+
+async def _own_task(db, who):
+    from app.tasks.models import Task
+
+    own = Task(user_id=who.id, title="Mine", prompt="x", frequency="daily")
+    db.add(own)
+    await db.commit()
+    return own
+
+
 async def test_home_steps_do_nothing_outside_a_home_automation(user, db):
     """Someone's own automation can't borrow a home's devices by naming them."""
     from app.tasks.flow_graph import FlowGraph
