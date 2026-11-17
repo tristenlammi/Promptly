@@ -1,8 +1,8 @@
-import { ChevronLeft, ChevronRight, Download, FileText, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, FileText, FileX, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { Attachment } from "@/api/rooms";
+import type { Attachment, RemovedAttachment } from "@/api/rooms";
 import { cn } from "@/utils/cn";
 
 import { fileSize } from "../format";
@@ -90,6 +90,28 @@ export function AttachmentList({ attachments, saveable }: { attachments: Attachm
         </a>
       ))}
       {open !== null && <Lightbox images={all} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+/** Files the sender has since removed: the name stays, so the message
+ *  still makes sense, and there is nothing to open. */
+export function RemovedAttachments({ removed }: { removed?: RemovedAttachment[] }) {
+  if (!removed?.length) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-1.5">
+      {removed.map((a) => (
+        <div
+          key={a.id}
+          className="flex w-fit max-w-full items-center gap-2.5 rounded-xl border border-dashed border-[var(--border)] px-3 py-2 text-[var(--text-muted)]"
+        >
+          <FileX className="h-5 w-5 shrink-0" />
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-sm">{a.mime.startsWith("audio/") && /^voice/i.test(a.filename) ? "Voice message" : a.filename}</span>
+            <span className="text-xs">File removed</span>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

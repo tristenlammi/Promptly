@@ -21,6 +21,8 @@ from .models import Room, RoomAttachment, RoomMember, RoomMessage, RoomPollVote,
 
 logger = logging.getLogger("promptly.rooms.service")
 
+# One request's worth. Bigger files (up to 1 GB) arrive in pieces through
+# tusd: see ``uploads.py``.
 MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 MAX_ATTACHMENTS = 10
 THUMB_EDGE = 1440
@@ -222,11 +224,11 @@ UNSENT_KEPT = timedelta(hours=24)
 
 
 async def store_attachment(db: AsyncSession, room: Room, user: User, upload: UploadFile) -> RoomAttachment:
-    waiting = await db.scalar(
-        select(func.count()).select_from(RoomAttachment).where(RoomAttachment.uploader_id == user.id, RoomAttachment.message_id.is_(None))
-    )
-    if (waiting or 0) >= MAX_UNSENT:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Send or remove the files you've already attached first")
+    from . import uploads
+
+    await uploads.ensure_not_waiting(db, user)
+    # It counts towards your storage: no point taking the bytes if it's full.
+    await uploads.ensure_storage(db, user, 0)
     att = RoomAttachment(id=uuid.uuid4(), room_id=room.id, uploader_id=user.id, filename=_clean_name(upload.filename))
     att.mime = (upload.content_type or mimetypes.guess_type(att.filename)[0] or "application/octet-stream")[:127]
     path = absolute_path(att_path(att))
@@ -237,7 +239,9 @@ async def store_attachment(db: AsyncSession, room: Room, user: User, upload: Upl
             while chunk := await upload.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_ATTACHMENT_BYTES:
-                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Files can be up to 50 MB")
+                    # A bigger file is sent in pieces (the page does that by
+                    # itself); one that arrives whole is past any limit here.
+                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=uploads.too_big_detail())
                 out.write(chunk)
     except BaseException:
         path.unlink(missing_ok=True)
@@ -246,6 +250,12 @@ async def store_attachment(db: AsyncSession, room: Room, user: User, upload: Upl
         path.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That file is empty")
     att.size = size
+    try:
+        # Exactly, and one upload at a time per person until the commit.
+        await uploads.ensure_storage(db, user, size, lock=True)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
     if att.mime.startswith("image/") and att.mime != "image/svg+xml":
         _thumbnail(att, path)
     db.add(att)

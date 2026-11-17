@@ -44,6 +44,8 @@ export interface StorageBreakdown {
   /** Versions count toward storage from ``versions_counted_from`` (WP-6.2). */
   versions_counted?: boolean;
   versions_counted_from?: string | null;
+  /** Of used_bytes: files you've sent in Rooms (Files â†’ Rooms uploads). */
+  rooms_bytes?: number;
   last_backup_at: string | null;
   last_offsite_at: string | null;
 }

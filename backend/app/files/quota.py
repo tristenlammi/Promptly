@@ -46,6 +46,10 @@ class StorageQuota:
     versions_bytes: int = 0
     versions_counted: bool = False
     versions_from: Any = None
+    # Files this person sent in Rooms: counted in ``used_bytes``. They are
+    # not Drive files (``app/rooms/uploads.py``); shown apart so the storage
+    # meter can say where the space went.
+    rooms_bytes: int = 0
 
     @property
     def remaining_bytes(self) -> int | None:
@@ -126,9 +130,13 @@ async def get_quota(db: AsyncSession, user: User) -> StorageQuota:
     versions = await _versions_bytes(db, user.id)
     v_from = row.versions_quota_from if row is not None else None
     v_counted = v_from is None or now >= v_from
+    from app.rooms.uploads import used_bytes as rooms_used_bytes
+
+    rooms = await rooms_used_bytes(db, user.id)
     return StorageQuota(
         cap_bytes=cap,
-        used_bytes=used - pending + (versions if v_counted else 0),
+        used_bytes=used - pending + (versions if v_counted else 0) + rooms,
+        rooms_bytes=rooms,
         office_pending_bytes=pending,
         versions_bytes=versions,
         versions_counted=v_counted,

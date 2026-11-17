@@ -220,6 +220,10 @@ const ShareLinkLandingPage = lazyWithRetry(
   () => import("@/pages/ShareLinkLandingPage").then((m) => ({ default: m.ShareLinkLandingPage })),
   "ShareLinkLandingPage"
 );
+const RoomsUploadsPage = lazyWithRetry(
+  () => import("@/pages/RoomsUploadsPage").then((m) => ({ default: m.RoomsUploadsPage })),
+  "RoomsUploadsPage"
+);
 const StarredFilesPage = lazyWithRetry(
   () => import("@/pages/StarredFilesPage").then((m) => ({ default: m.StarredFilesPage })),
   "StarredFilesPage"
@@ -958,6 +962,7 @@ export default function App() {
           <Route path="/files/folder/:folderId" element={<FilesPage />} />
           <Route path="/files/recent" element={<RecentFilesPage />} />
           <Route path="/files/starred" element={<StarredFilesPage />} />
+          <Route path="/files/rooms-uploads" element={<RoomsUploadsPage />} />
           <Route path="/files/shared" element={<SharedWithMePage />} />
           <Route path="/files/trash" element={<TrashPage />} />
           <Route path="/files/links" element={<SharedLinksPage />} />

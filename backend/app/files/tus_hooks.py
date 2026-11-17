@@ -233,6 +233,18 @@ async def _pre_create(db: AsyncSession, event: dict[str, Any]) -> dict[str, Any]
         except HTTPException as e:
             raise _Reject(e.status_code, e.detail) from None
         return {"ChangeFileInfo": {"ID": uuid.uuid4().hex, "MetaData": meta}}
+    if meta.get("room_id"):
+        # A big file being sent in Rooms: not a Drive file either (it never
+        # becomes a row in ``files``), but it uses the sender's storage.
+        from app.rooms import uploads as room_uploads
+
+        try:
+            await room_uploads.plan_big(db, user, meta["room_id"], meta.get("filename") or "", size)
+        except HTTPException as e:
+            raise _Reject(e.status_code, e.detail) from None
+        upload_id = uuid.uuid4().hex
+        await _reserve(upload_id, user.id, size)
+        return {"ChangeFileInfo": {"ID": upload_id, "MetaData": meta}}
     args = _plan_args(meta, at_finish=False)
     plan = await plan_upload(db, request=client_request(event), user=user, size_hint=size, **args)
     if plan.owner_id is not None:
@@ -273,6 +285,14 @@ async def _pre_finish(db: AsyncSession, event: dict[str, Any]) -> dict[str, Any]
 
             n = await adopt_part(db, user, meta["import_job"], meta.get("filename") or "", path)
             return {"HTTPResponse": {"Header": {"Upload-File-Id": f"import-part-{n}"}}}
+        if meta.get("room_id"):
+            from app.rooms import uploads as room_uploads
+
+            await _release(upload_id)  # its own reservation is now real bytes
+            att = await room_uploads.adopt_big(
+                db, user, meta["room_id"], meta.get("filename") or "", meta.get("filetype") or None, path, upload_id=upload_id
+            )
+            return {"HTTPResponse": {"Header": {"Upload-File-Id": str(att.id)}}}
         await _release(upload_id)  # its own reservation is now real bytes
         args = _plan_args(_meta(upload), at_finish=True)
         # Into staging (a rename — same disk), hashed, then the one upload path.

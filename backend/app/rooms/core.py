@@ -227,7 +227,13 @@ async def messages_out(db: AsyncSession, msgs: list[RoomMessage], viewer_id: uui
     for r in (await db.execute(select(RoomReaction).where(RoomReaction.message_id.in_(ids)).order_by(RoomReaction.created_at))).scalars():
         reacts.setdefault(r.message_id, {}).setdefault(r.emoji, []).append(str(r.user_id))
     atts: dict[uuid.UUID, list[dict]] = {}
+    # Files their sender has since removed (Files → Rooms uploads): a name
+    # to show as "File removed", nothing to open.
+    gone: dict[uuid.UUID, list[dict]] = {}
     for a in (await db.execute(select(RoomAttachment).where(RoomAttachment.message_id.in_(ids)).order_by(RoomAttachment.created_at))).scalars():
+        if a.removed_at is not None:
+            gone.setdefault(a.message_id, []).append({"id": str(a.id), "filename": a.filename, "mime": a.mime})  # type: ignore[arg-type]
+            continue
         atts.setdefault(a.message_id, []).append(attachment_out(a))  # type: ignore[arg-type]
     reply_ids = {m.reply_to_id for m in msgs if m.reply_to_id}
     replies = {}
@@ -253,6 +259,7 @@ async def messages_out(db: AsyncSession, msgs: list[RoomMessage], viewer_id: uui
                 "mentions": m.mentions or [],
                 "reactions": [] if deleted else [{"emoji": e, "user_ids": u} for e, u in reacts.get(m.id, {}).items()],
                 "attachments": [] if deleted else atts.get(m.id, []),
+                "removed_attachments": [] if deleted else gone.get(m.id, []),
                 "pinned": m.pinned_at is not None and not deleted,
                 "edited_at": m.edited_at.isoformat() if m.edited_at else None,
                 "deleted": deleted,

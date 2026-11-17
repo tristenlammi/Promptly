@@ -102,7 +102,10 @@ class RoomReaction(Base):
 
 class RoomAttachment(UUIDPKMixin, CreatedAtMixin, Base):
     """A file sent in a room. Stored at ``rooms/<room_id>/<id>`` under the
-    upload root — not in anyone's Files, so not indexed."""
+    upload root — never a row in ``files``, so no part of Drive (its index,
+    its search, the AI's file tools) can see it. It counts towards the
+    uploader's storage (``app/files/quota.py``) and they see their own in
+    Files → Rooms uploads (``uploads.py``)."""
 
     __tablename__ = "room_attachments"
 
@@ -117,6 +120,9 @@ class RoomAttachment(UUIDPKMixin, CreatedAtMixin, Base):
     has_thumb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # A GIF or animated WebP: played in the chat, not shown as a still.
     animated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # The uploader removed the file from their Rooms uploads (0490): its
+    # bytes are gone, the row stays so the message can say "File removed".
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class RoomSavedGif(UUIDPKMixin, CreatedAtMixin, Base):

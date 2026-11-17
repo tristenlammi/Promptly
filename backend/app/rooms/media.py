@@ -154,7 +154,7 @@ async def save_attachment(db: AsyncSession, user: User, att_id: uuid.UUID) -> Ro
     """Keep your own copy of a GIF someone sent. You must be able to see the
     message it's on; the copy is yours from then on."""
     att = await db.get(RoomAttachment, att_id)
-    if att is None or att.message_id is None:
+    if att is None or att.message_id is None or att.removed_at is not None:
         raise core.not_found("GIF")
     msg = await db.get(RoomMessage, att.message_id)
     if msg is None or msg.deleted_at is not None:
@@ -226,6 +226,11 @@ async def attach_saved(db: AsyncSession, room: Room, user: User, g: RoomSavedGif
     src = absolute_path(saved_path(g))
     if not src.exists():
         raise core.not_found("GIF")
+    # A file attached to a message like any other: the same limits.
+    from . import uploads
+
+    await uploads.ensure_not_waiting(db, user)
+    await uploads.ensure_storage(db, user, g.size, lock=True)
     att = RoomAttachment(
         id=uuid.uuid4(),
         room_id=room.id,

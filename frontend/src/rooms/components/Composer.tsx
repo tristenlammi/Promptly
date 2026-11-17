@@ -3,7 +3,7 @@ import { AtSign, BarChart3, CalendarPlus, Camera, Clapperboard, CornerUpLeft, Lo
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { crossApi, type ShareKind } from "@/api/crossapp";
-import { roomsApi, type Attachment, type GifSearchConfig, type LibraryGif, type Message, type RoomUser, type SavedGif, type SharedPlace } from "@/api/rooms";
+import { roomsApi, tooBigForRooms, type Attachment, type GifSearchConfig, type LibraryGif, type Message, type RoomUser, type SavedGif, type SharedPlace } from "@/api/rooms";
 import { useThingMentions } from "@/components/links/useThingMentions";
 import { Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -25,7 +25,9 @@ import { PollSheet } from "./PollSheet";
 import { CameraView } from "./CameraView";
 import { VoiceButton } from "./VoiceButton";
 
+// Until the server has said what it allows (1 GB where big uploads are on).
 const MAX_FILE = 50 * 1024 * 1024;
+let tidiedLeftovers = false;
 
 interface Upload {
   key: string;
@@ -159,12 +161,23 @@ export const Composer = forwardRef<
     el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
   }, [text]);
 
+  // Big files left half-sent by a closed tab: clear them out, once.
+  useEffect(() => {
+    if (tidiedLeftovers) return;
+    tidiedLeftovers = true;
+    void import("@/lib/tusUpload").then((m) => m.discardStaleRoomUploads()).catch(() => undefined);
+  }, []);
+
+  // How big a file can be here, and whether big ones go up in pieces.
+  const { data: uploadPolicy } = useQuery({ queryKey: ["rooms", "upload-policy"], queryFn: roomsApi.uploadPolicy, staleTime: 10 * 60_000 });
+
   const addFiles = useCallback(
     (files: File[]) => {
       if (editing) return;
+      const maxBytes = uploadPolicy?.max_bytes ?? MAX_FILE;
       for (const file of files) {
-        if (file.size > MAX_FILE) {
-          toast.error(`${file.name} is over 50 MB.`);
+        if (file.size > maxBytes) {
+          toast.error(tooBigForRooms(file.name, maxBytes));
           continue;
         }
         const key = `${Date.now()}-${Math.random()}`;
@@ -177,6 +190,7 @@ export const Composer = forwardRef<
             file,
             (f) => setUploads((u) => u.map((x) => (x.key === key ? { ...x, progress: f } : x))),
             abort.signal,
+            uploadPolicy,
           )
           .then((att) => setUploads((u) => u.map((x) => (x.key === key ? { ...x, att, progress: 1 } : x))))
           .catch((err) => {
@@ -185,7 +199,7 @@ export const Composer = forwardRef<
           });
       }
     },
-    [roomId, editing],
+    [roomId, editing, uploadPolicy],
   );
 
   useImperativeHandle(ref, () => ({ addFiles, focus: () => ta.current?.focus() }), [addFiles]);
@@ -505,7 +519,9 @@ export const Composer = forwardRef<
               ) : (
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-xs font-medium text-[var(--text)]">{u.file.name}</span>
-                  <span className="text-xs text-[var(--text-muted)]">{u.error ?? fileSize(u.file.size)}</span>
+                  <span className="text-xs text-[var(--text-muted)]">
+                    {u.error ?? (!u.att && u.file.size > 20 * 1024 * 1024 ? `${Math.round(u.progress * 100)}% of ${fileSize(u.file.size)}` : fileSize(u.file.size))}
+                  </span>
                 </span>
               )}
               {!u.att && !u.error && (

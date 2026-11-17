@@ -26,6 +26,13 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Home in chat and on the phone assistant: ask what's on at home ("are the kitchen lights on?", "what's playing?") and have it switch lights (on, off, brightness, colours, warm or cool white), plugs, fans, scenes and speakers (play, pause, next, previous, volume, mute). Only for people in a home, and only their own home. It never unlocks, opens or disarms anything: locks, garage doors, gates and alarms stay on the Home page.
 - Phone assistant: simple device commands happen at once, without waiting for the AI: "turn off the kitchen lights", "set lounge to 30%", "make the desk lamp warm white", "pause the music", "volume 40 in the study", "turn on movie night". It only does this when the room or device you named is exactly one thing; anything it isn't sure of goes to the AI, which can ask which you meant.
 - Home: "play preset 3" (spoken, or in a chat) starts a numbered favourite saved on a WiiM speaker in the WiiM Home app, such as a Tidal playlist. Needs the server's Home box to update (connector 0.6.0).
+- Rooms: a file you send can now be up to 1 GB (it was 50 MB). A big file goes up in pieces, so a dropped connection carries on from where it got to instead of starting again. A file over 1 GB is refused before anything is sent, with a note to put it in your files and use Send to… instead. Servers without big uploads switched on stay at 50 MB.
+- Files: a new "Rooms uploads" list (in the Files menu) shows every file you've sent in Rooms, where you sent it, its size, and what they add up to. You can download one or remove it. Removing a file takes it away for everyone in that conversation; the message stays and says "File removed". These files stay with Rooms: they aren't mixed in with your other files and AI never reads them.
+
+### Changed
+
+- Rooms: files you send now count towards your own storage, the same total your other files use, and show as their own line under Storage. A file that would take you over your limit is refused with a plain message. Files sent before this update count too.
+- Rooms: sending one of your saved GIFs now follows the same limits as any attached file (30 waiting to be sent, and your storage).
 
 ## [0.47.0] - 2026-11-17
 
