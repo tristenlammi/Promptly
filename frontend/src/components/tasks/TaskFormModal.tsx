@@ -60,6 +60,16 @@ interface TaskFormModalProps {
    * for the standalone /tasks page (task stays top-level).
    */
   workspaceId?: string | null;
+  /** A new task that starts filled in (the AI tasks page's suggestions). */
+  starter?: TaskStarter | null;
+}
+
+export interface TaskStarter {
+  title: string;
+  prompt: string;
+  useWebSearch: boolean;
+  frequency?: TaskFrequency;
+  time?: string;
 }
 
 function pad(n: number): string {
@@ -72,6 +82,7 @@ export function TaskFormModal({
   task,
   onSaved,
   workspaceId,
+  starter,
 }: TaskFormModalProps) {
   const { data: models } = useAvailableModels();
   const create = useCreateTask();
@@ -138,13 +149,13 @@ export function TaskFormModal({
       setConcurrency(task.concurrency === "skip" ? "skip" : "allow");
       setNotifyMode(task.notify ? task.notify_mode ?? "failures" : "never");
     } else {
-      setTitle("");
-      setPrompt("");
+      setTitle(starter?.title ?? "");
+      setPrompt(starter?.prompt ?? "");
       setModelKey("");
-      setUseWebSearch(false);
+      setUseWebSearch(starter?.useWebSearch ?? false);
       setConnectorIds(new Set());
-      setFrequency("daily");
-      setTime("07:00");
+      setFrequency(starter?.frequency ?? "daily");
+      setTime(starter?.time ?? "07:00");
       setWeekday(0);
       setWeekdays([0]);
       setIntervalMinutes(30);
@@ -153,7 +164,7 @@ export function TaskFormModal({
       setEnabled(true);
       setConcurrency("allow");
     }
-  }, [open, task, defaultTimezone]);
+  }, [open, task, defaultTimezone, starter]);
 
   // Load the connectors this user can attach (global + their grants +
   // the home workspace's restricted ones).
@@ -250,8 +261,8 @@ export function TaskFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={editing ? "Edit automation" : "New automation"}
-      description="A scheduled prompt that produces a fresh report each run."
+      title={editing ? "Edit AI task" : "New AI task"}
+      description="Something the AI does for you on a schedule. Each run is saved for you to read."
       widthClass="max-w-xl"
       footer={
         <>

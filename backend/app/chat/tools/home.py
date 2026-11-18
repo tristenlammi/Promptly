@@ -11,6 +11,9 @@
   (``app/home/music.py``). It plays only what is plainly the thing asked
   for; otherwise it hands back a short list to ask the person about.
 
+* ``home_automation``: run one of the home's own automations by its name
+  or phrase ("movie time"), or list them (``app/home/automations.py``).
+
 Only the person's own homes (``app/home/assistant.py``); an admin gets no
 more than anyone. Locks, garage doors, gates and alarms are listed but never
 operated from here: the tool says to use the Home page. On a turn that read
@@ -457,4 +460,60 @@ def _no_music(speakers: list[dict[str, Any]]) -> str:
     )
 
 
-HOME_TOOLS: list[Tool] = [HomeDevicesTool(), HomeControlTool(), HomeMusicTool()]
+class HomeAutomationTool(Tool):
+    name = "home_automation"
+    category = "home"
+    max_per_turn = 3
+    timeout_seconds = 15.0
+    description = (
+        "The automations (routines) their home has set up, each with a name and phrases: 'movie time', 'it's morning "
+        "time', 'bedtime'. When what they said sounds like one of these rather than one device, call this with their "
+        "words as `name`: it runs it if it is one of theirs, and tells you if it isn't. With no `name` it lists them "
+        "('what automations do we have?'). Automations are made and changed on the Home page, not here."
+    )
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "The automation's name or phrase, in their words. Leave out to list them."}},
+    }
+
+    async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+        from app.home import automations
+
+        name = str(args.get("name") or "").strip()[:120]
+        rows = await automations.mine(ctx.db, ctx.user.id)
+        many_homes = len({h.id for _t, h in rows}) > 1
+
+        def line(t: Any, h: Any) -> str:
+            phrases = ", ".join(f"“{p}”" for p in (t.phrases or [])[:4])
+            where = f" ({h.name})" if many_homes else ""
+            return f"- {t.title}{where}" + (f": say {phrases}" if phrases else "") + ("" if t.enabled else " [switched off]")
+
+        if not name:
+            if not rows:
+                return ToolResult(content="Their home has no automations yet. The home's owner makes them on the Home page, under Automations.", meta={"summary": "No automations", "result_count": 0})
+            return ToolResult(
+                content=f"{len(rows)} automation{'' if len(rows) == 1 else 's'}:\n" + "\n".join(line(t, h) for t, h in rows),
+                meta={"summary": f"{len(rows)} automation{'' if len(rows) == 1 else 's'}", "result_count": len(rows)},
+            )
+        guard_write(ctx, "running a home automation")
+        want = automations.phrase_key(name)
+        hits = [(t, h) for t, h in rows if automations.said_for(name, t) or automations.phrase_key(t.title) == want]
+        if not hits and want:
+            hits = [(t, h) for t, h in rows if want in automations.phrase_key(t.title)]
+        if not hits:
+            listed = "\n".join(line(t, h) for t, h in rows) or "(none)"
+            raise ToolError(f"“{name}” isn't one of their home's automations, so nothing ran. Carry on and answer them normally. Theirs:\n{listed}")
+        if len(hits) > 1:
+            raise ToolError("More than one automation could be that. Ask which they mean:\n" + "\n".join(line(t, h) for t, h in hits[:8]))
+        task, _home = hits[0]
+        try:
+            run = await automations.run_now(ctx.db, task, "phrase", wait=5.0)
+        except automations.Problem as e:
+            raise ToolError(str(e)) from e
+        ok, said = automations.result_words(task.title, run)
+        if not ok:
+            raise ToolError(said)
+        return ToolResult(content=f"Done: {said}", meta={"summary": said, "spoken": said})
+
+
+HOME_TOOLS: list[Tool] = [HomeDevicesTool(), HomeControlTool(), HomeMusicTool(), HomeAutomationTool()]

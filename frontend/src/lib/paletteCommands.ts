@@ -211,7 +211,7 @@ export const PLACES: Place[] = [
   { label: "Files", to: "/files", words: ["files", "drive", "my files", "documents", "docs"] },
   { label: "Photos", to: "/files/photos", words: ["photos", "pictures", "gallery"] },
   { label: "Workspaces", to: "/workspaces", words: ["workspaces", "workspace"] },
-  { label: "Automations", to: "/tasks", words: ["automations", "automation"] },
+  { label: "AI tasks", to: "/tasks", words: ["ai tasks", "ai task", "tasks", "automations", "automation", "scheduled"] },
   { label: "Apps", to: "/apps", words: ["apps", "launcher"] },
   { label: "Item Store", to: "/apps/store", words: ["store", "app store", "item store"] },
   { label: "Tasks", to: "/apps/tasks", words: ["tasks", "todo", "todos", "to-do", "reminders"] },

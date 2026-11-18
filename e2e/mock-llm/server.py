@@ -29,6 +29,8 @@ Spoken turns (Talk, WP-T4) can't carry markers, so plain words do:
     "joni" + tools          call home_music again with the Joni Mitchell album's uri
     "some jazz" + tools     call home_music with mix: a kind of music, no speaker said (it just plays)
     "just play music" + tools  call home_music with mix and nothing else
+    "movie time" + tools    call home_automation: run the home's "movie time" automation
+    "what automations" + tools  call home_automation with no name (it lists them)
     "pausecheck" + tools
              read something from outside (the person's files), then open
              example.com at an address they never wrote: the reply stops
@@ -164,6 +166,12 @@ def _tool_call_for(body: dict) -> tuple[str, str] | None:
             return "home_music", json.dumps({"query": "Blue", "target": "Lounge"})
         if re.search(r"\bjoni\b", text, re.I) and "home_music" in offered:
             return "home_music", json.dumps({"query": "Blue by Joni Mitchell", "uri": "tidal://album/300", "target": "Lounge"})
+        # A home automation by its phrase, typed (said out loud, an exact
+        # phrase never gets here: app/home/automations.py).
+        if re.search(r"\bmovie time\b", text, re.I) and "home_automation" in offered:
+            return "home_automation", json.dumps({"name": "movie time"})
+        if re.search(r"\bwhat automations\b", text, re.I) and "home_automation" in offered:
+            return "home_automation", json.dumps({})
         # Talk phase 2: "send that to my phone" (the latest thing it found).
         if re.search(r"\bphone\b", text, re.I) and "send_to_phone" in offered:
             return "send_to_phone", json.dumps({"item": 1})

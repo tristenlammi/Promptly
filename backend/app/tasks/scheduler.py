@@ -55,10 +55,14 @@ async def _claim_due() -> list[uuid.UUID]:
                             Workspace.trashed_at.is_not(None),
                         ),
                         # Only for owners who may use Automations: turning
-                        # it off quietly holds their schedules.
-                        exists().where(
-                            User.id == Task.user_id,
-                            or_(User.role == "admin", User.can_use_automations.is_(True)),
+                        # it off quietly holds their schedules. A home's
+                        # automations are the home's, whoever made them.
+                        or_(
+                            Task.home_id.is_not(None),
+                            exists().where(
+                                User.id == Task.user_id,
+                                or_(User.role == "admin", User.can_use_automations.is_(True)),
+                            ),
                         ),
                     )
                     .order_by(Task.next_run_at.asc())

@@ -61,9 +61,9 @@ export const OPTIONAL_NAV_KEYS: {
   },
   {
     key: "tasks",
-    label: "Automations",
+    label: "AI tasks",
     description:
-      "One page listing every automation you own — personal and across all your workspaces — with pause/run controls.",
+      "Things the AI does for you on a schedule, like a morning news digest, with your prompts and commands.",
   },
 ];
 
@@ -117,7 +117,7 @@ export const NAV_ITEMS: NavItem[] = [
   {
     to: "/automations",
     icon: Workflow,
-    label: "Automations",
+    label: "AI tasks",
     section: "chat",
     // Deliberately NOT desktop-only. The page's Prompts and Commands
     // tabs are mobile-first — `/` in chat is a phone gesture, and voice

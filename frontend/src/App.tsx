@@ -64,6 +64,10 @@ const HomePage = lazyWithRetry(
   () => import("@/home/HomePage").then((m) => ({ default: m.HomePage })),
   "HomePage"
 );
+const HomeAutomationPage = lazyWithRetry(
+  () => import("@/home/automations/HomeAutomationPage").then((m) => ({ default: m.HomeAutomationPage })),
+  "HomeAutomationPage"
+);
 const TodayPage = lazyWithRetry(
   () => import("@/pages/TodayPage").then((m) => ({ default: m.TodayPage })),
   "TodayPage"
@@ -925,6 +929,7 @@ export default function App() {
         <Route path="/today" element={<TodayPage />} />
         {/* Promptly Home: your home's devices (off until an admin turns it on). */}
         <Route path="/home" element={<HomePage />} />
+        <Route path="/home/automations/:homeId/:autoId" element={<HomeAutomationPage />} />
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/tags/:tagId" element={<TagPage />} />
         <Route path="/places" element={<PlacesPage />} />

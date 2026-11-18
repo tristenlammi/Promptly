@@ -470,12 +470,13 @@ export function UserFormModal({
               />
               <span className="text-xs">
                 <span className="font-medium text-[var(--text)]">
-                  Automations
+                  AI tasks and flows
                 </span>
                 <span className="block text-[11px] text-[var(--text-muted)]">
-                  Let this user build scheduled, webhook and event
-                  automations. Off = Automations is hidden for them and any
-                  they already have stop running.
+                  Let this user have the AI do things on a schedule, and
+                  build flows. Off = AI tasks are hidden for them and any
+                  they already have stop running. (A home's own automations
+                  don't need this.)
                 </span>
               </span>
             </label>

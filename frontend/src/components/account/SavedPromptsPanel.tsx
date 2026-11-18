@@ -31,7 +31,7 @@ export function SavedPromptsPanel() {
 
       <div className="px-4 py-4">
         <p className="text-sm text-[var(--text-muted)]">
-          Saved prompts now live in <strong>Automations → Prompts</strong>,
+          Saved prompts now live in <strong>AI tasks → Prompts</strong>,
           alongside the commands you can run by asking. Everything you had
           is already there, and <code className="font-mono">/</code> in any
           chat still inserts them exactly as before.
@@ -43,7 +43,7 @@ export function SavedPromptsPanel() {
             rightIcon={<ArrowRight className="h-3.5 w-3.5" />}
             onClick={() => navigate("/tasks?tab=prompts")}
           >
-            Open Automations
+            Open AI tasks
           </Button>
         </div>
       </div>

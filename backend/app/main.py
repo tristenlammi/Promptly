@@ -77,6 +77,11 @@ async def lifespan(_: FastAPI):
     # Phase 1 (v2) — start the scheduled-tasks runner. Polls for due
     # automations every minute and dispatches headless runs.
     scheduler_task = start_scheduler()
+    # A home automation runs in this process (it's where a home's box is
+    # connected), so one that was mid-run when the server stopped is over.
+    from app.home.automations import close_interrupted
+
+    await close_interrupted()
     # Phase 7 (v2) — start the semantic conversation indexer. Continuously
     # embeds messages lacking an up-to-date vector so the search palette
     # can blend keyword + meaning-based recall. No-op when embeddings
@@ -719,6 +724,9 @@ from app.home.layout import router as home_layout_router  # noqa: E402
 
 app.include_router(home_router, prefix="/api/home", tags=["home"])
 app.include_router(home_layout_router, prefix="/api/home", tags=["home"])
+from app.home.auto_router import router as home_auto_router  # noqa: E402
+
+app.include_router(home_auto_router, prefix="/api/home", tags=["home"])
 app.include_router(home_admin_router, prefix="/api/admin/home", tags=["home"])
 # Mail: the mailboxes people connect (app/mail).
 from app.mail.router import router as mail_router  # noqa: E402

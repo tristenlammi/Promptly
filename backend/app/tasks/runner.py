@@ -559,6 +559,8 @@ async def _owner_busy(db, user_id, run_id) -> bool:
         .join(Task, Task.id == TaskRun.task_id)
         .where(
             Task.user_id == user_id,
+            # A home automation waiting twenty minutes isn't this person's work.
+            Task.home_id.is_(None),
             TaskRun.status == "running",
             TaskRun.id != run_id,
         )
@@ -599,6 +601,14 @@ async def execute_run(run_id: uuid.UUID) -> None:
         if task is None:
             run.status = "failed"
             run.error = "Task was deleted before the run could start."
+            run.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+            return
+        if task.home_id is not None:
+            # A home automation that reached the worker (an old queued job):
+            # only the main server process is connected to a home's box.
+            run.status = "failed"
+            run.error = "This couldn't run just now. Try again."
             run.finished_at = datetime.now(timezone.utc)
             await db.commit()
             return

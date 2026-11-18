@@ -351,7 +351,7 @@ async def automations_section(db: AsyncSession, user: User, now: datetime) -> di
         return None
     rows = (
         await db.execute(
-            select(Task).where(Task.user_id == user.id, Task.enabled.is_(True), Task.next_run_at.is_not(None)).order_by(Task.next_run_at).limit(3)
+            select(Task).where(Task.user_id == user.id, Task.home_id.is_(None), Task.enabled.is_(True), Task.next_run_at.is_not(None)).order_by(Task.next_run_at).limit(3)
         )
     ).scalars().all()
     failed = (
@@ -359,7 +359,7 @@ async def automations_section(db: AsyncSession, user: User, now: datetime) -> di
             select(func.count())
             .select_from(TaskRun)
             .join(Task, Task.id == TaskRun.task_id)
-            .where(Task.user_id == user.id, TaskRun.status == "failed", TaskRun.created_at >= now - timedelta(hours=24))
+            .where(Task.user_id == user.id, Task.home_id.is_(None), TaskRun.status == "failed", TaskRun.created_at >= now - timedelta(hours=24))
         )
     ) or 0
     if not rows and not failed:

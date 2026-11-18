@@ -59,12 +59,37 @@ async def _get_pool():
 get_pool = _get_pool
 
 
+async def _is_home_run(run_id: uuid.UUID) -> bool:
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.tasks.models import Task, TaskRun
+
+    try:
+        async with SessionLocal() as db:
+            return (
+                await db.scalar(select(Task.home_id).join(TaskRun, TaskRun.task_id == Task.id).where(TaskRun.id == run_id))
+            ) is not None
+    except Exception:  # noqa: BLE001 - never the reason a run isn't queued
+        logger.warning("enqueue_run: couldn't look up run %s", run_id, exc_info=True)
+        return False
+
+
 async def enqueue_run(run_id: uuid.UUID, *, defer_by: float | None = None) -> None:
     """Enqueue a :class:`TaskRun` for the worker to execute (``defer_by``
     seconds from now, when given).
 
     Falls back to inline execution (non-durable, but never dropped) if the
-    queue can't be reached."""
+    queue can't be reached.
+
+    A home automation's run (``tasks.home_id``) is never queued: only the
+    main server process is connected to a home's box, so it runs there
+    (``app/home/automations.py``)."""
+    if await _is_home_run(run_id):
+        from app.home import automations
+
+        automations.start(run_id)
+        return
     try:
         pool = await _get_pool()
         if defer_by:

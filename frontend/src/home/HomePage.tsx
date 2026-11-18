@@ -12,6 +12,7 @@ import { cn } from "@/utils/cn";
 
 import { AddDeviceSheet } from "./AddDeviceSheet";
 import { Board } from "./board/Board";
+import { AutomationsSection } from "./automations/AutomationsSection";
 import { DeviceSheet } from "./DeviceSheet";
 import { HomeSettingsSheet } from "./HomeSettingsSheet";
 import { keyOf } from "./kinds";
@@ -153,6 +154,7 @@ export function HomePage() {
             <p className="mx-auto max-w-md text-center text-xs text-[var(--text-muted)]">No box? Ask whoever looks after this Promptly.</p>
           </div>
         )}
+        {home && home.boxes.length > 0 && <AutomationsSection home={home} />}
         {home && <Devices home={home} onAddDevice={() => setAddingDevice(true)} onSort={() => setSorting(true)} />}
       </div>
       {home && <AddDeviceSheet open={addingDevice} home={home} onClose={() => setAddingDevice(false)} onSort={() => setSorting(true)} />}

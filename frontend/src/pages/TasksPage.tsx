@@ -26,7 +26,7 @@ import {
 } from "@/hooks/useTasks";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { tasksApi, type Task } from "@/api/tasks";
-import { TaskFormModal } from "@/components/tasks/TaskFormModal";
+import { TaskFormModal, type TaskStarter } from "@/components/tasks/TaskFormModal";
 import { CommandEditorModal } from "@/components/commands/CommandEditorModal";
 import { CommandList } from "@/components/commands/CommandList";
 import {
@@ -36,7 +36,7 @@ import {
   useCommands,
 } from "@/hooks/useCommands";
 import type { Command, CommandActionType } from "@/api/commands";
-import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { CredentialsModal } from "@/components/tasks/CredentialsModal";
 import { RunStatusChip, relativeTime } from "@/components/tasks/RunStatusChip";
 import { TopNav } from "@/components/layout/TopNav";
@@ -62,7 +62,7 @@ const TABS: {
 }[] = [
   // Automations lead (V13) — the page used to open on Prompts, which are
   // text snippets, not automations.
-  { key: "scheduled", label: "Scheduled", hint: "Runs on its own" },
+  { key: "scheduled", label: "AI tasks", hint: "Things the AI does for you on a schedule" },
   { key: "commands", label: "Commands", hint: "Things Promptly does when you ask" },
   { key: "prompts", label: "Prompts", hint: "Text you insert with /" },
   // Set apart deliberately — italic and dimmed. History is a record, not
@@ -133,27 +133,29 @@ export function TasksPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [chooserOpen, setChooserOpen] = useState(false);
+  const [starter, setStarter] = useState<TaskStarter | null>(null);
   const [credsOpen, setCredsOpen] = useState(false);
+  const isMobile = useIsMobile();
   const create = useCreateTask();
   const { data: models } = useAvailableModels();
 
-  const openNew = () => setChooserOpen(true);
-  const handleChoose = async (mode: "simple" | "advanced") => {
-    setChooserOpen(false);
-    if (mode === "simple") {
-      setEditing(null);
-      setFormOpen(true);
-      return;
-    }
-    // Advanced: create a blank automation and drop straight into the flow
-    // editor — no form. Everything (prompt, model, schedule, output) is set
-    // in the canvas. Seeds the first AI step with the default model.
+  // An AI task is one prompt on a schedule: the form, nothing to choose
+  // first. (Home automations, the node editor's everyday use, are made on
+  // the Home page.)
+  const openNew = (from: TaskStarter | null = null) => {
+    setEditing(null);
+    setStarter(from);
+    setFormOpen(true);
+  };
+  // A flow of several steps: create a blank one and drop straight into the
+  // flow editor. Everything (prompt, model, schedule, output) is set in the
+  // canvas. Seeds the first AI step with the default model.
+  const buildFlow = async () => {
     try {
       const first = (models ?? [])[0];
       const created = await create.mutateAsync({
-        title: "Untitled automation",
-        prompt: "Describe what this automation should do.",
+        title: "Untitled flow",
+        prompt: "Describe what this flow should do.",
         provider_id: first?.provider_id ?? null,
         model_id: first?.model_id ?? null,
         use_web_search: false,
@@ -174,7 +176,7 @@ export function TasksPage() {
       await tasksApi.promote(created.id);
       navigate(`/tasks/${created.id}?flow=1`);
     } catch {
-      toast.error("Couldn't create the automation. Try again.");
+      toast.error("Couldn't create the flow. Try again.");
     }
   };
   const openEdit = (task: Task) => {
@@ -185,6 +187,7 @@ export function TasksPage() {
       return;
     }
     setEditing(task);
+    setStarter(null);
     setFormOpen(true);
     setMenuFor(null);
   };
@@ -218,26 +221,29 @@ export function TasksPage() {
   return (
     <>
       <TopNav
-        title={canAutomate ? "Automations" : "Prompts & commands"}
+        title={canAutomate ? "AI tasks" : "Prompts & commands"}
         subtitle={tabs.find((t) => t.key === tab)?.hint}
         actions={
           <div className="flex items-center gap-2">
             {tab === "history" ? null : tab === "scheduled" ? (
               <>
-                <Button
-                  variant="ghost"
-                  leftIcon={<KeyRound className="h-4 w-4" />}
-                  onClick={() => setCredsOpen(true)}
-                  title="Manage API keys and tokens your automations use"
-                >
-                  Credentials
-                </Button>
+                {/* Keys and tokens are only ever used by a flow's web steps. */}
+                {(tasks ?? []).some((t) => t.is_advanced) && (
+                  <Button
+                    variant="ghost"
+                    leftIcon={<KeyRound className="h-4 w-4" />}
+                    onClick={() => setCredsOpen(true)}
+                    title="Manage API keys and tokens your flows use"
+                  >
+                    Credentials
+                  </Button>
+                )}
                 <Button
                   variant="primary"
                   leftIcon={<Plus className="h-4 w-4" />}
-                  onClick={openNew}
+                  onClick={() => openNew()}
                 >
-                  New automation
+                  New AI task
                 </Button>
               </>
             ) : (
@@ -256,7 +262,7 @@ export function TasksPage() {
         <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-4 py-6">
           <div
             role="tablist"
-            aria-label="Automations sections"
+            aria-label="AI tasks sections"
             className="mb-5 flex gap-1 self-start rounded-lg bg-[var(--surface-2)] p-1"
           >
             {tabs.map((t) => (
@@ -476,11 +482,17 @@ export function TasksPage() {
         </div>
       ))}
 
-          <NewAutomationChooser
-            open={chooserOpen}
-            onClose={() => setChooserOpen(false)}
-            onChoose={handleChoose}
-          />
+          {/* Several steps, branches, sending the result somewhere: still
+              here, for a bigger screen, and no longer the first thing asked. */}
+          {tab === "scheduled" && !isLoading && !isMobile && (
+            <p className="mt-6 text-xs text-[var(--text-muted)]">
+              Need several steps, or the result sent somewhere?{" "}
+              <button type="button" onClick={() => void buildFlow()} className="font-medium text-[var(--accent-text)] underline-offset-2 hover:underline">
+                Build a flow
+              </button>
+              . Automations for your home's lights and speakers are made on the Home page.
+            </p>
+          )}
 
           <CredentialsModal
             open={credsOpen}
@@ -500,6 +512,7 @@ export function TasksPage() {
             open={formOpen}
             onClose={() => setFormOpen(false)}
             task={editing}
+            starter={starter}
             onSaved={(t) => {
               if (!editing) navigate(`/tasks/${t.id}`);
             }}
@@ -637,21 +650,63 @@ function CommandsTabBody({
   );
 }
 
-function TasksEmptyState({ onCreate }: { onCreate: () => void }) {
+/** Somewhere to start: each opens the form already filled in. */
+const STARTERS: TaskStarter[] = [
+  {
+    title: "Morning news",
+    prompt: "Find today's main news stories for where I live and the world. Give me the ten that matter most, grouped by topic, two sentences each, with a link.",
+    useWebSearch: true,
+    time: "07:00",
+  },
+  {
+    title: "Today's weather",
+    prompt: "What's the weather today where I live? Tell me the temperature range, the chance of rain, and whether I need a jacket or an umbrella, in three sentences.",
+    useWebSearch: true,
+    time: "06:30",
+  },
+  {
+    title: "My week ahead",
+    prompt: "Look at my calendar and tasks for the coming week. Tell me what's on each day, what needs getting ready, and anything that clashes.",
+    useWebSearch: false,
+    frequency: "weekly",
+    time: "18:00",
+  },
+];
+
+function TasksEmptyState({ onCreate }: { onCreate: (from?: TaskStarter | null) => void }) {
   return (
-    <EmptyState
-      icon={<CalendarClock className="h-5 w-5" />}
-      title="No automations yet"
-      description="Create a scheduled automation and Promptly will run it automatically — like a daily news digest or a weekly summary — saving each run as its own report."
-      action={
-        <Button
-          variant="primary"
-          leftIcon={<Plus className="h-4 w-4" />}
-          onClick={onCreate}
-        >
-          New automation
-        </Button>
-      }
-    />
+    <div className="flex flex-col items-center gap-5">
+      <EmptyState
+        icon={<CalendarClock className="h-5 w-5" />}
+        title="No AI tasks yet"
+        description="Have the AI do something for you on a schedule, like a morning news digest or a look at the week ahead. Each run is saved for you to read."
+        action={
+          <Button
+            variant="primary"
+            leftIcon={<Plus className="h-4 w-4" />}
+            onClick={() => onCreate()}
+          >
+            New AI task
+          </Button>
+        }
+      />
+      <div className="w-full max-w-xl">
+        <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Or start from one of these</p>
+        <ul className="grid gap-2 sm:grid-cols-3">
+          {STARTERS.map((s) => (
+            <li key={s.title}>
+              <button
+                type="button"
+                onClick={() => onCreate(s)}
+                className="h-full w-full rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-left transition hover:border-[var(--accent)]/50"
+              >
+                <span className="block text-sm font-medium text-[var(--text)]">{s.title}</span>
+                <span className="mt-1 block text-xs text-[var(--text-muted)]">{s.frequency === "weekly" ? "Once a week" : "Every morning"}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
