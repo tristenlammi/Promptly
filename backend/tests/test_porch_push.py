@@ -200,6 +200,30 @@ async def test_comments_replies_reactions_and_nothing_for_yourself(client, db, p
     assert kinds(pushes, bob) == ["reaction"] and "your comment" in porch_for(pushes, bob)[0]["title"]
 
 
+async def test_two_switches_flipped_together_both_stick(client, db, people):
+    """Two kinds changed a moment apart are two requests. The second must build on the
+    first, not on what was saved before it (it used to put the first one back)."""
+    import asyncio
+
+    from app.database import SessionLocal
+    from app.porch import push
+    from app.porch.models import PorchProfile
+
+    ann, *_ = people
+    await modes(client, ann, comment="on", reaction="summary")
+    async with SessionLocal() as first:
+        # The first request, caught between reading the modes and saving them.
+        prof = (await first.execute(select(PorchProfile).where(PorchProfile.user_id == ann.id).with_for_update())).scalar_one()
+        prof.push = {**push.modes_of(prof.push), "comment": "off"}
+        await first.flush()
+        second = asyncio.create_task(client.patch("/api/porch/me/notifications", headers=H(ann), json={"modes": {"reaction": "on"}}))
+        await asyncio.sleep(0.5)
+        assert not second.done()  # waiting its turn
+        await first.commit()
+    got = await ok(await second)
+    assert got["modes"]["comment"] == "off" and got["modes"]["reaction"] == "on"
+
+
 async def test_kinds_on_summary_off_and_the_account_switch(client, db, people, pushes, devices):
     ann, bob, cat, _ = people
     fam = await members_of(client, ann, "Family", [bob])

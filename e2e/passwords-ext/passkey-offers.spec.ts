@@ -70,7 +70,7 @@ test.beforeAll(async () => {
       },
     ],
   });
-  await testHook(rig, "seedBody", { body: { v: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...imported.items[0].body } });
+  await testHook(rig, "seedBody", { body: imported.items[0].body });
 });
 
 test.afterAll(async () => {

@@ -4,9 +4,9 @@
 //   scripts/check.ps1                 (Windows)      scripts/check.sh   (bash)
 //   node scripts/check.mjs            (either)
 //
+//   --quick                    everything but the browser suite (about 11 minutes)
 //   --only backend,frontend    run just these steps
 //   --skip android             run everything but these
-//   --with e2e                 also run the browser suite (about an hour)
 //   --workers 6                backend test processes (default: half the CPUs, 2-8)
 //   --tests "tests/test_mail.py -k sync"   backend: only these (passed to pytest)
 //   --list                     show the steps and stop
@@ -15,14 +15,18 @@
 //
 // Steps: static (compose file, one Alembic head, script syntax), backend
 // (pytest in the backend image, on throwaway databases of its own), frontend
-// (tsc + vitest), android (unit tests), and e2e (opt-in, about an hour: the
+// (tsc + vitest), android (unit tests), and e2e (about 45 minutes: the
 // browser suite against a private copy of Promptly built from this checkout;
 // set E2E_BASE_URL to test a stack that's already running instead).
 //
 // It prints one table at the end, exits non-zero if anything failed, keeps
 // each step's full output under .check/<time>/, and writes .check/last.json:
-// what ran, on which commit. scripts/release reads that file and won't cut a
-// version the checks didn't pass on.
+// what passed, on which code. scripts/release reads that file and won't cut a
+// version unless static, backend, frontend and e2e all passed on exactly
+// this code. They needn't be one run: steps run separately on the same code
+// add up (--quick while you work, --only e2e before the release). A run
+// narrowed with --tests, or pointed at another stack with E2E_BASE_URL, is
+// shown but never counts towards a release.
 //
 // Safe from a worktree: nothing here builds or restarts the main stack (the
 // browser suite's private copy has containers, a port and data of its own). The
@@ -39,14 +43,16 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WIN = process.platform === "win32";
 const STEPS = ["static", "backend", "frontend", "android", "e2e"];
-const DEFAULT = ["static", "backend", "frontend", "android"];
-// What a release needs to have seen pass. Android and e2e are reported when
-// they didn't run, not required: not every machine has the SDK or the stack.
-const REQUIRED = ["static", "backend", "frontend"];
+const DEFAULT = STEPS;
+// --quick: the day-to-day run, without the slow step.
+const QUICK = ["static", "backend", "frontend", "android"];
+// What a release needs to have seen pass. Android is reported when it
+// didn't run, not required: not every machine has the SDK.
+const REQUIRED = ["static", "backend", "frontend", "e2e"];
 
 function args() {
   const a = process.argv.slice(2);
-  const out = { only: null, skip: [], with: [], workers: 0, list: false, gate: false, tests: "" };
+  const out = { only: null, skip: [], with: [], workers: 0, list: false, gate: false, quick: false, tests: "" };
   for (let i = 0; i < a.length; i++) {
     const k = a[i].replace(/^-+/, "").toLowerCase();
     const v = () => (a[++i] ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -57,8 +63,9 @@ function args() {
     else if (k === "tests") out.tests = a[++i] ?? "";
     else if (k === "list") out.list = true;
     else if (k === "gate") out.gate = true;
+    else if (k === "quick") out.quick = true;
     else if (k === "h" || k === "help") {
-      console.log(fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 28).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+      console.log(fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 35).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
       process.exit(0);
     } else {
       console.error(`Unknown option: ${a[i]} (see --help)`);
@@ -81,9 +88,9 @@ function read(cmd, argv, opts = {}) {
 }
 
 const OPT = args();
-const chosen = (OPT.only ?? [...DEFAULT, ...OPT.with]).filter((s, i, all) => all.indexOf(s) === i && !OPT.skip.includes(s));
+const chosen = (OPT.only ?? [...(OPT.quick ? QUICK : DEFAULT), ...OPT.with]).filter((s, i, all) => all.indexOf(s) === i && !OPT.skip.includes(s));
 if (OPT.list) {
-  console.log(`Steps: ${STEPS.join(", ")}\nBy default: ${DEFAULT.join(", ")}`);
+  console.log(`Steps: ${STEPS.join(", ")}\nBy default: all of them. --quick: ${QUICK.join(", ")}\nA release needs: ${REQUIRED.join(", ")}`);
   process.exit(0);
 }
 
@@ -145,8 +152,10 @@ function junitTotals(file) {
 }
 
 const results = [];
+/** `counts.partial`: why this result doesn't stand for the whole step (a
+ *  narrowed run, someone else's stack). Shown, never counted by the gate. */
 function record(step, status, counts, note, seconds, log) {
-  results.push({ step, status, ...counts, note, seconds, log: log ? path.relative(ROOT, log) : undefined });
+  results.push({ step, status, ...counts, note, seconds, at: new Date().toISOString(), log: log ? path.relative(ROOT, log) : undefined });
   const mark = status === "pass" ? "ok  " : status === "skip" ? "skip" : "FAIL";
   console.log(`  ${mark}  ${step}${note ? `: ${note}` : ""}`);
 }
@@ -317,7 +326,8 @@ function stepBackend() {
   if (!t) return record("backend", "fail", {}, "pytest didn't finish (no result file): see the log", r.seconds, r.log);
   const bad = t.failed > 0 || r.code !== 0;
   const note = bad ? `${t.failed} failed${t.names.length ? `: ${t.names.slice(0, 3).join(", ")}${t.names.length > 3 ? " …" : ""}` : ` (exit ${r.code})`}` : `${t.tests - t.skipped} passed, ${t.skipped} skipped, ${workers} at a time`;
-  record("backend", bad ? "fail" : "pass", { tests: t.tests, failed: t.failed, skipped: t.skipped }, note, r.seconds, r.log);
+  const partial = OPT.tests ? "only some tests (--tests)" : undefined;
+  record("backend", bad ? "fail" : "pass", { tests: t.tests, failed: t.failed, skipped: t.skipped, partial }, partial ? `${note} [${partial}: doesn't count towards a release]` : note, r.seconds, r.log);
 }
 
 // ---------------------------------------------------------------- frontend
@@ -407,10 +417,12 @@ function stepE2e() {
     t = { tests: st.expected + st.unexpected + st.flaky + st.skipped, failed: st.unexpected, skipped: st.skipped, flaky: st.flaky };
   } catch { /* below */ }
   if (!t) return record("e2e", "fail", {}, "the browser suite didn't finish: see the log", r.seconds, r.log);
-  record("e2e", t.failed ? "fail" : "pass", t, `${t.tests - t.failed - t.skipped} passed, ${t.skipped} skipped${t.flaky ? `, ${t.flaky} passed only on a second try` : ""}${t.failed ? `, ${t.failed} failed` : ""}, on ${where}`, r.seconds, r.log);
+  const partial = process.env.E2E_BASE_URL ? "a stack that was already running, not this code" : undefined;
+  record("e2e", t.failed ? "fail" : "pass", { ...t, partial }, `${t.tests - t.failed - t.skipped} passed, ${t.skipped} skipped${t.flaky ? `, ${t.flaky} passed only on a second try` : ""}${t.failed ? `, ${t.failed} failed` : ""}, on ${where}${partial ? " [doesn't count towards a release]" : ""}`, r.seconds, r.log);
 }
 
 // -------------------------------------------------------------------- main
+const BEFORE = fingerprint();
 console.log(`Promptly check: ${chosen.join(", ")}   (output: ${path.relative(process.cwd(), OUT) || OUT})`);
 const todo = { static: stepStatic, backend: stepBackend, frontend: stepFrontend, android: stepAndroid, e2e: stepE2e };
 for (const s of chosen) {
@@ -440,12 +452,17 @@ function gate() {
   if (last.commit !== now.commit || last.tree !== now.tree) {
     return say(false, [`The last check ran on different code (commit ${String(last.commit).slice(0, 8)}${last.tree !== now.tree && last.commit === now.commit ? ", before later edits" : ""}).`, "Run scripts/check again."]);
   }
-  const steps = last.steps ?? [];
+  if (last.changed_during) return say(false, ["The code changed while the last check was running, so it doesn't say anything about this code.", "Run scripts/check again."]);
+  // The newest full result of each step on this code (steps run separately add up).
+  const steps = (last.steps ?? []).filter((r) => !r.partial);
   const failedSteps = steps.filter((r) => r.status === "fail").map((r) => `${r.step} (${r.note ?? "failed"})`);
   if (failedSteps.length) return say(false, [`The last check failed: ${failedSteps.join("; ")}`]);
   const missing = REQUIRED.filter((s) => !steps.some((r) => r.step === s && r.status === "pass"));
-  if (missing.length) return say(false, [`The last check didn't run: ${missing.join(", ")}.`, `Run scripts/check (it needs ${REQUIRED.join(", ")} to pass).`]);
-  const lines = [`Checked at ${last.at}: ${steps.filter((r) => r.status === "pass").map((r) => `${r.step} ${r.tests ?? ""}`.trim()).join(", ")} passed.`];
+  if (missing.length) {
+    const how = missing.length === 1 && missing[0] === "e2e" ? "Run scripts/check --only e2e (the browser suite, about 45 minutes)." : `Run scripts/check (it needs ${REQUIRED.join(", ")} to pass).`;
+    return say(false, [`Not checked on this code: ${missing.join(", ")}.`, how]);
+  }
+  const lines = [`Checked on this code: ${steps.filter((r) => r.status === "pass").map((r) => `${r.step} ${r.tests ?? ""}`.trim()).join(", ")} passed.`];
   const optional = STEPS.filter((s) => !steps.some((r) => r.step === s && r.status === "pass"));
   if (optional.length) lines.push(`NOT RUN: ${optional.join(", ")}. This release goes out without them.`);
   return say(true, lines);
@@ -453,9 +470,26 @@ function gate() {
 
 const failed = results.filter((r) => r.status === "fail");
 const notRun = STEPS.filter((s) => !results.some((r) => r.step === s && r.status !== "skip"));
-const summary = { at: new Date().toISOString(), ...fingerprint(), passed: failed.length === 0, steps: results, not_run: notRun, required: REQUIRED, out: path.relative(ROOT, OUT) };
+const AFTER = fingerprint();
+const changedDuring = AFTER.commit !== BEFORE.commit || AFTER.tree !== BEFORE.tree;
+const summary = { at: new Date().toISOString(), ...BEFORE, passed: failed.length === 0, steps: results, not_run: notRun, required: REQUIRED, out: path.relative(ROOT, OUT), ...(changedDuring ? { changed_during: true } : {}) };
 fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2));
-fs.writeFileSync(path.join(ROOT, ".check", "last.json"), JSON.stringify(summary, null, 2));
+// last.json is what the gate reads: each step's newest full result on this
+// exact code. Steps this run didn't touch keep the result an earlier run
+// gave them, as long as that run was on the same code. A narrowed run
+// (partial) is never written over a full one.
+const carried = [];
+{
+  const file = path.join(ROOT, ".check", "last.json");
+  let before = null;
+  try { before = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* none yet */ }
+  const same = before && !before.changed_during && !changedDuring && before.commit === BEFORE.commit && before.tree === BEFORE.tree;
+  const full = results.filter((r) => !r.partial && r.status !== "skip");
+  const kept = same ? (before.steps ?? []).filter((r) => !r.partial && !full.some((n) => n.step === r.step)) : [];
+  carried.push(...kept);
+  const merged = { ...summary, steps: [...kept, ...full], passed: [...kept, ...full].every((r) => r.status !== "fail") };
+  fs.writeFileSync(file, JSON.stringify(merged, null, 2));
+}
 
 const w = (s, n) => String(s ?? "").padEnd(n);
 console.log(`\n${w("step", 10)}${w("result", 8)}${w("tests", 8)}${w("failed", 8)}${w("skipped", 9)}${w("time", 8)}note`);
@@ -464,5 +498,7 @@ for (const r of results) {
   console.log(`${w(r.step, 10)}${w(r.status.toUpperCase(), 8)}${w(r.tests ?? "-", 8)}${w(r.failed ?? "-", 8)}${w(r.skipped ?? "-", 9)}${w(time, 8)}${r.note ?? ""}`);
 }
 if (notRun.length) console.log(`\nNot run: ${notRun.join(", ")}`);
+if (carried.length) console.log(`From earlier runs on this same code: ${carried.map((r) => `${r.step} ${r.status === "pass" ? "passed" : r.status === "fail" ? "FAILED" : r.status}`).join(", ")}`);
+if (changedDuring) console.log("\nThe code changed while this ran: the result doesn't count towards a release.");
 console.log(failed.length ? `\nFAILED: ${failed.map((f) => f.step).join(", ")}. Logs in ${path.relative(process.cwd(), OUT) || OUT}` : `\nAll ${results.filter((r) => r.status === "pass").length} steps that ran passed.`);
 process.exit(failed.length ? 1 : 0);

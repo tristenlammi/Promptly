@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { expect, run, stamp, test } from "../fixtures";
 import { card, notesReady, scan } from "../lib/notes";
@@ -33,7 +33,7 @@ async function shareInDialog(page: Page, username: string) {
   return dlg;
 }
 
-const bodyOf = (page: Page) => page.getByRole("textbox", { name: "Note text" });
+const bodyOf = (page: Page | Locator) => page.getByRole("textbox", { name: "Note text" });
 
 test.describe("notes: sharing and reminders", () => {
   test("share a list: both tick live; both edit the body at once and see the merge; leave", async ({ alice, bob }) => {

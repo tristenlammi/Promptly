@@ -16,13 +16,16 @@ async function ownPhoto(page: Page, searchable: boolean): Promise<void> {
     const probe = await page.request.get("/api/photos/search?q=x", { headers });
     test.skip(probe.status() === 503, `photos-ml isn't running: ${await probe.text()}`);
   }
-  const name = `pancakes-chat-${stamp}.jpg`;
+  // Its own word. Search shows a burst (the same scene within ten minutes) as one
+  // result, so a second spec's photo of the same word, taken minutes later, was
+  // folded into this one and that spec never saw its own (photo-search: PANCAKES).
+  const name = `waffles-chat-${stamp}.jpg`;
   const timeline = await (await page.request.get("/api/photos/timeline?limit=50", { headers })).json();
   let id = (timeline.items as { id: string; name?: string }[]).find((i) => i.name === name)?.id;
   if (!id) {
     const up = await page.request.post("/api/files/", {
       headers,
-      multipart: { scope: "mine", route: "camera", file: { name, mimeType: "image/jpeg", buffer: fs.readFileSync(wordPhoto(name, "PANCAKES")) } },
+      multipart: { scope: "mine", route: "camera", file: { name, mimeType: "image/jpeg", buffer: fs.readFileSync(wordPhoto(name, "WAFFLES")) } },
     });
     expect(up.ok(), await up.text()).toBeTruthy();
     id = (await up.json()).id as string;
@@ -30,7 +33,7 @@ async function ownPhoto(page: Page, searchable: boolean): Promise<void> {
   if (!searchable) return;
   await expect
     .poll(async () => {
-      const r = await page.request.get("/api/photos/search?q=pancakes", { headers });
+      const r = await page.request.get("/api/photos/search?q=waffles", { headers });
       return r.ok() ? ((await r.json()).items as { id: string }[]).some((i) => i.id === id) : false;
     }, { timeout: 180_000, intervals: [5_000] })
     .toBe(true);
@@ -46,7 +49,7 @@ test("a chat finds photos and shows them", async ({ dana: page }) => {
   await ready(page);
   await page.locator('button[aria-haspopup="listbox"]').first().click();
   await page.getByRole("option", { name: /E2E Mock Tools/ }).click();
-  await page.getByPlaceholder(/^Message Promptly/).fill('[tool:search_photos {"text": "pancakes"}] find the pancakes photo');
+  await page.getByPlaceholder(/^Message Promptly/).fill('[tool:search_photos {"text": "waffles"}] find the waffles photo');
   await page.getByRole("button", { name: "Send message" }).click();
 
   const gallery = page.getByRole("region", { name: "Photos found" }).last();

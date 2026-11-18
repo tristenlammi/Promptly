@@ -18,7 +18,7 @@ name: CI
 #                `tsc -b` + `vite build`.
 #
 # Not here: the Android unit tests and the browser suite. Those run locally
-# with `scripts/check` (`--with e2e` for the browser suite).
+# with `scripts/check` (the browser suite is part of it; a release needs it).
 #
 # The full build matters more than a bare typecheck here: the PWA precache step
 # (injectManifest) hard-fails when a large lazy chunk isn't listed in
