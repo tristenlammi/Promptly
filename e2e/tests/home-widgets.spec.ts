@@ -218,7 +218,7 @@ test("the Home page is laid out your own way, saved for you alone, and reset put
       const a = (await from.boundingBox())!;
       const b = (await to.boundingBox())!;
       const client = await phoneCtx.newCDPSession(phone);
-      const touch = (type: string, x: number, y: number) => client.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] });
+      const touch = (type: "touchStart" | "touchMove" | "touchEnd", x: number, y: number) => client.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] });
       await touch("touchStart", a.x + 20, a.y + a.height / 2);
       for (let i = 1; i <= 12; i++) await touch("touchMove", a.x + 20 + ((b.x - a.x) * i) / 12, a.y + a.height / 2 + ((b.y - a.y - 6) * i) / 12);
       await touch("touchEnd", 0, 0);
