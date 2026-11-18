@@ -30,7 +30,7 @@ export function parseCsv(text: string): string[][] {
   let row: string[] = [];
   let cell = "";
   let quoted = false;
-  const s = text.replace(/^﻿/, "");
+  const s = text.replace(/^\uFEFF/, "");
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (quoted) {
@@ -735,7 +735,7 @@ async function readFile(name: string, bytes: Uint8Array, password?: string): Pro
   } catch {
     throw new Error("We can't read that file. Is it a password export?");
   }
-  const trimmed = text.trimStart().replace(/^﻿/, "");
+  const trimmed = text.trimStart().replace(/^\uFEFF/, "");
 
   if (trimmed.startsWith("otpauth-migration://")) return fromMigrationLinks(trimmed);
   if (trimmed.startsWith("<")) return fromKeepassXml(trimmed);

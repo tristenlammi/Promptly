@@ -721,38 +721,8 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     }
   };
 
-  // ---- Not set up ----
-  if (config && !config.basemap) {
-    return (
-      <Shell embedded={embedded}>
-        {promptlyNav && <PromptlyMenuButton className="absolute left-3 top-3 z-10" />}
-        <div className="flex h-full items-center justify-center p-6 text-center">
-          <div className="max-w-sm">
-            <Navigation className="mx-auto mb-3 h-8 w-8 text-[var(--accent-text)]" />
-            {config.building ? (
-              <>
-                <h1 className="text-lg font-semibold text-[var(--text)]">Building your map</h1>
-                <p className="mt-1 text-sm text-[var(--text-muted)]">This server is downloading and preparing the map. It takes a while the first time and carries on by itself.</p>
-              </>
-            ) : (
-              <>
-                <h1 className="text-lg font-semibold text-[var(--text)]">Maps isn't turned on yet</h1>
-                <p className="mt-1 text-sm text-[var(--text-muted)]">
-                  {!isAdmin
-                    ? "Ask your admin to turn it on."
-                    : config.failed
-                      ? "The last map build stopped. The Promptly-Maps log says why."
-                      : 'To turn it on, add "maps" to COMPOSE_PROFILES on the server and start it again.'}
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      </Shell>
-    );
-  }
-
-  const route = routes[selected];
+  // These run before the "not set up" return below, so the same hooks run on
+  // every render: the map's settings arrive after the first one.
   // On the directions panel, results show in the panel itself.
   const showResults = panel !== "route" && query.trim().length > 1;
   // In the empty search box: where you've been lately.
@@ -787,6 +757,39 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
     };
     // The sheet is a new element whenever the search list has been over it.
   }, [sheetUp, dropdown]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Not set up ----
+  if (config && !config.basemap) {
+    return (
+      <Shell embedded={embedded}>
+        {promptlyNav && <PromptlyMenuButton className="absolute left-3 top-3 z-10" />}
+        <div className="flex h-full items-center justify-center p-6 text-center">
+          <div className="max-w-sm">
+            <Navigation className="mx-auto mb-3 h-8 w-8 text-[var(--accent-text)]" />
+            {config.building ? (
+              <>
+                <h1 className="text-lg font-semibold text-[var(--text)]">Building your map</h1>
+                <p className="mt-1 text-sm text-[var(--text-muted)]">This server is downloading and preparing the map. It takes a while the first time and carries on by itself.</p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-lg font-semibold text-[var(--text)]">Maps isn't turned on yet</h1>
+                <p className="mt-1 text-sm text-[var(--text-muted)]">
+                  {!isAdmin
+                    ? "Ask your admin to turn it on."
+                    : config.failed
+                      ? "The last map build stopped. The Promptly-Maps log says why."
+                      : 'To turn it on, add "maps" to COMPOSE_PROFILES on the server and start it again.'}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  const route = routes[selected];
   const options: SearchResult[] = showResults ? (searchError ? [] : results ?? []) : showRecents ? recents.slice(0, 6).map((r) => ({ kind: "recent" as const, ...r })) : [];
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {

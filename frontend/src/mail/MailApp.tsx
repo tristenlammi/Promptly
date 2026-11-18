@@ -1684,7 +1684,7 @@ function AskBar({ open, accounts, viewing, compactModel }: { open: Open | null; 
                 ) : (
                   <>
                     <div className="prose prose-sm max-w-none break-words text-[var(--text)] dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-strong:text-[var(--text)] prose-a:text-[var(--accent-text)]">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _n, ...p }) => <a {...p} target="_blank" rel="noopener noreferrer" /> }}>{t.a}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _n, children, ...p }) => <a {...p} target="_blank" rel="noopener noreferrer">{children}</a> }}>{t.a}</ReactMarkdown>
                     </div>
                     <p className="text-xs text-[var(--text-muted)]">From {t.read} {t.read === 1 ? "email" : "emails"}. AI can get things wrong, so check anything important.</p>
                     {t.hint && <p className="text-xs text-[var(--text-muted)]">{t.hint}</p>}

@@ -47,7 +47,7 @@ function Answer({ content }: { content: string }) {
         <details className="text-xs text-[var(--text-muted)]">
           <summary className="inline-flex min-h-7 cursor-pointer select-none items-center">Sources</summary>
           <div className={cn(PROSE, "text-xs text-[var(--text-muted)]")}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _node, ...p }) => <a {...p} target="_blank" rel="noopener noreferrer" /> }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _node, children, ...p }) => <a {...p} target="_blank" rel="noopener noreferrer">{children}</a> }}>
               {sources}
             </ReactMarkdown>
           </div>

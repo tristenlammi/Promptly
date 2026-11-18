@@ -526,7 +526,8 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
       return;
     }
     if (hasContent(draft)) toast.info("Kept as a draft. It'll be here next time.");
-    window.history.length > 1 ? navigate(-1) : navigate("/porch/");
+    if (window.history.length > 1) navigate(-1);
+    else navigate("/porch/");
   };
   const throwAway = async () => {
     if (!(await confirm({ title: "Throw this post away?", message: "The photos stay in your Photos library.", confirmLabel: "Throw away", danger: true }))) return;

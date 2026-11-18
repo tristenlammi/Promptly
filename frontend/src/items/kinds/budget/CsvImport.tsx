@@ -20,7 +20,7 @@ export function parseCsv(text: string): string[][] {
   let row: string[] = [];
   let cell = "";
   let q = false;
-  const src = text.replace(/^﻿/, "");
+  const src = text.replace(/^\uFEFF/, "");
   const delim = (() => {
     const first = src.split(/\r?\n/, 1)[0] ?? "";
     const c = (ch: string) => first.split(ch).length;

@@ -95,8 +95,16 @@ test("Security check finds weak, reused and breached, through the server's proxy
   });
 
   await nav(page, "Security check").click();
-  await page.getByRole("button", { name: "Check now" }).click();
-  await expect(page.getByText("Checked 3 logins.")).toBeVisible({ timeout: 60_000 });
+  // The server asks the real breach service, which now and then is slow or
+  // refuses. That isn't what this test is about, so a refusal gets another go.
+  const done = page.getByText("Checked 3 logins.");
+  const refused = page.getByText("The breach service can't be reached");
+  for (let tries = 0; tries < 3; tries++) {
+    await page.getByRole("button", { name: "Check now" }).click();
+    await expect(done.or(refused).first()).toBeVisible({ timeout: 60_000 });
+    if (await done.isVisible()) break;
+  }
+  await expect(done).toBeVisible();
   await expect(page.getByTestId("count-Weak")).toHaveText("1");
   await expect(page.getByTestId("count-Reused")).toHaveText("2");
   await expect(page.getByTestId("count-Breached")).not.toHaveText("0");

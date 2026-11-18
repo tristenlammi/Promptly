@@ -177,9 +177,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      # Fails on errors only. Warnings (currently ~233: exhaustive-deps,
-      # a11y, explicit-any) are known debt — use `npm run lint:strict` when
-      # burning them down.
+      # Fails on errors only (0 today; `scripts/check` runs the same rules, so a
+      # release can't ship one). Warnings (about 975: non-null assertions,
+      # exhaustive-deps, a11y, explicit-any) are known debt — use
+      # `npm run lint:strict` when burning them down.
       - name: Lint
         working-directory: frontend
         run: npm run lint

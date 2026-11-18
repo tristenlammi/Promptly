@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Check, EyeOff, MoreHorizontal, PawPrint, Plus, ScanFace, UserRound, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -182,6 +182,7 @@ function Avatar({ subject, size }: { subject: { cover: string | null; name: stri
  *  their own, from these as examples. */
 export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; known: Subject[]; className?: string }) {
   const qc = useQueryClient();
+  const listId = useId();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [left, setLeft] = useState<Set<string>>(new Set()); // unticked: not them
@@ -394,6 +395,7 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
             aria-label={isPerson ? "Who is this?" : `Name this ${entry.species ?? "pet"}`}
             role="combobox"
             aria-expanded={rows > 0}
+            aria-controls={listId}
             aria-autocomplete="list"
             className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-xs"
           />
@@ -402,7 +404,7 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
           </Button>
         </div>
         {rows > 0 && (
-          <ul role="listbox" aria-label="People you've named" className="overflow-hidden rounded-md border border-[var(--border)]">
+          <ul id={listId} role="listbox" aria-label="People you've named" className="overflow-hidden rounded-md border border-[var(--border)]">
             {matches.map((k, i) => (
               <li key={k.id} role="option" aria-selected={i === active}>
                 <button

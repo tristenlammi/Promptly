@@ -113,6 +113,17 @@ export function ContactDetail({
     top.current?.scrollIntoView({ block: "start" });
   }, [contactId]);
 
+  // Picked on the contact, or matched from their email. Asked for before the
+  // "this contact is gone" return below: a hook has to run on every render, and
+  // a contact can go while this pane is open (deleted here or on another device).
+  const { data: account } = useQuery({
+    queryKey: ["people-hub", "contact", item.fileId, c?.id, c?.promptly_user_id, c?.emails.map((e) => e.value).join()],
+    queryFn: () => peopleHubApi.get({ kind: "c", fileId: item.fileId, contactId: contactId }),
+    enabled: !!c,
+    staleTime: 60_000,
+    retry: false,
+  });
+
   if (!c) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-[var(--text-muted)]">
@@ -129,13 +140,6 @@ export function ContactDetail({
 
   const name = displayName(c, item.data.settings.name_order);
   const first = c.nickname || c.first || name;
-  // Picked on the contact, or matched from their email.
-  const { data: account } = useQuery({
-    queryKey: ["people-hub", "contact", item.fileId, c.id, c.promptly_user_id, c.emails.map((e) => e.value).join()],
-    queryFn: () => peopleHubApi.get({ kind: "c", fileId: item.fileId, contactId: c.id }),
-    staleTime: 60_000,
-    retry: false,
-  });
   const can = item.canEdit;
   const today = todayISO();
   const bdayNext = c.birthday ? nextOccurrence(c.birthday, today) : null;

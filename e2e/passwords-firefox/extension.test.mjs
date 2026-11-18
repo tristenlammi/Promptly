@@ -12,7 +12,7 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { By, Key, until } from "selenium-webdriver";
 
-import { BASE, button, byText, click, fill, labelled, makeUsers, MASTER, newFirefox, onboard, see, signIn } from "./lib.mjs";
+import { BASE, button, byText, click, fill, labelled, makeUsers, MASTER, newFirefox, onboard, see, signIn, pruneOldUsers } from "./lib.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.resolve(here, "../../frontend/package.json"));
@@ -94,6 +94,7 @@ async function state() {
 }
 
 before(async () => {
+  pruneOldUsers();
   makeUsers(["root"], "admin");
   server = http.createServer((req, res) => {
     const asked = new URL(req.url, "http://x");

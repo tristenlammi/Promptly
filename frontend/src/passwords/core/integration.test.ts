@@ -2,6 +2,8 @@
 //   PW_STACK_URL=http://localhost:8092 npx vitest run src/passwords/core/integration.test.ts
 // Includes the canary test (plan 13.2): distinctive strings in every field, then a
 // search of the database dump, logs, Redis, uploads and a real backup for any of them.
+import { spawnSync } from "node:child_process";
+
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { ApiError, VaultApi } from "./api";
@@ -693,7 +695,6 @@ describe.skipIf(!stackEnabled)("canary: what the client sends", () => {
 
 function execText(args: string[]): string {
   // ``docker logs`` writes the container's stderr to its own stderr.
-  const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
   const r = spawnSync("docker", args, { encoding: "latin1", maxBuffer: 1024 * 1024 * 1024 });
   return `${r.stdout}\n${r.stderr}`;
 }

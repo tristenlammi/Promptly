@@ -2,7 +2,7 @@ import { DndContext, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, us
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, GripVertical, Plus, X } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { cn } from "@/utils/cn";
 
@@ -26,6 +26,7 @@ function pos(i: NoteItem | undefined): number {
 }
 
 export function ListEditor({ note, editable, autoFocusNew }: { note: Note; editable: boolean; autoFocusNew?: boolean }) {
+  const hintId = useId();
   const all = useMemo(() => grouped(note.items), [note.items]);
   const open = all.filter((i) => !i.checked);
   const ticked = all.filter((i) => i.checked);
@@ -257,7 +258,7 @@ export function ListEditor({ note, editable, autoFocusNew }: { note: Note; edita
           <input
             ref={newRef}
             aria-label="New list item"
-            aria-description="Press Enter to add it to its aisle"
+            aria-describedby={hintId}
             placeholder="List item"
             value={draft}
             enterKeyHint="done"
@@ -274,6 +275,7 @@ export function ListEditor({ note, editable, autoFocusNew }: { note: Note; edita
               }
             }}
           />
+          <span id={hintId} className="sr-only">Press Enter to add it to its aisle</span>
         </div>
       )}
       {editable && !byAisle && (

@@ -214,3 +214,23 @@ async def test_today_gets_counts_only(client, db):
     out = {"tz": "UTC", "now": datetime.now(timezone.utc).isoformat(), "sections": {}}
     await hub.extend(db, a.user, out)
     assert "passwords" not in out["sections"]
+
+
+async def test_opting_in_puts_the_card_on_a_new_accounts_today(client, db):
+    """A new account starts with the Passwords card hidden on Today. Ticking
+    "show on my Today page" in the vault has to bring it back, once."""
+    a = await setup_vault(client, await make_user(db))
+    await db.refresh(a.user)
+    assert "passwords" in a.user.settings["today_hidden"]
+    counts = {"weak": 1, "reused": 0, "breached": 0, "old": 0}
+    assert (await client.put("/api/passwords/health", headers=a.h, json=counts)).status_code == 204
+    await db.refresh(a.user)
+    assert "passwords" not in a.user.settings["today_hidden"]
+    assert {"forms", "automations"} <= set(a.user.settings["today_hidden"])
+
+    # Hidden again in Customise: later checks leave that alone.
+    a.user.settings = {**a.user.settings, "today_hidden": [*a.user.settings["today_hidden"], "passwords"]}
+    await db.commit()
+    assert (await client.put("/api/passwords/health", headers=a.h, json=counts)).status_code == 204
+    await db.refresh(a.user)
+    assert "passwords" in a.user.settings["today_hidden"]

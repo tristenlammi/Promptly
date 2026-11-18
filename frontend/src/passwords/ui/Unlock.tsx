@@ -133,7 +133,7 @@ export function JoinDevice({ vault, deviceName, onReady }: { vault: VaultClient;
     };
   }, [join]);
 
-  const useKit = async (e: FormEvent) => {
+  const submitKit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
     setBusy(true);
@@ -188,7 +188,7 @@ export function JoinDevice({ vault, deviceName, onReady }: { vault: VaultClient;
         </div>
       )}
       {status === "approved" && (
-        <form onSubmit={useKit2(setError, setBusy, vault, password, onReady)} className="flex flex-col gap-3">
+        <form onSubmit={unlockOnSubmit(setError, setBusy, vault, password, onReady)} className="flex flex-col gap-3">
           <Callout>Approved. Now your master password.</Callout>
           <Label text="Master password">
             <input className={inputClass} type="password" autoFocus autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -199,7 +199,7 @@ export function JoinDevice({ vault, deviceName, onReady }: { vault: VaultClient;
       )}
       {status === "denied" && <Callout kind="danger">That request was refused from your other device.</Callout>}
       {mode === "kit" && (
-        <form onSubmit={useKit} className="flex flex-col gap-3">
+        <form onSubmit={submitKit} className="flex flex-col gap-3">
           <Label text="Secret Key" hint="From your recovery kit. Starts with PWK1.">
             <input className={`${inputClass} font-mono`} autoFocus value={secret} autoComplete="off" spellCheck={false} onChange={(e) => setSecret(e.target.value)} />
           </Label>
@@ -217,7 +217,9 @@ export function JoinDevice({ vault, deviceName, onReady }: { vault: VaultClient;
   );
 }
 
-function useKit2(setError: (s: string) => void, setBusy: (b: boolean) => void, vault: VaultClient, password: string, onReady: () => void) {
+/** The submit handler for the master password after another device approved this one.
+ *  A plain function, not a React hook (it used to be named like one). */
+function unlockOnSubmit(setError: (s: string) => void, setBusy: (b: boolean) => void, vault: VaultClient, password: string, onReady: () => void) {
   return async (e: FormEvent) => {
     e.preventDefault();
     setError("");

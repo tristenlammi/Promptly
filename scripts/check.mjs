@@ -15,7 +15,7 @@
 //
 // Steps: static (compose file, one Alembic head, script syntax), backend
 // (pytest in the backend image, on throwaway databases of its own), frontend
-// (tsc + vitest), android (unit tests), and e2e (about 45 minutes: the
+// (tsc + eslint + vitest), android (unit tests), and e2e (about 45 minutes: the
 // browser suite against a private copy of Promptly built from this checkout;
 // set E2E_BASE_URL to test a stack that's already running instead).
 //
@@ -341,6 +341,8 @@ function stepFrontend() {
   if (!borrow(path.join("frontend", "node_modules"))) return record("frontend", "skip", {}, "frontend/node_modules is missing: cd frontend && npm install", 0);
   const fe = path.join(ROOT, "frontend");
   const tsc = run("frontend", npx, ["tsc", "--noEmit"], { cwd: fe, shell: WIN });
+  // Errors only (--quiet): the warnings are known debt, and CI runs the same rule set.
+  const lint = run("frontend", npx, ["eslint", ".", "--quiet"], { cwd: fe, shell: WIN });
   const json = path.join(OUT, "vitest.json");
   const vit = run("frontend", npx, ["vitest", "run", "--reporter=json", `--outputFile=${json}`], { cwd: fe, shell: WIN });
   let t = { tests: 0, failed: 0, skipped: 0 };
@@ -350,8 +352,9 @@ function stepFrontend() {
   } catch { /* the exit code decides */ }
   const problems = [];
   if (tsc.code !== 0) problems.push("type errors (tsc)");
+  if (lint.code !== 0) problems.push("lint errors (eslint)");
   if (vit.code !== 0) problems.push(`${t.failed || "some"} unit tests failed`);
-  record("frontend", problems.length ? "fail" : "pass", { tests: t.tests + 1, failed: (tsc.code !== 0 ? 1 : 0) + t.failed, skipped: t.skipped }, problems.join("; ") || `types clean, ${t.tests - t.skipped} unit tests passed`, tsc.seconds + vit.seconds, tsc.log);
+  record("frontend", problems.length ? "fail" : "pass", { tests: t.tests + 2, failed: (tsc.code !== 0 ? 1 : 0) + (lint.code !== 0 ? 1 : 0) + t.failed, skipped: t.skipped }, problems.join("; ") || `types clean, lint clean, ${t.tests - t.skipped} unit tests passed`, tsc.seconds + lint.seconds + vit.seconds, tsc.log);
 }
 
 // ----------------------------------------------------------------- android

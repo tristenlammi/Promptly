@@ -23,7 +23,9 @@ async def main():
         for tag in os.environ["PW_USERS"].split(","):
             s = uuid.uuid4().hex[:10]
             password = "E2e-" + secrets.token_urlsafe(16) + "!9"
-            u = User(email=f"pw-ff-{tag}-{s}@example.com", username=f"pwff{tag}{s}", password_hash=hash_password(password), role=os.environ.get("PW_ROLE", "user"))
+            u = User(email=f"pw-ff-{tag}-{s}@example.com", username=f"pwff{tag}{s}", password_hash=hash_password(password), role=os.environ.get("PW_ROLE", "user"),
+                     # Already welcomed: the first-sign-in dialog would sit over every main-app page.
+                     settings={"features_chosen": True})
             db.add(u)
             await db.flush()
             out.append({"tag": tag, "id": str(u.id), "username": u.username, "password": password,
@@ -34,6 +36,37 @@ async def main():
 
 asyncio.run(main())
 `;
+
+
+const PRUNE = `
+import asyncio
+import app.db_models
+from sqlalchemy import text
+from app.database import SessionLocal
+
+async def main():
+    async with SessionLocal() as db:
+        r = await db.execute(text("DELETE FROM users WHERE email LIKE 'pw-%@example.com' AND created_at < now() - interval '2 hours'"))
+        await db.commit()
+        print("PW_PRUNED", r.rowcount)
+
+asyncio.run(main())
+`;
+
+/**
+ * Clears out the throwaway users earlier runs left on the isolated stack (every
+ * suite names them pw-...@example.com). They used to pile up for good, and past
+ * 2,000 of them the "share with" list, which stops at 2,000 names, no longer
+ * held the people a test had just made. Only ones older than two hours go, so
+ * a run that's still going keeps its own.
+ */
+export function pruneOldUsers() {
+  try {
+    execFileSync("docker", ["exec", "-i", BACKEND, "python", "-"], { input: PRUNE, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  } catch {
+    // A stack that can't prune still runs the tests.
+  }
+}
 
 export function makeUsers(tags, role = "user") {
   const out = execFileSync("docker", ["exec", "-i", "-e", `PW_USERS=${tags.join(",")}`, "-e", `PW_ROLE=${role}`, BACKEND, "python", "-"], {

@@ -5,6 +5,8 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./passwords-ext",
+  // Clears old throwaway users off the isolated stack, and makes sure it has an admin.
+  globalSetup: "./passwords-tests/global-setup.ts",
   timeout: 180_000,
   expect: { timeout: 20_000 },
   workers: 1,

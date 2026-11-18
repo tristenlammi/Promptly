@@ -150,7 +150,9 @@ export const SuggestionExtension = Extension.create<{ author: SuggestionAuthor |
   },
 
   addProseMirrorPlugins() {
-    const ext = this;
+    // Arrow functions below read `this` (the extension) without an alias.
+    const on = () => this.storage.enabled;
+    const who = () => this.options.author;
     return [
       new Plugin({
         key,
@@ -175,8 +177,8 @@ export const SuggestionExtension = Extension.create<{ author: SuggestionAuthor |
           },
         },
         appendTransaction(transactions, oldState, newState) {
-          if (!ext.storage.enabled) return null;
-          const author = ext.options.author;
+          if (!on()) return null;
+          const author = who();
           if (!author) return null;
           // Only your own edits: not someone else's (or undo), not accept/reject.
           const mine = transactions.filter(

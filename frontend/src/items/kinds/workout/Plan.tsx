@@ -570,8 +570,6 @@ function NumField({ label, value, onChange, step = 1, min = 0, max = 999, disabl
             }
           }}
           onChange={(e) => setText(e.target.value)}
-          aria-valuemin={min}
-          aria-valuemax={max}
           className="h-10 w-full min-w-0 bg-transparent px-2 text-sm font-semibold tabular-nums text-[var(--text)] outline-none"
         />
         {suffix && <span className="pr-2 text-[11px] text-[var(--text-muted)]">{suffix}</span>}

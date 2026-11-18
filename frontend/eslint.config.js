@@ -113,6 +113,12 @@ export default tseslint.config(
     },
   },
 
+  // A Node script kept beside the code it checks (see flashcards/golden.ts).
+  {
+    files: ["src/**/*.mjs"],
+    languageOptions: { globals: { ...globals.node } },
+  },
+
   // Service worker runs in a worker scope, not the browser window scope.
   {
     files: ["src/sw.ts", "src/**/*.worker.ts"],
