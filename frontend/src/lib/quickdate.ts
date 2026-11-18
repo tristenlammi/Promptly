@@ -46,6 +46,9 @@ function taker(initial: string): { take: Take; rest: () => string } {
   return { take, rest: () => s };
 }
 
+/** Tries each wording in turn and stops at the first that fits. */
+export const firstThat = (...tries: (() => boolean)[]): boolean => tries.some((t) => t());
+
 export const WD_WORDS: [string, number][] = [
   ["monday", 0], ["tuesday", 1], ["wednesday", 2], ["thursday", 3], ["friday", 4], ["saturday", 5], ["sunday", 6],
   ["tues", 1], ["weds", 2], ["thurs", 3], ["thur", 3],
@@ -127,14 +130,18 @@ export function parseWhen(input: string, today: string, weekStart = 0): When & {
       out.repeat = makeRepeat({ freq: "weekly", interval: m[1] ? 2 : 1, weekdays: Array.from(new Set(days)).sort() });
     });
   if (!out.repeat)
-    take(new RegExp(`\\s(?:every|each)\\s+(\\d{1,2})${ORD}\\s+(?:of\\s+)?(${MON})\\b`, "i"), (m) => {
-      out.repeat = makeRepeat({ freq: "yearly" });
-      out.due = ymd(today, monOf(m[2]), Number(m[1]));
-    }) ||
-    take(new RegExp(`\\s(?:every|each)\\s+(${MON})\\s+(\\d{1,2})${ORD}\\b`, "i"), (m) => {
-      out.repeat = makeRepeat({ freq: "yearly" });
-      out.due = ymd(today, monOf(m[1]), Number(m[2]));
-    });
+    firstThat(
+      () =>
+        take(new RegExp(`\\s(?:every|each)\\s+(\\d{1,2})${ORD}\\s+(?:of\\s+)?(${MON})\\b`, "i"), (m) => {
+          out.repeat = makeRepeat({ freq: "yearly" });
+          out.due = ymd(today, monOf(m[2]), Number(m[1]));
+        }),
+      () =>
+        take(new RegExp(`\\s(?:every|each)\\s+(${MON})\\s+(\\d{1,2})${ORD}\\b`, "i"), (m) => {
+          out.repeat = makeRepeat({ freq: "yearly" });
+          out.due = ymd(today, monOf(m[1]), Number(m[2]));
+        }),
+    );
   if (!out.repeat)
     take(new RegExp(`\\s(?:every|each)\\s+(?:month\\s+on\\s+)?(?:the\\s+)?(\\d{1,2})${ORD}(?:\\s+of\\s+(?:the|every)\\s+month)?\\b`, "i"), (m) => {
       const d = Number(m[1]);
@@ -221,29 +228,35 @@ export function parseWhen(input: string, today: string, weekStart = 0): When & {
   // "this evening at 8" is 8 pm, and "tonight at 7:30" is 7:30 pm.
   const later = (h: number) => (part && part !== "morning" && h >= 1 && h < 12 ? h + 12 : h);
   if (!out.time) {
-    take(/\s(?:at\s+|@\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?=\s|[,.]|$)/i, (m) => {
-      let h = Number(m[1]);
-      const mm = Number(m[2] || 0);
-      if (h < 1 || h > 12 || mm > 59) return false;
-      const pm = /^p/i.test(m[3]);
-      if (pm && h < 12) h += 12;
-      if (!pm && h === 12) h = 0;
-      out.time = clock(h, mm);
-    }) ||
-      take(/\s(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b/i, (m) => {
-        out.time = clock(later(Number(m[1])), Number(m[2]));
-      }) ||
-      take(/\s(?:at\s+)(noon|midday|midnight)\b|\s(noon|midday)\b/i, (m) => {
-        out.time = /night/i.test(m[1] ?? m[2]) ? "00:00" : "12:00";
-      }) ||
-      take(/\sat\s+(\d{1,2})(?=\s|$)/i, (m) => {
-        let h = Number(m[1]);
-        if (h > 23) return false;
-        if (part === "morning") h %= 24;
-        else if (part) h = later(h);
-        else if (h >= 1 && h <= 7) h += 12; // "at 5" means 5 pm
-        out.time = clock(h, 0);
-      });
+    firstThat(
+      () =>
+        take(/\s(?:at\s+|@\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?=\s|[,.]|$)/i, (m) => {
+          let h = Number(m[1]);
+          const mm = Number(m[2] || 0);
+          if (h < 1 || h > 12 || mm > 59) return false;
+          const pm = /^p/i.test(m[3]);
+          if (pm && h < 12) h += 12;
+          if (!pm && h === 12) h = 0;
+          out.time = clock(h, mm);
+        }),
+      () =>
+        take(/\s(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b/i, (m) => {
+          out.time = clock(later(Number(m[1])), Number(m[2]));
+        }),
+      () =>
+        take(/\s(?:at\s+)(noon|midday|midnight)\b|\s(noon|midday)\b/i, (m) => {
+          out.time = /night/i.test(m[1] ?? m[2]) ? "00:00" : "12:00";
+        }),
+      () =>
+        take(/\sat\s+(\d{1,2})(?=\s|$)/i, (m) => {
+          let h = Number(m[1]);
+          if (h > 23) return false;
+          if (part === "morning") h %= 24;
+          else if (part) h = later(h);
+          else if (h >= 1 && h <= 7) h += 12; // "at 5" means 5 pm
+          out.time = clock(h, 0);
+        }),
+    );
   }
   if (!out.time && part) out.time = PARTS[part];
 

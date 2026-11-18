@@ -52,7 +52,9 @@ const SKIP_TYPES = new Set(["hidden", "submit", "button", "reset", "image", "fil
 
 // ---- Text --------------------------------------------------------------------
 
-const NON_LATIN = /[^\u0000-ɏ]/;
+// Anything past Latin Extended-B (U+024F). Written as the range it matches, not as
+// "not U+0000 to U+024F", which puts a control character in the pattern.
+const NON_LATIN = /[\u0250-\uFFFF]/;
 
 /** Lowercase, joined across camelCase and separators: "User_Name" -> user name + username. */
 export function tokens(text: string): { words: Set<string>; joined: string } {

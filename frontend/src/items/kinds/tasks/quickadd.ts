@@ -1,4 +1,4 @@
-import { cleanTitle, parseWhen } from "@/lib/quickdate";
+import { cleanTitle, firstThat, parseWhen } from "@/lib/quickdate";
 
 import type { Repeat, TaskList } from "./types";
 
@@ -35,15 +35,20 @@ export function parseQuick(input: string, lists: TaskList[], today: string, week
   };
 
   // ---- priority, list, tags
-  take(/\s!([1-3])(?=\s)/, (m) => {
-    out.priority = Number(m[1]);
-  }) ||
-    take(/\s(!{1,3})(?=\s)/, (m) => {
-      out.priority = m[1].length;
-    }) ||
-    take(/\sp([1-3])(?=\s)/i, (m) => {
-      out.priority = 4 - Number(m[1]); // Todoist: p1 is the most urgent
-    });
+  firstThat(
+    () =>
+      take(/\s!([1-3])(?=\s)/, (m) => {
+        out.priority = Number(m[1]);
+      }),
+    () =>
+      take(/\s(!{1,3})(?=\s)/, (m) => {
+        out.priority = m[1].length;
+      }),
+    () =>
+      take(/\sp([1-3])(?=\s)/i, (m) => {
+        out.priority = 4 - Number(m[1]); // Todoist: p1 is the most urgent
+      }),
+  );
   const norm = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
   for (let guard = 0; guard < 10; guard++) {
     const hit = take(/\s#([\p{L}\p{N}_-]+)/u, (m) => {

@@ -46,6 +46,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- Maps on a server where Maps isn't turned on: opening it showed an error page, not the "Maps isn't turned on yet" (or "Building your map") page. The map's settings arrive a moment after the page opens, and the page tripped over itself when they did.
+- Contacts: a contact that disappears while you have it open (deleted on another device, or an import undone) now says "This contact is gone"; it used to blank the screen with an error.
+- Screen readers: the "name this person" box in Photos now says which list it controls, the new-item box in a shopping list reads its "Press Enter" hint, links in the AI's answers in Mail and in item panels are announced with their text, and Workout's number boxes no longer claim a range they didn't keep to.
 - Rooms on a phone: pressing Send no longer drops the keyboard, so you can type the next message straight away.
 - Ctrl+K: Enter pressed the moment a row appeared was sometimes lost, and search results landing threw away a row you had picked with the arrows. The highlighted row is now always the one Enter takes, and a row you picked stays picked while results come in.
 - Porch → Settings → Notifications: two switches changed one straight after the other both stick. The second used to put the first one back.

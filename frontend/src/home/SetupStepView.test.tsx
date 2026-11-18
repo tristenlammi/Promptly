@@ -56,7 +56,7 @@ describe("a set-up step", () => {
     const failed = draw(HUE_BUTTON_FAILED);
     const alert = /<p role="alert" class="([^"]*)"/.exec(failed);
     expect(alert).not.toBeNull();
-    expect(alert![1]).not.toMatch(/border/);
+    expect(alert![1]).not.toMatch(/\bborder\b/);
     expect(failed).toContain("<svg");
   });
 

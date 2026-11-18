@@ -8,7 +8,7 @@ import type { Contact, Group } from "./types";
 
 /** RFC 4180: quoted fields, doubled quotes, newlines inside quotes, BOM, ; or tab separators. */
 export function parseCSV(input: string): string[][] {
-  const textIn = input.replace(/^﻿/, "");
+  const textIn = input.replace(/^\uFEFF/, "");
   const firstLine = textIn.slice(0, textIn.indexOf("\n") >= 0 ? textIn.indexOf("\n") : undefined);
   const counts = [",", ";", "\t"].map((s) => [s, firstLine.split(s).length] as const);
   const sep = counts.sort((a, b) => b[1] - a[1])[0][0];
