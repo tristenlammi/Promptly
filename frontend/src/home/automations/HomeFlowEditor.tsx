@@ -132,7 +132,7 @@ const strong =
 const field =
   "h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]";
 
-export function HomeFlowEditor({ home, automation }: { home: Home; automation: HomeAutomation }) {
+export function HomeFlowEditor({ home, automation, onDirtyChange }: { home: Home; automation: HomeAutomation; onDirtyChange?: (dirty: boolean) => void }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const colorMode = useThemeStore((s) => s.resolved());
@@ -159,13 +159,21 @@ export function HomeFlowEditor({ home, automation }: { home: Home; automation: H
   };
   const fit = () => window.setTimeout(() => flow.current?.fitView({ padding: 0.3, duration: 200, maxZoom: 1 }), 30);
 
+  // The step's panel opening or closing changes how much room the flow has.
+  const panelOpen = picked !== null;
+  useEffect(() => {
+    const timer = window.setTimeout(() => flow.current?.fitView({ padding: 0.3, duration: 200, maxZoom: 1 }), 60);
+    return () => window.clearTimeout(timer);
+  }, [panelOpen]);
+
   // Leaving with changes that aren't saved: the browser asks first.
   useEffect(() => {
+    onDirtyChange?.(dirty);
     if (!dirty) return;
     const ask = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", ask);
     return () => window.removeEventListener("beforeunload", ask);
-  }, [dirty]);
+  }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onConnect = useCallback(
     (c: Connection) => {

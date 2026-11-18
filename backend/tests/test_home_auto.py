@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import pytest
 
 from tests.test_home import _answer, _dial, _has_snapshot, _prepare, _turn_on, _wait, client  # noqa: F401
-from tests.test_home_assistant import ALL, AREAS, _ctx, _home, _quiet
+from tests.test_home_assistant import ALL, _ctx, _home, _quiet
 from tests.test_maps_timeline import _hdr, _other
 
 DOOR = {"id": "binary_sensor.door", "domain": "binary_sensor", "name": "Front door sensor", "state": "off", "area": "hall"}
