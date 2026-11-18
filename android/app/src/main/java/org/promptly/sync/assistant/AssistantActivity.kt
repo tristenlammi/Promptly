@@ -155,7 +155,7 @@ class AssistantActivity : ComponentActivity() {
             begin()
             return
         }
-        // "Hey Promptly" on a locked phone: only if you turned that on. Private
+        // "Hey Promptly" on a locked phone: unless you turned that off. Private
         // things still wait for an unlock, as with a headset's button.
         if (wakeFloor != null && WakeWord.whenLocked(this)) {
             setTurnScreenOn(true)

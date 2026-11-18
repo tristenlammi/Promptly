@@ -60,8 +60,8 @@ object WakeWord {
 
     fun enabled(context: Context): Boolean = prefs(context).getBoolean("on", false)
 
-    /** Also answer on a locked phone. Private things still wait for an unlock. */
-    fun whenLocked(context: Context): Boolean = prefs(context).getBoolean("locked", false)
+    /** Also answer on a locked phone (on unless switched off). Private things still wait for an unlock. */
+    fun whenLocked(context: Context): Boolean = prefs(context).getBoolean("locked", true)
 
     fun setWhenLocked(context: Context, on: Boolean) = prefs(context).edit().putBoolean("locked", on).apply()
 

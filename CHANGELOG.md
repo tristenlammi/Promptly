@@ -33,7 +33,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Promptly for Android: "Hey Promptly" is back, as a switch that is off until you turn it on (Phone assistant settings, this phone only). The listening happens on the phone and nothing is sent anywhere until you've said the phrase and then gone on to speak. It needs Promptly to be your phone's assistant, shows Android's green dot and a notification while it listens, and says so on the switch. Only "Hey Promptly" sets it off; "Promptly" on its own no longer does.
 - "Hey Promptly" gets out of the way by itself: it lets go of the microphone while you drive with P Maps, while the phone is connected to a car, during any call or voice room, and while another app is recording, and picks it up again afterwards. The notification says which.
 - "Hey Promptly" never turns your music down by mistake. When it thinks it heard the phrase, the assistant opens and waits a few seconds; only if you then speak does the music pause and the conversation start. If you don't, it closes without a sound. A conversation it started ends by itself a few seconds after the last answer.
-- "Hey Promptly": an optional "Answer when the phone is locked" switch (off by default). Off, a locked phone asks you to unlock first; on, it answers but anything private still waits for an unlock.
+- "Hey Promptly" answers on a locked phone without unlocking. Anything private (calling, messaging, opening apps) still waits for an unlock, and an "Answer when the phone is locked" switch turns this off.
 
 ### Changed
 

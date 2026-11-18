@@ -184,7 +184,7 @@ class AssistantSettingsActivity : ComponentActivity() {
                     Column(Modifier.weight(1f)) {
                         Text("Answer when the phone is locked")
                         Text(
-                            "Off: on a locked phone it asks you to unlock first. On: it answers, but anything private still waits for an unlock.",
+                            "On: it answers without unlocking, but anything private (calling, messaging, opening apps) still waits for an unlock. Off: it asks you to unlock first.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
