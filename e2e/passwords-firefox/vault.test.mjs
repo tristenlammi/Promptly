@@ -78,7 +78,9 @@ test("Argon2 WASM runs under the real CSP, and inline script doesn't", async () 
     const done = arguments[0];
     fetch("/").then((r) => done(r.headers.get("content-security-policy")));
   `);
-  assert.ok(!main.includes("wasm-unsafe-eval"));
+  // The main app allows WASM too since Calls (noise suppression, nginx/nginx.conf), and still
+  // nothing looser: no inline script, no eval.
+  assert.equal(main.split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src")), "script-src 'self' 'wasm-unsafe-eval'");
 });
 
 test("a second device joins with the kit", async () => {

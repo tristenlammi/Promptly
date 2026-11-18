@@ -142,7 +142,17 @@ export async function click(driver, locator, timeout = 30000) {
   try {
     const el = await see(driver, locator, timeout);
     await driver.wait(until.elementIsEnabled(el), timeout);
-    await el.click();
+    // A toast ("Saved") can sit over a button for a few seconds. Real Firefox refuses the click
+    // then, where a person would just wait for it to go.
+    for (let tries = 0; ; tries++) {
+      try {
+        await el.click();
+        break;
+      } catch (e) {
+        if (e.name !== "ElementClickInterceptedError" || tries >= 20) throw e;
+        await driver.sleep(500);
+      }
+    }
   } catch (e) {
     // What was on the page says more than the timeout does.
     const seen = await driver.executeScript(`return location.href + " :: " + document.body.innerText.slice(0, 500)`).catch(() => "");
