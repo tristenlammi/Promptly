@@ -37,7 +37,12 @@ test("Account lists vault devices, and Today says only a count", async ({ browse
   await onboard(page);
   await addLogin(page, { title: "Secret site name", username: "ana", password: "password", url: "https://secret-site.example/" });
   await page.getByRole("navigation", { name: "Passwords" }).getByText("Security check", { exact: true }).click();
-  await page.getByText('Show "passwords need attention" on my Today page').click();
+  // The panels above load one by one and push this down, so a click can land where it was.
+  const optIn = page.getByRole("checkbox", { name: /passwords need attention/ });
+  await expect(async () => {
+    await optIn.check({ timeout: 5_000 });
+    await expect(optIn).toBeChecked();
+  }).toPass({ timeout: 30_000 });
   await page.getByRole("button", { name: "Check now", exact: true }).click();
   await expect(page.getByText(/Checked \d+ logins/)).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(1500);
