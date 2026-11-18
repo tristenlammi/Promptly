@@ -199,6 +199,9 @@ test("a home automation: made in the flow editor, run by its button, its phrase 
     await expect(alice.getByText("Play some jazz on Kitchen speaker")).toBeVisible();
     await alice.getByText("Play some jazz on Kitchen speaker").click();
     await expect(alice.getByRole("complementary", { name: "This step" }).getByLabel("What kind")).toHaveValue("jazz");
+    // The flow makes room for the step's panel.
+    await alice.waitForTimeout(700);
+    await expect(alice.getByText("Set Floor lamp to 40%, warm white").first()).toBeInViewport({ ratio: 1 });
     if (shots) await alice.screenshot({ path: `${shots}/hauto-09-editor-morning-routine.png` });
 
     // ---- on the Home page: the list, and its Run button.
