@@ -24,6 +24,18 @@ class IdbOrderStore extends MemoryStore {
   }
 }
 
+// IndexedDB hands back copies. A store that hands back the very object it was given hides what
+// two things running at once do to each other.
+class CopyingStore extends MemoryStore {
+  async getMeta<T>(key: string): Promise<T | undefined> {
+    const v = await super.getMeta<T>(key);
+    return v === undefined ? v : structuredClone(v);
+  }
+  async setMeta(key: string, value: unknown): Promise<void> {
+    await super.setMeta(key, structuredClone(value));
+  }
+}
+
 function server(userId = ALICE) {
   const api: any = new VaultApi("http://evil", () => "t", (() => { throw new Error("no net"); }) as any);
   const s: any = {
@@ -470,6 +482,73 @@ describe("a member of a shared vault, with the server", () => {
     expect(r.rollback).toContain(vid);
     expect(c.allItems().map((i) => i.body.password)).toContain("mine");
     s.vaults.set(vid, row);
+  });
+});
+
+// Found by the extension's browser tests, 2026-11-18: the page syncs on its own (a timer, a
+// nudge from another device), and one of those in flight while the person pressed Accept put
+// back the trust book from before, so the vault they'd just accepted read "(can't open)".
+describe("a sync already running when the person decides something", () => {
+  it("doesn't undo accepting a shared vault", async () => {
+    const { s, c } = await fresh(new CopyingStore());
+    const me = (await c.store.getAccount())!;
+    const inviter = persona("dana");
+    const did = "77777777-7777-4777-8777-777777777777";
+    s.userKeys.set(did, inviter.keys);
+    const vid = "88888888-8888-4888-8888-888888888888";
+    const K = randomBytes(32);
+    const wrapped = await sealTo(fromB64u(me.x25519Pub), K, aad(vid, "", `vault_key:${ALICE}`));
+    s.vaults.set(vid, { id: vid, kind: "shared", revision: 0, generation: 1, name: await sealField(await aesKey(K), vid, "name", "Shared"), role: "view", wrapped_key: b64u(wrapped), signature: b64u(ed25519Sign(inviter.e, grantInput(vid, ALICE, 1, wrapped))), granted_by: did, member_generation: 1, accepted: false, member_count: 2 });
+    await c.sync();
+    api_accept(s, c);
+    // A page opened afresh, as it is when someone comes to accept.
+    await c.lock();
+    await c.unlock(MASTER);
+
+    // A background sync gets as far as reading what this device has decided, and is held there
+    // until the person's choice is being written down.
+    const store: any = c.store;
+    const real = store.getMeta.bind(store);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let reached!: () => void;
+    const there = new Promise<void>((r) => (reached = r));
+    let armed = true;
+    store.getMeta = async (key: string) => {
+      const value = await real(key);
+      if (armed && key === "trust_generations") {
+        armed = false;
+        reached();
+        await held;
+      }
+      return value;
+    };
+    const realSet = store.setMeta.bind(store);
+    let first = true;
+    store.setMeta = async (key: string, value: unknown) => {
+      await realSet(key, value);
+      if (first && !armed && key === "trust") {
+        first = false;
+        release();
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    };
+    const background = c.sync();
+    await there;
+
+    await c.acceptVault(vid);
+    release();
+    await background;
+    store.getMeta = real;
+    store.setMeta = realSet;
+
+    expect((await c.vaults()).find((v) => v.id === vid)?.displayName).toBe("Shared");
+    expect((await c.trustEntries())[did]?.ed25519).toBe(inviter.keys.ed25519_pub);
+    // And it's still so after a lock, from what was saved.
+    await c.sync();
+    await c.lock();
+    await c.unlock(MASTER);
+    expect((await c.vaults()).find((v) => v.id === vid)?.displayName).toBe("Shared");
   });
 });
 

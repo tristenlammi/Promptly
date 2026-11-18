@@ -641,10 +641,26 @@ export class VaultClient {
     });
   }
 
-  /** Bring in what other devices decided. Union, and never a key change without a prompt. */
+  /** Bring in what other devices decided. Union, and never a key change without a prompt.
+   *
+   *  Syncs run on their own (a timer, a nudge from another device), so one can be part-way
+   *  through here when the person accepts a vault or compares safety words. Everything is read
+   *  first, and the book is then built and swapped in without a pause, with what's in memory
+   *  counted too. Otherwise a merge that read before the choice and finished after it puts the
+   *  old book back, and the vault they just accepted reads "(can't open)". */
   private async mergeTrustBook(): Promise<void> {
     await this.refreshOwnPins();
-    const local = (await this.store.getMeta<Record<string, TrustEntry>>("trust")) ?? {};
+    const stored = (await this.store.getMeta<Record<string, TrustEntry>>("trust")) ?? {};
+    const storedAccepted = (await this.store.getMeta<string[]>("trust_accepted")) ?? [];
+    const contacts = (await this.store.getMeta<string[]>("trust_contacts")) ?? [];
+    const storedGenerations = (await this.store.getMeta<Record<string, number>>("trust_generations")) ?? {};
+    const storedState = await this.store.getMeta<TrustState>("trust_state");
+    // No waiting from here to the swap.
+    const now = this.book;
+    const local = { ...stored, ...now.people };
+    const accepted = [...storedAccepted, ...now.accepted];
+    const generations = { ...storedGenerations };
+    for (const [k, n] of Object.entries(now.generations)) generations[k] = Math.max(generations[k] ?? 0, n);
     const items = this.trustItems();
     const books = items.map((i) => i.body.trustBook!);
     const remote: TrustBook = {
@@ -654,16 +670,13 @@ export class VaultClient {
       generations: {},
     };
     for (const b of books) for (const [k, n] of Object.entries(b.generations ?? {})) remote.generations[k] = Math.max(remote.generations[k] ?? 0, n);
-    const accepted = (await this.store.getMeta<string[]>("trust_accepted")) ?? [];
-    const contacts = (await this.store.getMeta<string[]>("trust_contacts")) ?? [];
-    const generations = (await this.store.getMeta<Record<string, number>>("trust_generations")) ?? {};
     const people = { ...(remote?.people ?? {}), ...local };
     for (const [id, e] of Object.entries(remote?.people ?? {})) {
       // Both keys: words compared on one pair say nothing about another with the same signing key.
       if (people[id] && e.verified) people[id] = { ...people[id], verified: people[id].ed25519 === e.ed25519 && people[id].x25519 === e.x25519 ? true : people[id].verified };
     }
     // Contacts go by counter, so a removal on any device sticks. A plain list could only add.
-    const states: (TrustState | undefined)[] = [...items.map((i) => i.body.trustState as TrustState | undefined), await this.store.getMeta<TrustState>("trust_state"), this.ownership];
+    const states: (TrustState | undefined)[] = [...items.map((i) => i.body.trustState as TrustState | undefined), storedState, this.ownership];
     const counters = withListed(mergeCounters(...states.map((t) => t?.contacts)), [...remote.contacts, ...contacts]);
     const union = (pick: (t: TrustState) => unknown) => [...new Set(states.flatMap((t) => (t && Array.isArray(pick(t)) ? (pick(t) as unknown[]).filter((x): x is string => typeof x === "string") : [])))];
     this.ownership = { contacts: counters, made: union((t) => t.made), shared: union((t) => t.shared) };

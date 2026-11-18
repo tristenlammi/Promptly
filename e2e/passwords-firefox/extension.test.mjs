@@ -620,8 +620,9 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
   await fill(driver, By.css('input[aria-label="Master password"]'), MASTER);
   await driver.sleep(700);
   await click(driver, button("Unlock"));
-  await driver.wait(until.elementLocated(By.css("#pin")), 60000);
-  await typePasskeyPin();
+  // The master password typed here is the proof for this request: no PIN is asked after it (D139).
+  await see(driver, button("Sign in"), 60000);
+  assert.equal((await driver.findElements(By.css("#pin"))).length, 0);
   await click(driver, button("Sign in"));
   await driver.switchTo().window(pg);
   await driver.wait(async () => driver.executeScript("return window.__res !== null"), 15000);
