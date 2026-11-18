@@ -351,3 +351,64 @@ async def test_elsewhere_the_copy_we_file_in_sent_takes_the_place_of_ours(client
     assert len(rows) == 2 and all(r.uid is not None for r in rows)
     shown = await _conversation(client, u, account, original.thread_key)
     assert shown[0]["message_id"] == first and len(shown) == 2
+
+
+# ---- the line we were handed dies while the copy is being filed
+
+
+def _in_sent_on_the_server() -> int:
+    c = _mailbox()
+    c.select_folder("Sent", readonly=True)
+    n = len(c.search(["ALL"]))
+    c.logout()
+    return n
+
+
+async def _reply_due(client, db, name: str):  # noqa: F811
+    _deliver(ME, sender=f"Teresa <{TERESA}>", subject="Booking", date=_earlier())
+    u = await mk_user(db, name, role="admin")
+    account = await _live_account(db, u)
+    await _pass(account, every=True)
+    original = (await _rows(db, account))[0]
+    item = await _reply_queued(client, db, u, account, original)
+    item.send_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await db.commit()
+    return u, account, original
+
+
+@live
+async def test_a_dead_line_still_gets_the_copy_into_sent(client, db, server):  # noqa: F811
+    """The connection went quiet before the send (a router forgot it, the server hung
+    up). The email goes, and its copy is filed on a new connection, where it used to be
+    left out of Sent for good."""
+    u, account, original = await _reply_due(client, db, "gs4")
+    c = await asyncio.to_thread(_connect, account)
+    c.logout()  # the line is dead from here on
+    assert await worker._send_due(c, await db.get(MailAccount, account.id), True)
+    assert _in_sent_on_the_server() == 1
+    await _pass(account, every=True)
+    rows = await _rows(db, account)
+    assert len(rows) == 2 and all(r.uid is not None for r in rows)
+
+
+@live
+async def test_a_copy_that_landed_before_the_line_died_is_not_filed_twice(client, db, server, monkeypatch):  # noqa: F811
+    u, account, original = await _reply_due(client, db, "gs5")
+    c = await asyncio.to_thread(_connect, account)
+    real = worker.imap.append_sent
+    calls = []
+
+    def lands_then_the_line_dies(link, path, raw):
+        calls.append(link)
+        real(link, path, raw)
+        if link is c:
+            raise TimeoutError("no answer")
+
+    monkeypatch.setattr(worker.imap, "append_sent", lands_then_the_line_dies)
+    assert await worker._send_due(c, await db.get(MailAccount, account.id), True)
+    c.logout()
+    assert calls == [c]  # the new connection found it there, and filed nothing
+    assert _in_sent_on_the_server() == 1
+    await _pass(account, every=True)
+    rows = await _rows(db, account)
+    assert len(rows) == 2 and all(r.uid is not None for r in rows)

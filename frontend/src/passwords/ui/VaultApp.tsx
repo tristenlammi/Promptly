@@ -527,7 +527,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
       </div>
       <div aria-live="polite" className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col gap-2">
         {toasts.map((t) => (
-          <div key={t.id} role="status" className={`rounded-lg px-3 py-2 text-sm shadow-md ${t.kind === "err" ? "bg-[var(--danger)] text-white" : "bg-[var(--text)] text-[var(--bg)]"}`}>{t.text}</div>
+          <div key={t.id} role="status" className={`rounded-lg px-3 py-2 text-sm shadow-md ${t.kind === "err" ? "bg-[var(--danger-fill,#C81E1E)] text-white" : "bg-[var(--text)] text-[var(--bg)]"}`}>{t.text}</div>
         ))}
       </div>
       <QrCameraHost />

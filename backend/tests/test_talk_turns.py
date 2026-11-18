@@ -86,6 +86,18 @@ async def messages(db, conversation):
     return rows
 
 
+async def interrupted_rows(db, conversation, c: TalkClient):
+    """The conversation's rows once the cut-short answer has been saved. That save lands just
+    after `stop_audio` goes out, so a fixed pause is a race on a busy machine: wait for it."""
+    rows = []
+    for _ in range(50):
+        await c.drain(0.1)
+        rows = await messages(db, conversation)
+        if len(rows) > 1 and (rows[1].voice or {}).get("interrupted"):
+            break
+    return rows
+
+
 async def finish(c: TalkClient) -> None:
     await c.send({"type": "bye"})
     try:
@@ -224,8 +236,7 @@ async def test_a_stop_word_stops_it_without_a_new_turn(db, user, conversation, s
     await live.emit({"type": "partial", "turn": 2, "text": "stop", "stable": ""})
     await c.expect("stop_audio", timeout=3)
     await live.emit({"type": "final", "turn": 2, "text": "Stop."})
-    await c.drain(0.3)
-    rows = await messages(db, conversation)
+    rows = await interrupted_rows(db, conversation, c)
     assert [r.role for r in rows] == ["user", "assistant"]
     assert rows[1].voice["interrupted"] is True
     await finish(c)
@@ -248,8 +259,7 @@ async def test_tap_to_interrupt_uses_what_the_client_played(db, user, conversati
     first_clause_ms = 320
     await c.send({"type": "interrupt", "played_ms": first_clause_ms})
     await c.expect("stop_audio", timeout=3)
-    await c.drain(0.2)
-    rows = await messages(db, conversation)
+    rows = await interrupted_rows(db, conversation, c)
     assert rows[1].content == "You've got three things today,"
     assert rows[1].voice == {"spoken": True, "interrupted": True, "heard_chars": len("You've got three things today,")}
     await finish(c)
@@ -330,6 +340,10 @@ async def test_mute_stops_listening(db, user, conversation, sidecars, talk_app, 
     await c.expect("state", state="muted")
     before = live.frames
     await c.mic(b"\x01" * 640)
+    for _ in range(50):
+        if "reset" in live.commands:
+            break
+        await asyncio.sleep(0.02)
     await asyncio.sleep(0.1)
     assert live.frames == before and "reset" in live.commands
     await c.send({"type": "unmute"})

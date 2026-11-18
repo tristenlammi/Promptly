@@ -491,13 +491,10 @@ test.describe("voice channels", () => {
     await alice.keyboard.type(`join ${lounge.toLowerCase()}`);
     const joinRow = alice.getByRole("button", { name: new RegExp(`Join ${lounge}.*Lads`) });
     await expect(joinRow).toBeVisible();
-    // The list is still settling when the row first shows (the ranked results
-    // land a moment after the keyword ones), and an Enter in that moment is
-    // lost: press until the palette has taken it.
-    await expect(async () => {
-      if (await joinRow.isVisible()) await alice.keyboard.press("Enter");
-      await expect(joinRow).toBeHidden({ timeout: 1500 });
-    }).toPass({ timeout: 15_000 });
+    // One Enter, the moment the row shows. (It used to be lost while the list
+    // was still settling: the palette's selection was a render behind its rows.)
+    await alice.keyboard.press("Enter");
+    await expect(joinRow).toBeHidden();
     await expect(panel(alice).getByTestId("voice-status")).toHaveText("Voice connected", { timeout: 30_000 });
     await alice.keyboard.press("Control+k");
     await alice.keyboard.type("leave");

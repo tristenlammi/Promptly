@@ -397,7 +397,7 @@ export function VoicePanel({ variant }: { variant: "rooms" | "sidebar" | "collap
                 onClick={() => (s.live ? void voice.stopLive() : openGoLive())}
                 className={cn(
                   "inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--surface)] text-xs font-medium [@media(pointer:coarse)]:h-10 text-[var(--text)] transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-40",
-                  s.live && "bg-[var(--danger)] text-white hover:bg-[var(--danger)] hover:brightness-95",
+                  s.live && "bg-[var(--danger-fill)] text-white hover:bg-[var(--danger-fill)] hover:brightness-95",
                 )}
               >
                 {s.live ? <ScreenShareOff className="h-4 w-4" /> : <MonitorUp className="h-4 w-4" />}

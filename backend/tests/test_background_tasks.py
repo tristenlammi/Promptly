@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import logging
 
 import pytest
 
@@ -23,6 +24,19 @@ from app import background
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
+    # These tests collect garbage on purpose. Whatever an earlier test on this
+    # worker left pending on its closed loop (a fake server's task, a request cut
+    # short) is destroyed by that collection, asyncio logs each at ERROR, and the
+    # app's error capture spawns a write per ERROR: the count below then read 2 or 3
+    # instead of 1, but only when such a test happened to run first. Collect that
+    # garbage here, with asyncio's complaint about it kept out of the error capture.
+    quiet = logging.getLogger("asyncio")
+    was = quiet.disabled
+    quiet.disabled = True
+    try:
+        gc.collect()
+    finally:
+        quiet.disabled = was
     background._background_tasks.clear()
     yield
     background._background_tasks.clear()
@@ -36,16 +50,17 @@ async def test_task_is_strongly_referenced_while_running():
         started.set()
         await release.wait()
 
-    background.spawn(work(), name="held")
+    task = background.spawn(work(), name="held")
     await started.wait()
 
     # The whole point: a reference exists somewhere other than the loop.
-    assert background.pending_count() == 1
+    assert task in background._background_tasks
 
     # Force a collection while it's suspended — the window where an
-    # unreferenced task could vanish.
+    # unreferenced task could vanish. (This task, not the count: a collection can
+    # log, and a logged error is itself a spawned write.)
     gc.collect()
-    assert background.pending_count() == 1
+    assert task in background._background_tasks and not task.done()
 
     release.set()
     await asyncio.sleep(0)

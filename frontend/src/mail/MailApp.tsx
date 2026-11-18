@@ -1128,7 +1128,7 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
     {(slide !== 0 || phase !== "idle") && (
       <div
         aria-hidden
-        className={`absolute inset-0 flex items-center gap-2 px-5 text-sm font-medium text-white transition-opacity duration-150 ${right ? "justify-start bg-[var(--accent-strong)]" : "flex-row-reverse justify-start bg-[var(--danger)]"}`}
+        className={`absolute inset-0 flex items-center gap-2 px-5 text-sm font-medium text-white transition-opacity duration-150 ${right ? "justify-start bg-[var(--accent-strong)]" : "flex-row-reverse justify-start bg-[var(--danger-fill)]"}`}
         style={{ opacity: armed || phase === "out" || phase === "shut" ? 1 : 0.55 + pull * 0.25 }}
       >
         <span className="transition-transform duration-150" style={{ transform: `scale(${armed ? 1.2 : 0.7 + pull * 0.3})` }}>

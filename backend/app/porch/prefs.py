@@ -81,6 +81,10 @@ async def patch_notifications(body: NotificationsPatch, db: AsyncSession = Depen
         if bad:
             raise core.bad(f"Unknown kind: {', '.join(bad)}")
         prof = await core.profile(db, user.id)
+        # One change at a time for this person: two switches flipped a moment apart are
+        # two requests, each sending only its own kind. Without the lock both read the
+        # saved modes before either wrote, and the second put the first one back.
+        await db.refresh(prof, with_for_update=True)
         prof.push = {**push.modes_of(prof.push), **body.modes}
     if body.porch is not None:
         from app.notifications.models import PushPreferences

@@ -60,7 +60,7 @@ export function MemberIcons({ m, className, size = 14 }: { m: VoiceMember; class
       )}
       {m.live && (
         <span
-          className="rounded-[4px] bg-[var(--danger)] px-1 text-[9px] font-bold uppercase leading-[14px] tracking-wide text-white"
+          className="rounded-[4px] bg-[var(--danger-fill)] px-1 text-[9px] font-bold uppercase leading-[14px] tracking-wide text-white"
           title="Live: streaming"
           aria-label="Live"
           role="img"

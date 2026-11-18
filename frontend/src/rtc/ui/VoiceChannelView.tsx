@@ -392,7 +392,7 @@ export function VoiceChannelView({
           aria-pressed={s.live}
           disabled={!s.canVideo || s.status !== "connected"}
           onClick={() => (s.live ? void voice.stopLive() : openGoLive())}
-          className={cn(barBtn, s.live && "bg-[var(--danger)] text-white")}
+          className={cn(barBtn, s.live && "bg-[var(--danger-fill)] text-white")}
         >
           {s.live ? <ScreenShareOff className="h-5 w-5" /> : <MonitorUp className="h-5 w-5" />}
         </button>
@@ -412,7 +412,7 @@ export function VoiceChannelView({
         aria-label="Leave voice"
         title="Leave voice"
         onClick={() => void voice.leave()}
-        className="inline-flex h-11 w-14 items-center justify-center rounded-full bg-[var(--danger)] text-white transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--danger)] focus-visible:ring-offset-2"
+        className="inline-flex h-11 w-14 items-center justify-center rounded-full bg-[var(--danger-fill)] text-white transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--danger)] focus-visible:ring-offset-2"
         data-testid="voice-leave"
       >
         <PhoneOff className="h-5 w-5" />

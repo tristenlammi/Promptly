@@ -97,8 +97,10 @@ test("it shows in Files → Rooms uploads and counts in her storage, not his", a
   expect(q.rooms_bytes).toBeGreaterThanOrEqual(policy!.direct_max_bytes);
   expect(q.used_bytes).toBeGreaterThanOrEqual(q.rooms_bytes);
   // Not a Drive file: her files don't have it, and neither does search.
+  // (Search also offers files that are merely alike, so "no hits at all" depends on
+  // what else is in the stack: what matters is that none of them is this file.)
   const found = await (await alice.request.get(`/api/files/search?q=${encodeURIComponent(bigName)}`, { headers: { Authorization: aAuth } })).json();
-  expect(found.hits).toEqual([]);
+  expect((found.hits as { file: { filename: string } }[]).filter((h) => h.file.filename === bigName)).toEqual([]);
   // Bob sent nothing by that name: his list doesn't have it.
   await bob.goto("/files/rooms-uploads");
   await expect(bob.getByRole("heading", { name: "Rooms uploads" }).first()).toBeVisible();

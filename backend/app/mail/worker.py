@@ -538,6 +538,44 @@ async def _smtp_send(account: MailAccount, raw: bytes, recipients: list[str]) ->
         link.close()
 
 
+def _file_again(server: imap.Server, sent: str, raw: bytes) -> str:
+    """On a connection of its own: put the copy in Sent unless it's already there."""
+    link = imap.connect(server)
+    try:
+        if imap.find_uid(link, sent, parse.parse(raw).message_id) is not None:
+            return "there already"
+        imap.append_sent(link, sent, raw)
+        return "filed"
+    finally:
+        try:
+            link.logout()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _file_in_sent(client, account: MailAccount, allow_private: bool, sent: str, raw: bytes) -> bool:
+    """The mailbox's own copy of what was just sent, in its Sent folder.
+
+    The email has gone by now, so nothing here may fail the send. But a line that went
+    quiet (a router that forgot it, a server that hung up or stopped answering) used to
+    mean the copy was never filed at all: sent, in the conversation here, and missing
+    from Sent in every other mail app for good. So when the line we were handed fails,
+    look on a new one: the copy may have landed before the line died (then it's left
+    alone, never filed twice), and if it didn't, it's filed there."""
+    try:
+        await asyncio.to_thread(imap.append_sent, client, sent, raw)
+        return True
+    except Exception as e:  # noqa: BLE001 — it did send
+        logger.warning("Couldn't file a sent message: %s. Looking on a new connection.", type(e).__name__)
+    try:
+        how = await asyncio.to_thread(_file_again, _server(account, allow_private), sent, raw)
+        logger.info("The sent message's copy on a new connection: %s", how)
+        return True
+    except Exception as e:  # noqa: BLE001 — it did send
+        logger.warning("Couldn't file a sent message: %s", type(e).__name__)
+        return False
+
+
 async def _send_due(client, account: MailAccount, allow_private: bool) -> bool:
     """Sends what's due. True if anything went, so Sent can be looked at straight away."""
     now = datetime.now(timezone.utc)
@@ -576,10 +614,7 @@ async def _send_due(client, account: MailAccount, allow_private: bool) -> bool:
             if account.provider != "gmail":
                 sent = await db.scalar(select(MailFolder.path).where(MailFolder.account_id == account.id, MailFolder.role == "sent").limit(1))
                 if sent:
-                    try:
-                        await asyncio.to_thread(imap.append_sent, client, sent, raw)
-                    except Exception as e:  # noqa: BLE001 — it did send
-                        logger.warning("Couldn't file a sent message: %s", type(e).__name__)
+                    await _file_in_sent(client, account, allow_private, sent, raw)
             # No addresses, subject or words: only whether it's in its conversation here.
             logger.info("Sent a message (%s mailbox, a reply: %s); its copy here: %s", account.provider, b"\nIn-Reply-To:" in raw, kept)
         await db.execute(delete(MailOutbox).where(MailOutbox.account_id == account.id, MailOutbox.status == "sent", MailOutbox.send_at < now - timedelta(days=1)))

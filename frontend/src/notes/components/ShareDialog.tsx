@@ -117,7 +117,7 @@ export function ShareDialog({ note, onClose, onLeft }: { note: Note; onClose: ()
         type="button"
         onClick={() => void leave()}
         disabled={busy === "leave"}
-        className="flex h-10 items-center gap-2 rounded-full bg-[var(--danger)] px-5 text-sm font-medium text-white disabled:opacity-50"
+        className="flex h-10 items-center gap-2 rounded-full bg-[var(--danger-fill)] px-5 text-sm font-medium text-white disabled:opacity-50"
       >
         {busy === "leave" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
         Leave note

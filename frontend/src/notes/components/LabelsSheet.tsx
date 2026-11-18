@@ -149,7 +149,7 @@ function LabelRow({ label, onChanged }: { label: Row; onChanged: () => void }) {
           <button type="button" className="h-10 rounded-full px-4 text-sm font-medium hover:bg-[var(--hover)]" onClick={() => setMode(null)}>
             Keep it
           </button>
-          <button type="button" disabled={busy} className="h-10 rounded-full bg-[var(--danger)] px-4 text-sm font-medium text-white disabled:opacity-60" onClick={() => void remove()}>
+          <button type="button" disabled={busy} className="h-10 rounded-full bg-[var(--danger-fill)] px-4 text-sm font-medium text-white disabled:opacity-60" onClick={() => void remove()}>
             Delete label
           </button>
         </div>
