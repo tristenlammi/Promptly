@@ -86,6 +86,19 @@ test("a message arrives live, and goes from Sent to Seen", async ({ alice, bob }
   await expect(log(alice).getByText(back)).toBeVisible({ timeout: 20_000 });
 });
 
+test("the Photos picker takes pictures and videos only, and what you pick is attached", async ({ alice, bob }) => {
+  await setUp(alice, bob);
+  await alice.goto(`/rooms/r/${dm}`);
+  const pick = alice.getByTestId("composer-photo-input");
+  // Photos and videos only is what makes a phone open its photo picker, not the file browser.
+  await expect(pick).toHaveAttribute("accept", "image/*,video/*");
+  await expect(pick).toHaveAttribute("multiple", "");
+  const name = `e2e-pick-${stamp}.png`;
+  await pick.setInputFiles({ name, mimeType: "image/png", buffer: PNG });
+  await expect(alice.getByRole("button", { name: `Remove ${name}` })).toBeVisible();
+  await alice.getByRole("button", { name: `Remove ${name}` }).click();
+});
+
 test("a photo is sent and shows for both", async ({ alice, bob }) => {
   await setUp(alice, bob);
   await bob.goto(`/rooms/r/${dm}`);

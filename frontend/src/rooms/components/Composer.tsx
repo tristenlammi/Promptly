@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, BarChart3, CalendarPlus, Camera, Clapperboard, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
+import { AtSign, BarChart3, CalendarPlus, Camera, Clapperboard, CornerUpLeft, Images, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { crossApi, type ShareKind } from "@/api/crossapp";
@@ -84,6 +84,9 @@ export const Composer = forwardRef<
   const qc = useQueryClient();
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Photos and videos only: on a phone this opens the phone's own photo picker (the
+  // whole library as a grid) instead of the file browser.
+  const photoInput = useRef<HTMLInputElement>(null);
   // The camera, one tap from a phone's composer (``CameraView``).
   const [cameraOpen, setCameraOpen] = useState(false);
   const emojiBtn = useRef<HTMLButtonElement>(null);
@@ -580,11 +583,39 @@ export const Composer = forwardRef<
             <Camera className="h-5 w-5 shrink-0" />
           </button>
         )}
+        {/* One tap to your photos, as in Messenger. Folds away with the camera
+            once you start typing; "Photos and videos" is under + as well. */}
+        {!editing && isPhone && (
+          <button
+            type="button"
+            aria-label="Send photos or videos"
+            title="Photos"
+            data-testid="composer-photos"
+            tabIndex={text.trim() ? -1 : 0}
+            aria-hidden={text.trim() ? true : undefined}
+            onClick={() => photoInput.current?.click()}
+            className={cn(iconBtn, "overflow-hidden transition-[width,opacity] duration-150", text.trim() && "pointer-events-none !w-0 opacity-0")}
+          >
+            <Images className="h-5 w-5 shrink-0" />
+          </button>
+        )}
         <input
           ref={fileInput}
           type="file"
           multiple
           hidden
+          onChange={(e) => {
+            addFiles(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={photoInput}
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          hidden
+          data-testid="composer-photo-input"
           onChange={(e) => {
             addFiles(Array.from(e.target.files ?? []));
             e.target.value = "";
@@ -686,10 +717,21 @@ export const Composer = forwardRef<
         (() => {
           const items = (
             <div role="menu" aria-label="Add" className="flex flex-col gap-0.5 p-1">
+              {isPhone && (
+                <PlusRow
+                  icon={Images}
+                  label="Photos and videos"
+                  hint="Pick from this phone's photos"
+                  onClick={() => {
+                    setPlusOpen(false);
+                    photoInput.current?.click();
+                  }}
+                />
+              )}
               <PlusRow
                 icon={Paperclip}
                 label="Upload a file"
-                hint={isPhone ? "Photos, documents, anything" : "Or drop / paste it here"}
+                hint={isPhone ? "Documents, anything" : "Or drop / paste it here"}
                 onClick={() => {
                   setPlusOpen(false);
                   fileInput.current?.click();

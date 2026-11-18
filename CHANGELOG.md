@@ -23,6 +23,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 
+- Rooms on a phone: a Photos button beside the camera opens your phone's photos in one tap (pick several at once, videos too). It's under + as "Photos and videos" as well.
 - Home: co-owners. A home's owner can make someone in it a co-owner, and take that back (Home settings, People). A co-owner can set the home up like the owner: add devices, rooms, music and people. Only the owner chooses co-owners, passes the home on or deletes it.
 - Home: the owner can pass a home to someone in it, and either stay on as a co-owner or leave ("Leave or delete this home" in Home settings). Nothing in the home changes.
 - Home: the owner can delete a home. Everyone is taken out of it, and its box forgets the brands and bridges that were added (with their devices and sign-ins), linked music and rooms. A box that's offline forgets them when it next connects, and shows nobody anything until it has.
