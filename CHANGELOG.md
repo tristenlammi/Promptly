@@ -25,6 +25,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 - Ctrl+K: Enter pressed the moment a row appeared was sometimes lost, and search results landing threw away a row you had picked with the arrows. The highlighted row is now always the one Enter takes, and a row you picked stays picked while results come in.
 - Porch → Settings → Notifications: two switches changed one straight after the other both stick. The second used to put the first one back.
+- Mail: an email you send is always filed in the mailbox's Sent folder. If the connection to the mail server had gone quiet at that moment, the email went but its copy was never filed, so it was missing from Sent in other mail apps. Promptly now looks on a new connection and files it there, unless it is already there.
 - Dark theme: white words on red were hard to read in 13 places (the "New" line and marker in Rooms, the live marker and the leave and screen-share buttons in voice rooms, Remove and Delete buttons in Mail, Notes, Porch admin and app items, and the Passwords error message). They now sit on a deeper red.
 
 ## [0.49.1] - 2026-11-17

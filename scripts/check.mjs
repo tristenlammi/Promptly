@@ -316,7 +316,13 @@ function stepBackend() {
     ...(mail ? ["-e", `MAIL_TEST_HOST=${mail}`, "-e", "SSL_CERT_FILE=/out/mail/cert.pem"] : []),
     "--entrypoint", "sh", "promptly-backend:local", "-c", inner,
   ]);
-  if (mail) spawnSync("docker", ["rm", "-f", mail], { stdio: "ignore", windowsHide: true });
+  if (mail) {
+    // What the mail server saw, kept with the run: a mail test that fails by
+    // chance is usually the server (a hang-up, a command it never answered).
+    const said = spawnSync("docker", ["logs", "--timestamps", mail], { encoding: "utf8", maxBuffer: 1 << 28, windowsHide: true });
+    try { fs.writeFileSync(path.join(OUT, "mail-server.log"), `${said.stdout ?? ""}${said.stderr ?? ""}`); } catch { /* the log is a nicety */ }
+    spawnSync("docker", ["rm", "-f", mail], { stdio: "ignore", windowsHide: true });
+  }
   // Drop this run's databases whatever happened.
   const names = read("docker", ["exec", "Promptly-Postgres", "psql", "-U", "promptly", "-d", "postgres", "-Atc", `select datname from pg_database where datname like '${base}%'`]);
   for (const n of (names ?? "").split("\n").filter(Boolean)) {
