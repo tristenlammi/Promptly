@@ -148,7 +148,9 @@ async function removeCalls(qc: ReturnType<typeof useQueryClient>, ids: string[])
   }
 }
 
-/** While the Calls tab is open and in front: the badge's calls are seen. */
+/** While the Calls tab is open and in front: the badge's calls are seen. Only once the
+ *  list is in: asked for at the same moment, "seen" could reach the server first, and the
+ *  list then came back with nothing marked new (no bold, no red) for calls you hadn't seen. */
 function useSeeMissed(active: boolean) {
   const missed = useCallStore((s) => s.missed);
   useEffect(() => {
@@ -244,7 +246,7 @@ export function CallsList({
   const [filter, setFilter] = useState<"all" | "missed">("all");
   const [menu, setMenu] = useState(false);
   const menuBtn = useRef<HTMLButtonElement>(null);
-  useSeeMissed(true);
+  useSeeMissed(q.isSuccess);
 
   const { entries, users } = useMemo(() => flatten(q.data), [q.data]);
   const allUsers = useMemo(() => ({ ...users, ...b.users }), [users, b.users]);
@@ -475,7 +477,7 @@ export function CallDetail({ b, callKey, isPhone, onBack }: { b: Bootstrap; call
   const qc = useQueryClient();
   const navigate = useNavigate();
   const q = useCallHistory();
-  useSeeMissed(true);
+  useSeeMissed(q.isSuccess);
   const { entries, users } = useMemo(() => flatten(q.data), [q.data]);
   const allUsers = useMemo(() => ({ ...users, ...b.users }), [users, b.users]);
   const group = useMemo(() => groupCalls(entries).find((g) => g.key === callKey || g.entries.some((x) => x.id === callKey)) ?? null, [entries, callKey]);
