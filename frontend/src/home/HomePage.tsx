@@ -1,50 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  AirVent,
-  Blinds,
-  BatteryMedium,
-  Bot,
-  DoorClosed,
-  Droplet,
-  Droplets,
-  Fan,
-  LayoutGrid,
-  Lightbulb,
-  Lock,
-  MoreHorizontal,
-  Plug,
-  Plus,
-  Power,
-  Radio,
-  Router,
-  Settings,
-  Shield,
-  Sparkles,
-  Speaker,
-  Thermometer,
-  Tv,
-  WifiOff,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { LayoutGrid, Lightbulb, Plus, Radio, Router, Settings, WifiOff, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { homeApi, type Home, type HomeEntity } from "@/api/home";
+import { homeApi, type Home } from "@/api/home";
 import { TopNav } from "@/components/layout/TopNav";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Sheet } from "@/components/shared/Sheet";
 import { Skeleton } from "@/components/shared/Skeleton";
-import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { AddDeviceSheet } from "./AddDeviceSheet";
+import { Board } from "./board/Board";
 import { DeviceSheet } from "./DeviceSheet";
 import { HomeSettingsSheet } from "./HomeSettingsSheet";
-import { byKind, isScene, isTile, isZone, keyOf, lit, tapSwitches } from "./kinds";
+import { keyOf } from "./kinds";
 import { RoomsSheet } from "./RoomsSheet";
-import { looseDevices, SortSheet } from "./SortSheet";
-import { byReading, isReading, noteLine, stateWords } from "./words";
+import { SortSheet } from "./SortSheet";
+import { noteLine } from "./words";
 
 /**
  * Home: the devices in your home, through the box that lives there.
@@ -62,6 +35,10 @@ import { byReading, isReading, noteLine, stateWords } from "./words";
  * lights, are never tiles. "Add a device" runs a brand's set-up steps on the home's box;
  * "Add a home box" takes the code on the box's card (the card's QR opens
  * this page with the code filled in).
+ *
+ * The devices themselves are drawn by ``board/Board``: as rooms, the way
+ * they always were, until the person customises their own page (widgets
+ * they add, size, drag and remove; see ``board/layout.ts``).
  *
  * Live: while the page is in front it asks the server every two seconds
  * whether anything changed (one number comes back when nothing has).
@@ -245,8 +222,6 @@ function useLive(home: Home | null) {
   }, [id, qc]);
 }
 
-const NO_ROOM = "Not in a room yet";
-
 function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () => void; onSort: () => void }) {
   const qc = useQueryClient();
   // This server's own box takes a minute or two to come up (longer the first
@@ -255,45 +230,11 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
   const offline = home.boxes.filter((b) => !b.online && !b.builtin);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const opened = openKey ? home.entities.find((e) => keyOf(e) === openKey) ?? null : null;
-  // In the order set under Rooms; what has no room yet comes last.
-  const rooms = useMemo(() => {
-    const known = new Map(home.areas.map((a) => [a.id, a]));
-    const groups = new Map<string, HomeEntity[]>();
-    for (const e of home.entities) {
-      const key = e.area && known.has(e.area) ? e.area : "";
-      groups.set(key, [...(groups.get(key) ?? []), e]);
-    }
-    const out: { id: string; name: string; list: HomeEntity[] }[] = [];
-    for (const a of home.areas) if (groups.has(a.id)) out.push({ id: a.id, name: a.name, list: groups.get(a.id)! });
-    if (groups.has("")) out.push({ id: "", name: NO_ROOM, list: groups.get("")! });
-    return out;
-  }, [home.areas, home.entities]);
-  const loose = useMemo(() => looseDevices(home.entities).length, [home.entities]);
   // Setting-up things (a note to tidy, devices to sort, adding) are for whoever runs the home.
   const noted = home.can_manage ? home.boxes.filter((b) => b.note) : [];
   const gotIt = useMutation({
     mutationFn: (boxId: string) => homeApi.clearNote(home.id, boxId),
     onMutate: (boxId) => qc.setQueryData<Home[]>(KEY, (old) => old?.map((h) => (h.id === home.id ? { ...h, boxes: h.boxes.map((b) => (b.id === boxId ? { ...b, note: null } : b)) } : h))),
-  });
-  const runScene = useMutation({
-    mutationFn: (e: HomeEntity) => homeApi.act(home.id, { box_id: e.box_id, entity_id: e.id, action: "run" }),
-    onMutate: () => void navigator.vibrate?.(8),
-    onSuccess: (_r, e) => toast.success(`${e.name} is on`),
-    onError: (e) => toast.error(apiErrorMessage(e, "That didn't work. Try again.")),
-  });
-  const allLights = useMutation({
-    mutationFn: (v: { boxId: string; area: string; on: boolean }) => homeApi.roomLights(home.id, v.boxId, v.area, v.on),
-    // Shows at once; the lights' own word follows within a moment.
-    onMutate: (v) => {
-      qc.setQueryData<Home[]>(KEY, (old) =>
-        old?.map((h) => (h.id === home.id ? { ...h, entities: h.entities.map((x) => (x.domain === "light" && x.area === v.area && x.box_id === v.boxId && x.state !== "unavailable" ? { ...x, state: v.on ? "on" : "off" } : x)) } : h)),
-      );
-      navigator.vibrate?.(8);
-    },
-    onError: (e) => {
-      toast.error(apiErrorMessage(e, "That didn't work. Try again."));
-      void qc.invalidateQueries({ queryKey: KEY });
-    },
   });
 
   if (home.boxes.length === 0) {
@@ -339,143 +280,9 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
           action={home.can_manage ? <button type="button" className={primary} onClick={onAddDevice}><Plus className="h-4 w-4" /> Add a device</button> : undefined}
         />
       )}
-      {rooms.map(({ id, name: room, list }) => {
-        const tiles = list.filter((e) => isTile(e, home.entities)).sort(byKind);
-        const scenes = list.filter(isScene).sort((a, b) => a.name.localeCompare(b.name));
-        const readings = list.filter(isReading).sort(byReading);
-        // One switch for the room's lights (two or more: one light has its own tile).
-        const lights = id ? tiles.filter((e) => e.domain === "light" && e.online && e.state !== "unavailable") : [];
-        const anyOn = lights.some((e) => e.state === "on");
-        return (
-          <section key={id || "none"} aria-label={room}>
-            <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
-              <h2 className="min-w-0 truncate text-sm font-semibold text-[var(--text-muted)]">{room}</h2>
-              {lights.length > 1 && (
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={anyOn}
-                  aria-label={`All lights in ${room}`}
-                  disabled={allLights.isPending}
-                  onClick={() => allLights.mutate({ boxId: lights[0].box_id, area: id, on: !anyOn })}
-                  className={cn(
-                    "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
-                    anyOn ? "border-[var(--accent)]/50 bg-[color-mix(in_srgb,var(--accent)_12%,var(--surface))] text-[var(--accent-text,var(--accent))]" : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]",
-                  )}
-                >
-                  <Lightbulb className="h-3.5 w-3.5" aria-hidden /> All lights {anyOn ? "on" : "off"}
-                </button>
-              )}
-              {!id && loose > 0 && home.can_manage && home.boxes.some((b) => b.ready) && (
-                <button type="button" onClick={onSort} className="inline-flex h-9 shrink-0 items-center rounded-full border border-[var(--border)] px-3 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
-                  Sort into rooms
-                </button>
-              )}
-            </div>
-            {tiles.length > 0 && (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {tiles.map((e) => <Tile key={keyOf(e)} homeId={home.id} entity={e} onOpen={() => setOpenKey(keyOf(e))} />)}
-              </div>
-            )}
-            {scenes.length > 0 && (
-              // One line that scrolls sideways: a brand can bring a dozen scenes to a room.
-              <ul className={cn("-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [-ms-overflow-style:none] md:-mx-6 md:px-6 [&::-webkit-scrollbar]:hidden", tiles.length > 0 && "mt-3")} aria-label={`${room} scenes`}>
-                {scenes.map((e) => (
-                  <li key={keyOf(e)} className="shrink-0">
-                    <button type="button" disabled={!e.online || e.state === "unavailable" || runScene.isPending} onClick={() => runScene.mutate(e)} className="inline-flex h-10 max-w-52 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
-                      <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text,var(--accent))]" aria-hidden />
-                      <span className="truncate">{e.name}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {readings.length > 0 && (
-              <ul className={cn("flex flex-wrap gap-2", (tiles.length > 0 || scenes.length > 0) && "mt-3")} aria-label={`${room} readings`}>
-                {readings.map((e) => {
-                  const Icon = iconOf(e);
-                  return (
-                    <li key={keyOf(e)}>
-                      <button type="button" onClick={() => setOpenKey(keyOf(e))} className={cn("inline-flex min-h-9 max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-left text-xs hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]", !e.online && "opacity-60")}>
-                        <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" aria-hidden />
-                        <span className="truncate text-[var(--text-muted)]">{e.name}</span>
-                        <span className="shrink-0 font-medium text-[var(--text)]">{stateWords(e)}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-        );
-      })}
+      <Board key={home.id} home={home} onOpen={setOpenKey} onSort={onSort} />
       <DeviceSheet home={home} entity={opened} onClose={() => setOpenKey(null)} onOpen={(other) => setOpenKey(keyOf(other))} />
     </>
-  );
-}
-
-const ICONS: Record<string, LucideIcon> = {
-  light: Lightbulb, switch: Plug, input_boolean: Power, fan: Fan, lock: Lock, cover: Blinds, climate: Thermometer, media_player: Speaker,
-  vacuum: Bot, humidifier: Droplets, valve: Droplet, remote: Power, alarm_control_panel: Shield, water_heater: Thermometer, lawn_mower: Bot, siren: Radio,
-};
-
-function iconOf(e: HomeEntity): LucideIcon {
-  if (e.domain === "media_player") return e.cls === "tv" || e.cls === "receiver" ? Tv : Speaker;
-  if (e.domain === "climate") return isZone(e) ? AirVent : Thermometer;
-  if (e.cls === "temperature") return Thermometer;
-  if (e.cls === "humidity" || e.cls === "moisture") return Droplets;
-  if (e.cls === "battery") return BatteryMedium;
-  if (e.cls === "door" || e.cls === "window" || e.cls === "opening" || e.cls === "garage_door") return DoorClosed;
-  if (e.domain === "cover" && (e.cls === "garage" || e.cls === "door" || e.cls === "gate")) return DoorClosed;
-  return ICONS[e.domain] ?? Radio;
-}
-
-function Tile({ homeId, entity, onOpen }: { homeId: string; entity: HomeEntity; onOpen: () => void }) {
-  const qc = useQueryClient();
-  const on = lit(entity);
-  const dead = !entity.online || entity.state === "unavailable";
-  const flip = useMutation({
-    mutationFn: () => homeApi.act(homeId, { box_id: entity.box_id, entity_id: entity.id, action: on ? "turn_off" : "turn_on" }),
-    // Shows at once; the box's own word follows within a moment.
-    onMutate: () => {
-      qc.setQueryData<Home[]>(KEY, (old) =>
-        old?.map((h) => (h.id === homeId ? { ...h, entities: h.entities.map((x) => (x.id === entity.id && x.box_id === entity.box_id ? { ...x, state: on ? "off" : isZone(entity) ? "fan_only" : "on" } : x)) } : h)),
-      );
-      navigator.vibrate?.(8);
-    },
-    onError: (e) => {
-      toast.error(apiErrorMessage(e, "That didn't work. Try again."));
-      void qc.invalidateQueries({ queryKey: KEY });
-    },
-  });
-  const Icon = iconOf(entity);
-  const body = (
-    <>
-      <span className={cn("flex h-9 w-9 items-center justify-center rounded-full", on && !dead ? "bg-[var(--accent)]/20 text-[var(--accent-text,var(--accent))]" : "bg-[var(--hover)] text-[var(--text-muted)]")}>
-        <Icon className="h-[18px] w-[18px]" aria-hidden />
-      </span>
-      <span className="mt-2 block w-full truncate text-sm font-medium text-[var(--text)]">{entity.name}</span>
-      <span className="block w-full truncate text-xs text-[var(--text-muted)]">{entity.grp ? "Group · " : isZone(entity) ? "Zone · " : ""}{stateWords(entity) || "\u00a0"}</span>
-    </>
-  );
-  const shell = cn(
-    "flex min-h-24 w-full flex-col items-start rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
-    on && !dead ? "border-[var(--accent)]/50 bg-[color-mix(in_srgb,var(--accent)_9%,var(--surface))]" : "border-[var(--border)] bg-[var(--surface)]",
-    dead && "opacity-60",
-  );
-  // A blind, an air con, a lock, a speaker: the tile opens its controls.
-  if (!tapSwitches(entity)) {
-    return <button type="button" aria-label={[entity.name, stateWords(entity)].filter(Boolean).join(", ")} onClick={onOpen} className={cn(shell, "hover:border-[var(--accent)]/60")}>{body}</button>;
-  }
-  return (
-    <div className="relative">
-      <button type="button" role="switch" aria-checked={on} aria-label={entity.name} disabled={dead || flip.isPending} onClick={() => flip.mutate()} className={cn(shell, "hover:border-[var(--accent)]/60 disabled:cursor-not-allowed")}>
-        {body}
-      </button>
-      <button type="button" aria-label={`${entity.name}: more`} onClick={onOpen} className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
-        <MoreHorizontal className="h-4 w-4" aria-hidden />
-      </button>
-    </div>
   );
 }
 

@@ -242,7 +242,7 @@ export function ClimateControls({ home, e, dead, busy, go, onOpen }: { home: Hom
 }
 
 /** The picture of what's playing, fetched through the home's box. Nothing shows if there is none. */
-function Art({ home, e }: { home: Home; e: HomeEntity }) {
+export function Art({ home, e }: { home: Home; e: HomeEntity }) {
   const mark = e.x?.art;
   const { data } = useQuery({
     queryKey: ["home", "art", home.id, e.box_id, e.id, mark],

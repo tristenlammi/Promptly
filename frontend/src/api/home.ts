@@ -268,6 +268,10 @@ export const homeApi = {
   /** Several devices into one room ("" = out of their room). */
   placeDevices: (h: string, b: string, entities: string[], area: string) => apiClient.post(`/home/${h}/boxes/${b}/devices/place`, { entities, area }).then(() => undefined),
   clearNote: (h: string, b: string) => apiClient.delete(`/home/${h}/boxes/${b}/note`).then(() => undefined),
+  // ---- your own layout of a home's page (yours alone; ``null`` until you customise it) ----
+  layout: (h: string) => apiClient.get<{ widgets: unknown[] | null }>(`/home/${h}/layout`).then((r) => r.data.widgets),
+  saveLayout: (h: string, widgets: unknown[]) => apiClient.put<{ widgets: unknown[] }>(`/home/${h}/layout`, { widgets }).then((r) => r.data.widgets),
+  resetLayout: (h: string) => apiClient.delete(`/home/${h}/layout`).then(() => undefined),
   /** The picture of what a speaker is playing (the box fetches it). */
   art: (h: string, b: string, entity: string) => apiClient.get<Blob>(`/home/${h}/boxes/${b}/art/${entity}`, { responseType: "blob" }).then((r) => r.data),
 };
