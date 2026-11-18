@@ -174,7 +174,7 @@ class AssistantSettingsActivity : ComponentActivity() {
                     "What turning it on means:\n" +
                         "• The microphone stays open, so Android shows its green dot and a notification the whole time.\n" +
                         "• The sound is checked on this phone for that one phrase and thrown away. Nothing is sent to your server until you've said it and then gone on to speak.\n" +
-                        "• It uses some battery all day. On a quiet day expect a few per cent; more where there's always sound.\n" +
+                        "• It uses some battery all day, and more where there's always sound.\n" +
                         "• It can mistake other sounds for the phrase. When it does, the assistant opens, waits a few seconds for you to speak, and closes again. It doesn't turn your music down.\n" +
                         "• It stops listening, and lets go of the microphone, while you drive with P Maps, while the phone is connected to a car, during calls and voice rooms, and while another app is recording. In the car, use the microphone button on the map.",
                     style = MaterialTheme.typography.bodySmall,
