@@ -664,7 +664,13 @@ export const Composer = forwardRef<
             type="button"
             aria-label={editing ? "Save edit" : "Send"}
             disabled={!canSend}
-            onClick={() => void submit()}
+            // Sending must not take the typing box's focus: on a phone that drops the
+            // keyboard, and the next message means tapping the box again.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              if (!editing) ta.current?.focus({ preventScroll: true });
+              void submit();
+            }}
             className={cn(
               iconBtn,
               canSend ? "!text-[var(--accent-text)]" : "opacity-40",

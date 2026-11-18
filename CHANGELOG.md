@@ -44,6 +44,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - "Hey Promptly" runs apart from the rest of the app, so a fault in the listening can't stop Promptly, a trip or the car's screen. If it stops unexpectedly three times in ten minutes it turns itself off and tells you.
 - In the car, asked to call someone, the assistant now says "I can only call from your phone." The microphone button on the car's map is how you talk to it there; the car never listens for "Hey Promptly".
 
+### Fixed
+
+- Rooms on a phone: pressing Send no longer drops the keyboard, so you can type the next message straight away.
+
 ## [0.49.1] - 2026-11-17
 
 ### Added

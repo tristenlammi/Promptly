@@ -96,6 +96,8 @@ test("a photo is sent and shows for both", async ({ alice, bob }) => {
   const caption = `The view ${stamp}`;
   await box(alice).fill(caption);
   await alice.getByRole("button", { name: "Send", exact: true }).click();
+  // Send leaves you in the typing box, so a phone keeps its keyboard up for the next message.
+  await expect(box(alice)).toBeFocused();
   for (const page of [alice, bob]) {
     await expect(log(page).getByText(caption)).toBeVisible({ timeout: 20_000 });
     // The picture itself, loaded (not a broken image).
