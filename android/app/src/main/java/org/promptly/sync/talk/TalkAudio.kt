@@ -84,6 +84,34 @@ class PhoneMic private constructor(private val record: AudioRecord) : MicSource 
     }
 }
 
+/** The plain microphone, for the wait after "Hey Promptly" ([WakeGate]): no call
+ *  mode, no audio focus, nothing that touches what the phone is playing. */
+class QuietMic private constructor(private val record: AudioRecord) : MicSource {
+    override fun read(into: ShortArray): Int = record.read(into, 0, into.size)
+
+    override fun close() {
+        runCatching { record.stop() }
+        record.release()
+    }
+
+    companion object {
+        @SuppressLint("MissingPermission")
+        fun open(): QuietMic? {
+            val rate = TalkProtocol.MIC_RATE
+            val size = maxOf(AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT), rate / 5 * 2)
+            return runCatching {
+                val record = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, size)
+                if (record.state != AudioRecord.STATE_INITIALIZED) {
+                    record.release()
+                    return null
+                }
+                record.startRecording()
+                QuietMic(record)
+            }.getOrNull()
+        }
+    }
+}
+
 /** An `AudioTrack` as [Playback] sees it: 24 kHz PCM16 mono, streamed, small buffer. */
 class PhoneTrack(route: PlaybackRoute) : Track {
     private val track: AudioTrack

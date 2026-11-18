@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -136,6 +137,76 @@ class AssistantSettingsActivity : ComponentActivity() {
         }
     }
 
+    /** "Hey Promptly": off until you turn it on, on this phone only. */
+    @Composable
+    private fun WakeSettings(isAssistant: Boolean) {
+        val context = this@AssistantSettingsActivity
+        var on by remember(tick) { mutableStateOf(WakeWord.enabled(context)) }
+        var locked by remember(tick) { mutableStateOf(WakeWord.whenLocked(context)) }
+        val status by WakeWord.status.collectAsState()
+        val micAllowed = remember(tick) { Voice.allowed(context) }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("\"Hey Promptly\"", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Listen for \"Hey Promptly\"")
+                        Text(
+                            when {
+                                !isAssistant -> "Make Promptly your phone's assistant first (above). Android only lets the assistant listen in the background."
+                                on -> status ?: "Starting…"
+                                else -> "Off. The microphone only opens when you ask."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = on && isAssistant, enabled = isAssistant, onCheckedChange = { want ->
+                        if (want && !micAllowed) {
+                            askMic.launch(android.Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            on = want
+                            WakeWord.setEnabled(context, want)
+                        }
+                    })
+                }
+                Text(
+                    "What turning it on means:\n" +
+                        "• The microphone stays open, so Android shows its green dot and a notification the whole time.\n" +
+                        "• The sound is checked on this phone for that one phrase and thrown away. Nothing is sent to your server until you've said it and then gone on to speak.\n" +
+                        "• It uses some battery all day, and more where there's always sound.\n" +
+                        "• It can mistake other sounds for the phrase. When it does, the assistant opens, waits a few seconds for you to speak, and closes again. It doesn't turn your music down.\n" +
+                        "• It stops listening, and lets go of the microphone, while you drive with P Maps, while the phone is connected to a car, during calls and voice rooms, and while another app is recording. In the car, use the microphone button on the map.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Answer when the phone is locked")
+                        Text(
+                            "Off: on a locked phone it asks you to unlock first. On: it answers, but anything private still waits for an unlock.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = locked, enabled = on && isAssistant, onCheckedChange = {
+                        locked = it
+                        WakeWord.setWhenLocked(context, it)
+                    })
+                }
+                if (org.promptly.sync.BuildConfig.DEBUG && on && isAssistant) {
+                    // Debug builds only: the emulator has nobody to say it.
+                    OutlinedButton(onClick = { WakeWord.heard(context, 200.0) }) { Text("Pretend it heard the phrase") }
+                }
+            }
+        }
+    }
+
+    private val askMic = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) WakeWord.setEnabled(this, true)
+        tick++
+    }
+
     @Composable
     private fun RouteChoice(title: String, detail: String, selected: Boolean, pick: (PlaybackRoute) -> Unit) {
         val which = if (title.startsWith("Call")) PlaybackRoute.CALL else PlaybackRoute.ASSISTANT
@@ -175,7 +246,8 @@ class AssistantSettingsActivity : ComponentActivity() {
                 }
             }
             TalkSettings()
-            Text("Nothing listens in the background. The microphone only opens when you use that gesture, the Quick Settings tile, the Talk shortcut on the Promptly icon, or the button in P Maps or on your car's screen, and it closes when the conversation ends.")
+            WakeSettings(isAssistant)
+            Text("Unless you turn \"Hey Promptly\" on, nothing listens in the background. The microphone only opens when you use that gesture, the Quick Settings tile, the Talk shortcut on the Promptly icon, or the button in P Maps or on your car's screen, and it closes when the conversation ends.")
             val problems = remember(tick) { Crashes.recent(context) }
             if (problems.isNotEmpty()) {
                 Card(Modifier.fillMaxWidth()) {

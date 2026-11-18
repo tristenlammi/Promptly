@@ -89,6 +89,8 @@ android {
         jniLibs {
             // Compressed, for a smaller download from your server.
             useLegacyPackaging = true
+            // "Hey Promptly" only uses the library's JNI half and ONNX Runtime.
+            excludes += listOf("**/libsherpa-onnx-c-api.so", "**/libsherpa-onnx-cxx-api.so")
         }
     }
 
@@ -200,6 +202,8 @@ dependencies {
     implementation("com.stadiamaps.ferrostar:ui-maplibre-car-app:$ferrostar")
     implementation("org.maplibre.compose:maplibre-compose-android:0.13.0")
     implementation("androidx.car.app:app:1.7.0")
+    // sherpa-onnx (Apache-2.0): matching "Hey Promptly" on the phone itself (WakeService).
+    implementation("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1")
     implementation("io.github.rallista:car-app-compose:0.0.2")
     // P Maps offline routing: Valhalla 3.9.0 on the phone (MIT), reading the server's
     // 3.9.1 tiles (checked in WP-M0). Bump it together with maps/Dockerfile's Valhalla.

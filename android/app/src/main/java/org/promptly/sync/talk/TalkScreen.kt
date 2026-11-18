@@ -162,7 +162,7 @@ private fun dotColor(ui: TalkUi, accent: Color): Color = when {
 
 /** One short phrase for where things are. */
 fun status(ui: TalkUi): String = when {
-    ui.phase == Phase.STARTING -> "Starting…"
+    ui.phase == Phase.STARTING -> if (ui.waiting) "Listening" else "Starting…"
     ui.phase == Phase.RECONNECTING -> "Reconnecting…"
     ui.phase == Phase.ENDED -> "Finished"
     ui.paused -> "Paused while another app uses the audio. Tap Unmute to carry on."

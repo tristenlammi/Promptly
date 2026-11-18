@@ -101,6 +101,8 @@ class AssistantActivity : ComponentActivity() {
     private var picking = false
     private var askingMic = false
     private var pickingFor: JSONObject? = null
+    /** Set when "Hey Promptly" opened the sheet: how loud the room was just before. */
+    private var wakeFloor: Double? = null
 
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         askingMic = false
@@ -146,9 +148,18 @@ class AssistantActivity : ComponentActivity() {
     }
 
     private fun arrive(intent: Intent?) {
+        // "Hey Promptly" opened it: it waits to hear you before anything else happens.
+        wakeFloor = if (intent?.getBooleanExtra(WakeWord.EXTRA_WAKE, false) == true) intent.getDoubleExtra(WakeWord.EXTRA_FLOOR, 200.0) else null
         val keyguard = getSystemService(KeyguardManager::class.java)
         if (keyguard == null || !keyguard.isKeyguardLocked) {
             begin()
+            return
+        }
+        // "Hey Promptly" on a locked phone: only if you turned that on. Private
+        // things still wait for an unlock, as with a headset's button.
+        if (wakeFloor != null && WakeWord.whenLocked(this)) {
+            setTurnScreenOn(true)
+            begin(locked = true)
             return
         }
         // A car's or headset's voice button (Bluetooth's voice-recognition command
@@ -205,15 +216,20 @@ class AssistantActivity : ComponentActivity() {
     }
 
     private fun startTalk(locked: Boolean = false) {
-        Talk.start(this, locked)
+        Talk.start(this, locked, wakeFloor)
+        // Only the once: Try again, or the next thing you ask, starts as the button does.
+        wakeFloor = null
         // The notification that keeps it going after the screen locks may only start
         // while this is on screen; onResume does it when that's still to come.
-        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) TalkService.start(this)
+        // Not while it's only waiting to hear you after "Hey Promptly": nothing has
+        // started yet, and its media controls would take over a headset's buttons.
+        // TalkPane starts it once you've spoken.
+        if (!Talk.ui.value.waiting && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) TalkService.start(this)
     }
 
     override fun onResume() {
         super.onResume()
-        if (gate.value == Gate.OPEN && mode.value == Mode.TALK && Talk.live) TalkService.start(this)
+        if (gate.value == Gate.OPEN && mode.value == Mode.TALK && Talk.live && !Talk.ui.value.waiting) TalkService.start(this)
     }
 
     /** One question at a time over `/api/assistant`, once Talk has let go of the microphone. */
@@ -332,6 +348,8 @@ class AssistantActivity : ComponentActivity() {
     override fun onDestroy() {
         alive = false
         if (current === this) current = null
+        // "Hey Promptly" (if it's on) may have been waiting for this sheet to finish.
+        if (!Talk.live) WakeWord.finished(this)
         super.onDestroy()
     }
 
@@ -435,6 +453,10 @@ class AssistantActivity : ComponentActivity() {
     @Composable
     private fun TalkPane() {
         val ui by Talk.ui.collectAsState()
+        // You spoke after "Hey Promptly": now it's a conversation, with its notification.
+        LaunchedEffect(ui.waiting) {
+            if (!ui.waiting && Talk.live && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) TalkService.start(this@AssistantActivity)
+        }
         LaunchedEffect(ui.phase, ui.problem) {
             if (ui.phase != Phase.ENDED) return@LaunchedEffect
             val problem = ui.problem

@@ -40,6 +40,11 @@ async def test_the_car_gets_no_screen_tools_and_no_memory(db, phone_user, sideca
     assert not offered & {"dial", "message", "open_app", "remember"}
     system = model.system()
     assert "can't look at a screen" in system and "That needs your phone's screen." in system
+    # Calls are made from the phone, never from the car (owner decision): it says so.
+    assert "I can only call from your phone." in system
+    # The house and its music are there in the car too, on the button.
+    from app.talk import tools as voice_tools
+    assert {"home_devices", "home_control", "home_music"} <= voice_tools.voice_tool_names([], device="car")
     await finish(c)
 
 
