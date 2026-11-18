@@ -1,8 +1,8 @@
 """Who looks after a home.
 
-The home's owner manages it: its automations, and (elsewhere) its brands,
-rooms and boxes. One place decides who that is, so "owner or co-owner" is a
-change to :data:`MANAGER_ROLES` and nothing else.
+A home's owner and its co-owners run it: its brands, rooms, boxes, music and
+automations. Everyone else in it uses it. One place says who that is, for
+every part of Home (``manage.py`` and the routers read it from here).
 """
 from __future__ import annotations
 
@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import HomeMember
 
-# The roles (``home_members.role``) that may change a home's automations.
-MANAGER_ROLES: frozenset[str] = frozenset({"owner"})
-ONLY_MANAGER = "Only the home's owner can do that."
+OWNER, COOWNER, MEMBER = "owner", "coowner", "member"
+# The roles (``home_members.role``) that set a home up and change its automations.
+RUNS_IT = (OWNER, COOWNER)
+MANAGER_ROLES: frozenset[str] = frozenset(RUNS_IT)
+ONLY_MANAGER = "Only the home's owner or a co-owner can do that."
 
 
 def manages(role: str | None) -> bool:

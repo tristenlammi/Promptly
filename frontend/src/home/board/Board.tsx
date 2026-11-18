@@ -2,8 +2,8 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GripVertical, Pencil, Plus, SlidersHorizontal, X } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { GripVertical, Pencil, Plus, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { homeApi, type Home } from "@/api/home";
 import { Skeleton } from "@/components/shared/Skeleton";
@@ -62,7 +62,19 @@ const tool =
 
 const SPAN: Record<Widget["size"], string> = { s: "col-span-1", m: "col-span-2", l: "col-span-2 sm:col-span-4" };
 
-export function Board({ home, onOpen, onSort }: { home: Home; /** Open a device's controls. */ onOpen: (key: string) => void; onSort: () => void }) {
+export function Board({
+  home,
+  onOpen,
+  onSort,
+  customise = 0,
+}: {
+  home: Home;
+  /** Open a device's controls. */
+  onOpen: (key: string) => void;
+  onSort: () => void;
+  /** Goes up by one each time "Customise this page" is pressed in the page's header. */
+  customise?: number;
+}) {
   const qc = useQueryClient();
   const key = layoutKey(home.id);
   const { data: saved = null, isPending } = useQuery({ queryKey: key, queryFn: () => homeApi.layout(home.id).then(tidy), staleTime: 60_000 });
@@ -110,6 +122,14 @@ export function Board({ home, onOpen, onSort }: { home: Home; /** Open a device'
     setDraft(start);
     setSure(false);
   };
+  // The header's button starts it (once the saved page is known; pressing it again while customising does nothing).
+  const asked = useRef(customise);
+  useEffect(() => {
+    if (customise === asked.current || isPending) return;
+    asked.current = customise;
+    if (draft === null && home.entities.length > 0) begin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customise, isPending]);
   const done = () => {
     if (!draft) return;
     // Nothing moved: leave the page as it comes (so it keeps following Rooms).
@@ -167,13 +187,6 @@ export function Board({ home, onOpen, onSort }: { home: Home; /** Open a device'
         )}
         {saved !== null && cells.length === 0 && home.entities.length > 0 && (
           <p className="rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--text-muted)]">Your page has nothing on it. Customise it to add a widget, or reset it.</p>
-        )}
-        {home.entities.length > 0 && (
-          <div className="flex justify-center pt-1">
-            <button type="button" onClick={begin} className="inline-flex h-11 items-center gap-2 rounded-full px-4 text-sm font-medium text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
-              <SlidersHorizontal className="h-4 w-4" aria-hidden /> Customise this page
-            </button>
-          </div>
         )}
       </>
     );

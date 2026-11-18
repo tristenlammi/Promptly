@@ -61,7 +61,7 @@ export function HomeAutomationPage() {
   }
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <TopNav title={auto.data.name} subtitle={auto.data.can_edit ? `${home.name} · automation` : `${home.name} · only the home's owner can change it`} actions={back} />
+      <TopNav title={auto.data.name} subtitle={auto.data.can_edit ? `${home.name} · automation` : `${home.name} · only the home's owner or a co-owner can change it`} actions={back} />
       <HomeFlowEditor home={home} automation={auto.data} onDirtyChange={(d) => (dirty.current = d)} />
     </div>
   );

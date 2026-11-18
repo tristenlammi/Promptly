@@ -37,16 +37,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import User
 
 from . import builtin, codes, relay
+from .access import COOWNER, MEMBER, OWNER, RUNS_IT, manages  # noqa: F401
 from .models import Home, HomeBox, HomeMember
 
 logger = logging.getLogger("promptly.home.manage")
 
-OWNER, COOWNER, MEMBER = "owner", "coowner", "member"
-RUNS_IT = (OWNER, COOWNER)
-
-
-def can_manage(role: str | None) -> bool:
-    return role in RUNS_IT
+# One list of who runs a home, shared with automations (``access.py``).
+can_manage = manages
 
 
 # ------------------------------------------------------------------ who's next
@@ -81,6 +78,11 @@ async def pass_on(db: AsyncSession, home: Home, to: uuid.UUID, *, stay: bool) ->
         else:
             await db.delete(old)
     await db.flush()
+    # Its automations run as the home's owner, and would go with the old
+    # owner's account: they are the new owner's now.
+    from . import automations
+
+    await automations.rehome(db, home.id, to)
 
 
 # ------------------------------------------------------------------ wiping
@@ -215,6 +217,11 @@ async def wipe_home(db: AsyncSession, home: Home) -> list[uuid.UUID]:
         # separate box before it's used again.
         await release(db, box, new_code=False)
     await db.flush()
+    # Its automations and everyone's layout of its page go with it (the
+    # database drops the rows); stop watching its devices for them.
+    from . import automations
+
+    automations.forget(home.id)
     await db.delete(home)
     await db.flush()
     return ids

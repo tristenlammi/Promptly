@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0480_home_layouts"
-down_revision = "0490_room_att_removed"
+down_revision = "0477_home_box_wipe"
 branch_labels = None
 depends_on = None
 

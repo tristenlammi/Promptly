@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LayoutGrid, Lightbulb, Plus, Radio, Router, Settings, WifiOff, X } from "lucide-react";
+import { LayoutGrid, Lightbulb, Plus, Radio, Router, Settings, SlidersHorizontal, WifiOff, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { homeApi, type Home } from "@/api/home";
@@ -70,6 +70,8 @@ export function HomePage() {
   const [settings, setSettings] = useState(false);
   const [rooms, setRooms] = useState(false);
   const [sorting, setSorting] = useState(false);
+  // Each press asks the page below to start being customised.
+  const [customise, setCustomise] = useState(0);
   const home = useMemo(() => homes?.find((h) => h.id === picked) ?? homes?.[0] ?? null, [homes, picked]);
 
   useLive(home);
@@ -104,6 +106,12 @@ export function HomePage() {
               {home.can_manage && home.boxes.some((b) => b.ready) && (
                 <button type="button" onClick={() => setAddingDevice(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-3 text-xs font-medium text-white hover:opacity-90">
                   <Plus className="h-3.5 w-3.5" /> Add a device
+                </button>
+              )}
+              {home.entities.length > 0 && (
+                // Everyone in the home: it is their own page they are arranging.
+                <button type="button" onClick={() => setCustomise((n) => n + 1)} aria-label="Customise this page" title="Customise this page" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
+                  <SlidersHorizontal className="h-4 w-4" />
                 </button>
               )}
               {home.can_manage && (
@@ -155,7 +163,7 @@ export function HomePage() {
           </div>
         )}
         {home && home.boxes.length > 0 && <AutomationsSection home={home} />}
-        {home && <Devices home={home} onAddDevice={() => setAddingDevice(true)} onSort={() => setSorting(true)} />}
+        {home && <Devices home={home} customise={customise} onAddDevice={() => setAddingDevice(true)} onSort={() => setSorting(true)} />}
       </div>
       {home && <AddDeviceSheet open={addingDevice} home={home} onClose={() => setAddingDevice(false)} onSort={() => setSorting(true)} />}
       {home && <RoomsSheet open={rooms} home={home} onClose={() => setRooms(false)} />}
@@ -224,7 +232,7 @@ function useLive(home: Home | null) {
   }, [id, qc]);
 }
 
-function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () => void; onSort: () => void }) {
+function Devices({ home, customise, onAddDevice, onSort }: { home: Home; customise: number; onAddDevice: () => void; onSort: () => void }) {
   const qc = useQueryClient();
   // This server's own box takes a minute or two to come up (longer the first
   // time, while it sets itself up): that's "starting", not "offline".
@@ -282,7 +290,7 @@ function Devices({ home, onAddDevice, onSort }: { home: Home; onAddDevice: () =>
           action={home.can_manage ? <button type="button" className={primary} onClick={onAddDevice}><Plus className="h-4 w-4" /> Add a device</button> : undefined}
         />
       )}
-      <Board key={home.id} home={home} onOpen={setOpenKey} onSort={onSort} />
+      <Board key={home.id} home={home} customise={customise} onOpen={setOpenKey} onSort={onSort} />
       <DeviceSheet home={home} entity={opened} onClose={() => setOpenKey(null)} onOpen={(other) => setOpenKey(keyOf(other))} />
     </>
   );

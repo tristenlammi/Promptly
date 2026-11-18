@@ -17,7 +17,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0482_home_auto"
-down_revision = "0490_room_att_removed"
+down_revision = "0480_home_layouts"
 branch_labels = None
 depends_on = None
 

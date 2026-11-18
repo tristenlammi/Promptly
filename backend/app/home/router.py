@@ -21,7 +21,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 
-from . import builtin, codes, manage, music, relay
+from . import access, builtin, codes, manage, music, relay
 from .models import Home, HomeBox, HomeMember
 
 router = APIRouter()
@@ -303,7 +303,7 @@ async def _ask_box(db: AsyncSession, box_id: uuid.UUID, op: str, args: dict[str,
 
 
 OWNER_ONLY = "Only the home's owner can do that."
-RUNS_IT_ONLY = "Only the home's owner or a co-owner can do that."
+RUNS_IT_ONLY = access.ONLY_MANAGER
 
 
 async def _owner(db: AsyncSession, user: User, home_id: uuid.UUID) -> Home:

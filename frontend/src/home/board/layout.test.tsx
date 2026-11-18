@@ -47,7 +47,7 @@ const GARAGE = entity({ id: "cover.garage", domain: "cover", cls: "garage", name
 const AC = entity({ id: "climate.ac", domain: "climate", name: "Air con", state: "cool", area: "lounge", can_switch: false, x: { target: 23, cur: 26 } });
 const ALL = [LAMP, STRIP, KETTLE, TEMP, COSY, MOVIE, SPEAKER, STUDY, TV, DOOR, GARAGE, AC];
 const HOME: Home = {
-  id: "h1", name: "Home", role: "member", members: [], rev: 1, boxes: [],
+  id: "h1", name: "Home", role: "member", can_manage: false, members: [], rev: 1, boxes: [],
   // The order set under Rooms: kitchen first. "Hall" has nothing in it.
   areas: [{ id: "kitchen", name: "Kitchen" }, { id: "lounge", name: "Lounge" }, { id: "hall", name: "Hall" }],
   entities: ALL,
@@ -199,7 +199,7 @@ describe("the page", () => {
     expect(html).toContain("All lights on"); // the lounge's two lights
     expect(html).toContain("Lounge scenes");
     expect(html).toContain("Lounge readings");
-    expect(html).toContain("Customise this page");
+    expect(html).not.toContain("Customising your page"); // only once the header's button is pressed
     expect(html).not.toContain("no longer in this home");
   });
 
