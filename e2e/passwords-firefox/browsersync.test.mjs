@@ -12,7 +12,7 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { By } from "selenium-webdriver";
 
-import { BASE, button, byText, click, fill, labelled, makeUsers, MASTER, newFirefox, onboard, see, signIn } from "./lib.mjs";
+import { BASE, button, byText, click, fill, labelled, makeUsers, MASTER, newFirefox, onboard, see, signIn, pruneOldUsers } from "./lib.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.resolve(here, "../../frontend/package.json"));
@@ -93,6 +93,7 @@ async function setBox(testId, on) {
 const tabUrls = () => extEval(`async () => (await browser.tabs.query({})).map((t) => t.url ?? "")`);
 
 before(async () => {
+  pruneOldUsers();
   makeUsers(["root"], "admin");
   server = http.createServer((req, res) => {
     const rel = new URL(req.url, "http://x").pathname.replace(/^\//, "");

@@ -17,13 +17,17 @@ test("a signed Firefox add-on gets an install link, and an unsigned one the temp
   let info: Record<string, unknown> = INFO;
   await page.route("**/downloads/PromptlyPasswordsExtension.json", (r) => r.fulfill({ json: info }));
 
+  // The extension sits under "More" since the page got one recommended step per device.
+  const more = () => page.getByTestId("install-more").locator("> summary").click();
   await page.goto("/apps/install");
+  await more();
   await expect(page.getByText("Promptly Passwords browser extension")).toBeVisible();
   await expect(page.getByText("Load Temporary Add-on")).toBeVisible();
   await expect(page.getByTestId("firefox-install")).toHaveCount(0);
 
   info = { ...INFO, firefox_signed: { file: "promptly-passwords-firefox.xpi", size_bytes: 1_600_000, sha256: "2".repeat(64) } };
   await page.reload();
+  await more();
   const install = page.getByTestId("firefox-install");
   await expect(install).toBeVisible();
   await expect(install).toHaveAttribute("href", "/downloads/promptly-passwords-firefox.xpi");

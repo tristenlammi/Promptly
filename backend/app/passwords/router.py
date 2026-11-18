@@ -1133,6 +1133,13 @@ async def post_health(body: s.HealthIn, session: VaultSession = Depends(require_
     row = await db.get(PwHealth, session.user.id)
     if row is None:
         db.add(PwHealth(user_id=session.user.id, counts=body.model_dump()))
+        # Opting in is "show this on my Today page". A new account starts with the
+        # Passwords card hidden there, so the first post brings it back. Only the
+        # first: hide it in Customise afterwards and it stays hidden.
+        user = await db.get(User, session.user.id)
+        hidden = list((user.settings or {}).get("today_hidden") or []) if user else []
+        if user is not None and "passwords" in hidden:
+            user.settings = {**(user.settings or {}), "today_hidden": [k for k in hidden if k != "passwords"]}
     else:
         row.counts = body.model_dump()
     await db.commit()

@@ -46,6 +46,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- Passwords: ticking "Show 'passwords need attention' on my Today page" in the Security check now puts that card on your Today. On an account made since new accounts started without the Passwords card, the tick did nothing you could see. Hide the card in Customise afterwards and it stays hidden.
 - Maps on a server where Maps isn't turned on: opening it showed an error page, not the "Maps isn't turned on yet" (or "Building your map") page. The map's settings arrive a moment after the page opens, and the page tripped over itself when they did.
 - Contacts: a contact that disappears while you have it open (deleted on another device, or an import undone) now says "This contact is gone"; it used to blank the screen with an error.
 - Screen readers: the "name this person" box in Photos now says which list it controls, the new-item box in a shopping list reads its "Press Enter" hint, links in the AI's answers in Mail and in item panels are announced with their text, and Workout's number boxes no longer claim a range they didn't keep to.

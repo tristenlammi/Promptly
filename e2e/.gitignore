@@ -4,3 +4,5 @@ node_modules/
 test-results/
 playwright-report/
 /files/
+# Firefox copied out of AppData for the Passwords suite (see passwords.config.ts).
+.browsers/

@@ -4,10 +4,11 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { By, until } from "selenium-webdriver";
 
-import { addLogin, BASE, button, byText, click, fill, labelled, makeUsers, MASTER, newFirefox, onboard, see, signIn, startProxy, unlock } from "./lib.mjs";
+import { addLogin, BASE, button, byText, click, fill, labelled, makeUsers, MASTER, newFirefox, onboard, see, signIn, startProxy, unlock, pruneOldUsers } from "./lib.mjs";
 
 let driver;
 before(async () => {
+  pruneOldUsers();
   makeUsers(["root"], "admin");
   driver = await newFirefox();
   console.log("Firefox", (await driver.getCapabilities()).get("browserVersion"));
