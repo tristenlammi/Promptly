@@ -26,8 +26,15 @@ async function bearer(page: Page): Promise<string> {
   await page.goto("/files");
   return (await seen).headers()["authorization"];
 }
-const call = (page: Page, auth: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, data?: unknown): Promise<APIResponse> =>
-  page.request.fetch(`/api${url}`, { method, headers: { Authorization: auth }, data });
+// The whole suite comes from one address, and three people loading the app
+// at once can trip the server's own "too many requests" limit: wait and ask again.
+async function call(page: Page, auth: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, data?: unknown): Promise<APIResponse> {
+  for (let tries = 0; ; tries++) {
+    const r = await page.request.fetch(`/api${url}`, { method, headers: { Authorization: auth }, data });
+    if (r.status() !== 429 || tries >= 6) return r;
+    await page.waitForTimeout(1500);
+  }
+}
 
 async function ask(page: Page, text: string): Promise<void> {
   await page.route("**/api/chat/conversations/*/messages", async (route) => {
@@ -52,7 +59,14 @@ async function talker(wav: string, viewport: { width: number; height: number }):
 
 test("a home automation: made in the flow editor, run by its button, its phrase and the assistant", async ({ alice, bob, dana }) => {
   test.setTimeout(360_000);
-  const [aAuth, bAuth, dAuth] = [await bearer(alice), await bearer(bob), await bearer(dana)];
+  // One at a time, with a breath between: each of these loads the whole app.
+  await alice.waitForTimeout(3000);
+  const aAuth = await bearer(alice);
+  await alice.waitForTimeout(1500);
+  const bAuth = await bearer(bob);
+  await alice.waitForTimeout(1500);
+  const dAuth = await bearer(dana);
+  await alice.waitForTimeout(1500);
   const before = await (await call(dana, dAuth, "GET", "/admin/home/settings")).json();
   expect((await call(dana, dAuth, "PATCH", "/admin/home/settings", { enabled: true })).ok()).toBe(true);
 
