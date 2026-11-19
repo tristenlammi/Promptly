@@ -36,6 +36,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Fixed
 
+- Promptly Passwords for Windows 0.2.1: carries the shared-vault fix from 0.50.0 (a vault you had just accepted could show as "(can't open)"). Nothing else changed in it.
 - Rooms camera: a video too big for one ordinary upload is now sent in pieces like any other big file, and "too big to send" follows the server's real limit, not a fixed 50 MB.
 
 ## [0.50.0] - 2026-11-19
