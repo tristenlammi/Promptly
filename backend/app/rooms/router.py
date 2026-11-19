@@ -6,7 +6,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import Literal
 
@@ -20,7 +20,7 @@ from app.background import spawn
 from app.database import get_db
 from app.files.storage import absolute_path
 
-from . import core, features, media, polls, receipts, service, uploads
+from . import camera, core, features, media, polls, receipts, service, uploads
 from . import settings as rooms_settings
 from . import voice as voices
 from .media_router import GifIn, gif_for_message
@@ -958,6 +958,89 @@ async def upload(room_id: uuid.UUID, file: UploadFile = File(...), db: AsyncSess
     att = await service.store_attachment(db, room, user, file)
     await db.commit()
     return core.attachment_out(att)
+
+
+# ---- the Android app's camera (``camera.py``) ----
+
+
+class CameraTicketIn(BaseModel):
+    reply_to_id: uuid.UUID | None = None
+
+
+@router.post("/rooms/{room_id}/camera-ticket", status_code=201)
+async def camera_ticket(room_id: uuid.UUID, body: CameraTicketIn | None = None, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """A ticket the phone's Promptly app can send photos and videos to this
+    conversation with, and nothing else."""
+    room, _sm = await core.load_room(db, room_id, user)
+    if room.kind == "voice":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Photos go in a text room")
+    reply = body.reply_to_id if body else None
+    if reply is not None:
+        there = await db.scalar(select(RoomMessage.id).where(RoomMessage.id == reply, RoomMessage.room_id == room.id))
+        if there is None:
+            reply = None
+    ticket, exp = camera.mint(user.id, room.id, reply)
+    return {"ticket": ticket, "expires_at": exp, "max_bytes": uploads.DIRECT_MAX_BYTES, "title": await _camera_title(db, room, user)}
+
+
+async def _camera_title(db: AsyncSession, room: Room, user: User) -> str:
+    """Who it's going to, as this person sees the conversation."""
+    try:
+        from app.calls import ring
+
+        return (await ring.conversation_name(db, room, user.id))[:80]
+    except Exception:  # noqa: BLE001 - a name for a button; never a reason to refuse
+        return (room.name or "this conversation")[:80]
+
+
+@router.post("/camera/send", status_code=201)
+async def camera_send(
+    file: UploadFile = File(...),
+    body: str = Form(default="", max_length=core.MAX_BODY),
+    client_id: str = Form(min_length=8, max_length=64),
+    ticket: str | None = Header(default=None, alias="X-Promptly-Camera-Ticket"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """One photo or video from the app's camera, with its words, sent as a
+    message. Signed in by the ticket alone; the same ``client_id`` again
+    gets the message it already made."""
+    claims = camera.read(ticket)
+    if claims is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Open the camera from the conversation again.")
+    user = await db.get(User, uuid.UUID(claims["sub"]))
+    if user is None or user.disabled:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Open the camera from the conversation again.")
+    room, _sm = await core.load_room(db, uuid.UUID(claims["room"]), user, lock=True)
+    already = (
+        await db.execute(
+            select(RoomMessage)
+            .where(
+                RoomMessage.room_id == room.id,
+                RoomMessage.author_id == user.id,
+                RoomMessage.created_at >= _now() - timedelta(days=2),
+                RoomMessage.meta["client_id"].astext == client_id,
+            )
+            .order_by(RoomMessage.seq.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if already is not None:
+        return await core.message_out(db, already, user.id)
+    kind = (file.content_type or "").lower()
+    if not kind.startswith(camera.KINDS) or kind == "image/svg+xml":
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="The camera sends photos and videos only.")
+    if not await camera.count_send(claims):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="That's a lot from one camera session. Open the camera from the conversation again.")
+    try:
+        att = await service.store_attachment(db, room, user, file)
+        reply = uuid.UUID(claims["reply"]) if claims.get("reply") else None
+        if reply is not None and await db.scalar(select(RoomMessage.id).where(RoomMessage.id == reply, RoomMessage.room_id == room.id)) is None:
+            reply = None  # the message it answered has gone: it's still worth sending
+        msg = await service.post_message(db, room, user, body, reply_to_id=reply, attachment_ids=[att.id], client_id=client_id)
+    except BaseException:
+        await camera.uncount_send(claims)
+        raise
+    return await _sent(db, room, user, msg)
 
 
 # ---- your own Rooms uploads (Files → Rooms uploads; ``uploads.py``) ----
