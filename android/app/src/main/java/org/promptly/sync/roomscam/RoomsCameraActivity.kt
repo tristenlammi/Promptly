@@ -162,17 +162,12 @@ class RoomsCameraActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val uri = intent?.data
-        val params = uri?.queryParameterNames?.associateWith { uri.getQueryParameter(it) } ?: emptyMap()
-        val saved = CallCenter.server(this)
-        val h = if (uri?.host == "rooms" && uri.path == "/camera") CamHandoffs.parse(params, saved, System.currentTimeMillis()) else null
+        // Android bringing this back after stopping the app has nothing to show: the
+        // shot wasn't kept, and a send that was under way finishes on its own.
+        val h = if (savedInstanceState == null) read(intent) else null
         if (h == null) {
-            Toast.makeText(
-                this,
-                if (saved == null) "Set up the Promptly app first: open P Rooms from your home screen." else "Open the camera from a conversation in Rooms.",
-                Toast.LENGTH_LONG,
-            ).show()
-            finish()
+            if (savedInstanceState == null) refuse()
+            finishAndRemoveTask()
             return
         }
         handoff = h
@@ -206,12 +201,43 @@ class RoomsCameraActivity : ComponentActivity() {
         }
     }
 
+    private fun read(intent: Intent?): CamHandoff? {
+        val uri = intent?.data
+        val params = uri?.queryParameterNames?.associateWith { uri.getQueryParameter(it) } ?: emptyMap()
+        return if (uri?.host == "rooms" && uri.path == "/camera") CamHandoffs.parse(params, CallCenter.server(this), System.currentTimeMillis()) else null
+    }
+
+    private fun refuse() {
+        Toast.makeText(
+            this,
+            if (CallCenter.server(this) == null) "Set up the Promptly app first: open P Rooms from your home screen." else "Open the camera from a conversation in Rooms.",
+            Toast.LENGTH_LONG,
+        ).show()
+    }
+
+    /** The camera button again, perhaps in another conversation, while this was still open. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val h = read(intent) ?: return refuse()
+        setIntent(intent)
+        // What was on screen belonged to the last conversation: it doesn't follow you to this one.
+        if (recording != null) stopRecording()
+        if (send !is SendState.Sending && pendingId == null) shot?.file?.delete()
+        pendingId?.let { CamWatch.unwatch(it) }
+        watchJob?.cancel()
+        pendingId = null
+        shot = null
+        caption = ""
+        send = SendState.Idle
+        handoff = h
+        if (has(Manifest.permission.CAMERA)) open() else phase = Phase.REFUSED
+    }
+
     override fun onStart() {
         super.onStart()
         orientation?.enable()
         // Back from Settings with the camera allowed.
         if (phase == Phase.REFUSED && has(Manifest.permission.CAMERA)) open()
-        pendingId?.let { CamWatch.watch(it) }
     }
 
     override fun onStop() {
@@ -221,12 +247,17 @@ class RoomsCameraActivity : ComponentActivity() {
         stopRecording()
         down = false
         holdJob?.cancel()
-        // A send the screen was watching carries on, on its own, to the end.
-        pendingId?.let { id ->
+        // Left while a send was under way, or after one failed for want of a connection:
+        // it carries on by itself to the end (WorkManager), and this screen is done. Coming
+        // back to a stale "didn't send" for a picture that has since arrived helps nobody.
+        val id = pendingId
+        val s = send
+        if (id != null && shot != null && !isFinishing && (s is SendState.Sending || (s is SendState.Failed && s.again))) {
             CamWatch.unwatch(id)
-            val s = send
-            val keep = shot
-            if (s is SendState.Failed && s.again && keep != null) resend()
+            watchJob?.cancel()
+            if (s is SendState.Failed) backgroundSend()
+            Toast.makeText(this, "Still sending. It will arrive in the conversation.", Toast.LENGTH_SHORT).show()
+            finishAndRemoveTask()
         }
     }
 
@@ -723,20 +754,27 @@ class RoomsCameraActivity : ComponentActivity() {
 
     // ================================================================ sending
 
+    /** Send, or Try again: the same send has the same id, so the server never posts it twice. */
     fun sendShot() {
-        val s = shot ?: return
-        val h = handoff ?: return
         if (send is SendState.Sending) return
-        val id = pendingId ?: UUID.randomUUID().toString().also { pendingId = it }
         tick()
         send = SendState.Sending(0f)
+        val (id, work) = enqueue() ?: return
         CamWatch.watch(id)
-        val work = CamSend.start(this, PendingShot(id, h.server, h.ticket, s.file.absolutePath, s.name, s.mime, caption.trim().take(4000), s.video))
         watch(work)
     }
 
-    /** The same send once more (its id is the same, so the server never posts it twice). */
-    fun resend() = sendShot()
+    /** The same, with nobody watching: it keeps trying on its own. */
+    private fun backgroundSend() {
+        enqueue()
+    }
+
+    private fun enqueue(): Pair<String, UUID>? {
+        val s = shot ?: return null
+        val h = handoff ?: return null
+        val id = pendingId ?: UUID.randomUUID().toString().also { pendingId = it }
+        return id to CamSend.start(this, PendingShot(id, h.server, h.ticket, s.file.absolutePath, s.name, s.mime, caption.trim().take(4000), s.video))
+    }
 
     private fun watch(work: UUID) {
         watchJob?.cancel()
@@ -767,14 +805,21 @@ class RoomsCameraActivity : ComponentActivity() {
     /** The X, or Back. A send in progress carries on by itself. */
     fun close() {
         val s = send
-        if (s is SendState.Sending) Toast.makeText(this, "Still sending. It will arrive in the conversation.", Toast.LENGTH_SHORT).show()
-        else if (!(s is SendState.Failed && s.again)) shot?.let { if (pendingId == null) it.file.delete() }
+        val id = pendingId
+        if (id != null && shot != null && (s is SendState.Sending || (s is SendState.Failed && s.again))) {
+            CamWatch.unwatch(id)
+            watchJob?.cancel()
+            if (s is SendState.Failed) backgroundSend()
+            Toast.makeText(this, "Still sending. It will arrive in the conversation.", Toast.LENGTH_SHORT).show()
+        } else if (id == null) {
+            shot?.file?.delete()
+        }
         finishAndRemoveTask()
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (phase == Phase.REVIEW && send !is SendState.Sending) retake() else close()
+    /** Back: from what you took to the camera again (it isn't sent); otherwise out. */
+    fun back() {
+        if (phase == Phase.REVIEW && send !is SendState.Sending && send !is SendState.Sent) retake() else close()
     }
 
     companion object {

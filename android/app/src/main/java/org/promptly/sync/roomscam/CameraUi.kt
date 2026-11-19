@@ -72,10 +72,12 @@ import org.promptly.sync.R
 import kotlin.math.roundToInt
 
 private val Terracotta = Color(0xFFD97757)
-private val Chip = Color(0x73000000)
+/** Behind a round button: seen on the black around the picture, quiet over the picture. */
+private val Chip = Color(0x29FFFFFF)
 
 @Composable
 fun CameraScreen(a: RoomsCameraActivity) {
+    androidx.activity.compose.BackHandler { a.back() }
     Box(Modifier.fillMaxSize().background(Color.Black).testTag("rooms-camera")) {
         when (a.phase) {
             RoomsCameraActivity.Phase.ASKING -> Unit

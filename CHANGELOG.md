@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Rooms on an Android phone with the Promptly app: the camera button opens the phone's real camera, built into the app, where it used to open a camera inside the web page. Tap for a photo, hold for a video (up to a minute; slide your finger up to zoom), as before. Photos are the camera's full-quality pictures, and videos are much less squeezed and steadied where the phone can. Tap the picture to focus, pinch or use the lens buttons to zoom, switch cameras, set the flash, use the volume keys as the button, or pick something from your photos. Then you see what you took, add a few words and press Send. If the signal drops it keeps trying, even with the camera closed, and a picture that can't be sent is saved to the phone. Needs the next phone app; older apps, iPhones and browsers keep the page's own camera.
+- Rooms: the app's camera sends with a ticket that works for that one conversation and for photos and videos only. It can't read anything, and stops working if you leave the conversation.
+
 ## [0.50.0] - 2026-11-19
 
 ### Added

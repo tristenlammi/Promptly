@@ -9,7 +9,9 @@ import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -133,6 +135,9 @@ object CamSend {
             .setInputData(workDataOf(KEY_ID to shot.id))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
+            // Sent now, not when Android next gets round to background jobs (it holds
+            // ordinary ones for minutes once the app isn't in front).
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .addTag("roomscam")
             .build()
         WorkManager.getInstance(ctx).enqueueUniqueWork(workName(shot.id), ExistingWorkPolicy.REPLACE, work)
@@ -227,6 +232,29 @@ class CamSendWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
     }
 
     private val workerParams = params
+
+    /** Android 11 and older run an urgent job as a foreground service, which needs a
+     *  notification to show (newer Android shows nothing). */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val nm = applicationContext.getSystemService(android.app.NotificationManager::class.java)
+        nm.createNotificationChannel(
+            android.app.NotificationChannel(CHANNEL, "Sending from the camera", android.app.NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Shows while a photo or video you took is being sent"
+            },
+        )
+        val n = androidx.core.app.NotificationCompat.Builder(applicationContext, CHANNEL)
+            .setSmallIcon(org.promptly.sync.R.drawable.ic_sync)
+            .setContentTitle("Sending your photo")
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+        return ForegroundInfo(NOTIFICATION, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+    }
+
+    private companion object {
+        const val CHANNEL = "roomscam-send"
+        const val NOTIFICATION = 4107
+    }
 }
 
 /** Which sends a camera screen is watching right now (it shows failures itself). */
