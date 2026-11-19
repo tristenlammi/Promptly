@@ -69,7 +69,9 @@ export function forgetNativeCamera(): void {
  * The app only takes it for its own server. If the app can't take it, Chrome
  * comes back to this page with ``#camera-no-app`` ([onNoCameraApp]).
  */
-export function cameraHandoffUrl(t: { ticket: string; room: string; title: string; maxBytes: number }, here: string = window.location.href, origin: string = window.location.origin): string {
+export function cameraHandoffUrl(
+  t: { ticket: string; room: string; title: string; maxBytes: number; bigMaxBytes?: number; tusEndpoint?: string | null },
+  here: string = window.location.href, origin: string = window.location.origin): string {
   const q = new URLSearchParams({
     server: origin,
     ticket: t.ticket,
@@ -77,6 +79,11 @@ export function cameraHandoffUrl(t: { ticket: string; room: string; title: strin
     title: t.title.slice(0, 80),
     max: String(t.maxBytes),
   });
+  // Resumable uploads are on: the app may record a fuller video and send it in pieces.
+  if (t.bigMaxBytes && t.tusEndpoint) {
+    q.set("big", String(t.bigMaxBytes));
+    q.set("tus", t.tusEndpoint);
+  }
   const back = new URL(here);
   back.hash = NO_APP_HASH;
   return `intent://rooms/camera?${q.toString()}#Intent;scheme=promptly;package=org.promptly.app;S.browser_fallback_url=${encodeURIComponent(back.href)};end`;
@@ -103,11 +110,28 @@ export function onNoCameraApp(cb: () => void): () => void {
 export async function openNativeCamera(roomId: string, replyToId: string | null): Promise<boolean> {
   try {
     const t = await roomsApi.cameraTicket(roomId, replyToId);
-    openHandoff(cameraHandoffUrl({ ticket: t.ticket, room: roomId, title: t.title, maxBytes: t.max_bytes }));
+    openHandoff(cameraHandoffUrl({ ticket: t.ticket, room: roomId, title: t.title, maxBytes: t.max_bytes, bigMaxBytes: t.big_max_bytes, tusEndpoint: t.tus_endpoint }));
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Back from the app's camera: did it send? True when one of [mine] is newer
+ * than when the camera was opened and, if you were replying, answers that
+ * message. [skewMs] forgives a phone clock a little ahead of the server's.
+ */
+export function sentFromCamera(
+  mine: { created_at: string; reply_to: { id: string } | null }[],
+  opened: { at: number; replyId: string | null },
+  skewMs = 15_000,
+): boolean {
+  return mine.some((m) => {
+    const at = Date.parse(m.created_at);
+    if (!(at >= opened.at - skewMs)) return false;
+    return opened.replyId ? m.reply_to?.id === opened.replyId : true;
+  });
 }
 
 captureCameraCap();
