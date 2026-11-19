@@ -21,6 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Rooms camera (the one built into Rooms): videos are much sharper. They were recorded at 2.5 Mbit/s whatever the picture; a full-HD video now gets about 10 Mbit/s, close to what the phone's own camera uses, wherever the server takes big uploads (about 6 Mbit/s where it doesn't, so a full minute still fits in one file). A one-minute video is now up to about 75 MB.
+- Rooms camera: where the phone's browser allows it (Chrome on Android), the camera keeps itself in focus and well lit, a tap on the picture focuses there (a ring shows where), and a pinch zooms, with the zoom shown as "2x". On a phone or browser that doesn't allow these, nothing changes and nothing extra shows.
+
+### Fixed
+
+- Rooms camera: a video too big for one ordinary upload is now sent in pieces like any other big file, and "too big to send" follows the server's real limit, not a fixed 50 MB.
+
 ## [0.50.0] - 2026-11-19
 
 ### Added

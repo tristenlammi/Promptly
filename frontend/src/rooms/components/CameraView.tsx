@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Aperture, Flashlight, FlashlightOff, Images, Loader2, RefreshCw, SendHorizontal, SwitchCamera, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -13,13 +13,22 @@ import {
   MAX_FILE_BYTES,
   MAX_VIDEO_S,
   audioBits,
+  autoSettings,
+  bitsForPicture,
+  cameraConstraints,
   cameraProblem,
   captureName,
+  focusSettings,
   pickVideoType,
+  pictureSpot,
+  pinchZoom,
   plainType,
   recordingClock,
   ringFraction,
   videoBits,
+  zoomLabel,
+  zoomRange,
+  type CameraCaps,
 } from "../camera";
 
 /**
@@ -33,6 +42,10 @@ import {
  * it, sending, or switching away lets go of it (and the microphone) at once.
  * The microphone is asked for the first time you hold for a video, not
  * before; said no, a video is recorded without sound.
+ *
+ * Where the phone's browser lets a page do it (Chrome on Android), the
+ * camera keeps itself in focus, **a tap on the picture** focuses there, and
+ * **a pinch** zooms. Where it doesn't, those do nothing and show nothing.
  *
  * **Phone camera** hands over to the phone's own camera app for one photo:
  * a browser's camera gives the sensor's picture as it is, while the camera
@@ -107,6 +120,20 @@ async function previewUrl(file: File): Promise<string> {
   return URL.createObjectURL(file);
 }
 
+/** Apply camera settings the browser may refuse; says whether they took. */
+async function setCamera(track: MediaStreamTrack, settings: Record<string, unknown>): Promise<boolean> {
+  try {
+    await track.applyConstraints({ advanced: [settings as MediaTrackConstraintSet] });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** After a tap has focused somewhere, the camera goes back to looking after
+ *  itself, so what you point at next is sharp too. */
+const REFOCUS_MS = 4000;
+
 const round =
   "flex h-11 w-11 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-40";
 
@@ -138,6 +165,22 @@ export function CameraView({
   const tick = useRef<number | null>(null);
   const stopAt = useRef<number | null>(null);
   const alive = useRef(true);
+  // What this camera can do (focus, zoom), and the pinch and tap in progress.
+  const caps = useRef<CameraCaps>({});
+  const touches = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ gap: number; zoom: number } | null>(null);
+  const tap = useRef<{ id: number; x: number; y: number; at: number } | null>(null);
+  const zoomNow = useRef(1);
+  const zoomBusy = useRef(false);
+  const zoomNext = useRef<number | null>(null);
+  const refocus = useRef<number | null>(null);
+  const ringGone = useRef<number | null>(null);
+  // How big a file may be here: far more than the fallback where the server
+  // takes big uploads, and the video's quality follows it.
+  const { data: uploadPolicy } = useQuery({ queryKey: ["rooms", "upload-policy"], queryFn: roomsApi.uploadPolicy, staleTime: 10 * 60_000 });
+  const maxBytes = uploadPolicy?.max_bytes ?? MAX_FILE_BYTES;
+  const maxBytesRef = useRef(maxBytes);
+  maxBytesRef.current = maxBytes;
 
   const [phase, setPhase] = useState<Phase>("starting");
   const [facing, setFacing] = useState<Facing>("environment");
@@ -150,8 +193,17 @@ export function CameraView({
   const [caption, setCaption] = useState("");
   const [progress, setProgress] = useState(0);
   const [sendError, setSendError] = useState("");
+  const [zoom, setZoom] = useState<number | null>(null); // null: this camera doesn't zoom
+  const [ring, setRing] = useState<{ x: number; y: number; key: number } | null>(null);
 
   const release = useCallback(() => {
+    if (refocus.current !== null) window.clearTimeout(refocus.current);
+    if (ringGone.current !== null) window.clearTimeout(ringGone.current);
+    refocus.current = ringGone.current = null;
+    touches.current.clear();
+    pinch.current = null;
+    tap.current = null;
+    caps.current = {};
     stream.current?.getTracks().forEach((t) => t.stop());
     stream.current = null;
     mic.current?.getTracks().forEach((t) => t.stop());
@@ -163,6 +215,8 @@ export function CameraView({
     async (which: Facing) => {
       release();
       setTorch(null);
+      setZoom(null);
+      setRing(null);
       phaseRef.current = "starting";
       setPhase("starting");
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -172,7 +226,7 @@ export function CameraView({
       }
       try {
         const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: which }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: cameraConstraints(which),
           audio: false,
         });
         // Gone, behind something else, or already looking at a photo the
@@ -188,8 +242,18 @@ export function CameraView({
           void video.current.play().catch(() => undefined);
         }
         const track = s.getVideoTracks()[0];
-        const caps = (track?.getCapabilities?.() ?? {}) as { torch?: boolean };
-        setTorch(caps.torch ? false : null);
+        const can = (track?.getCapabilities?.() ?? {}) as CameraCaps;
+        caps.current = can;
+        setTorch(can.torch ? false : null);
+        // Keep itself in focus and well lit, where the phone lets a page ask.
+        const auto = autoSettings(can);
+        if (track && auto) void setCamera(track, auto);
+        const range = zoomRange(can);
+        if (range) {
+          const at = (track?.getSettings?.() as { zoom?: number } | undefined)?.zoom;
+          zoomNow.current = typeof at === "number" ? at : range.min;
+          setZoom(zoomNow.current);
+        }
         try {
           const all = await navigator.mediaDevices.enumerateDevices();
           setCameras(all.filter((d) => d.kind === "videoinput").length || 1);
@@ -272,7 +336,7 @@ export function CameraView({
         if (!stream.current) void open(facingRef.current);
         return;
       }
-      if (blob.size > MAX_FILE_BYTES) {
+      if (blob.size > maxBytesRef.current) {
         setHint("That video is too big to send. Try a shorter one.");
         setPhase(stream.current ? "live" : "starting");
         if (!stream.current) void open(facingRef.current);
@@ -385,7 +449,14 @@ export function CameraView({
     const tracks = [track, ...(mic.current?.getAudioTracks() ?? [])];
     let r: MediaRecorder;
     try {
-      r = new MediaRecorder(new MediaStream(tracks), { mimeType: type, videoBitsPerSecond: videoBits(), audioBitsPerSecond: audioBits });
+      // As good as this picture's size wants, and never more than a minute of it fits in one file.
+      const shape = track.getSettings?.() ?? {};
+      const best = bitsForPicture(shape.width ?? 0, shape.height ?? 0, shape.frameRate ?? 30);
+      r = new MediaRecorder(new MediaStream(tracks), {
+        mimeType: type,
+        videoBitsPerSecond: videoBits(maxBytesRef.current, MAX_VIDEO_S, best),
+        audioBitsPerSecond: audioBits,
+      });
     } catch {
       setHint("This browser can't record video here. Tap for a photo.");
       return;
@@ -437,6 +508,81 @@ export function CameraView({
     press.current = null;
   };
 
+  // ---- on the picture: a tap focuses there, a pinch zooms. Both only where
+  // this camera says it can; otherwise nothing happens and nothing shows.
+  const applyZoom = (z: number) => {
+    const track = stream.current?.getVideoTracks()[0];
+    if (!track) return;
+    zoomNow.current = z;
+    setZoom(z);
+    // One request at a time: a pinch asks faster than a camera answers.
+    if (zoomBusy.current) {
+      zoomNext.current = z;
+      return;
+    }
+    zoomBusy.current = true;
+    void setCamera(track, { zoom: z }).then(() => {
+      zoomBusy.current = false;
+      const next = zoomNext.current;
+      zoomNext.current = null;
+      if (next !== null && next !== z && stream.current) applyZoom(next);
+    });
+  };
+  const focusAt = async (clientX: number, clientY: number) => {
+    const el = video.current;
+    const track = stream.current?.getVideoTracks()[0];
+    if (!el || !track) return;
+    const box = el.getBoundingClientRect();
+    const spot = pictureSpot({ x: clientX, y: clientY }, box, { width: el.videoWidth, height: el.videoHeight }, facingRef.current === "user");
+    const settings = spot && focusSettings(caps.current, spot);
+    if (!settings) return;
+    if (!(await setCamera(track, settings))) return;
+    if (!alive.current || stream.current?.getVideoTracks()[0] !== track) return;
+    setRing({ x: clientX - box.left, y: clientY - box.top, key: Date.now() });
+    if (ringGone.current !== null) window.clearTimeout(ringGone.current);
+    ringGone.current = window.setTimeout(() => setRing(null), 1200);
+    // Then back to looking after itself.
+    if (refocus.current !== null) window.clearTimeout(refocus.current);
+    refocus.current = window.setTimeout(() => {
+      const auto = autoSettings(caps.current);
+      if (auto && stream.current?.getVideoTracks()[0] === track) void setCamera(track, auto);
+    }, REFOCUS_MS);
+  };
+  const gap = () => {
+    const [a, b] = [...touches.current.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  };
+  const pictureDown = (e: React.PointerEvent<HTMLVideoElement>) => {
+    if (phaseRef.current !== "live" && phaseRef.current !== "recording") return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.current.size === 1) {
+      tap.current = { id: e.pointerId, x: e.clientX, y: e.clientY, at: performance.now() };
+    } else {
+      tap.current = null;
+      pinch.current = touches.current.size === 2 && zoomRange(caps.current) ? { gap: gap(), zoom: zoomNow.current } : null;
+    }
+  };
+  const pictureMove = (e: React.PointerEvent<HTMLVideoElement>) => {
+    if (!touches.current.has(e.pointerId)) return;
+    touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const t = tap.current;
+    if (t && Math.hypot(e.clientX - t.x, e.clientY - t.y) > 12) tap.current = null;
+    const p = pinch.current;
+    const range = zoomRange(caps.current);
+    if (p && range && touches.current.size === 2) {
+      const z = pinchZoom(p.zoom, p.gap, gap(), range);
+      if (z !== zoomNow.current) applyZoom(z);
+    }
+  };
+  const pictureUp = (e: React.PointerEvent<HTMLVideoElement>) => {
+    touches.current.delete(e.pointerId);
+    pinch.current = null;
+    const t = tap.current;
+    tap.current = null;
+    if (t && t.id === e.pointerId && e.type === "pointerup" && performance.now() - t.at < 500) void focusAt(t.x, t.y);
+  };
+
   const flip = () => {
     const next: Facing = facing === "environment" ? "user" : "environment";
     setFacing(next);
@@ -466,7 +612,7 @@ export function CameraView({
     setSendError("");
     setProgress(0);
     try {
-      const att = await roomsApi.upload(roomId, shot.file, setProgress);
+      const att = await roomsApi.upload(roomId, shot.file, setProgress, undefined, uploadPolicy);
       void sendMessage(qc, roomId, { body: caption.trim(), reply_to_id: replyToId, attachments: [att] });
       URL.revokeObjectURL(shot.url);
       onSent();
@@ -509,7 +655,20 @@ export function CameraView({
             autoPlay
             playsInline
             muted
-            className={cn("h-full w-full object-cover", facing === "user" && "-scale-x-100", phase === "error" && "hidden")}
+            onPointerDown={pictureDown}
+            onPointerMove={pictureMove}
+            onPointerUp={pictureUp}
+            onPointerCancel={pictureUp}
+            className={cn("h-full w-full touch-none object-cover", facing === "user" && "-scale-x-100", phase === "error" && "hidden")}
+          />
+        )}
+        {ring && !reviewing && !developing && (
+          <span
+            key={ring.key}
+            aria-hidden
+            data-testid="camera-focus-ring"
+            style={{ left: ring.x, top: ring.y }}
+            className="pointer-events-none absolute h-16 w-16 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full border-2 border-white/90"
           />
         )}
         {reviewing && shot.kind === "photo" && <img src={shot.url} alt="The photo you took" className="h-full w-full object-contain" />}
@@ -565,6 +724,11 @@ export function CameraView({
           )}
         </div>
 
+        {zoom !== null && zoom > (zoomRange(caps.current)?.min ?? 1) + 0.05 && !reviewing && !developing && phase !== "error" && (
+          <span data-testid="camera-zoom" className="pointer-events-none absolute inset-x-0 bottom-16 mx-auto w-fit rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium tabular-nums">
+            {zoomLabel(zoom)}
+          </span>
+        )}
         {hint && !reviewing && phase !== "error" && (
           <p role="status" className="absolute inset-x-6 bottom-4 mx-auto w-fit max-w-sm rounded-xl bg-black/65 px-3 py-2 text-center text-sm">
             {hint}
