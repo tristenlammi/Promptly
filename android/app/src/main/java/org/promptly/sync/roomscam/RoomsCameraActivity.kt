@@ -8,9 +8,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
+import android.media.MediaFormat
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.util.Range
 import android.util.Size
 import android.view.HapticFeedbackConstants
@@ -135,6 +137,9 @@ class RoomsCameraActivity : ComponentActivity() {
     private var ticker: Job? = null
     private var hintJob: Job? = null
     private var rotation = Surface.ROTATION_0
+    private var extMode: Int? = null
+    private var ultraOn = false
+    private var openedAt = 0L
     private var orientation: OrientationEventListener? = null
 
     // ---- the button
@@ -272,6 +277,8 @@ class RoomsCameraActivity : ComponentActivity() {
     fun open() {
         phase = Phase.STARTING
         problem = ""
+        openedAt = System.currentTimeMillis()
+        CamStart.configure()
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val p = runCatching { future.get() }.getOrNull()
@@ -291,79 +298,122 @@ class RoomsCameraActivity : ComponentActivity() {
 
     private fun selector(): CameraSelector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
 
-    private fun nightAvailable(): Boolean =
-        runCatching { extensions?.isExtensionAvailable(selector(), ExtensionMode.NIGHT) == true }.getOrDefault(false)
+    /** The phone maker's own photo processing for this camera, if it has any ([CamExt.pick]). */
+    private fun photoMode(): Int? {
+        val ex = extensions ?: return null
+        val sel = selector()
+        fun offers(mode: Int) = runCatching { ex.isExtensionAvailable(sel, mode) }.getOrDefault(false)
+        val auto = offers(ExtensionMode.AUTO)
+        val nightOk = offers(ExtensionMode.NIGHT)
+        nightOffered = CamExt.nightButton(auto, nightOk)
+        if (!nightOffered) night = false
+        return when (CamExt.pick(auto, offers(ExtensionMode.HDR), nightOk, night)) {
+            CamExt.Mode.AUTO -> ExtensionMode.AUTO
+            CamExt.Mode.HDR -> ExtensionMode.HDR
+            CamExt.Mode.NIGHT -> ExtensionMode.NIGHT
+            null -> null
+        }
+    }
 
+    private class Attempt(val selector: CameraSelector, val still: ImageCapture, val video: VideoCapture<Recorder>?, val ext: Int?, val ultra: Boolean)
+
+    /**
+     * Start the camera with the best set of things this phone can run at once.
+     * A phone that can't run a set says so when it's bound, and the next is tried.
+     *
+     * For photos the phone maker's processing is used where there is any (Auto,
+     * else HDR). Most phones can't record video through it, so a hold then
+     * comes back here with [forVideo] and records with the plain camera.
+     */
     @SuppressLint("RestrictedApi")
-    private fun bind() {
+    private fun bind(forVideo: Boolean = false) {
         val p = provider ?: return
         if (isFinishing || isDestroyed) return
         if (phase == Phase.REVIEW || phase == Phase.SAVING) return
         p.unbindAll()
         camera = null
-        nightOffered = nightAvailable()
-        if (!nightOffered) night = false
+        val mode = photoMode().takeIf { !forVideo }
 
-        val fourByThree = ResolutionSelector.Builder()
-            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-        val preview = Preview.Builder().setResolutionSelector(fourByThree.build()).build()
-        val still = ImageCapture.Builder()
+        val fourByThree = ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build()
+        // The sensor's own picture, up to about 12 megapixels: sharp, and not a
+        // 50-megapixel file on phones that offer one.
+        val twelve = ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+            .setResolutionStrategy(ResolutionStrategy(Size(STILL_LONG, STILL_SHORT), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build()
+        val preview = Preview.Builder().setResolutionSelector(fourByThree).build()
+        fun still(ultra: Boolean) = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-            .setResolutionSelector(
-                // The sensor's own picture, up to about 12 megapixels: sharp, and not a
-                // 50-megapixel file on phones that offer one.
-                fourByThree.setResolutionStrategy(ResolutionStrategy(Size(STILL_LONG, STILL_SHORT), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build(),
-            )
+            .setResolutionSelector(twelve)
             .setJpegQuality(95)
             .setTargetRotation(rotation)
             .setFlashMode(flashMode())
+            // Ultra HDR: an ordinary JPEG that also carries the bright detail an HDR screen can show.
+            .apply { if (ultra) setOutputFormat(ImageCapture.OUTPUT_FORMAT_JPEG_ULTRA_HDR) }
             .build()
 
-        val max = handoff?.maxBytes ?: CamHandoffs.DEFAULT_MAX_BYTES
-        val recorder = Recorder.Builder()
+        val limit = handoff?.limit ?: CamHandoffs.DEFAULT_MAX_BYTES
+        fun recorder(strict: Boolean) = Recorder.Builder()
             .setQualitySelector(QualitySelector.from(Quality.FHD, FallbackStrategy.lowerQualityOrHigherThan(Quality.FHD)))
-            .setTargetVideoEncodingBitRate(CamVideo.bits(max))
+            .setTargetVideoEncodingBitRate(CamVideo.bits(limit))
+            // H.264 and AAC in an MP4: what every phone, computer and browser plays.
+            // Left to itself a phone may pick a sound format a browser won't play.
+            .apply {
+                if (strict) {
+                    setVideoMimeType(MediaFormat.MIMETYPE_VIDEO_AVC)
+                    setAudioMimeType(MediaFormat.MIMETYPE_AUDIO_AAC)
+                    setTargetAudioEncodingBitRate(CamVideo.AUDIO_BITS)
+                }
+            }
             .build()
         val steady = runCatching { Recorder.getVideoCapabilities(p.getCameraInfo(selector())).isStabilizationSupported }.getOrDefault(false)
-        val video = VideoCapture.Builder(recorder)
-            .setTargetFrameRate(Range(30, 30))
+        fun video(strict: Boolean, best: Boolean) = VideoCapture.Builder(recorder(strict))
             .setMirrorMode(MirrorMode.MIRROR_MODE_OFF)
             .setTargetRotation(rotation)
-            .apply { if (steady) setVideoStabilizationEnabled(true) }
-            .build()
-        val plainVideo = VideoCapture.Builder(recorder).setMirrorMode(MirrorMode.MIRROR_MODE_OFF).setTargetRotation(rotation).build()
-
-        // Best first. A phone that can't run a set says so when it's bound, and the next is tried.
-        val attempts: List<Triple<CameraSelector, List<UseCase>, VideoCapture<Recorder>?>> = buildList {
-            if (night && nightOffered) {
-                runCatching { extensions!!.getExtensionEnabledCameraSelector(selector(), ExtensionMode.NIGHT) }.getOrNull()
-                    ?.let { add(Triple(it, listOf(preview, still), null)) }
+            .apply {
+                if (best) setTargetFrameRate(Range(30, 30))
+                if (best && steady) setVideoStabilizationEnabled(true)
             }
-            add(Triple(selector(), listOf(preview, still, video), video))
-            add(Triple(selector(), listOf(preview, still, plainVideo), plainVideo))
-            add(Triple(selector(), listOf(preview, still), null))
+            .build()
+        val ultraOk = runCatching {
+            ImageCapture.getImageCaptureCapabilities(p.getCameraInfo(selector())).supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_JPEG_ULTRA_HDR)
+        }.getOrDefault(false)
+
+        val attempts = buildList {
+            if (mode != null) {
+                runCatching { extensions!!.getExtensionEnabledCameraSelector(selector(), mode) }.getOrNull()?.let { ext ->
+                    // A few phones record through it too; most give photos only.
+                    add(Attempt(ext, still(false), video(strict = true, best = false), mode, false))
+                    add(Attempt(ext, still(false), null, mode, false))
+                }
+            }
+            if (ultraOk) add(Attempt(selector(), still(true), video(strict = true, best = true), null, true))
+            add(Attempt(selector(), still(false), video(strict = true, best = true), null, false))
+            add(Attempt(selector(), still(false), video(strict = false, best = true), null, false))
+            add(Attempt(selector(), still(false), video(strict = false, best = false), null, false))
+            add(Attempt(selector(), still(false), null, null, false))
         }
         var bound: Camera? = null
-        var boundVideo: VideoCapture<Recorder>? = null
-        var nightBound = false
-        for ((i, a) in attempts.withIndex()) {
+        var used: Attempt? = null
+        for (a in attempts) {
             val c = runCatching {
                 p.unbindAll()
-                p.bindToLifecycle(this, a.first, *a.second.toTypedArray())
+                p.bindToLifecycle(this, a.selector, *listOfNotNull(preview, a.still, a.video).toTypedArray())
             }.getOrNull()
             if (c != null) {
                 bound = c
-                boundVideo = a.third
-                nightBound = night && nightOffered && i == 0 && a.third == null
+                used = a
                 break
             }
         }
-        if (bound == null) return trouble("This phone's camera wouldn't start. Something else may be using it.")
-        if (night && !nightBound) night = false
+        if (bound == null || used == null) return trouble("This phone's camera wouldn't start. Something else may be using it.")
+        extMode = used.ext
+        ultraOn = used.ultra
+        if (night && used.ext != ExtensionMode.NIGHT) night = false
         camera = bound
-        imageCapture = still
-        videoCapture = boundVideo
-        canVideo = boundVideo != null
+        imageCapture = used.still
+        videoCapture = used.video
+        // With the phone's photo processing on, a hold switches to the plain camera to record.
+        canVideo = used.video != null || used.ext != null
+        Log.i(TAG, "bound: extension=${used.ext} ultraHdr=${used.ultra} video=${used.video != null} steady=$steady forVideo=$forVideo")
         preview.surfaceProvider = previewView.surfaceProvider
         hasFlash = bound.cameraInfo.hasFlashUnit()
         bound.cameraInfo.zoomState.removeObservers(this)
@@ -388,10 +438,28 @@ class RoomsCameraActivity : ComponentActivity() {
                     },
                 )
             } else if (s.type == CameraState.Type.OPEN && phase == Phase.STARTING) {
-                phase = Phase.LIVE
+                live()
             }
         }
-        if (phase == Phase.STARTING && bound.cameraInfo.cameraState.value?.type == CameraState.Type.OPEN) phase = Phase.LIVE
+        if (phase == Phase.STARTING && bound.cameraInfo.cameraState.value?.type == CameraState.Type.OPEN) live()
+        if (forVideo) {
+            // The hold that brought us here: still held, start recording; let go, it was nothing.
+            phase = Phase.LIVE
+            if (down && used.video != null) startVideo() else restorePhotoMode()
+        }
+    }
+
+    private fun live() {
+        phase = Phase.LIVE
+        if (openedAt > 0) {
+            Log.i(TAG, "viewfinder up ${System.currentTimeMillis() - openedAt} ms after opening")
+            openedAt = 0
+        }
+    }
+
+    /** After a video (or a hold that came to nothing): back to the photo processing, if this phone has any. */
+    private fun restorePhotoMode() {
+        if (extMode == null && phase == Phase.LIVE && recording == null && photoMode() != null) bind()
     }
 
     private fun trouble(what: String) {
@@ -427,7 +495,7 @@ class RoomsCameraActivity : ComponentActivity() {
         tick()
         phase = Phase.STARTING
         bind()
-        if (night) say("Night is for photos: hold still. Turn it off to record a video.")
+        if (night) say("Night: hold still while it takes the picture.")
     }
 
     fun zoomTo(ratio: Float) {
@@ -556,6 +624,7 @@ class RoomsCameraActivity : ComponentActivity() {
             flashing = false
         }
         val file = CamStore.newFile(this, "jpg")
+        val pressed = System.currentTimeMillis()
         val options = ImageCapture.OutputFileOptions.Builder(file).build()
         capture.takePicture(options, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(result: ImageCapture.OutputFileResults) {
@@ -563,6 +632,7 @@ class RoomsCameraActivity : ComponentActivity() {
                     file.delete()
                     return failedShot("That didn't take. Try again.")
                 }
+                Log.i(TAG, "photo saved ${System.currentTimeMillis() - pressed} ms after the tap (extension=$extMode ultraHdr=$ultraOn, ${file.length() / 1024} KB)")
                 keep(file, video = false, ext = "jpg")
             }
 
@@ -577,6 +647,7 @@ class RoomsCameraActivity : ComponentActivity() {
         if (isFinishing || isDestroyed) return
         phase = Phase.LIVE
         say(why)
+        restorePhotoMode()
     }
 
     // ================================================================ a video
@@ -584,8 +655,20 @@ class RoomsCameraActivity : ComponentActivity() {
     @SuppressLint("MissingPermission")
     private fun startVideo() {
         val capture = videoCapture
+        if (capture == null && extMode != null) {
+            // The phone's photo processing can't record: the plain camera does, in a moment.
+            if (!has(Manifest.permission.RECORD_AUDIO) && !micAsked) {
+                micAsked = true
+                down = false
+                askMic.launch(Manifest.permission.RECORD_AUDIO)
+                return
+            }
+            phase = Phase.STARTING
+            bind(forVideo = true)
+            return
+        }
         if (capture == null) {
-            say(if (night) "Night is for photos. Turn it off to record a video." else "This phone can't record video here. Tap for a photo.")
+            say("This phone can't record video here. Tap for a photo.")
             return
         }
         if (!roomLeft()) return say("This phone is almost out of space. Free some up and try again.")
@@ -597,7 +680,7 @@ class RoomsCameraActivity : ComponentActivity() {
             askMic.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        val max = handoff?.maxBytes ?: CamHandoffs.DEFAULT_MAX_BYTES
+        val max = handoff?.limit ?: CamHandoffs.DEFAULT_MAX_BYTES
         val file = CamStore.newFile(this, "mp4")
         capture.targetRotation = rotation
         val pending = capture.output.prepareRecording(this, FileOutputOptions.Builder(file).setFileSizeLimit((max * 0.97).toLong()).build())
@@ -699,7 +782,7 @@ class RoomsCameraActivity : ComponentActivity() {
     }
 
     private fun fromGallery(uri: Uri) {
-        val max = handoff?.maxBytes ?: CamHandoffs.DEFAULT_MAX_BYTES
+        val max = handoff?.limit ?: CamHandoffs.DEFAULT_MAX_BYTES
         val before = phase
         phase = Phase.SAVING
         lifecycleScope.launch {
@@ -773,7 +856,7 @@ class RoomsCameraActivity : ComponentActivity() {
         val s = shot ?: return null
         val h = handoff ?: return null
         val id = pendingId ?: UUID.randomUUID().toString().also { pendingId = it }
-        return id to CamSend.start(this, PendingShot(id, h.server, h.ticket, s.file.absolutePath, s.name, s.mime, caption.trim().take(4000), s.video))
+        return id to CamSend.start(this, PendingShot(id, h.server, h.ticket, s.file.absolutePath, s.name, s.mime, caption.trim().take(4000), s.video, h.room, h.title, h.maxBytes, h.tus))
     }
 
     private fun watch(work: UUID) {
@@ -827,7 +910,8 @@ class RoomsCameraActivity : ComponentActivity() {
         const val STILL_SHORT = 3024
         /** Past this a phone is only blowing up pixels. */
         const val MAX_ZOOM = 10f
-        const val LOW_SPACE_BYTES = 150L * 1024 * 1024
+        const val LOW_SPACE_BYTES = 200L * 1024 * 1024
+        const val TAG = "RoomsCam"
     }
 }
 

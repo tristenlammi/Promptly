@@ -18,8 +18,8 @@ class CamLogicTest {
             b64("""{"typ":"$typ","sub":"$sub","room":"$room","jti":"j","iat":1,"exp":$exp}""") + ".c2lnbmF0dXJl"
     }
 
-    private fun params(server: String = "https://home.example", t: String = ticket(), room: String = this.room, title: String? = "Ann", max: String? = null) =
-        mapOf("server" to server, "ticket" to t, "room" to room, "title" to title, "max" to max)
+    private fun params(server: String = "https://home.example", t: String = ticket(), room: String = this.room, title: String? = "Ann", max: String? = null, big: String? = null, tus: String? = null) =
+        mapOf("server" to server, "ticket" to t, "room" to room, "title" to title, "max" to max, "big" to big, "tus" to tus)
 
     // ---------------------------------------------------------------- the hand-off
 
@@ -230,5 +230,81 @@ class CamLogicTest {
         assertEquals(0.25f, CamSendRules.fraction(25, 100), 0.0001f)
         assertEquals(1f, CamSendRules.fraction(500, 100), 0.0001f)
         assertEquals(0f, CamSendRules.fraction(5, 0), 0.0001f)
+    }
+
+    // ---------------------------------------------------------------- a fuller video, in pieces
+
+    @Test fun `pieces only to the server's own upload path, and only up to what this camera will make`() {
+        val saved = "https://home.example"
+        val mb = 1024L * 1024
+        val on = CamHandoffs.parse(params(big = "${150 * mb}", tus = "/api/files/tus/"), saved, now)!!
+        assertEquals("/api/files/tus/", on.tus)
+        assertEquals(150 * mb, on.limit)
+        // Off on the server: one request, as before.
+        val off = CamHandoffs.parse(params(), saved, now)!!
+        assertEquals("", off.tus)
+        assertEquals(50 * mb, off.limit)
+        // A page can't send the pieces somewhere of its own, or make the camera fill the phone.
+        for (bad in listOf("https://evil.example/api/files/tus/", "//evil.example/", "/api/../x/", "api/files/tus/", "/api/files/tus")) {
+            val h = CamHandoffs.parse(params(big = "${150 * mb}", tus = bad), saved, now)!!
+            assertEquals(bad, "", h.tus)
+            assertEquals(50 * mb, h.limit)
+        }
+        assertEquals(150 * mb, CamHandoffs.parse(params(big = "99999999999", tus = "/api/files/tus/"), saved, now)!!.limit)
+        // "Big" that is no bigger than one request isn't worth the pieces.
+        assertEquals("", CamHandoffs.parse(params(big = "${10 * mb}", tus = "/api/files/tus/"), saved, now)!!.tus)
+    }
+
+    @Test fun `with pieces a full minute is a phone camera's own quality, and still fits`() {
+        val limit = 150L * 1024 * 1024
+        assertEquals(CamVideo.BEST_BITS, CamVideo.bits(limit))
+        val bytes = (CamVideo.BEST_BITS.toLong() + CamVideo.AUDIO_BITS) * (MAX_VIDEO_MS / 1000) / 8
+        assertTrue(bytes in (85L * 1024 * 1024)..(95L * 1024 * 1024))
+        assertTrue(bytes < limit * 97 / 100)
+    }
+
+    @Test fun `what goes in pieces, and how`() {
+        val one = 50L * 1024 * 1024
+        assertFalse(CamPieces.inPieces(one, one, "/api/files/tus/"))
+        assertTrue(CamPieces.inPieces(one + 1, one, "/api/files/tus/"))
+        assertFalse(CamPieces.inPieces(one * 2, one, ""))
+        assertEquals(CamPieces.PIECE, CamPieces.next(0, 90L * 1024 * 1024))
+        assertEquals(1024L, CamPieces.next(90L * 1024 * 1024 - 1024, 90L * 1024 * 1024))
+        assertEquals(0L, CamPieces.next(100, 100))
+        val meta = CamPieces.metadata("Video 1.mp4", "video/mp4", "room-1").split(",").associate {
+            val (k, v) = it.split(" ")
+            k to String(Base64.getDecoder().decode(v))
+        }
+        assertEquals(mapOf("filename" to "Video 1.mp4", "filetype" to "video/mp4", "room_id" to "room-1"), meta)
+    }
+
+    // ---------------------------------------------------------------- the phone's own processing
+
+    @Test fun `auto when the phone has it, else HDR, and night only when asked where auto can't do it`() {
+        assertEquals(CamExt.Mode.AUTO, CamExt.pick(auto = true, hdr = true, night = true, nightAsked = false))
+        // With Auto there is no Night button, so a stale "asked" changes nothing.
+        assertEquals(CamExt.Mode.AUTO, CamExt.pick(auto = true, hdr = true, night = true, nightAsked = true))
+        assertEquals(CamExt.Mode.HDR, CamExt.pick(auto = false, hdr = true, night = true, nightAsked = false))
+        assertEquals(CamExt.Mode.NIGHT, CamExt.pick(auto = false, hdr = true, night = true, nightAsked = true))
+        assertNull(CamExt.pick(auto = false, hdr = false, night = true, nightAsked = false))
+        assertEquals(CamExt.Mode.NIGHT, CamExt.pick(auto = false, hdr = false, night = true, nightAsked = true))
+        // A phone with none of it: the plain full-quality camera, untouched.
+        assertNull(CamExt.pick(auto = false, hdr = false, night = false, nightAsked = false))
+        assertNull(CamExt.pick(auto = false, hdr = false, night = false, nightAsked = true))
+        assertTrue(CamExt.nightButton(auto = false, night = true))
+        assertFalse(CamExt.nightButton(auto = true, night = true))
+        assertFalse(CamExt.nightButton(auto = false, night = false))
+    }
+
+    // ---------------------------------------------------------------- when it didn't send
+
+    @Test fun `a send that failed unseen says so plainly`() {
+        val (t1, x1) = CamNotes.words(video = false, to = "Mum", retry = true, kept = false)
+        assertEquals("Your photo to Mum hasn't sent", t1)
+        assertTrue(x1.startsWith("Tap to try again"))
+        val (t2, x2) = CamNotes.words(video = true, to = "", retry = false, kept = true)
+        assertEquals("Your video to the conversation couldn't be sent", t2)
+        assertTrue(x2.contains("gallery"))
+        assertFalse(CamNotes.words(video = true, to = "Mum", retry = false, kept = false).second.contains("gallery"))
     }
 }

@@ -452,6 +452,8 @@
             </intent-filter>
         </activity>
         <receiver android:name=".calls.CallActions" android:exported="false" />
+        <!-- "Try again" on the notification for a photo or video that didn't send. -->
+        <receiver android:name=".roomscam.CamRetryReceiver" android:exported="false" />
 
         <!-- The Rooms camera: the camera button in a conversation hands over to this
              (promptly://rooms/camera?…), the phone's real camera. It sends to the one

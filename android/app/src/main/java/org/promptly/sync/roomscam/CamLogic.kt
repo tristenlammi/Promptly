@@ -31,7 +31,14 @@ data class CamHandoff(
     val expiresAt: Long,
     /** The most the server takes in one request. */
     val maxBytes: Long,
-)
+    /** The most it takes in pieces (resumable uploads), or 0 when those are off. */
+    val bigBytes: Long = 0,
+    /** Where the pieces go (a path on [server]), or "" when resumable uploads are off. */
+    val tus: String = "",
+) {
+    /** The biggest file this camera may make. */
+    val limit: Long get() = if (tus.isNotEmpty()) maxOf(maxBytes, bigBytes) else maxBytes
+}
 
 object CamHandoffs {
     private val json = Json { ignoreUnknownKeys = true }
@@ -41,6 +48,10 @@ object CamHandoffs {
 
     /** One request to the server carries at most this (`rooms/uploads.py::DIRECT_MAX_BYTES`). */
     const val DEFAULT_MAX_BYTES = 50L * 1024 * 1024
+
+    /** The most this camera will ever make, whatever a page says (`rooms/camera.py::BIG_MAX_BYTES`). */
+    const val MAX_BIG_BYTES = 150L * 1024 * 1024
+    private val TUS_PATH = Regex("^/api/[A-Za-z0-9/_-]{1,80}/$")
 
     /**
      * The page's hand-off (`promptly://rooms/camera?server=…&ticket=…&room=…&title=…`),
@@ -60,7 +71,10 @@ object CamHandoffs {
         if (claims.room != room || claims.expiresAt <= now) return null
         val title = params["title"]?.trim()?.take(80)?.ifBlank { null } ?: "this conversation"
         val max = (params["max"]?.toLongOrNull() ?: DEFAULT_MAX_BYTES).coerceIn(5L * 1024 * 1024, DEFAULT_MAX_BYTES)
-        return CamHandoff(server, ticket, room, claims.user, title, claims.expiresAt, max)
+        // In pieces only to the server's own upload path: never an address a page made up.
+        val tus = params["tus"]?.takeIf { TUS_PATH.matches(it) } ?: ""
+        val big = if (tus.isEmpty()) 0L else (params["big"]?.toLongOrNull() ?: 0L).coerceIn(0L, MAX_BIG_BYTES)
+        return CamHandoff(server, ticket, room, claims.user, title, claims.expiresAt, max, big, if (big > max) tus else "")
     }
 
     /** A camera ticket's claims (a JWT, `typ: "rooms-camera"`), unverified. */
@@ -195,6 +209,47 @@ object CamVideo {
         val kept = (videoShort / videoLong) / (viewShort / viewLong)
         return ((1f - kept) / 2f).coerceIn(0f, 0.5f)
     }
+}
+
+// ==================================================================== the phone's own processing
+
+object CamExt {
+    enum class Mode { AUTO, HDR, NIGHT }
+
+    /**
+     * Which of the phone maker's own photo processing to use, from what this
+     * camera offers. Auto first: it chooses HDR or night by the scene, as the
+     * phone's own camera does. Without it, HDR. Night only when asked for
+     * ([nightAsked]: the Night button, shown only where there's no Auto to
+     * do it by itself). None of them: null, the plain full-quality picture.
+     */
+    fun pick(auto: Boolean, hdr: Boolean, night: Boolean, nightAsked: Boolean): Mode? = when {
+        nightAsked && night && !auto -> Mode.NIGHT
+        auto -> Mode.AUTO
+        hdr -> Mode.HDR
+        else -> null
+    }
+
+    /** The Night button is worth showing only where Night exists and Auto doesn't. */
+    fun nightButton(auto: Boolean, night: Boolean): Boolean = night && !auto
+}
+
+// ==================================================================== sending in pieces
+
+object CamPieces {
+    /** One piece: small enough to lose little when the signal drops, and to move the progress ring. */
+    const val PIECE = 8L * 1024 * 1024
+
+    /** In one request, or in pieces? */
+    fun inPieces(size: Long, maxOne: Long, tus: String): Boolean = tus.isNotEmpty() && size > maxOne
+
+    /** The next piece's length from [offset]. */
+    fun next(offset: Long, size: Long): Long = minOf(PIECE, size - offset).coerceAtLeast(0)
+
+    /** `filename <b64>,filetype <b64>,room_id <b64>`: what tus calls Upload-Metadata. */
+    fun metadata(name: String, mime: String, room: String): String =
+        listOf("filename" to name, "filetype" to mime, "room_id" to room)
+            .joinToString(",") { (k, v) -> "$k ${Base64.getEncoder().encodeToString(v.toByteArray())}" }
 }
 
 // ==================================================================== names
