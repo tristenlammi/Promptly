@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-19
+
 ### Added
 
 - Rooms on a phone: a Photos button beside the camera opens your phone's photos in one tap (pick several at once, videos too). It's under + as "Photos and videos" as well.
