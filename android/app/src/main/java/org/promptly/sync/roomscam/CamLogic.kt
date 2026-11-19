@@ -249,6 +249,17 @@ object CamSendRules {
         else -> SendState.Failed("The server had a problem. It's kept here: try again in a moment.", again = true)
     }
 
+    /** One run's tries: at once, then after these waits. */
+    val QUICK_WAITS_MS = listOf(0L, 4_000L, 10_000L)
+
+    /**
+     * Try again within the same run? Only for a send nobody is watching (the
+     * camera screen shows a failure at once and offers Try again itself), and
+     * only when the server never answered.
+     */
+    fun quickRetry(state: SendState, watched: Boolean): Boolean =
+        !watched && state is SendState.Failed && state.again && state.why.startsWith("No connection")
+
     /** A background try that failed: keep trying, or stop and keep the picture. */
     fun retryInBackground(failed: SendState.Failed, attempt: Int): Boolean = failed.again && attempt < 8
 

@@ -215,6 +215,16 @@ class CamLogicTest {
         assertFalse(CamSendRules.retryInBackground(CamSendRules.failure(401, null), 0))
     }
 
+    @Test fun `a blip is retried at once only when nobody is watching and the server never answered`() {
+        val net = CamSendRules.failure(null, null)
+        assertTrue(CamSendRules.quickRetry(net, watched = false))
+        assertFalse(CamSendRules.quickRetry(net, watched = true))
+        assertFalse(CamSendRules.quickRetry(CamSendRules.failure(500, null), watched = false))
+        assertFalse(CamSendRules.quickRetry(CamSendRules.failure(401, null), watched = false))
+        assertFalse(CamSendRules.quickRetry(SendState.Sent, watched = false))
+        assertEquals(0L, CamSendRules.QUICK_WAITS_MS.first())
+    }
+
     @Test fun `progress is a share of the file`() {
         assertEquals(0f, CamSendRules.fraction(0, 100), 0.0001f)
         assertEquals(0.25f, CamSendRules.fraction(25, 100), 0.0001f)

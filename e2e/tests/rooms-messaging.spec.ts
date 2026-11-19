@@ -279,8 +279,10 @@ test("on a phone with the Promptly app the camera button opens the app's camera,
     await bob.goto(`/rooms/r/${dm}`);
     for (const p of [page, bob]) {
       await expect(log(p).getByText(words)).toBeVisible({ timeout: 20_000 });
-      const img = log(p).locator("img").last();
-      await expect.poll(async () => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+      // This picture, by its name (the conversation has others from the tests above).
+      const img = log(p).getByAltText(`Photo ${stamp}.png`).first();
+      await img.scrollIntoViewIfNeeded();
+      await expect.poll(async () => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), { timeout: 20_000 }).toBe(true);
     }
 
     // The app has gone (Chrome comes back with #camera-no-app): the page's camera opens, and it stops asking.

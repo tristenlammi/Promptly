@@ -207,8 +207,15 @@ class CamSendWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val id = CamSend.idOf(params = workerParams) ?: return Result.failure()
         val shot = CamStore.load(applicationContext, id)
             ?: return Result.failure(workDataOf(CamSend.KEY_WHY to "That picture isn't on this phone any more.", CamSend.KEY_AGAIN to false))
-        val state = withContext(Dispatchers.IO) {
-            CamSend.send(shot, { f -> setProgressAsync(workDataOf(CamSend.KEY_FRACTION to f)) })
+        // A dropped connection is usually back in seconds (a lift, a tunnel, Wi-Fi to mobile):
+        // a few quick tries here, before leaving it to Android's own, slower, retry.
+        var state: SendState = SendState.Idle
+        for (wait in CamSendRules.QUICK_WAITS_MS) {
+            if (wait > 0) kotlinx.coroutines.delay(wait)
+            state = withContext(Dispatchers.IO) {
+                CamSend.send(shot, { f -> setProgressAsync(workDataOf(CamSend.KEY_FRACTION to f)) })
+            }
+            if (!CamSendRules.quickRetry(state, watched = CamWatch.watching(id))) break
         }
         return when (state) {
             is SendState.Sent -> {
