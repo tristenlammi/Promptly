@@ -156,3 +156,76 @@ async def test_what_the_camera_sends_is_a_rooms_upload_not_a_drive_file(client, 
     assert (await shoot(client, t)).status_code == 201
     assert (await db.execute(text("SELECT count(*) FROM files"))).scalar() == before
     assert (await db.execute(text("SELECT count(*) FROM room_attachments WHERE message_id IS NOT NULL"))).scalar() == 1
+
+
+# ------------------------------------------------------------------ a video too big for one request
+
+
+def _big_event(t, *, size, meta, upload_id="", offset=0):
+    header = {"X-Real-Ip": ["203.0.113.7"]}
+    if t is not None:
+        header["X-Promptly-Camera-Ticket"] = [t]
+    return {
+        "Upload": {"ID": upload_id, "Size": size, "SizeIsDeferred": False, "Offset": offset, "MetaData": meta, "IsPartial": False, "IsFinal": False},
+        "HTTPRequest": {"Method": "POST", "URI": "/api/files/tus/", "Header": header},
+    }
+
+
+async def test_a_long_video_goes_in_pieces_with_the_ticket_and_is_still_one_message(client, db, people, root):  # noqa: F811
+    from sqlalchemy import text
+
+    from app.files.tus_hooks import TUS_DIR
+    from tests.test_rooms_uploads import _hook, _refusal
+
+    ann, bob, _ = people
+    _, room = await make_space(client, ann, bob)
+    _, other = await make_space(client, ann, bob, name="Other")
+    got = await ticket(client, ann, room)
+    t = got["ticket"]
+    assert got["tus_endpoint"] == "/api/files/tus/" and got["big_max_bytes"] > 90 * 1024 * 1024
+
+    data = b"frame " * 5000
+    meta = {"filename": "Video.mp4", "filetype": "video/mp4", "room_id": room}
+    # The ticket's own conversation and a photo or video, or nothing.
+    assert _refusal(await _hook(client, "pre-create", _big_event(t, size=len(data), meta={**meta, "room_id": other})))[0] == 403
+    assert _refusal(await _hook(client, "pre-create", _big_event(t, size=len(data), meta={**meta, "filetype": "application/zip"})))[0] == 403
+    assert _refusal(await _hook(client, "pre-create", _big_event(t, size=len(data), meta={"filename": "x.mp4", "filetype": "video/mp4"})))[0] == 403
+    assert _refusal(await _hook(client, "pre-create", _big_event("nonsense", size=len(data), meta=meta)))[0] == 401
+
+    reply = await _hook(client, "pre-create", _big_event(t, size=len(data), meta=meta))
+    assert "RejectUpload" not in reply, reply
+    upload_id = reply["ChangeFileInfo"]["ID"]
+    d = root / TUS_DIR
+    d.mkdir(exist_ok=True)
+    (d / upload_id).write_bytes(data)
+    reply = await _hook(client, "pre-finish", _big_event(t, size=len(data), meta=meta, upload_id=upload_id, offset=len(data)))
+    att_id = reply["HTTPResponse"]["Header"]["Upload-File-Id"]
+
+    cid = uuid.uuid4().hex
+
+    async def send(**kw):
+        return await client.post("/api/rooms/camera/send", headers={"X-Promptly-Camera-Ticket": t}, data={"body": "The whole minute", "client_id": cid, **kw})
+
+    # Another person's ticket can't send it; nor can this one, with nothing to send.
+    bobs = (await ticket(client, bob, room))["ticket"]
+    r = await client.post("/api/rooms/camera/send", headers={"X-Promptly-Camera-Ticket": bobs}, data={"client_id": uuid.uuid4().hex, "attachment_id": att_id})
+    assert r.status_code == 404
+    assert (await send()).status_code == 400
+    r = await send(attachment_id=att_id)
+    assert r.status_code == 201, r.text
+    assert r.json()["attachments"][0]["id"] == att_id and r.json()["body"] == "The whole minute"
+    # Its answer was lost and the phone tried again: the same message, not a second one or an error.
+    again = await send(attachment_id=att_id)
+    assert again.status_code == 201 and again.json()["id"] == r.json()["id"]
+    assert (await db.execute(text("SELECT count(*) FROM room_attachments WHERE message_id IS NULL"))).scalar() == 0
+    assert (await db.execute(text("SELECT count(*) FROM files"))).scalar() == 0
+
+
+async def test_with_big_uploads_off_the_camera_keeps_to_one_request(client, db, people, monkeypatch):
+    from app.config import get_settings
+
+    ann, bob, _ = people
+    _, room = await make_space(client, ann, bob)
+    monkeypatch.setattr(get_settings(), "TUS_ENABLED", False)
+    got = await ticket(client, ann, room)
+    assert got["big_max_bytes"] == 0 and got["tus_endpoint"] is None and got["max_bytes"] == 50 * 1024 * 1024

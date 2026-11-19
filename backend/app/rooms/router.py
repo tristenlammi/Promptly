@@ -980,7 +980,17 @@ async def camera_ticket(room_id: uuid.UUID, body: CameraTicketIn | None = None, 
         if there is None:
             reply = None
     ticket, exp = camera.mint(user.id, room.id, reply)
-    return {"ticket": ticket, "expires_at": exp, "max_bytes": uploads.DIRECT_MAX_BYTES, "title": await _camera_title(db, room, user)}
+    policy = uploads.policy()
+    return {
+        "ticket": ticket,
+        "expires_at": exp,
+        "max_bytes": uploads.DIRECT_MAX_BYTES,
+        # With resumable uploads on, the camera may send more than one request
+        # carries (in pieces, to ``tus_endpoint``): room for a proper video.
+        "big_max_bytes": camera.BIG_MAX_BYTES if policy["tus_endpoint"] else 0,
+        "tus_endpoint": policy["tus_endpoint"],
+        "title": await _camera_title(db, room, user),
+    }
 
 
 async def _camera_title(db: AsyncSession, room: Room, user: User) -> str:
@@ -995,7 +1005,8 @@ async def _camera_title(db: AsyncSession, room: Room, user: User) -> str:
 
 @router.post("/camera/send", status_code=201)
 async def camera_send(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(default=None),
+    attachment_id: uuid.UUID | None = Form(default=None),
     body: str = Form(default="", max_length=core.MAX_BODY),
     client_id: str = Form(min_length=8, max_length=64),
     ticket: str | None = Header(default=None, alias="X-Promptly-Camera-Ticket"),
@@ -1003,7 +1014,9 @@ async def camera_send(
 ) -> dict:
     """One photo or video from the app's camera, with its words, sent as a
     message. Signed in by the ticket alone; the same ``client_id`` again
-    gets the message it already made."""
+    gets the message it already made. A video too big for one request was
+    sent in pieces first (``tus_hooks``, with the same ticket) and is named
+    here by ``attachment_id``."""
     claims = camera.read(ticket)
     if claims is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Open the camera from the conversation again.")
@@ -1026,13 +1039,28 @@ async def camera_send(
     ).scalar_one_or_none()
     if already is not None:
         return await core.message_out(db, already, user.id)
-    kind = (file.content_type or "").lower()
-    if not kind.startswith(camera.KINDS) or kind == "image/svg+xml":
+    waiting: RoomAttachment | None = None
+    if attachment_id is not None:
+        waiting = (
+            await db.execute(
+                select(RoomAttachment).where(
+                    RoomAttachment.id == attachment_id,
+                    RoomAttachment.uploader_id == user.id,
+                    RoomAttachment.room_id == room.id,
+                    RoomAttachment.message_id.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if waiting is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That upload isn't here any more. Send it again.")
+    elif file is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to send")
+    if not camera.is_media(waiting.mime if waiting is not None else file.content_type):
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="The camera sends photos and videos only.")
     if not await camera.count_send(claims):
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="That's a lot from one camera session. Open the camera from the conversation again.")
     try:
-        att = await service.store_attachment(db, room, user, file)
+        att = waiting if waiting is not None else await service.store_attachment(db, room, user, file)
         reply = uuid.UUID(claims["reply"]) if claims.get("reply") else None
         if reply is not None and await db.scalar(select(RoomMessage.id).where(RoomMessage.id == reply, RoomMessage.room_id == room.id)) is None:
             reply = None  # the message it answered has gone: it's still worth sending

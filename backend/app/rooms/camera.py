@@ -28,9 +28,17 @@ from app.config import get_settings
 TTL = timedelta(hours=6)
 MAX_SENDS = 40
 TYP = "rooms-camera"
+# The most the camera sends in pieces: a minute of 1080p at a phone camera's
+# own bit rate is about 90 MB.
+BIG_MAX_BYTES = 150 * 1024 * 1024
 
 # What a camera makes. Anything else isn't from the camera screen.
 KINDS = ("image/", "video/")
+
+
+def is_media(mime: str | None) -> bool:
+    kind = (mime or "").lower()
+    return kind.startswith(KINDS) and kind != "image/svg+xml"
 
 
 def mint(user_id: uuid.UUID, room_id: uuid.UUID, reply_to_id: uuid.UUID | None) -> tuple[str, int]:
