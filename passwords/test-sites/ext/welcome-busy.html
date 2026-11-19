@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head><title>Welcome</title></head>
+  <body>
+    <h1>Welcome back</h1>
+    <p>Signed in, and this page is busy drawing itself.</p>
+    <button id="under" style="position: fixed; top: 60px; right: 60px" onclick="window.__pressed = (window.__pressed || 0) + 1">Under the corner</button>
+    <script>
+      // A heavy app just after sign-in: the moment anything is added beside <body>, the
+      // page is busy for a while, as a big first render is.
+      const ms = Number(new URLSearchParams(location.search).get("busy") || 2500);
+      let done = false;
+      new MutationObserver(() => {
+        if (done) return;
+        done = true;
+        const until = performance.now() + ms;
+        while (performance.now() < until) { /* busy */ }
+      }).observe(document.documentElement, { childList: true });
+    </script>
+  </body>
+</html>

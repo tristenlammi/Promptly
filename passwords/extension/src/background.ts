@@ -954,6 +954,16 @@ async function pendingSave(tabId: number): Promise<PendingSave | null> {
   return live.sort((a, b) => b.at - a.at)[0] ?? null;
 }
 
+// An offer that goes takes its bar with it, however it went: a sign-in that turned out to
+// have failed, an answer in the toolbar panel, the vault locking.
+session.onChanged.addListener((changes) => {
+  const change = changes.pendingSave;
+  if (!change) return;
+  const now = new Set(((change.newValue as PendingSave[] | undefined) ?? []).map((p) => p.tabId));
+  const gone = new Set(((change.oldValue as PendingSave[] | undefined) ?? []).map((p) => p.tabId).filter((id) => !now.has(id)));
+  for (const tabId of gone) void send(tabId, 0, { t: "hideSave" });
+});
+
 async function setPending(tabId: number, frameId: number | null, offer: SaveOffer | null, submittedKind = "signin") {
   const list = (((await session.get("pendingSave")).pendingSave as PendingSave[]) ?? []).filter((x) => x.tabId !== tabId || (frameId !== null && x.frameId !== frameId));
   if (offer && frameId !== null) list.push({ tabId, frameId, offer, submittedKind, at: Date.now() });
@@ -1983,8 +1993,14 @@ async function handleSave(m: SaveRequest, sender: chrome.runtime.MessageSender):
   if (!owner || owner.frameId !== 0) return null;
   if (m.t === "saveOffer") {
     const p = await pendingSave(tabId);
+    // Nothing to ask about (it failed, was answered, ran out): the bar has no reason to be there.
+    if (!p) {
+      await send(tabId, 0, { t: "hideSave" });
+      return { none: true };
+    }
+    await send(tabId, 0, { t: "saveDrawn", token: m.token });
     // Only what's needed to ask: never the password back.
-    return p ? { kind: p.offer.kind, username: p.offer.username ?? "", host: p.offer.host } : null;
+    return { kind: p.offer.kind, username: p.offer.username ?? "", host: p.offer.host };
   }
   // Firefox can't judge a press on the bar (press.ts): saving goes through the popup there.
   if (__ENGINE__ === "firefox" && m.answer !== "dismiss") return null;

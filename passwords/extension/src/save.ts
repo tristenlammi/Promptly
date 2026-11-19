@@ -51,7 +51,17 @@ function toPanel(e: Event, how: HTMLElement) {
 }
 
 async function init() {
-  const offer = (await call({ t: "saveOffer" })) as { kind: "save" | "update"; username: string; host: string } | null;
+  // No answer at all means nobody could vouch for this bar just then: the page it's on was
+  // too busy to say the bar is its own (a big app drawing itself after sign-in). Ask again
+  // for a few seconds. "none" is a real answer: there's nothing to ask, and the bar goes.
+  type Offer = { kind: "save" | "update"; username: string; host: string };
+  let offer: Offer | null = null;
+  for (let i = 0; i < 5 && !offer; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 600));
+    const answer = (await call({ t: "saveOffer" })) as Offer | { none: true } | null;
+    if (answer && "none" in answer) return;
+    offer = answer;
+  }
   if (!offer) return;
   const title = document.createElement("div");
   title.className = "title";

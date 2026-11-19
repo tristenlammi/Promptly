@@ -750,6 +750,13 @@ function main() {
 
   let saveHost: HTMLElement | null = null;
   let saveToken: string | null = null;
+  let saveDrawn = false;
+  let saveTimers: ReturnType<typeof setTimeout>[] = [];
+  /** How long a bar may sit with nothing in it. Its page asks more than once (save.ts),
+   *  which takes under this long. */
+  const SAVE_EMPTY_MS = 8000;
+  /** An offer lives five minutes in the background; the bar asking about it goes then too. */
+  const SAVE_LIFE_MS = 5 * 60 * 1000;
 
   async function checkPendingSave() {
     if (window !== window.top) return;
@@ -766,6 +773,9 @@ function main() {
     saveHost?.remove();
     saveHost = null;
     saveToken = null;
+    saveDrawn = false;
+    for (const t of saveTimers) clearTimeout(t);
+    saveTimers = [];
   }
 
   function showSaveBar() {
@@ -777,7 +787,9 @@ function main() {
     const f = document.createElement("iframe");
     saveToken = newToken();
     f.src = `${ext.runtime.getURL("save.html")}#${saveToken}`;
-    f.setAttribute("style", "all:initial;display:block;width:360px;height:150px;border:0;color-scheme:normal");
+    // The same colour scheme as the bar's page (as for the menu), or with the computer set
+    // to dark the browser paints the whole frame as a solid black block.
+    f.setAttribute("style", "all:initial;display:block;width:360px;height:150px;border:0;background:transparent;color-scheme:light dark");
     shadow.appendChild(f);
     saveHost.setAttribute("style", "all:initial;position:fixed;top:12px;right:12px;width:360px;height:150px;z-index:2147483647;display:block;inset:12px 12px auto auto;border:0;padding:0;margin:0;overflow:hidden;background:transparent");
     // As for the menu: a page's stylesheet can't reach past these.
@@ -791,6 +803,18 @@ function main() {
     } catch {
       /* it's still there at the top z-index */
     }
+    // A bar that never got its question (the offer went, or nobody could vouch for this
+    // bar) is an unseen box over the corner of the page, taking its clicks. It goes.
+    const mine = saveToken;
+    saveDrawn = false;
+    saveTimers = [
+      setTimeout(() => {
+        if (saveToken === mine && !saveDrawn) hideSaveBar();
+      }, SAVE_EMPTY_MS),
+      setTimeout(() => {
+        if (saveToken === mine) hideSaveBar();
+      }, SAVE_LIFE_MS),
+    ];
   }
 
   // ---- A short note on the page, with nothing a script could read ------------------------
@@ -1080,6 +1104,10 @@ function main() {
         return false;
       case "hideSave":
         hideSaveBar();
+        reply(true);
+        return false;
+      case "saveDrawn":
+        if (saveToken && msg.token === saveToken) saveDrawn = true;
         reply(true);
         return false;
       default:

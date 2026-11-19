@@ -130,6 +130,8 @@ export type ToContent =
   | { t: "ownsSave"; token: string }
   | { t: "showSave"; kind: string }
   | { t: "hideSave" }
+  /** The bar holding this token has its question: it stays. */
+  | { t: "saveDrawn"; token: string }
   | { t: "checkFailed" }
   | { t: "openMenu" }
   /** Draw the menu for a box in the frame `child` (one of this document's own iframes), at
