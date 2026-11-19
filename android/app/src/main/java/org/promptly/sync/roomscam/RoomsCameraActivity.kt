@@ -288,10 +288,14 @@ class RoomsCameraActivity : ComponentActivity() {
             val hasBack = runCatching { p.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) }.getOrDefault(false)
             if (!hasBack && !hasFront) return@addListener trouble("This phone has no camera Promptly can use.")
             if (!hasBack) front = true
+            // The picture first. Finding out what photo processing the phone maker offers
+            // takes a moment longer; if there is any, the camera switches to it then.
+            bind()
+            if (extensions != null) return@addListener
             val ext = ExtensionsManager.getInstanceAsync(this, p)
             ext.addListener({
                 extensions = runCatching { ext.get() }.getOrNull()
-                bind()
+                if (!isFinishing && !isDestroyed && (phase == Phase.LIVE || phase == Phase.STARTING) && recording == null && !down && extMode == null && photoMode() != null) bind()
             }, ContextCompat.getMainExecutor(this))
         }, ContextCompat.getMainExecutor(this))
     }
