@@ -76,6 +76,7 @@ PUBLIC: dict[str, str] = {
     "WS /api/home/box/ws": "a home box: its own key, or this server's HOME_BOX_SECRET (reviewed 2026-11)",
     "POST /api/hooks/{task_id}/{secret}": "an automation's webhook: its secret is in the address",
     "POST /api/internal/documents/{document_id}/snapshot": "service to service inside the deployment: a shared secret, checked in the handler",
+    "POST /api/rooms/camera/send": "a camera ticket, signed: one person, one conversation, photos and videos only, 6 hours and 40 sends; membership checked on each (rooms/camera.py)",
     "POST /api/internal/tus-hook": "service to service inside the deployment: a shared secret, checked in the handler",
     "GET /api/items/app-manifest/{file_id}.webmanifest": "an installed app's manifest: names and icons only",
     "GET /api/items/app/{kind}/manifest.webmanifest": "an installed app's manifest: names and icons only",
