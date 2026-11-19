@@ -219,6 +219,16 @@ dependencies {
     // Core-Telecom, Apache-2.0. Pinned to the settled 1.0.x line; bump on purpose.
     implementation("androidx.core:core-telecom:1.0.1")
 
+    // The Rooms camera (roomscam package): the phone's real camera, not a web page's.
+    // CameraX, Apache-2.0. One version for all of its parts; bump them together.
+    val camerax = "1.7.0"
+    implementation("androidx.camera:camera-core:$camerax")
+    implementation("androidx.camera:camera-camera2:$camerax")
+    implementation("androidx.camera:camera-lifecycle:$camerax")
+    implementation("androidx.camera:camera-video:$camerax")
+    implementation("androidx.camera:camera-view:$camerax")
+    implementation("androidx.camera:camera-extensions:$camerax")
+
     // Notes widgets: the home-screen widgets (Agenda, Tasks, Notes) — Jetpack Glance,
     // Apache-2.0, stable 1.2.0 (see the widgets package).
     implementation("androidx.glance:glance-appwidget:1.2.0")

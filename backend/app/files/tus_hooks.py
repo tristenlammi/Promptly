@@ -111,6 +111,22 @@ async def _user(db: AsyncSession, event: dict[str, Any]):
 
     if settings.SINGLE_USER_MODE:
         return await _get_singleton_user(db)
+    ticket = next((v for k, v in _headers(event).items() if k.lower() == "x-promptly-camera-ticket"), "")
+    if ticket:
+        # The Android app's camera, sending a video too big for one request
+        # (``app/rooms/camera.py``): the ticket's own conversation, a photo
+        # or a video, and nothing else.
+        from app.auth.models import User
+        from app.rooms import camera
+
+        claims = camera.read(ticket)
+        meta = _meta(event.get("Upload") or {})
+        who = await db.get(User, uuid.UUID(claims["sub"])) if claims else None
+        if who is None or who.disabled:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Open the camera from the conversation again.")
+        if (meta.get("room_id") or "").lower() != claims["room"].lower() or not camera.is_media(meta.get("filetype")) or meta.get("import_job"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The camera sends photos and videos to its own conversation only.")
+        return who
     auth = _headers(event).get("Authorization", "")
     scheme, _, token = auth.partition(" ")
     if scheme.lower() == "basic":

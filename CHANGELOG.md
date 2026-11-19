@@ -21,6 +21,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Rooms on an Android phone with the Promptly app: the camera button opens the phone's real camera, built into the app, where it used to open a camera inside the web page. Tap for a photo, hold for a video (up to a minute; slide your finger up to zoom), as before. Photos are the camera's full-quality pictures, and videos are much less squeezed and steadied where the phone can. Tap the picture to focus, pinch or use the lens buttons to zoom, switch cameras, set the flash, use the volume keys as the button, or pick something from your photos. Then you see what you took, add a few words and press Send. If the signal drops it keeps trying, even with the camera closed, and a picture that can't be sent is saved to the phone. Needs the next phone app; older apps, iPhones and browsers keep the page's own camera.
+- Rooms camera in the phone app: videos are recorded at about the quality of the phone's own camera (a full minute is around 90 MB) and sent in pieces that carry on after a dropped connection. On a server with big uploads turned off they stay at the smaller size. Sound is recorded in the format every browser plays.
+- Rooms camera in the phone app: photos use the phone maker's own processing where the phone offers it to apps (automatic HDR and night), and keep extra highlight detail for HDR screens where the phone can. Holding for a video switches back to the plain camera for the recording.
+- Rooms camera in the phone app: if a photo or video can't be sent after you've left the camera, a notification says so, with Try again. Back in the conversation, the reply you were writing is cleared once the camera's message has answered it.
+- Rooms: the app's camera sends with a ticket that works for that one conversation and for photos and videos only. It can't read anything, and stops working if you leave the conversation.
+
 ### Changed
 
 - Rooms camera (the one built into Rooms): videos are much sharper. They were recorded at 2.5 Mbit/s whatever the picture; a full-HD video now gets about 10 Mbit/s, close to what the phone's own camera uses, wherever the server takes big uploads (about 6 Mbit/s where it doesn't, so a full minute still fits in one file). A one-minute video is now up to about 75 MB.

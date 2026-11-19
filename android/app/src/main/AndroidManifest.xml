@@ -452,6 +452,29 @@
             </intent-filter>
         </activity>
         <receiver android:name=".calls.CallActions" android:exported="false" />
+        <!-- "Try again" on the notification for a photo or video that didn't send. -->
+        <receiver android:name=".roomscam.CamRetryReceiver" android:exported="false" />
+
+        <!-- The Rooms camera: the camera button in a conversation hands over to this
+             (promptly://rooms/camera?…), the phone's real camera. It sends to the one
+             conversation the page gave it a ticket for, and nothing else. -->
+        <activity
+            android:name=".roomscam.RoomsCameraActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.roomscam"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@android:style/Theme.Material.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptly" android:host="rooms" android:path="/camera" />
+            </intent-filter>
+        </activity>
 
         <!-- WorkManager's foreground service, for long backups. -->
         <service

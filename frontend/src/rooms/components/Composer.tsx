@@ -23,6 +23,7 @@ import { useRoomFeatures } from "../features";
 import { canRecord } from "../voiceRecorder";
 import { PollSheet } from "./PollSheet";
 import { CameraView } from "./CameraView";
+import { forgetNativeCamera, hasNativeCamera, onNoCameraApp, openNativeCamera, sentFromCamera } from "../nativeCamera";
 import { VoiceButton } from "./VoiceButton";
 
 // Until the server has said what it allows (1 GB where big uploads are on).
@@ -89,6 +90,63 @@ export const Composer = forwardRef<
   const photoInput = useRef<HTMLInputElement>(null);
   // The camera, one tap from a phone's composer (``CameraView``).
   const [cameraOpen, setCameraOpen] = useState(false);
+  // On a phone with the Promptly app the button opens the app's camera (the
+  // phone's real one, ``nativeCamera.ts``); anywhere else, or if that can't
+  // be reached, the page's own. Never a button that does nothing.
+  const replyId = replyTo?.id ?? null;
+  // The app's camera is out of this page's sight: when the page is in front
+  // again, fetch what's new at once (the photo it sent), and if it answered
+  // the message you were replying to, the reply bar has done its job.
+  const cameraOut = useRef<{ at: number; replyId: string | null; roomId: string } | null>(null);
+  const openCamera = useCallback(() => {
+    if (!hasNativeCamera()) return setCameraOpen(true);
+    void openNativeCamera(roomId, replyId).then((ok) => {
+      if (ok) cameraOut.current = { at: Date.now(), replyId, roomId };
+      else setCameraOpen(true);
+    });
+  }, [roomId, replyId]);
+  useEffect(() => {
+    let timers: number[] = [];
+    const look = () => {
+      const out = cameraOut.current;
+      if (!out || document.visibilityState !== "visible") return;
+      void roomsApi
+        .messages(out.roomId, { limit: 10 })
+        .then((page) => {
+          const store = useRoomsStore.getState();
+          for (const m of page.messages) store.upsertMessage(m);
+          if (cameraOut.current !== out) return;
+          if (sentFromCamera(page.messages.filter((m) => m.author_id === meId), out)) {
+            cameraOut.current = null;
+            if (out.replyId) onCancelReply();
+          }
+        })
+        .catch(() => undefined);
+    };
+    const back = () => {
+      if (document.visibilityState !== "visible" || !cameraOut.current) return;
+      timers.forEach((t) => window.clearTimeout(t));
+      // Now, and again shortly: a long video is still on its way when you come back.
+      timers = [0, 2500, 8000, 20_000, 45_000].map((ms) => window.setTimeout(look, ms));
+      // Past that it wasn't sent from there: an old hand-off mustn't clear a later reply.
+      timers.push(window.setTimeout(() => (cameraOut.current = null), 60_000));
+    };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("focus", back);
+      timers.forEach((t) => window.clearTimeout(t));
+    };
+  }, [meId, onCancelReply]);
+  useEffect(
+    () =>
+      onNoCameraApp(() => {
+        forgetNativeCamera();
+        setCameraOpen(true);
+      }),
+    [],
+  );
   const emojiBtn = useRef<HTMLButtonElement>(null);
   const [text, setText] = useState(() => getDraft(meId, roomId));
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -577,7 +635,7 @@ export const Composer = forwardRef<
             data-testid="composer-camera"
             tabIndex={text.trim() ? -1 : 0}
             aria-hidden={text.trim() ? true : undefined}
-            onClick={() => setCameraOpen(true)}
+            onClick={openCamera}
             className={cn(iconBtn, "overflow-hidden transition-[width,opacity] duration-150", text.trim() && "pointer-events-none !w-0 opacity-0")}
           >
             <Camera className="h-5 w-5 shrink-0" />
@@ -744,7 +802,7 @@ export const Composer = forwardRef<
                   hint="Tap for a photo, hold for a video"
                   onClick={() => {
                     setPlusOpen(false);
-                    setCameraOpen(true);
+                    openCamera();
                   }}
                 />
               )}
