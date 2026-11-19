@@ -23,6 +23,7 @@ import { useRoomFeatures } from "../features";
 import { canRecord } from "../voiceRecorder";
 import { PollSheet } from "./PollSheet";
 import { CameraView } from "./CameraView";
+import { forgetNativeCamera, hasNativeCamera, onNoCameraApp, openNativeCamera } from "../nativeCamera";
 import { VoiceButton } from "./VoiceButton";
 
 // Until the server has said what it allows (1 GB where big uploads are on).
@@ -89,6 +90,24 @@ export const Composer = forwardRef<
   const photoInput = useRef<HTMLInputElement>(null);
   // The camera, one tap from a phone's composer (``CameraView``).
   const [cameraOpen, setCameraOpen] = useState(false);
+  // On a phone with the Promptly app the button opens the app's camera (the
+  // phone's real one, ``nativeCamera.ts``); anywhere else, or if that can't
+  // be reached, the page's own. Never a button that does nothing.
+  const replyId = replyTo?.id ?? null;
+  const openCamera = useCallback(() => {
+    if (!hasNativeCamera()) return setCameraOpen(true);
+    void openNativeCamera(roomId, replyId).then((ok) => {
+      if (!ok) setCameraOpen(true);
+    });
+  }, [roomId, replyId]);
+  useEffect(
+    () =>
+      onNoCameraApp(() => {
+        forgetNativeCamera();
+        setCameraOpen(true);
+      }),
+    [],
+  );
   const emojiBtn = useRef<HTMLButtonElement>(null);
   const [text, setText] = useState(() => getDraft(meId, roomId));
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -577,7 +596,7 @@ export const Composer = forwardRef<
             data-testid="composer-camera"
             tabIndex={text.trim() ? -1 : 0}
             aria-hidden={text.trim() ? true : undefined}
-            onClick={() => setCameraOpen(true)}
+            onClick={openCamera}
             className={cn(iconBtn, "overflow-hidden transition-[width,opacity] duration-150", text.trim() && "pointer-events-none !w-0 opacity-0")}
           >
             <Camera className="h-5 w-5 shrink-0" />
@@ -744,7 +763,7 @@ export const Composer = forwardRef<
                   hint="Tap for a photo, hold for a video"
                   onClick={() => {
                     setPlusOpen(false);
-                    setCameraOpen(true);
+                    openCamera();
                   }}
                 />
               )}

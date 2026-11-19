@@ -3,6 +3,7 @@
 import "./lib/installPrompt";
 // The Promptly Android app says it can hold voice channels (?caps=voice).
 import "./rtc/voice/androidApp";
+import "./rooms/nativeCamera";
 import "./lib/androidPush";
 // ...and hands the map its own GPS (#pl=<key>).
 import "./maps/phoneLocation";

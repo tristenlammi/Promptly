@@ -215,7 +215,9 @@ public class SuiteLauncher extends LauncherActivity {
         // which registration (the SHA-256 of its push address), nothing more.
         // #pl: the map page's key for this phone's GPS (above), after any fragment
         // the path already has.
-        String query = sep + "source=android&caps=voice,calls,callout,sound" + nativePush();
+        // camera: this app has the Rooms camera (promptly://rooms/camera), so the camera
+        // button in a conversation opens it and not the page's own.
+        String query = sep + "source=android&caps=voice,calls,callout,sound,camera" + nativePush();
         String frag = "pl=" + pageLocationKey();
         int hash = path.indexOf('#');
         String url = hash < 0

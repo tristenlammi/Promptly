@@ -594,6 +594,13 @@ export const roomsApi = {
     }
   },
 
+  /** A ticket for the Android app's camera: photos and videos to this one
+   *  conversation, and nothing else (``rooms/camera.py``). */
+  async cameraTicket(roomId: string, replyToId: string | null): Promise<{ ticket: string; expires_at: number; max_bytes: number; title: string }> {
+    const { data } = await apiClient.post(`/rooms/rooms/${roomId}/camera-ticket`, { reply_to_id: replyToId });
+    return data;
+  },
+
   // ---- attachments ----
   async uploadPolicy(): Promise<RoomUploadPolicy> {
     const { data } = await apiClient.get<RoomUploadPolicy>("/rooms/uploads/policy");

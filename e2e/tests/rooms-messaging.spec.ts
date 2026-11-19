@@ -223,3 +223,73 @@ test("the latest message stays in view when the screen gets shorter", async ({ b
     await ctx.close();
   }
 });
+
+test("on a phone with the Promptly app the camera button opens the app's camera, and what it sends arrives", async ({ browser, bob }) => {
+  const { storageStateFile } = await import("../lib/stack");
+  const ua = "Mozilla/5.0 (Linux; Android 16; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
+  const ctx = await browser.newContext({ storageState: storageStateFile("alice"), userAgent: ua, viewport: { width: 412, height: 860 }, isMobile: true, hasTouch: true });
+  await ctx.route("**/version.json*", (r) => r.abort());
+  const page = await ctx.newPage();
+  // A desktop browser has no app to open: keep the hand-off instead.
+  await page.addInitScript(() => {
+    (window as unknown as { __voiceHandoff: string[] }).__voiceHandoff = [];
+  });
+  const handoffs = () => page.evaluate(() => (window as unknown as { __voiceHandoff: string[] }).__voiceHandoff);
+  try {
+    const auth = await bearer(page);
+    if (!dm) {
+      const r = await api(page, auth).post("/rooms/dms", { user_ids: [run.users.bob.id] });
+      dm = (await r.json()).id;
+    }
+    // An older app (no "camera" in what it says it can do): the page's own camera, as before.
+    await page.goto("/rooms/?source=android&caps=voice,calls,callout,sound");
+    await page.goto(`/rooms/r/${dm}`);
+    await page.getByTestId("composer-camera").click();
+    await expect(page.getByTestId("camera-view")).toBeVisible();
+    expect(await handoffs()).toEqual([]);
+    await page.getByTestId("camera-view").getByRole("button", { name: /close/i }).first().click();
+    await expect(page.getByTestId("camera-view")).toHaveCount(0);
+
+    // The app with the camera.
+    await page.goto("/rooms/?source=android&caps=voice,calls,callout,sound,camera");
+    await page.goto(`/rooms/r/${dm}`);
+    await page.getByTestId("composer-camera").click();
+    await expect.poll(async () => (await handoffs())[0] ?? "", { timeout: 15_000 }).toMatch(/^intent:\/\/rooms\/camera\?/);
+    await expect(page.getByTestId("camera-view")).toHaveCount(0);
+    const handoff = (await handoffs())[0];
+    expect(handoff).toContain("#Intent;scheme=promptly;package=org.promptly.app;");
+    expect(handoff).toContain(encodeURIComponent("#camera-no-app"));
+    const q = new URLSearchParams(handoff.slice("intent://rooms/camera?".length, handoff.indexOf("#Intent")));
+    expect(q.get("server")).toBe(new URL(page.url()).origin);
+    expect(q.get("room")).toBe(dm);
+    expect(q.get("title")).toBeTruthy();
+
+    // What the app does with the ticket: one request, picture and words, no sign-in.
+    const words = `From the app's camera ${stamp}`;
+    const plain = await browser.newContext();
+    try {
+      const sent = await plain.request.post(`${new URL(page.url()).origin}/api/rooms/camera/send`, {
+        headers: { "X-Promptly-Camera-Ticket": q.get("ticket")! },
+        multipart: { body: words, client_id: `e2e-cam-${stamp}`, file: { name: `Photo ${stamp}.png`, mimeType: "image/png", buffer: PNG } },
+      });
+      expect(sent.status(), await sent.text()).toBe(201);
+    } finally {
+      await plain.close();
+    }
+    await bob.goto(`/rooms/r/${dm}`);
+    for (const p of [page, bob]) {
+      await expect(log(p).getByText(words)).toBeVisible({ timeout: 20_000 });
+      const img = log(p).locator("img").last();
+      await expect.poll(async () => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+    }
+
+    // The app has gone (Chrome comes back with #camera-no-app): the page's camera opens, and it stops asking.
+    await page.evaluate(() => {
+      window.location.hash = "#camera-no-app";
+    });
+    await expect(page.getByTestId("camera-view")).toBeVisible();
+    expect(await page.evaluate(() => window.localStorage.getItem("promptly.android.camera"))).toBeNull();
+  } finally {
+    await ctx.close();
+  }
+});
