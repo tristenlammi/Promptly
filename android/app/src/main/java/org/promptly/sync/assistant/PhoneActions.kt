@@ -42,6 +42,7 @@ object PhoneActions {
         "meals" to ("MealsLauncher" to "/app/open/meals"),
         "trip" to ("TripLauncher" to "/app/open/trip"),
         "tasks" to ("TasksLauncher" to "/app/open/tasks"),
+        "study" to ("StudyLauncher" to "/study"),
     )
 
     /** Carry out what the assistant decided. Returns what to say instead, if it

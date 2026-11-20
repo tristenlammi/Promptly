@@ -52,6 +52,8 @@ object Widgets {
         Kind(CountdownWidgetReceiver::class.java, { CountdownWidget() }, emptyList()),
         Kind(HealthWidgetReceiver::class.java, { HealthWidget() }, emptyList(), listOf("health")),
         Kind(MailWidgetReceiver::class.java, { MailWidget() }, emptyList(), listOf("mail")),
+        // Study: what's due today and the next lesson.
+        Kind(StudyWidgetReceiver::class.java, { StudyWidget() }, emptyList(), listOf("study")),
     )
 
     /** For work that outlives a widget action (the redraw after a tick's moment). */

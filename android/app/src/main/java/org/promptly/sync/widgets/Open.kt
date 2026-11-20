@@ -33,6 +33,7 @@ object Open {
     const val MEALS = "org.promptly.app.MealsLauncher"
     const val HEALTH = "org.promptly.app.HealthLauncher"
     const val WORKOUT = "org.promptly.app.WorkoutLauncher"
+    const val STUDY = "org.promptly.app.StudyLauncher"
 
     /** An intent for a widget: through [OpenActivity], which decides at tap time. */
     fun page(ctx: Context, launcher: String, path: String): Intent =

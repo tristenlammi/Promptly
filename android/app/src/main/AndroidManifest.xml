@@ -727,6 +727,15 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_mail_info" />
         </receiver>
+        <receiver
+            android:name=".widgets.StudyWidgetReceiver"
+            android:label="@string/wg_study_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/wg_study_info" />
+        </receiver>
         <activity
             android:name=".widgets.AppsConfigActivity"
             android:label="App panel widget"

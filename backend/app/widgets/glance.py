@@ -2,7 +2,7 @@
 
 One call for every widget that isn't Agenda, Tasks, Notes or Photo: the app
 panel's counts, Today, Meals & Macros, Rooms and Porch, P Maps, who's on
-their way, Health and Mail. Built from what the Today page and the sidebar's
+their way, Health, Mail and Study. Built from what the Today page and the sidebar's
 count badges already work out, so the numbers match what Promptly shows.
 
 Only the caller's own things, as everywhere: no other person's data beyond
@@ -24,7 +24,7 @@ from app.auth.models import User
 
 logger = logging.getLogger("promptly.widgets")
 
-SECTIONS = ("counts", "today", "macros", "social", "maps", "trips", "health", "mail")
+SECTIONS = ("counts", "today", "macros", "social", "maps", "trips", "health", "mail", "study")
 #: Sections that come from the Today page's own sections.
 _FROM_TODAY = {"counts", "today", "macros", "social", "maps", "health", "mail"}
 HOME_WORK_CACHE_S = 600
@@ -305,6 +305,33 @@ async def mail(db: AsyncSession, user: User, sec: dict[str, Any]) -> dict[str, A
     }
 
 
+async def study(db: AsyncSession, user: User) -> dict[str, Any] | None:
+    """Study: what's due for review today, the lesson that comes next and the
+    run of days. The caller's own subjects only (``app/study``). ``None``
+    with nothing started and nothing due."""
+    from app.study import service
+    from app.study.router import today_section
+
+    t = await today_section(db, user)
+    if t is None:
+        return None
+    nxt = (t.get("next_capstone") or {}).get("title") or (t.get("next_concept") or {}).get("title")
+    stats = await service.stats(db, user)
+    due = int(t.get("due_count") or 0)
+    sid = t.get("subject_id")
+    return {
+        "due": due,
+        "subject": (t.get("title") or "")[:80] or None,
+        "percent": (t.get("progress") or {}).get("percent"),
+        "next": (nxt or "")[:80] or None,
+        "next_url": f"/study/{sid}/continue" if sid and t.get("status") == "active" else (f"/study/{sid}" if sid else None),
+        "review_url": "/study/review" if due else None,
+        "streak": int(stats.get("streak") or 0),
+        "today": bool(stats.get("today")),
+        "url": "/study",
+    }
+
+
 async def build(db: AsyncSession, user: User, want: list[str], now: datetime | None = None) -> dict[str, Any]:
     from app.today import core, weather
 
@@ -349,6 +376,7 @@ async def build(db: AsyncSession, user: User, want: list[str], now: datetime | N
     await part("trips", lambda: trips(db, user, now))
     await part("health", lambda: health(db, user, sec, now.date()))
     await part("mail", lambda: mail(db, user, sec))
+    await part("study", lambda: study(db, user))
     return out
 
 

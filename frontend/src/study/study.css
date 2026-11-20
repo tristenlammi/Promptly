@@ -147,3 +147,6 @@ html.dark .study {
 .study-range-big::-moz-range-track { height: 6px; border-radius: 3px; background: var(--st-line); }
 .study-range-big::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -8px; border-radius: 50%; background: var(--st-accent); border: 2px solid var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 0.35); }
 .study-range-big::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--st-accent); border: 2px solid var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 0.35); }
+
+/* Study as its own installed app: there is no Promptly menu to open. */
+.study-own header button[aria-label^="Open navigation menu"] { display: none; }

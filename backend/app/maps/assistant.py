@@ -93,7 +93,7 @@ APPS = {
     "promptly": "Promptly", "photos": "Photos", "rooms": "Rooms", "calendar": "Calendar", "mail": "Mail", "maps": "Maps",
     "contacts": "Contacts", "budget": "Budget", "habits": "Habits", "journal": "Journal", "workout": "Workout",
     "flashcards": "Cards", "boardgames": "Games", "health": "Health", "mealplan": "Meal Plan", "meals": "Macros",
-    "trip": "Trips", "tasks": "Tasks",
+    "trip": "Trips", "tasks": "Tasks", "study": "Study",
 }
 # Looking things up happens straight away.
 READ_TOOLS = (

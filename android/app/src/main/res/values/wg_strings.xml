@@ -33,6 +33,8 @@
     <string name="wg_countdown_description">Days until a day you choose: a holiday, a birthday.</string>
     <string name="wg_health_name">Health</string>
     <string name="wg_health_description">Your weight trend, Log weight, and your next workout.</string>
+    <string name="wg_study_name">Study</string>
+    <string name="wg_study_description">What\'s due for review today, and your next lesson.</string>
     <string name="wg_mail_name">Mail</string>
     <string name="wg_mail_description">Unread mail and who it\'s from.</string>
 </resources>

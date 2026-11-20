@@ -589,3 +589,49 @@ async def test_who_a_course_can_and_cannot_be_given_to(client, db, model, pushes
     building = (await client.post(f"{API}/subjects", json={"title": "Half built", "use_web": False}, headers=H(ana))).json()["id"]
     r = await client.post(f"{API}/subjects/{building}/share", json={"user_ids": [str(ben.id)]}, headers=H(ana))
     assert r.status_code == 409 and r.json()["detail"]["code"] == "not_ready"
+
+
+# ------------------------------------------------------- the phone's widget
+
+
+async def test_the_study_widget_shows_your_own_due_and_next_and_nobody_elses(client, db, model):  # noqa: F811
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from app.study import service
+    from app.study.models import StudyConcept, StudySubject
+    from tests.test_widgets_glance import _device
+
+    ana, ben = await mk_user(db, "ana"), await mk_user(db, "ben")
+    mine, his = await _device(db, ana, ["widgets"]), await _device(db, ben, ["widgets"])
+
+    async def glance(auth):
+        r = await client.get("/api/widgets/glance", params={"want": "study"}, auth=auth)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    assert "study" not in await glance(mine)  # nothing started, nothing due
+    sid = await ready(client, db, ana)
+    got = (await glance(mine))["study"]
+    assert got == {
+        "due": 0, "subject": "Tides", "percent": 0, "next": "Concept 1", "next_url": f"/study/{sid}/continue", "review_url": None,
+        "streak": 0, "today": False, "url": "/study",
+    }
+    # Learn the first idea, then let time pass: it comes due.
+    s = await db.get(StudySubject, uuid.UUID(sid))
+    se = await service.start_lesson(db, s)
+    for _ in range(4):
+        st = await service.next_step(db, ana, se, s)
+        await kit.answer(db, ana, st, "good", 3)
+    learned = (await db.execute(select(StudyConcept).where(StudyConcept.subject_id == s.id, StudyConcept.state == "mastered"))).scalars().first()
+    assert learned is not None
+    learned.due_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    await db.commit()
+    got = (await glance(mine))["study"]
+    assert got["due"] == 1 and got["review_url"] == "/study/review" and got["today"] is True and got["streak"] == 1
+    assert got["next"] == "Concept 2" and got["percent"] > 0
+    # Somebody else's phone shows nothing of it; and a phone without the widgets password is refused.
+    assert "study" not in await glance(his)
+    other = await _device(db, ana, ["upload"])
+    assert (await client.get("/api/widgets/glance", params={"want": "study"}, auth=other)).status_code == 403
+    assert (await client.get("/api/widgets/glance", params={"want": "study"})).status_code == 401

@@ -76,7 +76,9 @@ object Samples {
              "trips": [{"user_id": "s", "name": "Sam", "destination": "Home", "eta": "$eta"}],
              "health": {"weight": "82.4 kg", "unit": "kg", "series": [83.5, 83.2, null, 82.9, 82.8, 82.6, 82.4], "change": "−1.1 kg",
                         "workout": {"name": "Upper body", "date": "today", "time": "17:30"}},
-             "mail": {"unread": 4, "items": [{"from": "School office", "subject": "Excursion form"}, {"from": "Bank", "subject": "Your statement is ready"}]}}
+             "mail": {"unread": 4, "items": [{"from": "School office", "subject": "Excursion form"}, {"from": "Bank", "subject": "Your statement is ready"}]},
+             "study": {"due": 3, "subject": "How tides work", "percent": 40, "next": "Spring tides", "next_url": "/study", "review_url": "/study/review",
+                       "streak": 4, "today": false, "url": "/study"}}
             """.trimIndent(),
         )
         return HubState(j, now(), null, 1)

@@ -554,3 +554,277 @@ test.describe("study", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------- phase 3
+
+const shot3 = (name: string) => path.join(E2E_ROOT, "..", "docs", "study-shots", `p3-${name}.png`);
+
+/** A new subject with the quick check skipped: straight to the map. */
+async function freshCourse(page: Page, title: string): Promise<void> {
+  await newSubject(page, title);
+  await expect(page.getByTestId("study-placement-offer")).toBeVisible({ timeout: 90_000 });
+  await page.getByRole("button", { name: /I'm new to this/ }).click();
+  await expect(page.getByTestId("study-map")).toBeVisible();
+}
+
+/** Work the figure of the explore step on screen: to the answer, or not. */
+async function workFigure(page: Page, well: boolean): Promise<string> {
+  const step = page.locator('[data-testid="study-step"][data-status="pending"]');
+  const fig = step.locator("figure[data-testid^='figure-']");
+  const type = ((await fig.getAttribute("data-testid")) ?? "").replace("figure-", "");
+  if (type === "parts") {
+    await fig.getByRole("radio", { name: well ? "Far-side bulge" : "Moon" }).click();
+  } else if (type === "plot") {
+    // High water 5 m: mean 2 + half of a 6 m range.
+    await fig.getByTestId("fig-slider-r").fill(well ? "6" : "3");
+  } else if (type === "table") {
+    // Low water 1 m: mean 3 less half of a 4 m range.
+    await fig.getByTestId("fig-slider-r").fill(well ? "4" : "1");
+  } else {
+    await fig.getByTestId("fig-scale").fill(well ? "6.25" : "11");
+  }
+  return type;
+}
+
+
+/** Answer the step on screen well and carry on to the next. Returns its kind. */
+async function pass(page: Page): Promise<string> {
+  const kind = await answer(page, "well");
+  if (kind === "explain") return kind;
+  await expect(page.getByTestId("study-feedback")).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("study-continue").click();
+  return kind;
+}
+
+test.describe("study: figures, code, giving a course, its own app", () => {
+  test("figures you can work: a picture of parts, a plot, a table and a scale, checked by the app", async ({ alice: page, dana }) => {
+    test.setTimeout(420_000);
+    const found: string[] = [];
+    await withTeacher(dana, async () => {
+      await freshCourse(page, `Tides figcheck ${stamp}`);
+      await page.getByTestId("study-continue-course").click();
+      await expect(page.getByTestId("study-rail")).toBeVisible({ timeout: 30_000 });
+      const seen: Record<string, string> = {};
+      let explained = false;
+      for (let i = 0; i < 40 && Object.keys(seen).length < 4; i++) {
+        await expect(page.getByTestId("study-check").or(page.getByTestId("study-lesson-done"))).toBeVisible({ timeout: 30_000 });
+        if (await page.getByTestId("study-lesson-done").isVisible()) {
+          await page.getByRole("button", { name: /Keep going|Another lesson|Carry on/ }).first().click();
+          continue;
+        }
+        const step = page.locator('[data-testid="study-step"][data-status="pending"]');
+        await expect(step).toBeVisible({ timeout: 30_000 });
+        const kind = await step.getAttribute("data-kind");
+        if (kind === "explain" && !explained && (await step.locator("figure[data-testid='figure-parts']").count())) {
+          // An explanation's figure is for playing with: a tap shows what the part does.
+          explained = true;
+          await step.getByTestId("fig-part-p2").click();
+          await expect(step.getByTestId("fig-part-note")).toContainText("Pulled hardest");
+          await page.screenshot({ path: shot3("explain-parts") });
+        }
+        if (kind !== "explore") {
+          await pass(page);
+          continue;
+        }
+        const check = page.getByTestId("study-check");
+        const type = ((await step.locator("figure[data-testid^='figure-']").getAttribute("data-testid")) ?? "").replace("figure-", "");
+        // Nothing touched yet: not an answer.
+        await expect(check).toBeDisabled();
+        found.push(...(await scan(page, `explore ${type}`)));
+        // The table's first try is wrong on purpose, to see the app show the answer.
+        const well = type !== "table";
+        await workFigure(page, well);
+        if (type === "plot") {
+          await expect(step.getByTestId("fig-value-r")).toContainText("6");
+          await expect(step.getByTestId("fig-plot-target")).toHaveCount(1);
+        }
+        if (type === "scale") await expect(step.getByTestId("fig-scale-readout")).toContainText("50");
+        if (type === "table") await expect(step.getByTestId("fig-out-1")).toContainText("2.5 m");
+        await page.screenshot({ path: shot3(`explore-${type}`) });
+        await expect(check).toBeEnabled();
+        await check.click();
+        const fb = page.getByTestId("study-feedback");
+        await expect(fb).toHaveAttribute("data-outcome", well ? "correct" : "wrong", { timeout: 30_000 });
+        if (!well) {
+          // The right setting is shown beside theirs, and why.
+          await expect(page.getByTestId("fig-value-r")).toContainText("→ 4");
+          await expect(page.locator('[data-testid="study-step"]')).toContainText("half the range");
+          await page.screenshot({ path: shot3("explore-table-wrong") });
+        }
+        seen[type] = well ? "correct" : "wrong";
+        await page.getByTestId("study-continue").click();
+      }
+      expect(Object.keys(seen).sort()).toEqual(["parts", "plot", "scale", "table"]);
+
+      // By keyboard alone: arrow keys move a slider.
+      // (Every control is a real range input or radio button.)
+      // And on a phone: the same step, no sideways scroll.
+      await page.setViewportSize({ width: 390, height: 800 });
+      await page.goto(page.url());
+      await ready(page);
+      await expect(page.getByTestId("study-check").or(page.getByTestId("study-lesson-done"))).toBeVisible({ timeout: 30_000 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+      await page.screenshot({ path: shot3("phone-lesson") });
+    });
+    expect(found, found.join("\n")).toEqual([]);
+  });
+
+  test("code you can run: checks, what it printed, an endless loop stopped, and no way out of the sandbox", async ({ bob: page, dana }) => {
+    test.setTimeout(420_000);
+    const found: string[] = [];
+    await withTeacher(dana, async () => {
+      // The runner page arrives with its own policy: no origin, no network.
+      const runner = await page.request.get("/study-runner.html");
+      expect(runner.ok()).toBeTruthy();
+      const csp = runner.headers()["content-security-policy"] ?? "";
+      expect(csp).toContain("sandbox allow-scripts");
+      expect(csp).toContain("default-src 'none'");
+      expect(csp).not.toContain("connect-src");
+
+      await freshCourse(page, `Tides codecheck ${stamp}`);
+      await page.getByTestId("study-continue-course").click();
+      await expect(page.getByTestId("study-rail")).toBeVisible({ timeout: 30_000 });
+      const step = page.locator('[data-testid="study-step"][data-status="pending"]');
+      for (let i = 0; i < 12; i++) {
+        await expect(page.getByTestId("study-check")).toBeVisible({ timeout: 30_000 });
+        await expect(step).toBeVisible({ timeout: 30_000 });
+        if ((await step.getAttribute("data-kind")) === "write_code") break;
+        await pass(page);
+      }
+      await expect(step).toHaveAttribute("data-kind", "write_code");
+      const editor = page.getByTestId("code-editor");
+      const run = page.getByTestId("code-run");
+      const check = page.getByTestId("study-check");
+      const result = page.getByTestId("code-result");
+      await expect(editor).toHaveValue(/function highWater\(mean, range\)/);
+      await expect(check).toBeDisabled(); // nothing has been run
+      await expect(page.locator('[data-testid="study-step"]')).not.toContainText("mean + range / 2"); // the answer isn't on the page
+      found.push(...(await scan(page, "write code")));
+
+      // A wrong answer: which checks failed, and what the code gave.
+      await editor.fill('function highWater(mean, range) {\n  console.log("trying", mean, range);\n  return mean + range;\n}');
+      await run.click();
+      await expect(result.getByTestId("code-check-k1")).toHaveAttribute("data-pass", "false", { timeout: 20_000 });
+      await expect(result.getByTestId("code-check-k2")).toHaveAttribute("data-pass", "true");
+      await expect(result).toContainText("highWater(3, 4) should give 5, but gave 7");
+      await expect(result).toContainText("trying 3 4");
+      await page.screenshot({ path: shot3("code-failing") });
+      found.push(...(await scan(page, "write code, run")));
+
+      // A mistake in the code: said plainly, with its line.
+      await editor.fill("function highWater(mean, range) {\n  return mean +;\n}");
+      await expect(check).toBeDisabled(); // changed since the run
+      await run.click();
+      await expect(page.getByTestId("code-error")).toContainText(/Line 2/, { timeout: 20_000 });
+
+      // A loop that never ends is stopped, and the page is still alive.
+      await editor.fill("function highWater(mean, range) {\n  while (true) {}\n}");
+      await run.click();
+      await expect(page.getByTestId("code-error")).toContainText("took too long", { timeout: 20_000 });
+
+      // The sandbox: no network, no cookies, no storage, no page, no Promptly.
+      await editor.fill(
+        'var seen = [typeof fetch, typeof XMLHttpRequest, typeof WebSocket, typeof document, typeof localStorage, typeof indexedDB, String(self.origin || location.origin)];\n' +
+          "console.log(seen.join(' '));\nfunction highWater(mean, range) {\n  return mean + range / 2;\n}",
+      );
+      await run.click();
+      await expect(result.getByTestId("code-check-k1")).toHaveAttribute("data-pass", "true", { timeout: 20_000 });
+      await expect(result).toContainText("undefined undefined undefined undefined undefined undefined null");
+
+      // Right: every check passes, and it can be handed in.
+      await expect(result.getByTestId("code-check-k3")).toHaveAttribute("data-pass", "true");
+      await page.screenshot({ path: shot3("code-passing") });
+      await expect(check).toBeEnabled();
+      await check.click();
+      await expect(page.getByTestId("study-feedback")).toHaveAttribute("data-outcome", "correct", { timeout: 30_000 });
+      await expect(page.getByTestId("code-solution")).toContainText("return mean + range / 2;");
+      await expect(page.getByTestId("code-run")).toHaveCount(0);
+
+      // A task whose own answer fails its checks counts for nothing, and says so.
+      await freshCourse(page, `Tides faultcheck ${stamp}`);
+      await page.getByTestId("study-continue-course").click();
+      for (let i = 0; i < 12; i++) {
+        await expect(page.getByTestId("study-check")).toBeVisible({ timeout: 30_000 });
+        await expect(step).toBeVisible({ timeout: 30_000 });
+        if ((await step.getAttribute("data-kind")) === "write_code") break;
+        await pass(page);
+      }
+      await editor.fill("function highWater(mean, range) {\n  return mean + range / 2;\n}");
+      await run.click();
+      await expect(page.getByTestId("code-faulty")).toBeVisible({ timeout: 20_000 });
+      await check.click();
+      await expect(page.getByTestId("study-void")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("study-feedback")).toHaveCount(0);
+      await page.screenshot({ path: shot3("code-void") });
+      await page.getByTestId("study-continue").click();
+      await expect(step).toBeVisible({ timeout: 30_000 });
+      expect(await step.getAttribute("data-kind")).not.toBe("write_code");
+    });
+    expect(found, found.join("\n")).toEqual([]);
+  });
+
+  test("give a course: they get the map and start fresh; you each keep your own", async ({ alice, bob, dana }) => {
+    test.setTimeout(300_000);
+    const found: string[] = [];
+    await withTeacher(dana, async () => {
+      const title = `Tides to give ${stamp}`;
+      await freshCourse(alice, title);
+      // Some progress of alice's own, which must not travel.
+      await alice.getByTestId("study-continue-course").click();
+      for (let i = 0; i < 4; i++) {
+        await expect(alice.getByTestId("study-check")).toBeVisible({ timeout: 30_000 });
+        await pass(alice);
+      }
+      await alice.getByRole("button", { name: /Leave|Close|Back to the map/ }).first().click();
+      await expect(alice.getByTestId("study-map")).toBeVisible({ timeout: 30_000 });
+
+      await alice.getByRole("button", { name: "Subject settings" }).click();
+      await alice.getByTestId("study-give-open").click();
+      const give = alice.getByTestId("study-give");
+      await expect(give).toContainText("Nothing of yours");
+      await expect(alice.getByTestId("study-give-go")).toBeDisabled();
+      await give.getByRole("textbox", { name: "Search people" }).fill("e2e_bob");
+      await give.getByRole("option", { name: /e2e_bob/ }).first().click();
+      found.push(...(await scan(alice, "give a course")));
+      await alice.screenshot({ path: shot3("give") });
+      await alice.getByTestId("study-give-go").click();
+      await expect(alice.getByTestId("study-given")).toContainText("now has it in Study");
+      await alice.screenshot({ path: shot3("given") });
+
+      // Bob has his own copy: from alice, nothing learned yet, the quick check on offer.
+      await bob.goto("/study");
+      await ready(bob);
+      const card = bob.getByTestId("study-subject-card").filter({ hasText: title });
+      await expect(card).toContainText("From e2e_alice");
+      await card.click();
+      await expect(bob.getByTestId("study-placement-offer")).toBeVisible({ timeout: 30_000 });
+      await bob.screenshot({ path: shot3("received") });
+      const bobs = bob.url().split("/study/")[1].split(/[/?#]/)[0];
+      // Alice can't open bob's copy; bob can't open alice's.
+      const hers = await alice.request.get(`/api/study/subjects/${bobs}`, { headers: { Authorization: await bearer(alice) } });
+      expect(hers.status()).toBe(404);
+    });
+    expect(found, found.join("\n")).toEqual([]);
+  });
+
+  test("Study as its own app: its manifest, and no Promptly menu when it is opened from its own icon", async ({ alice: page }) => {
+    const manifest = await page.request.get("/study.webmanifest");
+    expect(manifest.ok()).toBeTruthy();
+    expect((await manifest.json()).scope).toBe("/study/");
+    expect(await (await page.request.get("/study")).text()).toContain('href="/study.webmanifest"');
+
+    // Inside Promptly: the sidebar is there.
+    await page.goto("/study");
+    await ready(page);
+    await expect(page.locator(".study-own")).toHaveCount(0);
+    // From the P Study icon: Study alone.
+    await page.goto("/study/?source=android");
+    await ready(page);
+    await expect(page.locator(".study-own")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Study" }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Workspaces" })).toHaveCount(0);
+    await page.screenshot({ path: shot3("own-app") });
+    // The launch is remembered for the window: forget it so later tests see Promptly.
+    await page.evaluate(() => sessionStorage.removeItem("promptly:launched-app"));
+  });
+});

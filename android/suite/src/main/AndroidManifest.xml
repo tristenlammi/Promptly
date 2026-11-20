@@ -429,5 +429,22 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".StudyLauncher"
+            android:label="P Study"
+            android:enabled="false"
+            android:icon="@mipmap/ic_study"
+            android:roundIcon="@mipmap/ic_study"
+            android:taskAffinity="org.promptly.app.study"
+            android:theme="@style/Launch"
+            android:exported="true">
+            <meta-data android:name="org.promptly.app.PATH" android:value="/study" />
+            <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/bar" />
+            <meta-data android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR" android:resource="@color/bar" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

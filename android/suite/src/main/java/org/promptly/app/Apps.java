@@ -26,6 +26,7 @@ public final class Apps {
         {"tasks", "P Tasks", "org.promptly.app.TasksLauncher"},
         {"notes", "P Notes", "org.promptly.app.NotesLauncher"},
         {"porch", "P Porch", "org.promptly.app.PorchLauncher"},
+        {"study", "P Study", "org.promptly.app.StudyLauncher"},
         {"passwords", "P Passwords", "org.promptly.app.PasswordsLauncher"},
     };
 }

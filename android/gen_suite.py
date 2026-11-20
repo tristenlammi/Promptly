@@ -31,6 +31,8 @@ APPS = [
     # Notes (docs/notes-plan.md §9): long-press → New note · New list · Voice note (native, in :app).
     ("notes", "P Notes", "/notes", "item-icons/notes-maskable-512.png"),
     ("porch", "P Porch", "/porch/", "item-icons/porch-maskable-512.png"),
+    # Study: an AI teacher. Its widget (what's due today) is in :app (widgets/GlanceWidgets.kt).
+    ("study", "P Study", "/study", "item-icons/study-maskable-512.png"),
 ]
 
 # maps-offline (WP-M7): launchers that open a native screen in :app when there's no
@@ -334,6 +336,14 @@ def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
              settings shortcut points at it). -->
         <activity android:name=".ManageData" android:exported="false" />
         <activity android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity" android:exported="false" />
+
+        <!-- Android 13+: when a page asks to send notifications, Chrome has this app
+             ask for Android's notification permission, through this screen. Without
+             it the hand-off fails and notifications come from Chrome instead. -->
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.NotificationPermissionRequestActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Web push from the site shows as this app's notifications, and pages get
              their location through this app. -->

@@ -439,6 +439,21 @@ function NotesGate() {
   return <AppLayout />;
 }
 
+/** Study sits inside Promptly's layout; only the installed Study app (its
+ *  own PWA, or the P Study icon on Android) shows it on its own. */
+function StudyGate() {
+  if (isOwnAppWindow("study")) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <div className="study-own flex h-[100dvh] min-h-0 flex-col bg-[var(--bg)]">
+          <StudyApp />
+        </div>
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
+
 const PhotosAppShell = lazyWithRetry(
   () => import("@/components/photos/PhotosAppShell").then((m) => ({ default: m.PhotosAppShell })),
   "PhotosAppShell"
@@ -884,6 +899,11 @@ export default function App() {
         <Route index element={<NotesApp embedded />} />
         <Route path="*" element={<NotesApp embedded />} />
       </Route>
+      {/* Study: inside Promptly, except as the installed Study app. */}
+      <Route path="/study" element={<StudyGate />}>
+        <Route index element={<StudyApp />} />
+        <Route path="*" element={<StudyApp />} />
+      </Route>
       <Route path="/mail" element={<MailGate />}>
         <Route index element={<MailApp />} />
         <Route path="*" element={<MailApp />} />
@@ -988,8 +1008,7 @@ export default function App() {
         {/* Forms: the builder (a form is a file) and the Forms home. */}
         <Route path="/files/form/:fileId" element={<FormBuilderPage />} />
         <Route path="/forms" element={<FormsHomePage />} />
-        {/* Study: your subjects, a subject's map, and the lesson player. */}
-        <Route path="/study/*" element={<StudyApp />} />
+
         <Route path="/files/item/:fileId" element={<ItemPage />} />
         {/* Apps: the launcher, the store, and each app (its file). Every
             app's data lives in My files › Apps › <App>. */}

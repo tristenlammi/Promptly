@@ -345,6 +345,7 @@ class WidgetsActivity : ComponentActivity() {
         Entry("Countdown", "Days until a day you choose.", CountdownWidgetReceiver::class.java),
         Entry("Health", "Your weight trend and next workout.", HealthWidgetReceiver::class.java),
         Entry("Mail", "Unread mail and who it's from.", MailWidgetReceiver::class.java),
+        Entry("Study", "What's due for review today, and your next lesson.", StudyWidgetReceiver::class.java),
         Entry("Agenda", "Today and the week ahead.", AgendaWidgetReceiver::class.java),
         Entry("Tasks", "Today's tasks, ticked off right there.", TasksWidgetReceiver::class.java),
         Entry("Notes", "Your pinned and latest notes.", NotesWidgetReceiver::class.java),

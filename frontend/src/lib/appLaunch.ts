@@ -45,6 +45,7 @@ export function appKeyFor(path: string): string {
   if (under("/mail")) return "mail";
   if (under("/notes")) return "notes";
   if (under("/porch")) return "porch";
+  if (under("/study")) return "study";
   if (under("/passwords")) return "passwords";
   // An Android launcher's fixed address for an Item Store app; it becomes
   // that person's ``/app/<file>/`` once opened (see rememberLaunchedApp).

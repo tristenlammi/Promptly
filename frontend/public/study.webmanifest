@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "name": "Promptly Study",
+  "short_name": "Study",
+  "description": "A teacher for anything you want to learn, on your own Promptly: a course built around you, lessons you take part in, and reviews so it sticks.",
+  "id": "/study/",
+  "start_url": "/study/?source=pwa",
+  "scope": "/study/",
+  "display": "standalone",
+  "background_color": "#FAF9F7",
+  "theme_color": "#D97757",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "education"
+  ],
+  "icons": [
+    {
+      "src": "/item-icons/study-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/study-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/study-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Review what's due",
+      "short_name": "Review",
+      "url": "/study/review?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/item-icons/study-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "New subject",
+      "short_name": "New",
+      "url": "/study/new?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/item-icons/study-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}
