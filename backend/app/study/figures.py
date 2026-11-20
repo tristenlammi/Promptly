@@ -243,7 +243,7 @@ def _best(fig: dict[str, Any], goal: dict[str, Any], near: dict[str, float] | No
         raise FigureInvalid("goal: too many slider positions to check; use fewer sliders or bigger steps")
     near = near or _starts(controls)
     best: tuple[dict[str, float], float] | None = None
-    hit: tuple[dict[str, float], float, float] | None = None
+    hit: tuple[dict[str, float], float, tuple[Any, ...]] | None = None
     for combo in itertools.product(*grids):
         env = {c["name"]: v for c, v in zip(controls, combo)}
         m = _miss(fig, goal, env)
@@ -252,9 +252,13 @@ def _best(fig: dict[str, Any], goal: dict[str, Any], near: dict[str, float] | No
         if best is None or m < best[1]:
             best = (env, m)
         if m <= 1 + 1e-9:
-            moved = sum(abs(env[c["name"]] - near.get(c["name"], c["value"])) / (c["max"] - c["min"]) for c in controls)
-            if hit is None or moved < hit[2] - 1e-12:
-                hit = (env, m, moved)
+            # Fewest sliders touched, then the smallest move; on a tie the
+            # earlier sliders stay put. Rounded so equal moves compare equal.
+            gaps = [abs(env[c["name"]] - near.get(c["name"], c["value"])) / (c["max"] - c["min"]) for c in controls]
+            touched = tuple(g > 1e-9 for g in gaps)
+            rank = (sum(touched), round(sum(gaps), 9), touched)
+            if hit is None or rank < hit[2]:
+                hit = (env, m, rank)
     if best is None:
         raise FigureInvalid("goal: the formula has no value anywhere")
     return (hit[0], hit[1]) if hit is not None else best
