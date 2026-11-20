@@ -69,6 +69,15 @@ export function speechFor(step: Pick<Step, "kind" | "public">): string {
     case "capstone":
       parts.push(say((step.public as PublicByKind["capstone"]).task_md));
       break;
+    case "explore": {
+      const p = step.public as PublicByKind["explore"];
+      parts.push(say(p.prompt_md), p.figure.title ? `The figure: ${p.figure.title}.` : "");
+      break;
+    }
+    case "write_code":
+      // The task, not the code: code read aloud helps nobody.
+      parts.push(say((step.public as PublicByKind["write_code"]).prompt_md));
+      break;
   }
   return parts.filter(Boolean).join("\n\n");
 }

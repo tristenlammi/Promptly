@@ -224,9 +224,20 @@ def test_a_probe_answered_wrong_is_not_marked_even_before_the_frontier():
 # --------------------------------------------------------------- step kinds
 
 
+def _raw(kind):
+    from tests.study_kit import raw_explore
+
+    return raw_explore("plot") if kind == "explore" else raw_step(kind)
+
+
+def _suits(kind):
+    """What the concept must suit for this kind to be allowed at all."""
+    return {"explore": {"tool": "plot"}, "write_code": {"tool": "code", "lang": "javascript"}}.get(kind, {})
+
+
 @pytest.mark.parametrize("kind", rules.KINDS)
 def test_every_kind_builds_and_keeps_its_answer_out_of_the_public_part(kind):
-    payload = steps.build(kind, raw_step(kind), valid_sources={1}, seed=7)
+    payload = steps.build(kind, _raw(kind), valid_sources={1}, seed=7, **_suits(kind))
     pub = payload["public"]
     text = str(pub)
     for secret in ("correct", "error_id", "rubric", "model_answer", "misconception", "hints", "pairs", "'order'"):
@@ -242,7 +253,7 @@ def test_kinds_with_a_right_answer_are_graded_here(kind):
         pass
 
     st = S()
-    st.kind, st.payload = kind, steps.build(kind, raw_step(kind), seed=3)
+    st.kind, st.payload = kind, steps.build(kind, _raw(kind), seed=3, **_suits(kind))
     good = steps.grade_local(kind, st.payload, steps.check_answer(kind, st.payload, answer_for(st, "good")))
     bad = steps.grade_local(kind, st.payload, steps.check_answer(kind, st.payload, answer_for(st, "bad")))
     assert good["outcome"] == "correct" and bad["outcome"] in ("wrong", "partial")

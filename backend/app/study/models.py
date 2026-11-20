@@ -77,6 +77,10 @@ class StudySubject(Base):
     # Written once when the subject is finished: {"next": [{"title", "why"}], "at"}.
     report: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     trashed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Phase 3 (0485_study_three). The language a programming subject teaches
+    # when the app can run it; who gave this course (a name), on a copy.
+    code_lang: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    shared_from: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
 class StudyUnit(Base):
@@ -122,6 +126,8 @@ class StudyConcept(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mastered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fsrs: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # "" or plot | scale | parts | table | code: what suits this concept beyond words.
+    tool: Mapped[str] = mapped_column(String(8), nullable=False, default="", server_default="")
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

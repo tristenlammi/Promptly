@@ -28,6 +28,11 @@ class FakeModel:
         self.unsuitable = False
         self.gaps = 0
         self.gap_title: str | None = None
+        #: Concept number -> the tool the plan gives it (plot, scale, parts, table, code).
+        self.tools: dict[int, str] = {}
+        self.language: str | None = None
+        #: Raw steps to hand back instead of the usual one, by kind (tests of bad figures).
+        self.override: dict[str, Any] = {}
 
     def tasks(self) -> list[str]:
         return [c["task"] for c in self.calls]
@@ -54,9 +59,10 @@ class FakeModel:
                     concepts.append({
                         "key": f"c{n}", "title": f"Concept {n}", "summary": f"Idea number {n}.", "objectives": [f"can use idea {n}"],
                         "nature": self.nature, "prereqs": [f"c{n - 1}"] if n > 1 else [], "sources": [1, 99],
+                        "tool": self.tools.get(n, "none"),
                     })
                 units.append({"title": f"Unit {u + 1}", "summary": "A unit.", "concepts": concepts})
-            return {"suitable": True, "title": "Tides", "summary": "You will understand tides.", "units": units}
+            return {"suitable": True, "title": "Tides", "summary": "You will understand tides.", "units": units, "programming_language": self.language}
         if task == "placement":
             keys = re.findall(r'key "([^"]+)"', prompt)
             return {"questions": [{"key": k, "question": f"Probe for {k}?", "options": _opts(), "correct": 0} for k in keys]}
@@ -94,6 +100,13 @@ class FakeModel:
             last = [line for line in said.splitlines() if line.startswith("TEACHER:")][-1]
             return {"reply": "Oh! So it pulls." if "GOOD" in last else "I still don't get it.", "resolved": "GOOD" in last}
         kind = task.split(":", 1)[1]
+        if kind in self.override:
+            return self.override[kind]
+        if kind == "explore":
+            return raw_explore(re.search(r'\{"type": "(plot|scale|parts|table)"', prompt).group(1))
+        if kind == "explain" and '"figure"' in prompt:
+            tool = re.search(r'\{"type": "(plot|scale|parts|table)"', prompt).group(1)
+            return {**raw_step("explain"), "figure": FIGURES[tool]}
         return raw_step(kind)
 
 
@@ -104,6 +117,28 @@ def _opts() -> list[dict[str, str]]:
         {"text": "WRONG 2", "why": "No."},
         {"text": "WRONG 3", "why": "No."},
     ]
+
+
+FIGURES: dict[str, dict[str, Any]] = {
+    "plot": {"type": "plot", "title": "Height of the tide", "expr": "a*sin(x) + b", "x": {"min": 0, "max": 6, "label": "hours"}, "y": {"label": "metres"},
+             "params": [{"name": "a", "label": "range", "min": 0, "max": 4, "step": 0.5, "value": 1}, {"name": "b", "label": "mean level", "min": 0, "max": 4, "step": 1, "value": 0}]},
+    "scale": {"type": "scale", "title": "Hours after high water", "min": 0, "max": 12, "step": 0.5, "value": 6, "unit": "h",
+              "marks": [{"value": 0, "label": "high"}], "readout": {"label": "fraction of the cycle", "expr": "v / 12.4", "unit": "", "decimals": 2}},
+    "parts": {"type": "parts", "title": "The pull", "layout": "row",
+              "parts": [{"label": "Moon", "note": "does the pulling"}, {"label": "Near sea", "note": "pulled most"}, {"label": "Earth", "note": "in between"}, {"label": "Far sea", "note": "pulled least"}]},
+    "table": {"type": "table", "title": "Tide height", "inputs": [{"name": "r", "label": "range", "min": 0, "max": 10, "step": 1, "value": 2, "unit": "m"}],
+              "outputs": [{"label": "high water", "expr": "3 + r / 2", "unit": "m", "decimals": 1}]},
+}
+GOALS: dict[str, dict[str, Any]] = {
+    "plot": {"points": [{"x": 0, "y": 3}], "tolerance": 0.2},  # b = 3
+    "scale": {"target": 6, "tolerance": 0.5},  # starts on it: the app moves the start
+    "parts": {"part": 1},
+    "table": {"output": 0, "target": 7, "tolerance": 0.1},  # r = 8
+}
+
+
+def raw_explore(tool: str) -> dict[str, Any]:
+    return {"prompt": "Work the figure.", "figure": FIGURES[tool], "goal": GOALS[tool], "explain": "Because of the pull.", "hints": ["Try the other way."]}
 
 
 def raw_step(kind: str) -> dict[str, Any]:
@@ -127,6 +162,10 @@ def raw_step(kind: str) -> dict[str, Any]:
                      "model_answer": "The moon.", "hints": hints},
         "teach_student": {"student_name": "Sam", "opening": "I think the sea pushes the moon.", "misconception": MISC,
                           "rubric": ["the moon pulls", "not the other way"], "model_answer": "It is the moon that pulls."},
+        "write_code": {"prompt": "Write `double(n)`.", "starter": "function double(n) {\n  // your code\n}", "solution": "function double(n) {\n  return n * 2;\n}",
+                       "checks": [{"call": "double(2)", "expect": 4, "label": "doubles 2"}, {"call": "double(0)", "expect": 0, "label": "keeps 0"},
+                                  {"call": "double(-3)", "expect": -6, "label": "works below zero"}],
+                       "explain": "Multiply by two.", "hints": hints},
     }[kind]
 
 
@@ -183,6 +222,19 @@ def answer_for(step: Any, how: str) -> dict[str, Any]:
         return {"line_id": next(x["id"] for x in lines if ("ERROR" in x["text"]) == good)}
     if kind == "worked_example":
         return {"blanks": {s["id"]: pick(s["options"]) for s in pub["steps"] if s["blank"]}}
+    if kind == "explore":
+        key = step.payload["key"]
+        if good:
+            return dict(key["solution"])
+        fig = key["figure"]
+        if fig["type"] == "parts":
+            return {"part_id": next(p["id"] for p in fig["parts"] if p["id"] != key["goal"]["part_id"])}
+        if fig["type"] == "scale":
+            return {"value": fig["value"]}
+        return {"values": {c["name"]: c["value"] for c in (fig["params"] if fig["type"] == "plot" else fig["inputs"])}}
+    if kind == "write_code":
+        ids = [c["id"] for c in pub["run"]["checks"]]
+        return {"code": "function double(n) { return n * 2; }" if good else "function double(n) {}", "results": {i: good for i in ids}, "output": "", "error": ""}
     if kind in ("explain_back", "scenario", "capstone"):
         return {"text": {"good": "GOOD answer", "misc": "MISC answer", "half": "HALF answer", "last": "LASTONLY answer"}.get(how, "a poor answer")}
     return {}

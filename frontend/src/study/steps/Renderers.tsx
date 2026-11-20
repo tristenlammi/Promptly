@@ -1,14 +1,16 @@
-import { ArrowDown, ArrowUp, Check, GripVertical, Send, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, GripVertical, Play, RotateCcw, Send, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { Opt, PublicByKind, RevealByKind, Step, StepKind, WStep } from "@/api/study";
 import { cn } from "@/utils/cn";
 
+import { isSound, passedAll, runCode } from "../code/runner";
+import { Figure, initialFigureState } from "../figures/Figure";
 import { Thinking } from "../ui/bits";
 import { Diagram } from "../ui/Diagram";
 import { Md } from "../ui/Md";
 import { DictateButton } from "../ui/Voice";
-import { CAPSTONE_MAX, clearPair, moveItem, setPair, WRITTEN_MAX, type Draft } from "./answers";
+import { CAPSTONE_MAX, clearPair, CODE_MAX, moveItem, setPair, WRITTEN_MAX, type Draft } from "./answers";
 import { appendDictation } from "./speech";
 
 /*
@@ -160,7 +162,7 @@ export function ExplainStep({ step }: StepProps<"explain">) {
       {ANGLE_WORDS[p.angle] && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--st-accent-text)]">{ANGLE_WORDS[p.angle]}</p>}
       {p.title && <h2 className="text-xl font-semibold leading-tight text-[var(--text)]">{p.title}</h2>}
       <Md text={p.body_md} />
-      {p.diagram && <Diagram spec={p.diagram} />}
+      {p.figure ? <Figure spec={p.figure} /> : p.diagram && <Diagram spec={p.diagram} />}
       {p.key_points.length > 0 && (
         <Card tone="soft">
           <Label>Take away</Label>
@@ -803,6 +805,218 @@ function Bubble({ children, who, mine, happy }: { children: ReactNode; who?: str
   );
 }
 
+// ---------------------------------------------------------------- explore
+
+const EXPLORE_HOW: Record<string, string> = {
+  plot: "Move the sliders. The curve follows.",
+  scale: "Drag the point to where it belongs.",
+  parts: "Tap the part you think it is.",
+  table: "Change the numbers and watch what they do.",
+};
+
+export function ExploreStep({ step, draft, setDraft, locked }: StepProps<"explore">) {
+  const p = step.public;
+  const r = step.reveal;
+  // Once answered the figure comes back whole (a parts figure's notes with it).
+  const spec = r?.figure ?? p.figure;
+  const state = draft.fig ?? initialFigureState(spec);
+  const right = step.grade?.outcome === "correct";
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <Md text={p.prompt_md} className="text-[17px] font-medium" />
+        {!r && <p className="mt-1 text-sm text-[var(--text-muted)]">{EXPLORE_HOW[spec.type]}</p>}
+      </div>
+      <Figure spec={spec} state={state} onChange={(fig) => setDraft({ ...draft, fig })} locked={locked} pick targets={p.targets} solution={r && !right ? r.solution : undefined} />
+      {r?.explain_md && (
+        <Card tone="soft" className="study-in">
+          <Label>Why</Label>
+          <Md text={r.explain_md} compact />
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------- write code
+
+export function WriteCodeStep({ step, draft, setDraft, locked }: StepProps<"write_code">) {
+  const p = step.public;
+  const r = step.reveal;
+  const checks = p.run.checks;
+  const [running, setRunning] = useState(false);
+  // Whether this step's own answer passes its own checks (found out once, when a run fails).
+  const sound = useRef<boolean | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const area = useRef<HTMLTextAreaElement>(null);
+
+  const run = async () => {
+    if (running || locked) return;
+    const code = draftRef.current.code;
+    setRunning(true);
+    const result = await runCode(code, checks);
+    let faulty = false;
+    if (!result.unavailable && !passedAll(result, checks)) {
+      if (sound.current === null) sound.current = await isSound(p.run.solution, checks);
+      faulty = sound.current === false;
+    }
+    setRunning(false);
+    setDraft({ ...draftRef.current, run: result, ranCode: code, faulty });
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      void run();
+      return;
+    }
+    // Tab indents (Escape first to tab out of the box, as code editors do).
+    if (e.key === "Tab" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      const el = e.currentTarget;
+      if (el.dataset.escaped === "1") return;
+      e.preventDefault();
+      const { selectionStart: a, selectionEnd: b, value } = el;
+      const next = `${value.slice(0, a)}  ${value.slice(b)}`;
+      setDraft({ ...draft, code: next });
+      requestAnimationFrame(() => {
+        if (area.current) area.current.selectionStart = area.current.selectionEnd = a + 2;
+      });
+    } else if (e.key === "Escape") {
+      e.currentTarget.dataset.escaped = "1";
+    } else {
+      delete e.currentTarget.dataset.escaped;
+    }
+  };
+
+  const res = draft.run;
+  const stale = !!res && draft.ranCode !== draft.code;
+  const lines = Math.min(22, Math.max(6, draft.code.split("\n").length + 1));
+  const labels = Object.fromEntries((r?.checks ?? []).map((c) => [c.id, c.label]));
+  return (
+    <div className="flex flex-col gap-4">
+      <Md text={p.prompt_md} className="text-[16px]" />
+      <div>
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <label htmlFor={`code-${step.id}`} className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Your code <span className="font-normal normal-case">(JavaScript)</span>
+          </label>
+          {!locked && draft.code !== p.starter && (
+            <button
+              type="button"
+              onClick={() => setDraft({ ...draft, code: p.starter })}
+              className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]"
+            >
+              <RotateCcw aria-hidden className="h-3.5 w-3.5" /> Start again
+            </button>
+          )}
+        </div>
+        <textarea
+          ref={area}
+          id={`code-${step.id}`}
+          data-testid="code-editor"
+          value={draft.code}
+          onChange={(e) => setDraft({ ...draft, code: e.target.value.slice(0, CODE_MAX) })}
+          onKeyDown={onKeyDown}
+          readOnly={locked}
+          rows={lines}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          autoComplete="off"
+          aria-describedby={`code-help-${step.id}`}
+          className="block w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3 font-mono text-[13.5px] leading-relaxed text-[var(--text)] [tab-size:2] focus:border-[var(--st-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--st-accent)]"
+        />
+        <p id={`code-help-${step.id}`} className="mt-1 text-xs text-[var(--text-muted)]">
+          Tab indents (press Escape first to move on with Tab). Ctrl+Enter runs it. It runs here in your browser, shut off from everything else.
+        </p>
+      </div>
+      {!locked && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void run()}
+            disabled={running || !draft.code.trim()}
+            data-testid="code-run"
+            className="study-press flex min-h-[2.5rem] items-center gap-1.5 rounded-full border border-[var(--st-accent)] px-4 text-sm font-semibold text-[var(--st-accent-text)] hover:bg-[var(--st-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)] disabled:opacity-50"
+          >
+            <Play aria-hidden className="h-4 w-4" /> {running ? "Running…" : res ? "Run again" : "Run"}
+          </button>
+          {stale && !running && <span className="text-sm text-[var(--text-muted)]">You've changed the code since the last run. Run it again before you hand it in.</span>}
+        </div>
+      )}
+      {res && (
+        <section aria-label="What happened when it ran" aria-live="polite" data-testid="code-result" className={cn("flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4", stale && "opacity-60")}>
+          {res.unavailable ? (
+            <p role="alert" className="text-sm text-[var(--st-bad)]">
+              {res.error} You can still say "I don't know" to move on.
+            </p>
+          ) : (
+            <>
+              {res.error && (
+                <p className="rounded-xl border border-[var(--st-bad-border)] bg-[var(--st-bad-bg)] px-3 py-2 font-mono text-[13px] text-[var(--text)]" data-testid="code-error">
+                  {res.line ? `Line ${res.line}: ` : ""}
+                  {res.error}
+                </p>
+              )}
+              <ul className="flex flex-col gap-1.5" aria-label="Checks">
+                {checks.map((c) => {
+                  const ok = res.results[c.id] === true;
+                  return (
+                    <li key={c.id} className="flex items-start gap-2 text-sm text-[var(--text)]" data-testid={`code-check-${c.id}`} data-pass={ok}>
+                      <span aria-hidden className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white", ok ? "bg-[var(--st-good)]" : "bg-[var(--st-bad)]")}>
+                        {ok ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="sr-only">{ok ? "Passed: " : "Failed: "}</span>
+                        {labels[c.id] ?? (c.label || c.call)}
+                        {!ok && !res.error && (
+                          <span className="mt-0.5 block font-mono text-[12.5px] text-[var(--text-muted)]">
+                            {c.call} should give {JSON.stringify(c.expect)}
+                            {res.got[c.id] !== undefined ? `, but gave ${res.got[c.id]}` : ""}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {res.output && (
+                <div>
+                  <Label>What it printed</Label>
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-[var(--bg)] p-3 font-mono text-[12.5px] text-[var(--text)]">{res.output}</pre>
+                </div>
+              )}
+              {draft.faulty && !locked && (
+                <p className="rounded-xl border border-[var(--st-warn-border)] bg-[var(--st-warn-bg)] px-3 py-2 text-sm text-[var(--text)]" data-testid="code-faulty">
+                  This task has a fault in it: its own answer doesn't pass these checks. Hand it in and it won't count against you.
+                </p>
+              )}
+            </>
+          )}
+        </section>
+      )}
+      {r && (
+        <>
+          {r.explain_md && (
+            <Card tone="soft" className="study-in">
+              <Label>The idea</Label>
+              <Md text={r.explain_md} compact />
+            </Card>
+          )}
+          <details className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">One way to write it</summary>
+            <pre className="mt-3 overflow-auto rounded-xl bg-[var(--bg)] p-3 font-mono text-[13px] leading-relaxed text-[var(--text)]" data-testid="code-solution">
+              {r.solution}
+            </pre>
+          </details>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ----------------------------------------------------------------- switch
 
 export function StepBody(props: StepProps & { onTurn: (text: string) => void; sending: boolean; turnError: string | null }) {
@@ -830,6 +1044,10 @@ export function StepBody(props: StepProps & { onTurn: (text: string) => void; se
       return <TeachStudentStep {...(rest as StepProps<"teach_student">)} onTurn={onTurn} sending={sending} error={turnError} />;
     case "capstone":
       return <CapstoneStep {...(rest as StepProps<"capstone">)} />;
+    case "explore":
+      return <ExploreStep {...(rest as StepProps<"explore">)} />;
+    case "write_code":
+      return <WriteCodeStep {...(rest as StepProps<"write_code">)} />;
     default:
       return <p className="text-sm text-[var(--text-muted)]">This kind of step can't be shown here yet. Update Promptly, or skip it.</p>;
   }

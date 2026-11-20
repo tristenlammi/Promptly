@@ -57,7 +57,7 @@ def _state(c: StudyConcept) -> rules.ConceptState:
     return rules.ConceptState(
         id=str(c.id), position=c.position, mastery=c.mastery, state=c.state, nature=c.nature,
         prereqs=tuple(c.prereqs or ()), evidence_count=c.evidence_count, production_ok=c.production_ok,
-        origin=c.origin, last_seen=c.last_seen_at.timestamp() if c.last_seen_at else 0.0,
+        origin=c.origin, last_seen=c.last_seen_at.timestamp() if c.last_seen_at else 0.0, tool=c.tool or "",
     )
 
 
@@ -210,6 +210,9 @@ def check_plan(raw: Any, *, depth: str, level: str, valid_sources: set[int]) -> 
     if not isinstance(units_raw, list) or len(units_raw) < 2:
         raise StepInvalid("need at least 2 units")
     lo, hi = DEPTH_BOUNDS[depth]
+    # A programming subject the app can run code for (only then may a concept ask for code).
+    lang = {"js": "javascript"}.get(steps._s(raw.get("programming_language"), 16).lower(), steps._s(raw.get("programming_language"), 16).lower())
+    code_lang = lang if lang in steps.CODE_LANGS else None
     seen_keys: list[str] = []
     seen_titles: set[str] = set()
     units = []
@@ -229,7 +232,11 @@ def check_plan(raw: Any, *, depth: str, level: str, valid_sources: set[int]) -> 
             # Only earlier concepts can be depended on: the map can't loop.
             prereqs = [p for p in (c.get("prereqs") if isinstance(c.get("prereqs"), list) else []) if p in seen_keys][:4]
             seen_keys.append(key)
+            tool = c.get("tool") if c.get("tool") in rules.TOOLS else ""
+            if tool == "code" and not code_lang:
+                tool = ""
             concepts.append({
+                "tool": tool,
                 "key": key, "title": title, "summary": steps._s(c.get("summary"), 600),
                 "objectives": [steps._s(o, 200) for o in (c.get("objectives") if isinstance(c.get("objectives"), list) else []) if steps._s(o)][:4],
                 "nature": c.get("nature") if c.get("nature") in NATURES else "principle",
@@ -242,7 +249,7 @@ def check_plan(raw: Any, *, depth: str, level: str, valid_sources: set[int]) -> 
         raise StepInvalid(f"too small: {total} concepts, need at least {lo}")
     if total > hi:
         raise StepInvalid(f"too big: {total} concepts, at most {hi}")
-    return {"title": steps._s(raw.get("title"), 200), "summary": steps._s(raw.get("summary"), 800), "units": units}
+    return {"title": steps._s(raw.get("title"), 200), "summary": steps._s(raw.get("summary"), 800), "units": units, "code_lang": code_lang}
 
 
 async def build_subject(subject_id: uuid.UUID) -> None:
@@ -300,11 +307,13 @@ async def build_subject(subject_id: uuid.UUID) -> None:
                     row = StudyConcept(
                         subject_id=subject.id, unit_id=unit.id, position=pos, title=c["title"], summary=c["summary"],
                         objectives=c["objectives"], nature=c["nature"], prereqs=[ids[p] for p in c["prereqs"]], source_ns=c["sources"],
+                        tool=c["tool"],
                     )
                     db.add(row)
                     await db.flush()
                     ids[c["key"]] = str(row.id)
             subject.summary = plan["summary"]
+            subject.code_lang = plan["code_lang"]
             subject.status, subject.build_stage, subject.build_progress, subject.updated_at = "placement", "done", 100, _now()
             await db.commit()
         except StudyError as e:
@@ -516,7 +525,7 @@ async def next_step(db: AsyncSession, user: User, se: StudySession, subject: Stu
     if role == "recall":
         kind, angle = rules.recall_kind(target, hist), "plain"
     elif role == "test_out":
-        kind, angle = ("scenario" if target.nature != "process" else "worked_example"), "plain"
+        kind, angle = rules.test_out_kind(target), "plain"
     else:
         kind, angle = rules.choose_kind(target, hist)
 
@@ -527,12 +536,13 @@ async def next_step(db: AsyncSession, user: User, se: StudySession, subject: Stu
     system = ai.system_for(subject.level)
     valid = {s.n for s in srcs}
     se_id, concept_id, subject_id = se.id, concept.id, subject.id
+    tool, lang = concept.tool or "", subject.code_lang or ""
     se.plan = plan
     await db.commit()
 
     payload = await _ask(
         teacher, f"step:{kind}", system=system, prompt=prompt, max_tokens=2600,
-        check=lambda r: steps.build(kind, r, valid_sources=valid),
+        check=lambda r: steps.build(kind, r, valid_sources=valid, tool=tool, lang=lang),
     )
     if kind == "explain":
         payload["public"]["angle"] = angle
@@ -603,6 +613,8 @@ def _step_prompt(
             "order_steps": "an ORDER-THE-STEPS step", "match_pairs": "a MATCH-THE-PAIRS step", "spot_error": "a SPOT-THE-ERROR step",
             "worked_example": "a WORKED-EXAMPLE step", "explain_back": "an EXPLAIN-IT-BACK step", "scenario": "a SCENARIO step",
             "teach_student": "a TEACH-THE-CONFUSED-STUDENT step",
+            "explore": "an EXPLORE step (the learner works a figure to reach a goal; the app checks it)",
+            "write_code": "a WRITE-CODE step (the learner writes a few lines; hidden checks run them)",
         }
         parts.append(f"Write {names[kind]} on this concept.")
     if kind == "worked_example":
@@ -613,7 +625,15 @@ def _step_prompt(
     block = ai.sources_block(use, per=2200, total=5000)
     if block:
         parts.append("\n" + block + "\nPut the numbers of the sources you actually used in \"sources\" (an empty list if none).")
-    parts.append(f"\nReply in exactly this shape:\n{ai.STEP_SHAPES[kind]}")
+    if kind == "explain":
+        shape = ai.explain_shape(concept.tool or "")
+    elif kind == "explore":
+        shape = ai.explore_shape(concept.tool)
+    elif kind == "write_code":
+        shape = ai.CODE_SHAPE
+    else:
+        shape = ai.STEP_SHAPES[kind]
+    parts.append(f"\nReply in exactly this shape:\n{shape}")
     return "\n".join(parts)
 
 
@@ -633,7 +653,9 @@ async def answer_step(db: AsyncSession, user: User, step_id: uuid.UUID, answer: 
     if st.kind == "teach_student" and not any(t["role"] == "learner" for t in st.turns):
         raise StudyError("bad_answer", "Say something to the student first.", 422)
 
-    if st.kind == "explain":
+    if st.kind == "explain" or (st.kind == "write_code" and clean.get("faulty")):
+        # A code task whose own answer fails its checks proves nothing about
+        # the learner: it counts for nothing and the lesson moves on.
         grade = None
     elif st.kind == "capstone":
         grade = await _grade_capstone(db, user, st, subject, clean)
@@ -668,7 +690,10 @@ async def answer_step(db: AsyncSession, user: User, step_id: uuid.UUID, answer: 
     state = _state(concept)
     before, was_done = concept.mastery, state.done
     outcome = grade["outcome"] if grade else None
-    ev = rules.Evidence(kind=st.kind, outcome=outcome or "correct", hints=st.hints_used, confidence=confidence, test_out=st.role == "test_out")
+    ev = rules.Evidence(
+        kind=st.kind if grade else "explain", outcome=outcome or "correct", hints=st.hints_used, confidence=confidence,
+        test_out=st.role == "test_out" and bool(grade),
+    )
     state = rules.apply_evidence(state, ev)
     concept.mastery, concept.state = state.mastery, state.state
     concept.evidence_count, concept.production_ok = state.evidence_count, state.production_ok

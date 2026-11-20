@@ -274,6 +274,42 @@ def _editor_ai_reply(system: str, messages: list) -> str | None:
 #   - a capstone (a unit's task, or the final one) has three rubric points; an
 #     answer with "pull" or GOOD meets all three, HALF one, anything else none
 #   - "what next" after a finished subject is always the same two subjects
+#   - a subject called "… figcheck" marks its first four concepts for a figure
+#     (parts, plot, table, scale): each explanation carries one to play with
+#     and the first check on it is an explore step with a known answer
+#     (STUDY_FIGURE_ANSWERS)
+#   - "… codecheck" is a JavaScript course whose first concept is proved by
+#     writing highWater(mean, range); "… faultcheck" is the same with checks
+#     the task's own answer fails (the step must count for nothing)
+
+_STUDY_TOOLS = {1: "parts", 2: "plot", 3: "table", 4: "scale"}
+_STUDY_FIGURES = {
+    "parts": {"type": "parts", "title": "The Earth and its two bulges", "layout": "row", "parts": [
+        {"label": "Moon", "note": "Does the pulling."},
+        {"label": "Near-side bulge", "note": "Pulled hardest: the water heaps up towards the moon."},
+        {"label": "Earth", "note": "Pulled a middling amount, so it sits between the two bulges."},
+        {"label": "Far-side bulge", "note": "Pulled least: it is left behind, and heaps up too."},
+    ]},
+    "plot": {"type": "plot", "title": "Height of the tide through the day", "expr": "m + (r / 2) * cos(2 * pi * x / 12.4)",
+             "x": {"min": 0, "max": 24, "label": "hours after high water"}, "y": {"label": "height (m)"},
+             "params": [{"name": "m", "label": "Mean sea level", "unit": "m", "min": 1, "max": 4, "step": 0.5, "value": 2},
+                        {"name": "r", "label": "Tidal range", "unit": "m", "min": 0, "max": 6, "step": 0.5, "value": 2}]},
+    "table": {"type": "table", "title": "High and low water", "inputs": [
+        {"name": "m", "label": "Mean sea level", "unit": "m", "min": 1, "max": 5, "step": 0.5, "value": 3},
+        {"name": "r", "label": "Tidal range", "unit": "m", "min": 0, "max": 8, "step": 0.5, "value": 2}],
+        "outputs": [{"label": "High water", "expr": "m + r / 2", "unit": "m", "decimals": 2}, {"label": "Low water", "expr": "m - r / 2", "unit": "m", "decimals": 2}]},
+    "scale": {"type": "scale", "title": "Hours after high water", "min": 0, "max": 12.5, "step": 0.25, "value": 0, "unit": "h",
+              "marks": [{"value": 0, "label": "high water"}, {"value": 12.5, "label": "next high"}],
+              "readout": {"label": "Part of the cycle", "expr": "100 * v / 12.4", "unit": "%", "decimals": 0}},
+}
+_STUDY_GOALS = {
+    "parts": ("Tap the part of the picture that is pulled **least** by the moon.", {"part": 3}),
+    "plot": ("High water must reach **5 m**. Set the sliders so the curve passes through the dot.", {"points": [{"x": 0, "y": 5}], "tolerance": 0.2}),
+    "table": ("The harbour dries when low water falls to **1 m**. Set the numbers so that low water is exactly 1 m.", {"output": 1, "target": 1, "tolerance": 0.05}),
+    "scale": ("Drag the point to when **low water** comes.", {"target": 6.2, "tolerance": 0.5}),
+}
+# One right answer per figure, for the tests that drive them.
+STUDY_FIGURE_ANSWERS = {"parts": "Far-side bulge", "plot": {"m": 2, "r": 6}, "table": {"m": 3, "r": 4}, "scale": 6.25}
 
 STUDY_RIGHT = "The moon's gravity pulls the sea towards it"
 STUDY_MISC = "thinks the sea pushes the moon"
@@ -399,10 +435,26 @@ def _study_step(kind: str, concept: str, prompt: str) -> dict:
                 "misconception": STUDY_MISC, "rubric": ["the moon pulls on the sea, not the other way round", "the pull is strongest on the near side"],
                 "model_answer": "It is the other way round, Sam. The moon's gravity pulls on the sea, hardest on the side nearest the moon, so the water there is drawn up into a bulge.",
                 "sources": [1]}
+    if kind == "explore":
+        tool = re.search(r'\{"type": "(plot|scale|parts|table)"', prompt.rsplit("Reply in exactly this shape:", 1)[-1]).group(1)
+        task, goal = _STUDY_GOALS[tool]
+        return {"prompt": task, "figure": _STUDY_FIGURES[tool], "goal": goal,
+                "explain": "The moon's pull is strongest on the near side and weakest on the far side; the height of the tide swings by half the range either side of the mean.",
+                "hints": hints, "sources": [1]}
+    if kind == "write_code":
+        fault = "faultcheck" in prompt
+        return {"prompt": "Write `highWater(mean, range)`: it returns the height of high water, which is the mean level plus **half** the range.\n\nFor example `highWater(3, 4)` is `5`.",
+                "starter": "function highWater(mean, range) {\n  // your code here\n}",
+                "solution": "function highWater(mean, range) {\n  return mean + range / 2;\n}",
+                "checks": [{"call": "highWater(3, 4)", "expect": 50 if fault else 5, "label": "a 4 m range on a 3 m mean gives 5 m"},
+                           {"call": "highWater(2, 0)", "expect": 2, "label": "no range: high water is the mean"},
+                           {"call": "highWater(1.5, 1)", "expect": 2, "label": "works with halves"}],
+                "explain": "High water sits half the range above the mean level.", "hints": hints, "sources": [1]}
     return {}
 
 
 _STUDY_KINDS = (
+    ("explore", '"goal": <the goal>'), ("write_code", '"starter"'),
     ("teach_student", '"student_name"'), ("explain", '"key_points"'), ("predict", '"setup"'), ("mcq", "Test understanding, not wording"),
     ("order_steps", "IN THE CORRECT ORDER"), ("match_pairs", '"pairs": [{"left"'), ("spot_error", "exactly ONE mistake"),
     ("worked_example", '"problem": "a concrete problem"'), ("explain_back", "explain the idea in their own words"), ("scenario", '"scenario": "a realistic'),
@@ -458,14 +510,16 @@ def _study_reply(system: str, messages: list) -> str | None:
                 n += 1
                 # Concept 6 builds on two earlier ones, so the map has a fork.
                 prereqs = ["c2", "c3"] if n == 6 else [f"c{n - 1}"] if n > 1 else []
+                tool = _STUDY_TOOLS.get(n, "none") if "figcheck" in title else "code" if n == 1 and ("codecheck" in title or "faultcheck" in title) else "none"
                 concepts.append({"key": f"c{n}", "title": c_title, "summary": c_sum, "objectives": [f"can explain {c_title.lower()}", "can use it on a real coast"],
-                                 "nature": nature, "prereqs": prereqs, "sources": [1]})
+                                 "nature": nature, "prereqs": prereqs, "sources": [1], "tool": tool})
             units.append({"title": u_title, "summary": u_sum, "concepts": concepts})
         if depth == "deep":
             extra = [{"key": f"c{n + i}", "title": f"Going further {i}", "summary": "A harder case.", "objectives": ["can handle a harder case"], "nature": "skill",
                       "prereqs": [f"c{n + i - 1}"], "sources": [1]} for i in range(1, 10)]
             units.append({"title": "The hard parts", "summary": "Edge cases.", "concepts": extra})
         return json.dumps({"suitable": True, "title": title.replace(" kidcheck", "") or "How tides work",
+                           "programming_language": "javascript" if ("codecheck" in title or "faultcheck" in title) else None,
                            "summary": "You'll be able to say why the sea rises and falls, and work out when it will. You'll read a tide table with confidence.", "units": units})
     if '{"questions": [{"key"' in prompt:
         keys = re.findall(r'key "([^"]+)"', prompt)
@@ -496,7 +550,10 @@ def _study_reply(system: str, messages: list) -> str | None:
     shape = prompt.rsplit("Reply in exactly this shape:", 1)[-1]
     for kind, mark in _STUDY_KINDS:
         if mark in shape:
-            return json.dumps(_study_step(kind, concept, prompt))
+            out = _study_step(kind, concept, prompt)
+            if kind == "explain" and 'You may ALSO add "figure"' in shape:
+                out["figure"] = _STUDY_FIGURES[re.search(r'\{"type": "(plot|scale|parts|table)"', shape).group(1)]
+            return json.dumps(out)
     return "{}"
 
 

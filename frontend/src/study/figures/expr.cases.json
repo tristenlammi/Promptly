@@ -1,0 +1,307 @@
+{
+ "values": [
+  {
+   "expr": "1 + 2 * 3",
+   "env": {},
+   "value": 7
+  },
+  {
+   "expr": "(1 + 2) * 3",
+   "env": {},
+   "value": 9
+  },
+  {
+   "expr": "2 ^ 3 ^ 2",
+   "env": {},
+   "value": 512
+  },
+  {
+   "expr": "-2 ^ 2",
+   "env": {},
+   "value": -4
+  },
+  {
+   "expr": "2 ^ -1",
+   "env": {},
+   "value": 0.5
+  },
+  {
+   "expr": "2 ** 10",
+   "env": {},
+   "value": 1024
+  },
+  {
+   "expr": "a*x^2 + b",
+   "env": {
+    "a": 2,
+    "x": 3,
+    "b": 1
+   },
+   "value": 19
+  },
+  {
+   "expr": "2x + 1",
+   "env": {
+    "x": 4
+   },
+   "value": 9
+  },
+  {
+   "expr": "2(x + 1)",
+   "env": {
+    "x": 4
+   },
+   "value": 10
+  },
+  {
+   "expr": "(x)(x)",
+   "env": {
+    "x": 5
+   },
+   "value": 25
+  },
+  {
+   "expr": "3x^2",
+   "env": {
+    "x": 2
+   },
+   "value": 12
+  },
+  {
+   "expr": "10 - 4 - 3",
+   "env": {},
+   "value": 3
+  },
+  {
+   "expr": "100 / 10 / 2",
+   "env": {},
+   "value": 5
+  },
+  {
+   "expr": "sqrt(16) + abs(-3)",
+   "env": {},
+   "value": 7
+  },
+  {
+   "expr": "min(3, 1, 2) + max(1, 5)",
+   "env": {},
+   "value": 6
+  },
+  {
+   "expr": "pow(2, 5)",
+   "env": {},
+   "value": 32
+  },
+  {
+   "expr": "round(2.5) + round(-2.5) + round(0.4)",
+   "env": {},
+   "value": 1
+  },
+  {
+   "expr": "floor(-1.5) + ceil(1.2)",
+   "env": {},
+   "value": 0
+  },
+  {
+   "expr": "sign(-9) + sign(0) + sign(4)",
+   "env": {},
+   "value": 0
+  },
+  {
+   "expr": "log(1000) + log2(8) + ln(e)",
+   "env": {},
+   "value": 7
+  },
+  {
+   "expr": "sin(0) + cos(0)",
+   "env": {},
+   "value": 1
+  },
+  {
+   "expr": "2 * pi",
+   "env": {},
+   "value": 6.283185307179586
+  },
+  {
+   "expr": "exp(0) * 1.5e2",
+   "env": {},
+   "value": 150
+  },
+  {
+   "expr": ".5 + 0.25",
+   "env": {},
+   "value": 0.75
+  },
+  {
+   "expr": "p * (1 + r / 100) ^ t",
+   "env": {
+    "p": 1000,
+    "r": 5,
+    "t": 2
+   },
+   "value": 1102.5
+  },
+  {
+   "expr": "v * 9 / 5 + 32",
+   "env": {
+    "v": 100
+   },
+   "value": 212
+  },
+  {
+   "expr": "3 × 4 − 2 ÷ 2",
+   "env": {},
+   "value": 11
+  },
+  {
+   "expr": "--3",
+   "env": {},
+   "value": 3
+  },
+  {
+   "expr": "1 / 0",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "1 / x",
+   "env": {
+    "x": 0
+   },
+   "value": null
+  },
+  {
+   "expr": "sqrt(-1)",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "(-8) ^ 0.5",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "ln(0)",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "log(-5)",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "asin(2)",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "0 ^ -1",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "10 ^ 400",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "exp(1000)",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "9 ^ 99",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "1e11 * 100",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "y + 1",
+   "env": {
+    "x": 1
+   },
+   "value": null
+  },
+  {
+   "expr": "this",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "0x10 + 1",
+   "env": {},
+   "value": null
+  },
+  {
+   "expr": "1e",
+   "env": {},
+   "value": 2.718281828459045
+  },
+  {
+   "expr": "(x + 1)x",
+   "env": {
+    "x": 2
+   },
+   "value": 6
+  }
+ ],
+ "bad": [
+  "",
+  "   ",
+  "1 +",
+  "* 2",
+  "(1 + 2",
+  "1 + 2)",
+  "2 ^",
+  "sin",
+  "sin()",
+  "sin(1, 2)",
+  "min(1)",
+  "max(1,2,3,4,5)",
+  "x.y",
+  "x[0]",
+  "a = 1",
+  "1; 2",
+  "\"text\"",
+  "'a'",
+  "__import__('os')",
+  "__class__",
+  "x.__class__",
+  "lambda: 1",
+  "1 if x else 2",
+  "x and y",
+  "not x",
+  "1 < 2",
+  "1 == 1",
+  "a ? b : c",
+  "x!",
+  "5 % 2",
+  "1,2",
+  "f(1)(",
+  "constructor.constructor('return 1')()",
+  "`x`",
+  "x => x",
+  "{a: 1}",
+  "[1, 2]",
+  "1..2",
+  "import os",
+  "eval(1)",
+  "exec(1)",
+  "open(1)",
+  "globalThis.fetch(1)",
+  "a\nb",
+  "a\u0000b",
+  "((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))",
+  "x_very_long_name_that_goes_on",
+  "12345678901234567890123456789",
+  "x y",
+  "2 3",
+  "x (1)",
+  "_x"
+ ]
+}

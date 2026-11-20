@@ -191,7 +191,73 @@ PLAN_SHAPE = """{"suitable": true, "unsuitable_reason": "",
      "objectives": ["can ...", "can ..."],
      "nature": "fact|process|principle|skill",
      "prereqs": ["keys of earlier concepts this one truly needs"],
-     "sources": [1, 2]}]}]}"""
+     "tool": "none|plot|scale|parts|table|code",
+     "sources": [1, 2]}]}],
+ "programming_language": null}
+"tool" is "none" for most concepts. Give one only where the learner would really understand better by handling something:
+  plot  = a quantity that depends on another through a formula, with numbers to vary (a curve with sliders)
+  scale = a single quantity on a line where position matters (a temperature, a pH, a date, a probability)
+  parts = a thing made of named parts or layers where knowing which part does what is the point
+  table = "what happens if": a few numbers in, a few worked out (a budget, a dose, interest, a recipe scaled)
+  code  = ONLY when the subject itself is learning to program: the concept is proved by writing a few lines
+"programming_language" is the language the subject teaches when the subject IS learning to program (e.g. "javascript", "python"); otherwise null."""
+
+FIGURE_SHAPES: dict[str, str] = {
+    "plot": """{"type": "plot", "title": "", "expr": "a*x^2 + b", "x": {"min": 0, "max": 10, "label": "what x is"}, "y": {"label": "what y is"},
+  "params": [{"name": "a", "label": "what a is", "min": 0, "max": 5, "step": 0.5, "value": 1}]}
+"expr" is a formula in x and the slider names: + - * / ^, brackets, pi, e, and sin cos tan sqrt abs exp ln log log2 min max floor ceil round. 1 to 3 sliders, short lower-case names.""",
+    "scale": """{"type": "scale", "title": "", "min": 0, "max": 14, "step": 0.5, "value": 7, "unit": "",
+  "marks": [{"value": 7, "label": "a landmark on the scale"}],
+  "readout": null OR {"label": "what else it means", "expr": "a formula in v", "unit": "", "decimals": 1}}
+The learner drags one point along the line; v is where it is.""",
+    "parts": """{"type": "parts", "title": "", "layout": "layers|rings|row|grid",
+  "parts": [{"label": "the part's name", "note": "what it does, one sentence"}]}
+3 to 8 parts, in their real order. layers = stacked top to bottom; rings = outermost first; row = left to right; grid = no particular order.""",
+    "table": """{"type": "table", "title": "",
+  "inputs": [{"name": "p", "label": "what it is", "min": 0, "max": 100, "step": 5, "value": 20, "unit": ""}],
+  "outputs": [{"label": "what is worked out", "expr": "a formula in the input names", "unit": "", "decimals": 1}]}
+1 to 3 inputs with short lower-case names; 1 to 4 outputs. Formulas: + - * / ^, brackets, pi, e, and sin cos tan sqrt abs exp ln log log2 min max floor ceil round.""",
+}
+
+GOAL_SHAPES: dict[str, str] = {
+    "plot": """{"points": [{"x": 2, "y": 8}], "tolerance": 0.5}
+The learner must move the sliders until the curve passes through the point(s). The sliders must NOT start at the answer, and the answer must be reachable on the slider steps.""",
+    "scale": """{"target": 7, "tolerance": 0.5}
+The learner must drag the point to the right place. Don't give the answer away with a mark at the target.""",
+    "parts": """{"part": 2}
+The position (0 = first) of the part the learner must tap. Ask about what the part DOES, never by its name.""",
+    "table": """{"output": 0, "target": 150, "tolerance": 2}
+The learner must set the inputs so that output number "output" (0 = first) reaches the target. The inputs must NOT start at the answer, and it must be reachable on the input steps.""",
+}
+
+
+def explain_shape(tool: str) -> str:
+    """The explain step's shape; a concept that suits a figure may get one to play with."""
+    base = STEP_SHAPES["explain"]
+    if tool not in FIGURE_SHAPES:
+        return base
+    return (
+        base + '\nYou may ALSO add "figure" (then leave "diagram" null): something the learner can move while reading, '
+        f"which makes the idea visible:\n{FIGURE_SHAPES[tool]}"
+    )
+
+
+def explore_shape(tool: str) -> str:
+    return (
+        '{"prompt": "what to do with the figure, as an instruction; it must need the idea, not guesswork",\n'
+        ' "figure": <the figure>, "goal": <the goal>,\n'
+        ' "explain": "why that is the answer, 1-4 sentences", "hints": ["a nudge", "a stronger nudge"], "sources": [1]}\n'
+        f"The figure:\n{FIGURE_SHAPES[tool]}\nThe goal:\n{GOAL_SHAPES[tool]}"
+    )
+
+
+CODE_SHAPE = """{"prompt": "the task: what to write and what it must do, with one example of use",
+ "starter": "code the learner starts from: the function's first line and a comment, NOT the answer",
+ "solution": "a correct, simple answer",
+ "checks": [{"call": "an expression that uses the learner's code, e.g. add(2, 3)", "expect": 5, "label": "what this checks, in plain words"}],
+ "explain": "the idea the task turns on, 1-3 sentences", "hints": ["a nudge", "a stronger nudge"], "sources": [1]}
+Plain JavaScript only (no imports, no DOM, no network, no timers); the learner's code and each check run in a fresh sandbox.
+3 to 5 checks, each ONE expression whose value is compared with "expect" (a number, text, true/false, null, a list or a plain object). Cover the ordinary case and the edge cases. The solution must pass every check."""
 
 STEP_SHAPES: dict[str, str] = {
     "explain": """{"title": "short", "body": "the explanation, 90-220 words, Markdown; one idea, built up in order, with a concrete example",

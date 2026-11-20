@@ -49,8 +49,11 @@ MAX_GAPS_PER_CONCEPT = 2
 MAX_GAPS_PER_SUBJECT = 8
 
 UNGRADED = ("explain",)
-RECOGNITION = ("predict", "mcq", "order_steps", "match_pairs")
-PRODUCTION = ("explain_back", "spot_error", "worked_example", "scenario", "teach_student")
+RECOGNITION = ("predict", "mcq", "order_steps", "match_pairs", "explore")
+PRODUCTION = ("explain_back", "spot_error", "worked_example", "scenario", "teach_student", "write_code")
+#: What a concept can be given to work with: a figure to play with, or code to run.
+FIGURE_TOOLS = ("plot", "scale", "parts", "table")
+TOOLS = FIGURE_TOOLS + ("code",)
 KINDS = UNGRADED + RECOGNITION + PRODUCTION
 
 KIND_WEIGHT = {
@@ -58,11 +61,13 @@ KIND_WEIGHT = {
     "mcq": 0.7,
     "order_steps": 0.7,
     "match_pairs": 0.7,
+    "explore": 0.8,
     "spot_error": 0.9,
     "worked_example": 0.9,
     "explain_back": 1.0,
     "scenario": 1.0,
     "teach_student": 1.0,
+    "write_code": 1.0,
 }
 OUTCOME_SCORE = {"correct": 1.0, "partial": 0.5, "wrong": 0.0}
 
@@ -108,6 +113,8 @@ class ConceptState:
     evidence_count: int = 0
     production_ok: int = 0
     origin: str = "planned"
+    #: "" or one of TOOLS: the concept suits a figure to play with, or code to write.
+    tool: str = ""
     last_seen: float = 0.0  # any increasing number; smaller = longer ago
 
     @property
@@ -225,12 +232,20 @@ def choose_kind(c: ConceptState, history: Sequence[tuple[str, str | None]]) -> t
     * After a right answer: a production step (a new kind each time).
     * After a wrong or partial answer: explain again from another angle,
       then an easier recognition step.
+    * After a code task that turned out to be faulty (no outcome): another
+      task in the learner's own work, not the explanation again.
     """
     kinds = [k for k, _ in history]
     explains = kinds.count("explain")
     angle = ANGLES[min(explains, len(ANGLES) - 1)]
     recog = RECOGNITION_FOR.get(c.nature, RECOGNITION_FOR["principle"])
     prod = PRODUCTION_FOR.get(c.nature, PRODUCTION_FOR["principle"])
+    # A concept that suits a figure gets it as its first check; one that
+    # suits code is proved by writing some.
+    if c.tool in FIGURE_TOOLS:
+        recog = ("explore",) + tuple(recog)
+    elif c.tool == "code":
+        prod = ("write_code",) + tuple(prod)
 
     def fresh(options: Sequence[str]) -> str:
         used = [k for k in kinds if k in options]
@@ -251,7 +266,16 @@ def choose_kind(c: ConceptState, history: Sequence[tuple[str, str | None]]) -> t
         return fresh(recog), angle
     if last_outcome == "correct":
         return fresh(prod), angle
+    if last_outcome is None and last_kind == "write_code":
+        return fresh([k for k in prod if k != last_kind] or prod), angle
     return "explain", angle
+
+
+def test_out_kind(c: ConceptState) -> str:
+    """The one demanding task for "I know this already"."""
+    if c.tool == "code":
+        return "write_code"
+    return "worked_example" if c.nature == "process" else "scenario"
 
 
 def recall_kind(c: ConceptState, history: Sequence[tuple[str, str | None]]) -> str:

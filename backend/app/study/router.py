@@ -64,7 +64,7 @@ def concept_view(c: StudyConcept, by_id: dict[str, StudyConcept]) -> dict[str, A
         "objectives": c.objectives or [], "nature": c.nature, "prereqs": [p for p in (c.prereqs or []) if p in by_id],
         "mastery": round(c.mastery, 3), "state": c.state, "locked": locked,
         "origin": c.origin, "reason": c.reason, "gap_for": str(c.gap_for) if c.gap_for else None,
-        "steps_done": c.steps_done, "sources": c.source_ns or [],
+        "steps_done": c.steps_done, "sources": c.source_ns or [], "tool": c.tool or "",
         "last_seen_at": _iso(c.last_seen_at), "mastered_at": _iso(c.mastered_at),
         # Reviews: when it next comes back, whether that is now, and how often it has slipped.
         "due_at": _iso(c.due_at) if c.state in ("mastered", "known") else None, "due": _is_due(c),
@@ -92,6 +92,7 @@ def subject_card(s: StudySubject, concepts: list[StudyConcept]) -> dict[str, Any
         "next_capstone": None,  # filled by _card (it needs the units)
         "due_count": sum(1 for c in concepts if _is_due(c)) if s.status in ("active", "complete") and not s.archived else 0,
         "capstone": _cap_view(s.capstone),
+        "code_lang": s.code_lang, "shared_from": s.shared_from,
         "created_at": _iso(s.created_at), "updated_at": _iso(s.updated_at), "last_studied_at": _iso(s.last_studied_at),
     }
 
@@ -121,6 +122,8 @@ def step_view(st: StudyStep) -> dict[str, Any]:
         "hints_left": 0 if placement or st.role == "test_out" else max(0, len(hints) - st.hints_used),
         "confidence": st.confidence, "answer": st.answer, "turns": st.turns, "asks": st.asks,
         "grade": None, "reveal": None,
+        # A code task whose own answer failed its checks: answered, counted for nothing.
+        "void": answered and st.kind != "explain" and not st.grade,
         "created_at": _iso(st.created_at), "answered_at": _iso(st.answered_at),
     }
     if st.kind == "teach_student":

@@ -1,4 +1,7 @@
-import type { Opt, Step, StepKind, WStep } from "@/api/study";
+import type { CodeCheck, Figure, Opt, Step, StepKind, WStep } from "@/api/study";
+
+import type { RunResult } from "../code/runner";
+import { figureAnswer, initialFigureState, stateFromAnswer, type FigureState } from "../figures/Figure";
 
 /*
  * What the learner has entered on a step so far (a draft), whether it is
@@ -15,13 +18,25 @@ export interface Draft {
   /** worked-example step id → option id */
   blanks: Record<string, string>;
   text: string;
+  /** Where an explore step's figure is set. */
+  fig: FigureState | null;
+  /** A write-code step: the code, the last run, and the code that run was of. */
+  code: string;
+  run: RunResult | null;
+  ranCode: string | null;
+  /** The step's own answer failed its own checks: it proves nothing. */
+  faulty: boolean;
 }
 
 export function emptyDraft(step?: Pick<Step, "kind" | "public">): Draft {
-  const d: Draft = { optionId: null, lineId: null, order: [], pairs: {}, blanks: {}, text: "" };
+  const d: Draft = { optionId: null, lineId: null, order: [], pairs: {}, blanks: {}, text: "", fig: null, code: "", run: null, ranCode: null, faulty: false };
   if (step?.kind === "order_steps") d.order = (step.public as { items: Opt[] }).items.map((i) => i.id);
+  if (step?.kind === "explore") d.fig = initialFigureState((step.public as { figure: Figure }).figure);
+  if (step?.kind === "write_code") d.code = (step.public as { starter: string }).starter;
   return d;
 }
+
+export const CODE_MAX = 8000;
 
 export const WRITTEN_MIN = 2;
 export const WRITTEN_MAX = 4000;
@@ -62,6 +77,14 @@ export function isReady(step: Pick<Step, "kind" | "public" | "turns">, d: Draft)
     }
     case "teach_student":
       return step.turns.some((t) => t.role === "learner");
+    case "explore": {
+      // A figure nobody has touched isn't an answer.
+      const fig = (step.public as { figure: Figure }).figure;
+      return !!d.fig && (fig.type === "parts" ? d.fig.partId !== null : d.fig.touched);
+    }
+    case "write_code":
+      // Handed in only after a run of exactly this code.
+      return d.code.trim().length > 0 && d.code.length <= CODE_MAX && !!d.run && !d.run.unavailable && d.ranCode === d.code;
   }
 }
 
@@ -91,6 +114,20 @@ export function buildAnswer(step: Pick<Step, "kind" | "public">, d: Draft): Reco
       return { text: d.text.trim().slice(0, WRITTEN_MAX) };
     case "capstone":
       return { text: d.text.trim().slice(0, CAPSTONE_MAX) };
+    case "explore": {
+      const fig = (step.public as { figure: Figure }).figure;
+      return { ...figureAnswer(fig, d.fig ?? initialFigureState(fig)) };
+    }
+    case "write_code": {
+      const checks = (step.public as { run: { checks: CodeCheck[] } }).run.checks;
+      return {
+        code: d.code,
+        results: Object.fromEntries(checks.map((c) => [c.id, d.run?.results[c.id] === true])),
+        output: (d.run?.output ?? "").slice(0, 2000),
+        error: (d.run?.error ?? "").slice(0, 500),
+        ...(d.faulty ? { faulty: true } : {}),
+      };
+    }
   }
 }
 
@@ -101,7 +138,14 @@ export const canSayDontKnow = (kind: StepKind) => kind !== "explain" && kind !==
 
 /** Kinds graded by code (instant); the rest wait on the teacher. */
 export const isInstant = (kind: StepKind) =>
-  kind === "predict" || kind === "mcq" || kind === "order_steps" || kind === "match_pairs" || kind === "spot_error" || kind === "worked_example";
+  kind === "predict" ||
+  kind === "mcq" ||
+  kind === "order_steps" ||
+  kind === "match_pairs" ||
+  kind === "spot_error" ||
+  kind === "worked_example" ||
+  kind === "explore" ||
+  kind === "write_code";
 
 /** A draft rebuilt from what was sent, to show an answered step again. */
 export function draftFromAnswer(step: Pick<Step, "kind" | "public" | "answer">): Draft {
@@ -113,6 +157,15 @@ export function draftFromAnswer(step: Pick<Step, "kind" | "public" | "answer">):
   if (a.pairs && typeof a.pairs === "object") d.pairs = { ...(a.pairs as Record<string, string>) };
   if (a.blanks && typeof a.blanks === "object") d.blanks = { ...(a.blanks as Record<string, string>) };
   if (typeof a.text === "string") d.text = a.text;
+  if (step.kind === "explore") d.fig = stateFromAnswer((step.public as { figure: Figure }).figure, step.answer);
+  if (step.kind === "write_code") {
+    if (typeof a.code === "string") d.code = a.code;
+    if (a.results && typeof a.results === "object") {
+      d.run = { results: a.results as Record<string, boolean>, got: {}, output: typeof a.output === "string" ? a.output : "", error: typeof a.error === "string" ? a.error : "" };
+      d.ranCode = d.code;
+    }
+    d.faulty = a.faulty === true;
+  }
   return d;
 }
 
@@ -151,6 +204,8 @@ export const KIND_LABEL: Record<StepKind, string> = {
   scenario: "Use it",
   teach_student: "You're the teacher",
   capstone: "Put it together",
+  explore: "Try it yourself",
+  write_code: "Write the code",
 };
 
 /** The kinds answered in writing: these can be dictated. */

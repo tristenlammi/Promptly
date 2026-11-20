@@ -278,6 +278,9 @@ export default defineConfig({
           "**/item-icons/**",
           "**/excalidraw-assets/**",
           "**/excalidraw-*.js",
+          // Study's code runner: always from the network, so it always
+          // arrives with the policy headers nginx gives it.
+          "**/study-runner.html",
           // The map library (~1 MB) and its fonts, icons and country outlines:
           // only for whoever opens a map.
           "**/maplibre-gl-*.js",

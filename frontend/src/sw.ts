@@ -107,6 +107,9 @@ registerRoute(
       /^\/uploads\//,
       // The Android app download — a file, never the app shell.
       /^\/downloads\//,
+      // Study's code runner: a page of its own with its own policy headers,
+      // loaded in a sandboxed frame. Never the app shell.
+      /^\/study-runner\.html$/,
       /^\/openapi\.json$/,
       /^\/docs/,
       /^\/redoc/,

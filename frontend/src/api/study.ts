@@ -48,6 +48,10 @@ export interface Subject {
   /** Learned ideas whose review is due now. */
   due_count: number;
   capstone: Capstone | null;
+  /** The language a programming subject teaches, when its code can be run here. */
+  code_lang?: string | null;
+  /** Who gave this course, on a copy someone shared. */
+  shared_from?: string | null;
   created_at: string;
   updated_at: string;
   last_studied_at: string | null;
@@ -103,6 +107,8 @@ export interface Concept {
   due: boolean;
   reviews: number;
   lapses: number;
+  /** What suits it beyond words: a figure to work, or code to write. */
+  tool?: "" | "plot" | "scale" | "parts" | "table" | "code";
 }
 
 export interface Unit {
@@ -191,7 +197,47 @@ export type StepKind =
   | "explain_back"
   | "scenario"
   | "teach_student"
-  | "capstone";
+  | "capstone"
+  | "explore"
+  | "write_code";
+
+/** A slider: a named number with a range, a step and where it starts. */
+export interface Control {
+  name: string;
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+}
+
+/** Something the learner can work: drawn by the app from this data, never markup. */
+export type Figure =
+  | { type: "plot"; title: string; expr: string; params: Control[]; x: { min: number; max: number; label: string }; y: { min: number; max: number; label: string } }
+  | {
+      type: "scale";
+      title: string;
+      min: number;
+      max: number;
+      step: number;
+      value: number;
+      unit: string;
+      marks: { value: number; label: string }[];
+      readout?: { label: string; expr: string; unit: string; decimals: number };
+    }
+  | { type: "parts"; title: string; layout: "layers" | "rings" | "row" | "grid"; parts: { id: string; label: string; note: string }[] }
+  | { type: "table"; title: string; inputs: Control[]; outputs: { label: string; expr: string; unit: string; decimals: number }[] };
+
+/** What an explore step's answer is: slider values, a point on the scale, or a part. */
+export type FigureAnswer = { values: Record<string, number> } | { value: number } | { part_id: string };
+
+export interface CodeCheck {
+  id: string;
+  call: string;
+  expect: unknown;
+  label: string;
+}
 
 export interface Opt {
   id: string;
@@ -220,7 +266,11 @@ export type ExplainAngle = "plain" | "analogy" | "example" | "step_by_step" | "c
 
 /** What each kind shows before it is answered. */
 export interface PublicByKind {
-  explain: { title: string; body_md: string; key_points: string[]; diagram: Diagram | null; angle: ExplainAngle; sources: number[] };
+  explain: { title: string; body_md: string; key_points: string[]; diagram: Diagram | null; figure?: Figure; angle: ExplainAngle; sources: number[] };
+  /** ``targets``: the point(s) a plot's curve must be brought through. */
+  explore: { prompt_md: string; figure: Figure; targets?: { x: number; y: number }[]; sources: number[] };
+  /** ``run`` is for the sandbox only (the checks and a known-good answer): never shown. */
+  write_code: { prompt_md: string; lang: "javascript"; starter: string; run: { checks: CodeCheck[]; solution: string }; sources: number[] };
   predict: { setup_md: string; question_md: string; options: Opt[]; sources: number[] };
   mcq: { question_md: string; options: Opt[]; sources: number[] };
   order_steps: { prompt_md: string; items: Opt[]; sources: number[] };
@@ -236,6 +286,8 @@ export interface PublicByKind {
 /** The answer key, once answered. */
 export interface RevealByKind {
   explain: Record<string, never>;
+  explore: { solution: FigureAnswer; goal: Record<string, unknown>; figure: Figure; explain_md: string };
+  write_code: { solution: string; explain_md: string; checks: { id: string; label: string }[] };
   predict: { correct_id: string; notes: Record<string, string>; misconceptions: Record<string, string>; explain_md: string };
   mcq: RevealByKind["predict"];
   order_steps: { order: string[]; explain_md: string };
@@ -287,6 +339,8 @@ export interface Step<K extends StepKind = StepKind> {
   turns_left?: number;
   asks: Ask[];
   grade: Grade | null;
+  /** Answered but counted for nothing (a code task whose own answer failed its checks). */
+  void?: boolean;
   reveal: RevealByKind[K] | null;
   created_at: string;
   answered_at: string | null;

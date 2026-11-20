@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Study code runner</title>
+<!--
+  Runs the code a learner writes in a Study "write code" step.
+
+  This page is only ever loaded in a hidden <iframe sandbox="allow-scripts">
+  by the lesson player, and nginx serves it with its own policy:
+  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' blob:;
+  worker-src blob:". So it has no origin (no cookies, no storage, no way to
+  call Promptly as the person signed in) and no network at all. The code runs
+  one level further in, in a Worker that is stopped after a few seconds.
+
+  Nothing here uses eval: the learner's code and the checks are written into
+  the Worker's own source text. If the policy header is missing, this inline
+  script is blocked by the site's normal policy and nothing runs.
+-->
+</head>
+<body>
+<script>
+(function () {
+  "use strict";
+  var HEAD_LINES = 1;
+  // Everything on ONE line, so a line number in the learner's code is off by exactly HEAD_LINES.
+  var HEAD =
+    "var __out=[],__len=0;function __show(v){try{return typeof v==='string'?v:typeof v==='function'?'[function]':v===undefined?'undefined':JSON.stringify(v)}catch(e){return String(v)}}" +
+    "function __log(){if(__len>4000)return;var s=Array.prototype.map.call(arguments,__show).join(' ');__len+=s.length;__out.push(s)}" +
+    "var console={log:__log,info:__log,warn:__log,error:__log,debug:__log};" +
+    "self.fetch=self.XMLHttpRequest=self.WebSocket=self.EventSource=self.importScripts=self.indexedDB=self.caches=self.BroadcastChannel=undefined;" +
+    "function __same(a,b){if(typeof a==='number'&&typeof b==='number')return (a!==a&&b!==b)||Math.abs(a-b)<=1e-9*Math.max(1,Math.abs(a),Math.abs(b));" +
+    "if(a===b)return true;if(a===null||b===null||typeof a!=='object'||typeof b!=='object')return false;" +
+    "if(Array.isArray(a)!==Array.isArray(b))return false;" +
+    "if(Array.isArray(a)){if(a.length!==b.length)return false;for(var i=0;i<a.length;i++)if(!__same(a[i],b[i]))return false;return true}" +
+    "var ka=Object.keys(a),kb=Object.keys(b);if(ka.length!==kb.length)return false;for(var j=0;j<ka.length;j++){if(!Object.prototype.hasOwnProperty.call(b,ka[j])||!__same(a[ka[j]],b[ka[j]]))return false}return true}\n";
+
+  function source(code, checks) {
+    var tail = "\n;var __r={},__got={};\n";
+    for (var i = 0; i < checks.length; i++) {
+      var id = JSON.stringify(String(checks[i].id));
+      tail +=
+        "try{var __v=(" + String(checks[i].call) + "\n);__got[" + id + "]=__show(__v).slice(0,200);__r[" + id + "]=__same(__v," + JSON.stringify(checks[i].expect) + ")}" +
+        "catch(e){__r[" + id + "]=false;__got[" + id + "]='error: '+String(e&&e.message||e).slice(0,160)}\n";
+    }
+    tail += "postMessage({results:__r,got:__got,output:__out.join('\\n').slice(0,4000),error:''});\n";
+    return HEAD + String(code) + tail;
+  }
+
+  window.addEventListener("message", function (ev) {
+    var m = ev.data;
+    if (ev.source !== window.parent || !m || m.type !== "study-run" || !Array.isArray(m.checks)) return;
+    var url = URL.createObjectURL(new Blob([source(m.code, m.checks)], { type: "text/javascript" }));
+    var worker = null;
+    var done = false;
+    var timer = 0;
+    function finish(result) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { if (worker) worker.terminate(); } catch (e) { /* already gone */ }
+      URL.revokeObjectURL(url);
+      window.parent.postMessage({ type: "study-result", id: m.id, result: result }, "*");
+    }
+    function failed(message, line) {
+      var results = {};
+      for (var i = 0; i < m.checks.length; i++) results[String(m.checks[i].id)] = false;
+      finish({ results: results, got: {}, output: "", error: message, line: line || null });
+    }
+    try {
+      worker = new Worker(url);
+    } catch (e) {
+      failed("This browser can't run code here.");
+      return;
+    }
+    timer = setTimeout(function () { failed("Your code took too long. Is there a loop that never ends?"); }, Math.min(10000, Math.max(500, Number(m.timeout) || 3000)));
+    worker.onmessage = function (e) { finish(e.data); };
+    worker.onerror = function (e) {
+      if (e.preventDefault) e.preventDefault();
+      var line = typeof e.lineno === "number" && e.lineno > HEAD_LINES ? e.lineno - HEAD_LINES : null;
+      failed(String(e.message || "There's a mistake in the code.").replace(/^Uncaught\s+/, ""), line);
+    };
+  });
+  window.parent.postMessage({ type: "study-runner-ready" }, "*");
+})();
+</script>
+</body>
+</html>

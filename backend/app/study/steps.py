@@ -12,10 +12,11 @@ writes markup.
 """
 from __future__ import annotations
 
+import json
 import random
 from typing import Any
 
-from app.study import rules
+from app.study import figures, rules
 
 MAX_MD = 6000
 MAX_SHORT = 400
@@ -136,6 +137,25 @@ def clean_diagram(raw: Any) -> dict[str, Any] | None:
     return out
 
 
+#: Languages a "write code" step can run (in the browser's sandbox).
+CODE_LANGS = ("javascript",)
+
+
+def _plain(v: Any, depth: int = 0) -> bool:
+    """JSON-plain: what a check can expect back."""
+    if v is None or isinstance(v, (bool, str)):
+        return True
+    if isinstance(v, (int, float)):
+        return v == v and abs(v) < 1e15
+    if depth > 4:
+        return False
+    if isinstance(v, list):
+        return len(v) <= 50 and all(_plain(x, depth + 1) for x in v)
+    if isinstance(v, dict):
+        return len(v) <= 30 and all(isinstance(k, str) and _plain(x, depth + 1) for k, x in v.items())
+    return False
+
+
 # ----------------------------------------------------------------- building
 
 
@@ -163,8 +183,11 @@ def _options(raw_opts: Any, correct: Any, rng: random.Random, lo: int = 3) -> tu
     return public, correct_id, notes, misc
 
 
-def build(kind: str, raw: Any, *, valid_sources: set[int] | None = None, seed: int | None = None) -> dict[str, Any]:
-    """A stored payload from the model's raw step. Raises :class:`StepInvalid`."""
+def build(
+    kind: str, raw: Any, *, valid_sources: set[int] | None = None, seed: int | None = None, tool: str = "", lang: str = ""
+) -> dict[str, Any]:
+    """A stored payload from the model's raw step. ``tool`` is what the concept
+    suits (a figure type, or ``code`` in ``lang``). Raises :class:`StepInvalid`."""
     if kind not in rules.KINDS:
         raise StepInvalid("unknown kind")
     if not isinstance(raw, dict):
@@ -179,6 +202,11 @@ def build(kind: str, raw: Any, *, valid_sources: set[int] | None = None, seed: i
             "key_points": [_s(x, 240) for x in (raw.get("key_points") if isinstance(raw.get("key_points"), list) else []) if _s(x)][:5],
             "diagram": clean_diagram(raw.get("diagram")),
         }
+        # A figure to play with, only where the concept suits one (a bad one is dropped).
+        if tool in rules.FIGURE_TOOLS and raw.get("figure") is not None:
+            fig = figures.clean_or_none(raw.get("figure"), want=tool)
+            if fig is not None:
+                pub["figure"], pub["diagram"] = fig, None
     elif kind in ("mcq", "predict"):
         options, correct_id, notes, misc = _options(raw.get("options"), raw.get("correct"), rng)
         pub = {"question_md": _need(raw.get("question"), "question", 1500), "options": options}
@@ -260,6 +288,38 @@ def build(kind: str, raw: Any, *, valid_sources: set[int] | None = None, seed: i
             "rubric": rubric,
             "model_answer_md": _need(raw.get("model_answer"), "model answer", 2500),
         }
+    elif kind == "explore":
+        if tool not in rules.FIGURE_TOOLS:
+            raise StepInvalid("this concept has no figure")
+        try:
+            fig = figures.clean(raw.get("figure"), want=tool)
+            goal, solution = figures.clean_goal(fig, raw.get("goal"))
+        except figures.FigureInvalid as e:
+            raise StepInvalid(str(e)) from e
+        pub = {"prompt_md": _need(raw.get("prompt"), "prompt", 1500), "figure": figures.public(fig, hide_notes=True)}
+        if fig["type"] == "plot":
+            pub["targets"] = goal["points"]  # drawn on the plot: "make the curve pass through these"
+        key = {"goal": goal, "solution": solution, "figure": fig, "explain_md": _need(raw.get("explain"), "explain", 2000)}
+    elif kind == "write_code":
+        if tool != "code" or lang not in CODE_LANGS:
+            raise StepInvalid("this concept has no code to run")
+        checks = []
+        for i, c in enumerate(_list(raw.get("checks"), "checks", 2, 6)):
+            if not isinstance(c, dict) or "expect" not in c:
+                raise StepInvalid("each check is {call, expect, label}")
+            expect = c["expect"]
+            if not _plain(expect) or len(json.dumps(expect)) > 600:
+                raise StepInvalid("a check's expect must be a plain value (number, text, true/false, null, list, object)")
+            checks.append({"id": f"k{i + 1}", "call": _need(c.get("call"), "check call", 200), "expect": expect, "label": _s(c.get("label"), 160)})
+        if len({c["call"] for c in checks}) != len(checks):
+            raise StepInvalid("two checks are the same")
+        starter, solution = _need(raw.get("starter"), "starter", 3000), _need(raw.get("solution"), "solution", 4000)
+        if starter.strip() == solution.strip():
+            raise StepInvalid("the starter code must leave the work to the learner")
+        # The checks and a known-good answer go to the browser: that is where
+        # the code runs (a sandbox with no network). They are never shown.
+        pub = {"prompt_md": _need(raw.get("prompt"), "prompt", 2000), "lang": lang, "starter": starter, "run": {"checks": checks, "solution": solution}}
+        key = {"solution": solution, "explain_md": _s(raw.get("explain"), 2000), "checks": [{"id": c["id"], "label": c["label"] or c["call"]} for c in checks]}
     pub["sources"] = _sources(raw, valid_sources or set())
     if kind != "explain":
         key["hints"] = _hints(raw)
@@ -292,7 +352,7 @@ def build_capstone(raw: Any, concept_ids: list[str], *, valid_sources: set[int] 
 
 # ------------------------------------------------------------------ grading
 
-LOCAL = ("mcq", "predict", "order_steps", "match_pairs", "spot_error", "worked_example")
+LOCAL = ("mcq", "predict", "order_steps", "match_pairs", "spot_error", "worked_example", "explore", "write_code")
 WRITTEN = ("explain_back", "scenario", "teach_student")
 
 
@@ -343,6 +403,23 @@ def check_answer(kind: str, payload: dict[str, Any], answer: Any) -> dict[str, A
         if not isinstance(blanks, dict) or set(blanks) != set(want) or any(blanks[k] not in want[k] for k in want):
             raise AnswerInvalid("Fill in every step.")
         return {"blanks": {str(k): str(v) for k, v in blanks.items()}}
+    if kind == "explore":
+        try:
+            return figures.check_answer(payload["key"]["figure"], answer)
+        except figures.AnswerBad as e:
+            raise AnswerInvalid(str(e)) from e
+    if kind == "write_code":
+        code = answer.get("code")
+        if not isinstance(code, str) or not code.strip() or len(code) > 8000:
+            raise AnswerInvalid("Write some code first.")
+        ids = [c["id"] for c in pub["run"]["checks"]]
+        results = answer.get("results")
+        if not isinstance(results, dict) or set(results) != set(ids) or not all(isinstance(v, bool) for v in results.values()):
+            raise AnswerInvalid("Run your code before you hand it in.")
+        return {
+            "code": code, "results": {k: results[k] for k in ids}, "output": _s(answer.get("output"), 2000),
+            "error": _s(answer.get("error"), 500), "faulty": answer.get("faulty") is True,
+        }
     if kind in ("explain_back", "scenario", "capstone"):
         text = _s(answer.get("text"), 8000 if kind == "capstone" else 4000)
         if len(text) < 2:
@@ -390,6 +467,22 @@ def grade_local(kind: str, payload: dict[str, Any], answer: dict[str, Any]) -> d
             "misconception": None if right else (key.get("misconception") or None),
             "detail": {"error_id": key["error_id"], "correction": key.get("correction", "")},
         }
+    if kind == "explore":
+        outcome, miss = figures.grade(key["figure"], key["goal"], answer)
+        close = "Close, but not quite on it.\n\n" if outcome == "partial" else ""
+        return {"outcome": outcome, "feedback_md": close + key["explain_md"], "misconception": None, "detail": {"miss": miss, "solution": key["solution"]}}
+    if kind == "write_code":
+        labels = {c["id"]: c["label"] for c in key["checks"]}
+        failed = [k for k, ok in answer["results"].items() if not ok]
+        lines = (["These checks didn't pass:"] + [f"- {labels[k]}" for k in failed]) if failed else []
+        if answer.get("error"):
+            lines = [f"Your code stopped with an error: `{answer['error'][:300]}`", ""] + lines
+        if key.get("explain_md"):
+            lines += ["", key["explain_md"]]
+        return {
+            "outcome": _band(1 - len(failed) / len(labels)), "feedback_md": "\n".join(lines).strip(), "misconception": None,
+            "detail": {"failed": failed, "passed": len(labels) - len(failed), "checks": len(labels)},
+        }
     if kind == "worked_example":
         right_ids = [k for k, v in key["blanks"].items() if answer["blanks"].get(k) == v]
         notes = [key["notes"][k] for k in key["blanks"] if k not in right_ids and key["notes"].get(k)]
@@ -426,4 +519,8 @@ def public_view(payload: dict[str, Any]) -> dict[str, Any]:
 
 def reveal_view(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     """What is shown once the step is answered (the key, without the hints)."""
+    if kind == "explore":
+        # The answer, why, and the figure whole (a parts figure's notes come back).
+        key = payload["key"]
+        return {"solution": key["solution"], "goal": key["goal"], "figure": key["figure"], "explain_md": key["explain_md"]}
     return {k: v for k, v in payload["key"].items() if k != "hints"}

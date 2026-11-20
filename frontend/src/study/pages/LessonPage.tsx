@@ -433,6 +433,12 @@ export function LessonPage() {
                 </div>
               )}
 
+              {answered && step.void && (
+                <p role="status" data-testid="study-void" className="study-in rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-[15px] text-[var(--text)]">
+                  That task had a fault in it, so it didn't count. On to the next one.
+                </p>
+              )}
+
               {phase === "advancing" && <Thinking label={quiet ? "Next question" : "The teacher is getting your next step ready"} />}
 
               {error && (
