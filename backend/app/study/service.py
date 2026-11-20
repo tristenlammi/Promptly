@@ -1107,10 +1107,16 @@ async def start_review(db: AsyncSession, user: User, subject_id: uuid.UUID | Non
             .order_by(StudySession.started_at.desc())
         )
     ).scalars().first()
-    if active is not None:
-        return active
     if subject_id is not None:
         await get_subject(db, user, subject_id)
+    scope = str(subject_id) if subject_id else "all"
+    if active is not None:
+        if (active.plan or {}).get("scope", "all") == scope:
+            return active
+        # A sitting left open for something else (one subject, when everything
+        # is now asked for): it is closed, and this one starts from what is due.
+        await _end(db, active, await db.get(StudySubject, active.subject_id))
+        await db.commit()
     rows = await due_rows(db, user, subject_id)
     if not rows:
         raise StudyError("nothing_due", "Nothing is due for review right now.", 409)

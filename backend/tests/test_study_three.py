@@ -751,3 +751,29 @@ async def test_a_new_account_can_be_made_with_study_already_set_for_a_child(clie
     assert r.status_code in (200, 201) and r.json()["study_level_lock"] is None
     r = await client.post("/api/admin/users", json={**body, "email": "c@example.com", "username": "odd", "study_level_lock": "toddler"}, headers=H(admin))
     assert r.status_code == 422
+
+
+async def test_a_review_left_open_for_one_subject_does_not_stand_in_for_reviewing_everything(db, user, model):
+    from datetime import datetime, timedelta, timezone
+
+    from app.study import service
+    from app.study.models import StudyConcept
+
+    a = await kit.make_subject(db, user)
+    b = await kit.make_subject(db, user, title="Knots")
+    for s in (a, b):
+        assert (await kit.run_course(db, user, s, kit.strong))["complete"]
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    for c in (await db.execute(select(StudyConcept).where(StudyConcept.subject_id.in_([a.id, b.id])))).scalars():
+        c.due_at = past
+    await db.commit()
+
+    one = await service.start_review(db, user, a.id)
+    assert len(one.plan["queue"]) == 6 and one.plan["scope"] == str(a.id)
+    assert (await service.start_review(db, user, a.id)).id == one.id  # the same sitting, picked up
+
+    everything = await service.start_review(db, user)
+    await db.refresh(one)
+    assert everything.id != one.id and one.status == "done"
+    assert len(everything.plan["queue"]) == 12 and everything.plan["scope"] == "all"
+    assert (await service.start_review(db, user)).id == everything.id
