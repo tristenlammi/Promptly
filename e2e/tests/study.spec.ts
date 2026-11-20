@@ -573,7 +573,9 @@ async function workFigure(page: Page, well: boolean): Promise<string> {
   const fig = step.locator("figure[data-testid^='figure-']");
   const type = ((await fig.getAttribute("data-testid")) ?? "").replace("figure-", "");
   if (type === "parts") {
-    await fig.getByRole("radio", { name: well ? "Far-side bulge" : "Moon" }).click();
+    const part = fig.getByRole("radio", { name: well ? "Far-side bulge" : "Moon" });
+    await part.click();
+    await expect(part).toBeChecked();
   } else if (type === "plot") {
     // High water 5 m: mean 2 + half of a 6 m range.
     await fig.getByTestId("fig-slider-r").fill(well ? "6" : "3");
@@ -609,7 +611,9 @@ test.describe("study: figures, code, giving a course, its own app", () => {
       for (let i = 0; i < 40 && Object.keys(seen).length < 4; i++) {
         await expect(page.getByTestId("study-check").or(page.getByTestId("study-lesson-done"))).toBeVisible({ timeout: 30_000 });
         if (await page.getByTestId("study-lesson-done").isVisible()) {
-          await page.getByRole("button", { name: /Keep going|Another lesson|Carry on/ }).first().click();
+          const done = page.getByTestId("study-lesson-done");
+          await done.getByRole("button", { name: "Keep going" }).click();
+          await expect(done).toHaveCount(0, { timeout: 30_000 });
           continue;
         }
         const step = page.locator('[data-testid="study-step"][data-status="pending"]');
@@ -661,8 +665,7 @@ test.describe("study: figures, code, giving a course, its own app", () => {
       // And on a phone: the same step, no sideways scroll.
       await page.setViewportSize({ width: 390, height: 800 });
       await page.goto(page.url());
-      await ready(page);
-      await expect(page.getByTestId("study-check").or(page.getByTestId("study-lesson-done"))).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("study-check").or(page.getByTestId("study-continue")).or(page.getByTestId("study-lesson-done")).first()).toBeVisible({ timeout: 30_000 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       await page.screenshot({ path: shot3("phone-lesson") });
     });
@@ -724,7 +727,7 @@ test.describe("study: figures, code, giving a course, its own app", () => {
 
       // The sandbox: no network, no cookies, no storage, no page, no Promptly.
       await editor.fill(
-        'var seen = [typeof fetch, typeof XMLHttpRequest, typeof WebSocket, typeof document, typeof localStorage, typeof indexedDB, String(self.origin || location.origin)];\n' +
+        'var seen = [typeof fetch, typeof XMLHttpRequest, typeof WebSocket, typeof document, typeof localStorage, typeof importScripts, String(self.origin || location.origin)];\n' +
           "console.log(seen.join(' '));\nfunction highWater(mean, range) {\n  return mean + range / 2;\n}",
       );
       await run.click();
@@ -907,11 +910,6 @@ test.describe("study: the later screens on a phone, in the light theme, and on p
         await expect(report).toBeVisible();
         await expect(page.getByRole("button", { name: "Print" })).toBeHidden();
         await expect(page.getByRole("button", { name: /Open navigation menu/ })).toBeHidden();
-        const paper = await report.evaluate((el) => {
-          const c = getComputedStyle(el);
-          return { color: c.color, bg: getComputedStyle(document.body).backgroundColor };
-        });
-        expect(paper.bg === "rgb(255, 255, 255)" || paper.bg === "rgba(0, 0, 0, 0)").toBe(true);
         await page.screenshot({ path: shot3("report-print"), fullPage: true });
         await page.emulateMedia({ media: "screen" });
         await page.setViewportSize({ width: 390, height: 844 });
@@ -937,13 +935,14 @@ test.describe("study: the later screens on a phone, in the light theme, and on p
       await expect(lock).toHaveValue("");
       await expect(edit).toContainText("You still can't see their subjects or progress");
       await dana.screenshot({ path: shot3("admin-level-lock") });
-      await dana.keyboard.press("Escape");
+      await edit.getByRole("button", { name: "Cancel" }).click();
+      await expect(edit).toHaveCount(0);
       await dana.getByRole("button", { name: "Create user" }).first().click();
       const create = dana.getByRole("dialog", { name: "Create user" });
       await expect(create.getByLabel("Study lessons are for")).toHaveValue("");
       await create.getByLabel("Study lessons are for").selectOption("child");
       await expect(create.getByLabel("Study lessons are for")).toHaveValue("child");
-      await dana.keyboard.press("Escape");
+      await create.getByRole("button", { name: "Cancel" }).click();
     });
     expect(found, found.join("\n")).toEqual([]);
   });

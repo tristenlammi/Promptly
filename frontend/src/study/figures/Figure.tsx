@@ -288,11 +288,16 @@ function Scale({
           onChange={(e) => set({ ...state, value: tidy(Number(e.target.value)), touched: true })}
         />
         <div className="pointer-events-none relative h-8" aria-hidden>
-          {[spec.min, spec.max].map((v) => (
-            <span key={v} className="absolute top-1 -translate-x-1/2 text-[11px] tabular-nums text-[var(--text-muted)]" style={{ left: pct(v) }}>
-              {fmt(v)}
-            </span>
-          ))}
+          {[spec.min, spec.max].map((v, i) => {
+            // A landmark at an end of the scale is named under that end's number.
+            const mark = spec.marks.find((m) => m.value === v);
+            return (
+              <span key={v} className={cn("absolute top-1 flex flex-col text-[11px] text-[var(--text-muted)]", i === 0 ? "left-0 items-start" : "right-0 items-end")}>
+                <span className="tabular-nums">{fmt(v)}</span>
+                {mark && <span className="max-w-[8rem] truncate">{mark.label}</span>}
+              </span>
+            );
+          })}
           {spec.marks
             .filter((m) => m.value !== spec.min && m.value !== spec.max)
             .map((m, i) => (
@@ -307,9 +312,6 @@ function Scale({
             </span>
           )}
         </div>
-        {spec.marks.some((m) => m.value === spec.min || m.value === spec.max) && (
-          <p className="sr-only">{spec.marks.map((m) => `${m.label} at ${fmt(m.value)}`).join(", ")}</p>
-        )}
       </div>
       {spec.readout && (
         <p className="text-sm text-[var(--text)]" data-testid="fig-scale-readout">
