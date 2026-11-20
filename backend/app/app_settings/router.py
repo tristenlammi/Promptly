@@ -146,6 +146,9 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         voice_provider_id=row.voice_provider_id,
         voice_model_id=row.voice_model_id,
         voice_configured=row.voice_configured,
+        study_provider_id=row.study_provider_id,
+        study_model_id=row.study_model_id,
+        study_configured=row.study_configured,
         photos_vision_provider_id=row.photos_vision_provider_id,
         photos_vision_model_id=row.photos_vision_model_id,
         photos_vision_configured=row.photos_vision_configured,
@@ -528,6 +531,35 @@ async def update_app_settings(
             diff["voice_model_id"] = new_mid
         row.voice_provider_id = new_pid
         row.voice_model_id = new_mid
+
+    # ----- Study model -----
+    spid_set = "study_provider_id" in fields
+    smid_set = "study_model_id" in fields
+    if spid_set != smid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "study_provider_id and study_model_id must be sent together "
+                "— pass both to set the Study model, or both as null to clear."
+            ),
+        )
+    if spid_set and smid_set:
+        new_pid = payload.study_provider_id
+        new_mid = payload.study_model_id
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "study_provider_id and study_model_id must both be set "
+                    "or both be null."
+                ),
+            )
+        if row.study_provider_id != new_pid:
+            diff["study_provider_id"] = str(new_pid) if new_pid else None
+        if row.study_model_id != new_mid:
+            diff["study_model_id"] = new_mid
+        row.study_provider_id = new_pid
+        row.study_model_id = new_mid
 
     # ----- Photos vision model (PH-2) -----
     ppid_set = "photos_vision_provider_id" in fields

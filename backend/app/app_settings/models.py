@@ -318,6 +318,18 @@ class AppSettings(Base):
         String(255), nullable=True
     )
 
+    # ----- Study model (0483) -----
+    # The model that teaches in the Study app: it plans the course, writes
+    # the lesson steps and grades written answers, so a strong model shows.
+    # NULL = Study uses the default chat model (then the learner's last
+    # chat model). Same FK/ON DELETE shape as the other pairs.
+    study_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("model_providers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    study_model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Describing photos (PH-2, 0217): the model that writes each photo's
     # sentence and tags for the people who turned it on. A cloud model only
     # describes ``photos_vision_monthly_limit`` photos a month (everyone's).
@@ -439,6 +451,11 @@ class AppSettings(Base):
     def voice_configured(self) -> bool:
         """True when the admin has designated a dedicated voice model."""
         return bool(self.voice_provider_id and self.voice_model_id)
+
+    @property
+    def study_configured(self) -> bool:
+        """True when the admin has designated a model for the Study app."""
+        return bool(self.study_provider_id and self.study_model_id)
 
     @property
     def photos_vision_configured(self) -> bool:

@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Study, the server side (the screens come next): an AI teacher for any subject you pick. You say what you want to learn, why and how deep; it reads up (the web if you leave that on, plus any of your own files and notes you attach), lays the subject out as a map of ideas that build on each other, and can run a two-minute check so it skips what you already know. Lessons mix ten kinds of step, from short explanations with diagrams to "predict before you're told", spot the mistake, put the steps in order, worked examples, explaining it back, real situations, and putting a confused student right. Every answer changes its picture of you: do well and it moves on quickly, miss and it explains another way, and if your answers show something more basic is missing it adds that to the map first and tells you why. You can ask the teacher anything mid-step, take a hint, say "I don't know", or test out of an idea you already have. Each subject is pitched for a child, a teenager or an adult. Admins can pick the model that teaches (Admin → Models → Study). Your subjects and progress are yours alone: nobody else, an admin included, can see them.
+
 ## [0.51.0] - 2026-11-19
 
 ### Added

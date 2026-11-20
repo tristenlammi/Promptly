@@ -848,6 +848,10 @@ app.include_router(
 from app.forms.router import router as forms_router  # noqa: E402
 
 app.include_router(forms_router, prefix="/api/forms", tags=["forms"])
+# Study (0483): an AI teacher; every route is the signed-in person's own.
+from app.study.router import router as study_router  # noqa: E402
+
+app.include_router(study_router, prefix="/api/study", tags=["study"])
 # Forms (WP-F1.3): the answer side (no sign-in dependency: people without
 # an account answer link forms) and Admin → Forms.
 from app.forms.admin_router import router as forms_admin_router  # noqa: E402

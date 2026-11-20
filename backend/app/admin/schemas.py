@@ -244,6 +244,12 @@ class AppSettingsResponse(BaseModel):
     voice_model_id: str | None = None
     voice_configured: bool
 
+    # ----- Study model (0483) -----
+    # The model that teaches in the Study app; null = the default chat model.
+    study_provider_id: uuid.UUID | None = None
+    study_model_id: str | None = None
+    study_configured: bool = False
+
     # ----- Photos vision (PH-2) -----
     photos_vision_provider_id: uuid.UUID | None = None
     photos_vision_model_id: str | None = None
@@ -357,6 +363,11 @@ class AppSettingsUpdate(BaseModel):
     # value responsiveness over raw capability.
     voice_provider_id: uuid.UUID | None = None
     voice_model_id: str | None = Field(default=None, max_length=255)
+
+    # ----- Study model -----
+    # Same paired semantics. Favor a strong model: it plans courses and grades.
+    study_provider_id: uuid.UUID | None = None
+    study_model_id: str | None = Field(default=None, max_length=255)
 
     # ----- Photos vision (PH-2) -----
     # Same paired semantics; the limit is photos a cloud model may describe

@@ -171,3 +171,13 @@ from app.notes.models import (  # noqa: F401
 from app.feedback.models import FeedbackMessage  # noqa: F401
 # Promptly Home: homes, members, boxes (0476).
 from app.home.models import Home, HomeBox, HomeLayout, HomeMember  # noqa: F401
+# Study: subjects, the concept map, lessons (0483).
+from app.study.models import (  # noqa: F401
+    StudyConcept,
+    StudyMisconception,
+    StudySession,
+    StudySource,
+    StudyStep,
+    StudySubject,
+    StudyUnit,
+)

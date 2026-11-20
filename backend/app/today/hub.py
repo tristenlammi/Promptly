@@ -695,6 +695,15 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
             sec["forms"] = f
     except Exception:  # noqa: BLE001
         logger.exception("today forms section failed")
+    # Study: the subject in hand, how far along, what is next.
+    try:
+        from app.study.router import today_section as learn_today
+
+        learn = await learn_today(db, user)
+        if learn:
+            sec["learn"] = learn
+    except Exception:  # noqa: BLE001
+        logger.exception("today learn section failed")
     # Calls: who's hanging out in a voice channel of your spaces right now.
     try:
         from app.calls.apps import today_section as voice_today
