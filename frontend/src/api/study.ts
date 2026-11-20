@@ -355,12 +355,14 @@ export function studyError(err: unknown): { code: string; message: string; statu
   if (isAxiosError(err)) {
     const status = err.response?.status ?? 0;
     const detail = (err.response?.data as { detail?: unknown } | undefined)?.detail;
+    // The shared send limit (chat's "sending messages too quickly"), in Study's words.
+    if (status === 429 && (typeof detail !== "string" || /too quickly/i.test(detail)) && !(detail && typeof detail === "object"))
+      return { code: "rate", message: "You're going faster than the teacher can keep up. Give it a minute, then carry on: nothing is lost.", status };
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
       const d = detail as { code?: unknown; message?: unknown };
       if (typeof d.message === "string") return { code: typeof d.code === "string" ? d.code : "error", message: d.message, status };
     }
     if (typeof detail === "string") return { code: "error", message: detail, status };
-    if (status === 429) return { code: "rate", message: "You've reached the limit for now. Try again in a little while.", status };
     if (status === 0) return { code: "offline", message: "Can't reach Promptly. Check your connection and try again.", status };
     if (status === 422) return { code: "bad", message: "That couldn't be sent. Try again.", status };
   }

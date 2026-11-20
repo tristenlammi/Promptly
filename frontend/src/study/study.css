@@ -55,11 +55,11 @@ html.dark .study {
 .study-in { animation: study-in 260ms var(--ease-out, ease-out) both; }
 
 @keyframes study-pop {
-  0% { transform: scale(0.6); opacity: 0; }
-  60% { transform: scale(1.12); opacity: 1; }
+  0% { transform: scale(0.8); opacity: 0.35; }
+  60% { transform: scale(1.08); opacity: 1; }
   100% { transform: scale(1); }
 }
-.study-pop { animation: study-pop 360ms var(--ease-out, ease-out) both; }
+.study-pop { animation: study-pop 260ms var(--ease-out, ease-out) both; }
 
 @keyframes study-shake {
   0%, 100% { transform: none; }

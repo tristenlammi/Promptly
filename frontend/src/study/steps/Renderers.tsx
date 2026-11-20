@@ -139,7 +139,7 @@ function Options({
             onPick={() => onPick(o.id)}
             note={correctId && (o.id === correctId || picked === o.id) ? notes?.[o.id] : undefined}
           >
-            <Md text={o.text} compact />
+            <Md text={o.text} line />
           </Choice>
         );
       })}
@@ -207,6 +207,12 @@ export function McqStep({ step, draft, setDraft, locked }: StepProps<"mcq">) {
     <div className="flex flex-col gap-4">
       <Md text={p.question_md} className="text-[17px] font-medium" />
       <Options label="Choices" options={p.options} picked={draft.optionId} onPick={(id) => setDraft({ ...draft, optionId: id })} locked={locked} correctId={r?.correct_id} notes={r?.notes} />
+      {r?.explain_md && (
+        <Card tone="soft" className="study-in">
+          <Label>The idea</Label>
+          <Md text={r.explain_md} compact />
+        </Card>
+      )}
     </div>
   );
 }
@@ -300,7 +306,7 @@ export function OrderStep({ step, draft, setDraft, locked }: StepProps<"order_st
                 {ok === true ? <Check className="h-3.5 w-3.5" /> : i + 1}
               </span>
               <span className="min-w-0 flex-1 text-[15px] leading-snug text-[var(--text)]">
-                <Md text={item.text} compact />
+                <Md text={item.text} line />
                 {ok === false && <span className="mt-0.5 block text-xs text-[var(--text-muted)]">Belongs at place {rightPlace + 1}</span>}
               </span>
               {!r && (
@@ -354,7 +360,8 @@ export function MatchStep({ step, draft, setDraft, locked }: StepProps<"match_pa
       <ul className="flex flex-col gap-2">
         {p.left.map((l) => {
           const rid = draft.pairs[l.id];
-          const ok = r ? r.pairs[l.id] === rid : null;
+          // Left blank (an "I don't know"): the answer is simply shown, not marked wrong.
+          const ok = r && rid ? r.pairs[l.id] === rid : null;
           const isTarget = !r && target === l.id;
           return (
             <li
@@ -395,7 +402,7 @@ export function MatchStep({ step, draft, setDraft, locked }: StepProps<"match_pa
                 </button>
               ) : (
                 <span className={cn("flex items-center rounded-lg border border-dashed px-2.5 py-2 text-sm", isTarget ? "border-[var(--st-accent)] text-[var(--st-accent-text)]" : "border-[var(--st-line)] text-[var(--text-muted)]")}>
-                  {r ? "No answer" : isTarget ? "Pick below" : "…"}
+                  {r ? <span className="text-[var(--text)]">{rightById.get(r.pairs[l.id])?.text}</span> : isTarget ? "Pick below" : "…"}
                 </span>
               )}
             </li>
@@ -443,7 +450,7 @@ export function SpotErrorStep({ step, draft, setDraft, locked }: StepProps<"spot
           const mark: Mark = r ? (l.id === r.error_id ? (draft.lineId === l.id ? "right" : "missed") : draft.lineId === l.id ? "wrong" : null) : null;
           return (
             <Choice key={l.id} index={i} selected={draft.lineId === l.id} mark={mark} disabled={locked} onPick={() => setDraft({ ...draft, lineId: l.id })}>
-              <Md text={l.text} compact />
+              <Md text={l.text} line />
             </Choice>
           );
         })}
@@ -490,7 +497,7 @@ export function WorkedStep({ step, draft, setDraft, locked }: StepProps<"worked_
                     const mark: Mark = right ? (o.id === right ? (picked ? "right" : "missed") : picked ? "wrong" : null) : null;
                     return (
                       <Choice key={o.id} selected={picked} mark={mark} disabled={locked} onPick={() => setDraft({ ...draft, blanks: { ...draft.blanks, [s.id]: o.id } })}>
-                        <Md text={o.text} compact />
+                        <Md text={o.text} line />
                       </Choice>
                     );
                   })}
@@ -533,6 +540,8 @@ function Written({ step, draft, setDraft, locked, placeholder }: StepProps<"expl
         onChange={(e) => setDraft({ ...draft, text: e.target.value.slice(0, WRITTEN_MAX) })}
         disabled={locked}
         rows={6}
+        // A keyboard is already there on a computer; on a phone it would cover the question.
+        autoFocus={typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches === true}
         placeholder={placeholder}
         className="min-h-[9rem] w-full resize-y rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-[16px] leading-relaxed text-[var(--text)] placeholder:text-[var(--text-muted)] focus:border-[var(--st-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--st-soft)] disabled:opacity-70"
       />

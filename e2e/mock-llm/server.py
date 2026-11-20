@@ -46,6 +46,9 @@ well-formed answers: Sheet AI fill → "Cat <row>" per row, clean → each
 text cell trimmed and Title Cased, build → a small budget with a SUM
 formula, PDF → Doc → "# Converted" plus the text.
 
+The Study app's teacher gets a small course about tides in the JSON shapes
+it asks for; see the Study section below for how answers are marked.
+
 ``prompt_tokens`` is a size estimate of the request (characters / 4), and
 ``GET /last-request`` returns the last chat request body, so tests can
 check what a turn actually sends.
@@ -255,6 +258,228 @@ def _editor_ai_reply(system: str, messages: list) -> str | None:
     return None
 
 
+# ------------------------------------------------------------------ Study
+# The Study app's teacher (backend/app/study/ai.py) asks for JSON in a stated
+# shape. Which shape is being asked for is read from the prompt; the answers
+# are a small course about tides, the same every time:
+#
+#   - every choice step has one right option: the text in STUDY_RIGHT
+#   - a written answer is marked by its words: "pull" or GOOD correct, HALF
+#     partial, "push" or MISC wrong with the same misconception each time
+#     (twice on one concept adds a gap concept), anything else wrong
+#   - the confused student is put right by a reply with "pull" or GOOD in it
+#   - a subject called "… failcheck" gets unusable answers (the build fails);
+#     "… kidcheck" is refused as unsuitable for a child or a teenager
+
+STUDY_RIGHT = "The moon's gravity pulls the sea towards it"
+STUDY_MISC = "thinks the sea pushes the moon"
+_STUDY_UNITS = [
+    ("Why the sea moves", "What makes a tide in the first place.", [
+        ("Gravity reaches across space", "Every mass pulls on every other; the moon is close enough for its pull on the sea to show.", "fact"),
+        ("The bulge towards the moon", "Water on the side facing the moon is pulled a little harder, so it heaps up.", "principle"),
+        ("The bulge on the far side", "The far side is pulled least, so it is left behind and heaps up too.", "principle"),
+    ]),
+    ("The rhythm of the tides", "Why high water comes when it does.", [
+        ("Two tides a day", "The Earth turns under both bulges, so most coasts get two highs and two lows a day.", "process"),
+        ("Why tides run late each day", "The moon moves on while the Earth turns, so the cycle takes about 24 hours 50 minutes.", "process"),
+    ]),
+    ("Big tides and small tides", "The sun joins in.", [
+        ("Spring tides", "Sun and moon in line pull together: the biggest range, at new and full moon.", "principle"),
+        ("Neap tides", "Sun and moon at right angles pull against each other: the smallest range.", "principle"),
+    ]),
+    ("Tides where you are", "Using it on a real coast.", [
+        ("Reading a tide table", "Times and heights of high and low water for one place.", "skill"),
+        ("The rule of twelfths", "How fast the water rises between low and high.", "skill"),
+        ("Tidal streams", "The sideways flow of water that the rise and fall drives.", "process"),
+        ("Local shape matters", "Bays and channels can double a tide or cancel it.", "principle"),
+        ("Planning around the tide", "Choosing when to go, with a margin.", "skill"),
+    ]),
+]
+_STUDY_DIAGRAMS = [
+    {"type": "flow", "title": "From the moon to high water", "nodes": [
+        {"id": "a", "label": "The moon's gravity", "note": "Weaker with distance."},
+        {"id": "b", "label": "Near side pulled hardest", "note": "It is closest to the moon."},
+        {"id": "c", "label": "Far side pulled least", "note": "So it is left behind."},
+        {"id": "d", "label": "Two bulges of water", "note": "One each side of the Earth."}],
+     "edges": [{"from": "a", "to": "b", "label": ""}, {"from": "a", "to": "c", "label": ""}, {"from": "b", "to": "d", "label": "heaps up"}, {"from": "c", "to": "d", "label": ""}]},
+    {"type": "cycle", "title": "One tidal day", "nodes": [
+        {"id": "a", "label": "High water", "note": "Under a bulge."}, {"id": "b", "label": "Ebb", "note": "The water falls."},
+        {"id": "c", "label": "Low water", "note": "Between the bulges."}, {"id": "d", "label": "Flood", "note": "The water rises."}],
+     "edges": [{"from": "a", "to": "b", "label": ""}, {"from": "b", "to": "c", "label": ""}, {"from": "c", "to": "d", "label": ""}, {"from": "d", "to": "a", "label": ""}]},
+    {"type": "compare", "title": "Spring and neap", "columns": ["Spring tide", "Neap tide"], "rows": [
+        {"label": "Sun and moon", "cells": ["In line", "At right angles"]},
+        {"label": "Range", "cells": ["Biggest", "Smallest"]},
+        {"label": "When", "cells": ["New and full moon", "Half moon"]}]},
+    {"type": "timeline", "title": "A day on the coast", "items": [
+        {"label": "High water", "when": "06:10", "note": "4.6 m"}, {"label": "Low water", "when": "12:25", "note": "0.9 m"},
+        {"label": "High water", "when": "18:35", "note": "4.4 m"}]},
+    {"type": "bars", "title": "Tidal range through the month", "unit": "m", "bars": [
+        {"label": "New moon", "value": 4.8}, {"label": "First quarter", "value": 2.1}, {"label": "Full moon", "value": 4.6}, {"label": "Last quarter", "value": 2.3}]},
+    {"type": "tree", "title": "What shapes a tide", "nodes": [
+        {"id": "t", "label": "The tide here", "note": "", "parent": None},
+        {"id": "a", "label": "The moon", "note": "The main pull.", "parent": "t"}, {"id": "b", "label": "The sun", "note": "About half as strong.", "parent": "t"},
+        {"id": "c", "label": "The coast", "note": "Bays and channels.", "parent": "t"}]},
+]
+
+
+def _study_opts() -> list[dict]:
+    return [
+        {"text": STUDY_RIGHT, "why": "Yes. Gravity gets weaker with distance, so the near side is pulled hardest."},
+        {"text": "The sea pushes the moon away", "why": "It is the other way round: the moon does the pulling.", "misconception": STUDY_MISC},
+        {"text": "The wind piles the water up", "why": "Wind makes waves and surges, not the twice-daily tide.", "misconception": "thinks wind makes tides"},
+        {"text": "The sun heats the water so it swells", "why": "Warm water does expand, but far too little and too slowly for this."},
+    ]
+
+
+def _study_step(kind: str, concept: str, prompt: str) -> dict:
+    hints = [] if "TEST OUT" in prompt else ["Think about which way the pull goes.", "The moon pulls; the sea follows."]
+    if kind == "explain":
+        angle = next((a for a, mark in (("analogy", "everyday analogy"), ("example", "fully concrete example"), ("step_by_step", "smallest steps"), ("contrast", "by contrast")) if mark in prompt), "plain")
+        pick = (sum(map(ord, concept)) + {"plain": 0, "analogy": 1, "example": 2, "step_by_step": 3, "contrast": 4}[angle]) % len(_STUDY_DIAGRAMS)
+        opening = {
+            "plain": "Start with what you know: things with mass pull on each other.",
+            "analogy": "Picture a tablecloth with a magnet under one edge: the cloth nearest the magnet lifts first.",
+            "example": "Take one beach at six in the morning, with the moon overhead.",
+            "step_by_step": "One step at a time.",
+            "contrast": "It helps to see what this is **not**: it is not wind, and it is not heat.",
+        }[angle]
+        return {"title": concept, "body": f"{opening}\n\n**{concept}.** The moon's gravity pulls on the whole Earth, but not evenly: it is strongest on the side nearest the moon. "
+                "The sea there is pulled a little more than the rock beneath it, so the water heaps up. For example, if the pull on the near side is $1.03$ and at the centre $1.00$, "
+                "that small difference is the whole tide.\n\n- The pull gets weaker with distance\n- The difference in pull, not the pull itself, makes the bulge",
+                "key_points": ["The moon pulls; the sea follows", "It is the difference in pull across the Earth that matters"],
+                "diagram": _STUDY_DIAGRAMS[pick], "sources": [1]}
+    if kind == "predict":
+        return {"setup": f"It is evening and the moon is directly overhead at your beach. ({concept})", "question": "What is the sea doing here, and why?",
+                "options": _study_opts(), "correct": 0, "reveal": "The water under the moon is pulled hardest, so it heaps up: high water. The same is happening on the far side of the Earth.",
+                "hints": hints, "sources": [1]}
+    if kind == "mcq":
+        return {"question": f"{concept}: what makes the water heap up on the side of the Earth that faces the moon?", "options": _study_opts(), "correct": 0,
+                "reveal": "The moon's gravity is strongest on the near side.", "hints": hints, "sources": [1]}
+    if kind == "order_steps":
+        return {"prompt": f"{concept}: put what happens in order, starting at low water.",
+                "steps": ["1. Low water: the beach is wide", "2. The flood: the water starts to rise", "3. High water: the bulge is overhead", "4. The ebb: the water falls again"],
+                "explain": "The Earth turns the beach into the bulge, then out of it.", "hints": hints, "sources": [1]}
+    if kind == "match_pairs":
+        return {"prompt": f"{concept}: match each word to what it means.", "pairs": [
+            {"left": "Flood", "right": "The water rising"}, {"left": "Ebb", "right": "The water falling"},
+            {"left": "Spring tide", "right": "The biggest range"}, {"left": "Neap tide", "right": "The smallest range"}],
+            "explain": "Flood and ebb are the two halves of every tide; spring and neap are the two ends of the month.", "hints": hints, "sources": [1]}
+    if kind == "spot_error":
+        return {"intro": f"A classmate wrote this about {concept.lower()}. One line is wrong.",
+                "lines": ["The moon's gravity reaches the Earth.", "It pulls hardest on the side nearest the moon.", "So the sea pushes the moon away and heaps up.", "The Earth turns, so the high water moves round."],
+                "error": 2, "explain": "The sea does not push anything: it is pulled, and it follows.", "correction": "So the sea is pulled towards the moon and heaps up.",
+                "misconception": STUDY_MISC, "hints": hints, "sources": [1]}
+    if kind == "worked_example":
+        def blank(q: str) -> dict:
+            return {"blank": True, "question": q, "options": [STUDY_RIGHT, "The sea pushes the moon away", "The wind piles the water up"], "correct": 0,
+                    "why": "The pull is strongest on the near side, so the water heaps up there."}
+        steps = [{"text": "High water was at 06:10. Half a tidal day is about 12 h 25 min.", "blank": False},
+                 {"text": "So the next high water is 06:10 + 12:25 = **18:35**.", "blank": False}]
+        steps.append(blank("Why is there a high water at all at 18:35?"))
+        if "last TWO steps" in prompt or "every step after the first" in prompt:
+            steps.insert(1, blank("What sets the time of high water?"))
+        return {"problem": f"{concept}: high water was at 06:10. When is the next, and why is there one?", "steps": steps, "hints": hints, "sources": [1]}
+    if kind == "explain_back":
+        return {"prompt": f"A friend asks why the sea comes in and goes out. Explain {concept.lower()} to them in your own words.",
+                "rubric": ["the moon's gravity pulls on the sea", "the pull is strongest on the near side", "so the water heaps up there"],
+                "model_answer": "The moon's gravity pulls on the sea. It pulls hardest on the side nearest the moon, so the water there heaps up into a bulge, and that bulge is high tide.",
+                "hints": hints, "sources": [1]}
+    if kind == "scenario":
+        return {"scenario": f"You are on a beach at dusk with the moon straight overhead and the water right up at the sea wall. A child asks you why the sea is so high. ({concept})",
+                "question": "What is going on, and what will the beach look like in about six hours?",
+                "rubric": ["the moon's pull has heaped the water up here", "in about six hours it will be low water"],
+                "model_answer": "The moon is overhead, so its pull has heaped the water up here: high water. In about six hours the Earth will have turned the beach out of the bulge and it will be low water.",
+                "hints": hints, "sources": [1]}
+    if kind == "teach_student":
+        return {"student_name": "Sam", "opening": "I think I get tides. The sea is heavy, so it pushes the moon away, and when it pushes hard the water goes up. Right?",
+                "misconception": STUDY_MISC, "rubric": ["the moon pulls on the sea, not the other way round", "the pull is strongest on the near side"],
+                "model_answer": "It is the other way round, Sam. The moon's gravity pulls on the sea, hardest on the side nearest the moon, so the water there is drawn up into a bulge.",
+                "sources": [1]}
+    return {}
+
+
+_STUDY_KINDS = (
+    ("teach_student", '"student_name"'), ("explain", '"key_points"'), ("predict", '"setup"'), ("mcq", "Test understanding, not wording"),
+    ("order_steps", "IN THE CORRECT ORDER"), ("match_pairs", '"pairs": [{"left"'), ("spot_error", "exactly ONE mistake"),
+    ("worked_example", '"problem": "a concrete problem"'), ("explain_back", "explain the idea in their own words"), ("scenario", '"scenario": "a realistic'),
+)
+
+
+def _study_reply(system: str, messages: list) -> str | None:
+    if "teacher inside Promptly's Study app" not in system:
+        return None
+    users = [_text_of(m.get("content"))[0] for m in messages if m.get("role") == "user"]
+    prompt = users[0] if users else ""
+    if "answering the learner's side question" in system:
+        asked = users[-1] if users else ""
+        if "more simply" in asked:
+            return "Put simply: **the moon pulls the sea towards it**, and the water heaps up where the pull is strongest."
+        if "analogy" in asked:
+            return "Think of a magnet under a tablecloth: the cloth nearest the magnet lifts first. The analogy stops working because gravity pulls on everything, not just metal."
+        if "example" in asked:
+            return "At a beach with the moon overhead at 18:00, the water is at its highest. By about midnight it will be low."
+        if "deeper" in asked:
+            return "The tide comes from the *difference* in the moon's pull across the Earth, which falls off roughly as $1/d^3$."
+        return "Good question. Think about **which way the pull goes**: what is doing the pulling, and what follows?"
+    found = re.search(r"^Subject: (.*)$", prompt, re.M)
+    title = found.group(1) if found else ""
+    if "failcheck" in title:
+        return "Sure! Here is a lovely course for you."
+    if '"suitable": true' in prompt:
+        if "kidcheck" in title and "The learner is an adult" not in system:
+            return json.dumps({"suitable": False, "unsuitable_reason": "This subject isn't a good fit for this age. Try it on the adult setting."})
+        found = re.search(r"^Depth wanted: (\w+)", prompt, re.M)
+        depth = found.group(1) if found else "solid"
+        wanted = _STUDY_UNITS[:3] if depth == "overview" else _STUDY_UNITS
+        units, n = [], 0
+        for u_title, u_sum, cs in wanted:
+            concepts = []
+            for c_title, c_sum, nature in cs:
+                n += 1
+                # Concept 6 builds on two earlier ones, so the map has a fork.
+                prereqs = ["c2", "c3"] if n == 6 else [f"c{n - 1}"] if n > 1 else []
+                concepts.append({"key": f"c{n}", "title": c_title, "summary": c_sum, "objectives": [f"can explain {c_title.lower()}", "can use it on a real coast"],
+                                 "nature": nature, "prereqs": prereqs, "sources": [1]})
+            units.append({"title": u_title, "summary": u_sum, "concepts": concepts})
+        if depth == "deep":
+            extra = [{"key": f"c{n + i}", "title": f"Going further {i}", "summary": "A harder case.", "objectives": ["can handle a harder case"], "nature": "skill",
+                      "prereqs": [f"c{n + i - 1}"], "sources": [1]} for i in range(1, 10)]
+            units.append({"title": "The hard parts", "summary": "Edge cases.", "concepts": extra})
+        return json.dumps({"suitable": True, "title": title.replace(" kidcheck", "") or "How tides work",
+                           "summary": "You'll be able to say why the sea rises and falls, and work out when it will. You'll read a tide table with confidence.", "units": units})
+    if '{"questions": [{"key"' in prompt:
+        keys = re.findall(r'key "([^"]+)"', prompt)
+        return json.dumps({"questions": [{"key": k, "question": "What makes the water heap up on the side of the Earth facing the moon?",
+                                          "options": [{"text": o["text"]} for o in _study_opts()], "correct": 0} for k in keys]})
+    if '"met" lists the positions' in prompt:
+        text = prompt.split("<learner_answer>")[1].split("</learner_answer>")[0]
+        low = text.lower()
+        if "GOOD" in text or "pull" in low:
+            return json.dumps({"outcome": "correct", "met": [0, 1, 2], "feedback": "Yes. You have the cause the right way round: **the moon pulls, the sea follows**.", "misconception": None})
+        if "HALF" in text:
+            return json.dumps({"outcome": "partial", "met": [0], "feedback": "You have the moon in there, which is right. What is missing is *where* the pull is strongest.", "misconception": None})
+        if "MISC" in text or "push" in low:
+            return json.dumps({"outcome": "wrong", "met": [], "feedback": "Not quite: it is the other way round. The sea does not push the moon.",
+                               "misconception": {"label": STUDY_MISC, "detail": "Has the cause and the effect the wrong way round."}})
+        return json.dumps({"outcome": "wrong", "met": [], "feedback": "That does not get at the idea yet. Think about what is doing the pulling.", "misconception": None})
+    if "one sentence TO the learner" in prompt:
+        return json.dumps({"title": "Which way gravity pulls", "summary": "A bigger mass pulls a smaller one towards it; the pull is never a push.",
+                           "objectives": ["can say which way a pull goes", "can tell a pull from a push"], "nature": "principle",
+                           "reason": "Your answers had the sea pushing the moon, so we'll sort out which way gravity pulls first."})
+    if "Stay in character as the student" in prompt:
+        said = prompt.split("<conversation>")[1].split("</conversation>")[0]
+        last = [ln for ln in said.splitlines() if ln.startswith("TEACHER:")][-1]
+        ok = "GOOD" in last or "pull" in last.lower()
+        return json.dumps({"reply": "Oh! So the moon pulls the water towards it, and that makes the bulge. I had it backwards." if ok else "But the sea is so heavy. How can it not be pushing?", "resolved": ok})
+    found = re.search(r"^Concept being taught now: (.*)$", prompt, re.M)
+    concept = found.group(1) if found else "Tides"
+    shape = prompt.rsplit("Reply in exactly this shape:", 1)[-1]
+    for kind, mark in _STUDY_KINDS:
+        if mark in shape:
+            return json.dumps(_study_step(kind, concept, prompt))
+    return "{}"
+
+
 def _reply_for(body: dict) -> tuple[list[str], float, bool]:
     """Chunks to stream, the delay between them, and whether to cut off."""
     messages = body.get("messages") or []
@@ -270,6 +495,9 @@ def _reply_for(body: dict) -> tuple[list[str], float, bool]:
     editor = _editor_ai_reply(system, messages)
     if editor is not None:
         return [editor], 0, False
+    study = _study_reply(system, messages)
+    if study is not None:
+        return [study], 0, False
 
     if messages and messages[-1].get("role") == "tool":
         result = _text_of(messages[-1].get("content"))[0]

@@ -33,12 +33,20 @@ const components: Components = {
   },
 };
 
-export const Md = memo(function Md({ text, compact, className }: { text: string; compact?: boolean; className?: string }) {
+/** A one-line piece of text (a choice, a step to put in order) that starts
+ *  "1. …", "- …" or "# …" means those characters, not a list or a heading. */
+export function asLine(text: string): string {
+  return text
+    .replace(/^(\s*\d+)([.)])(\s)/, "$1\\$2$3")
+    .replace(/^(\s*)([-+*#>])(\s)/, "$1\\$2$3");
+}
+
+export const Md = memo(function Md({ text, compact, line, className }: { text: string; compact?: boolean; line?: boolean; className?: string }) {
   if (!text) return null;
   return (
-    <div className={cn("study-md", compact && "compact", className)}>
+    <div className={cn("study-md", (compact || line) && "compact", className)}>
       <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={components}>
-        {text}
+        {line ? asLine(text) : text}
       </ReactMarkdown>
     </div>
   );

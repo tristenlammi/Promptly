@@ -249,7 +249,7 @@ export function LessonPage() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
-      if (e.metaKey || e.ctrlKey || e.altKey || askOpen) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || (askOpen && isPhone)) return;
       if (!step) return;
       if (phase === "step" && /^[1-9]$/.test(e.key)) {
         const i = Number(e.key) - 1;
@@ -259,7 +259,10 @@ export function LessonPage() {
         if ((step.kind === "mcq" || step.kind === "predict") && option) setDraft((d) => ({ ...d, optionId: option }));
         if (step.kind === "spot_error" && line) setDraft((d) => ({ ...d, lineId: line }));
       }
-      if (e.key === "Enter" && t?.tagName !== "BUTTON" && t?.tagName !== "SUMMARY" && t?.tagName !== "A") {
+      // Enter on a choice (or the how-sure row) checks, as it would in a form;
+      // on any other button it presses that button.
+      const onChoice = t?.getAttribute?.("role") === "radio";
+      if (e.key === "Enter" && (onChoice || (t?.tagName !== "BUTTON" && t?.tagName !== "SUMMARY" && t?.tagName !== "A"))) {
         if (phase === "step" && isReady(step, draft)) {
           e.preventDefault();
           check();
@@ -354,11 +357,11 @@ export function LessonPage() {
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div ref={bodyRef} className="promptly-scroll min-h-0 flex-1 overflow-y-auto">
-            <div key={step.id} className="study-in mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-8 pt-5 sm:px-6">
+            <div key={step.id} data-testid="study-step" data-step={step.id} data-kind={step.kind} data-status={step.status} className="study-in mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-8 pt-5 sm:px-6">
               <ConceptLine step={step} concept={concept} quiet={quiet} before={before?.before} />
               <StepBody step={step} draft={draft} setDraft={setDraft} locked={answered || busy} onTurn={turn} sending={turnBusy} turnError={turnError} />
 
-              {step.hints_shown.length > 0 && (
+              {step.hints_shown.length > 0 && !answered && (
                 <ul className="flex flex-col gap-2" aria-label="Hints">
                   {step.hints_shown.map((h, i) => (
                     <li key={i} className="study-in flex gap-2 rounded-xl border border-[var(--st-warn-border)] bg-[var(--st-warn-bg)] px-3 py-2 text-[15px] text-[var(--text)]">
@@ -377,6 +380,8 @@ export function LessonPage() {
                   {result && <Changes changes={result.changes} concept={concept} />}
                 </div>
               )}
+
+              {phase === "advancing" && <Thinking label={quiet ? "Next question" : "The teacher is getting your next step ready"} />}
 
               {error && (
                 <p role="alert" className="rounded-xl border border-[var(--st-bad-border)] bg-[var(--st-bad-bg)] px-3 py-2.5 text-sm text-[var(--st-bad)]">
@@ -483,7 +488,7 @@ function Shell({
           <X className="h-5 w-5" />
         </button>
         <h1 className="sr-only">{title}</h1>
-        <div className="min-w-0 flex-1">{rail}</div>
+        <div className="min-w-0 flex-1 pr-2">{rail}</div>
         {onEnd && (
           <button type="button" onClick={onEnd} className="hidden h-10 shrink-0 rounded-full px-3 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)] sm:block">
             Finish for now
@@ -512,7 +517,7 @@ function Rail({ session, history, current }: { session: Session; history: Step[]
   const segs = Array.from({ length: total }, (_, i) => {
     const s = done[i];
     if (s) return s.status === "skipped" ? "skip" : !s.grade ? "seen" : s.grade.outcome;
-    return i === done.length && current ? "now" : "todo";
+    return i === done.length && current?.status === "pending" ? "now" : "todo";
   });
   return (
     <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done.length} aria-label={`Step ${Math.min(total, done.length + 1)} of ${total}`} className="flex items-center gap-1" data-testid="study-rail">
@@ -553,7 +558,9 @@ function ConceptLine({ step, concept, quiet, before }: { step: Step; concept: Co
       {concept && !quiet && (
         <div className="flex items-center gap-3">
           <p className="min-w-0 flex-1 truncate text-sm text-[var(--text-muted)]">{concept.title}</p>
-          <Bar value={shown} className="w-24 shrink-0" label={`How well you know ${concept.title}`} color={concept.state === "mastered" || concept.state === "known" ? "var(--st-good)" : "var(--st-accent)"} />
+          <span className="w-24 shrink-0">
+            <Bar value={shown} label={`How well you know ${concept.title}`} color={concept.state === "mastered" || concept.state === "known" ? "var(--st-good)" : "var(--st-accent)"} />
+          </span>
         </div>
       )}
     </div>
@@ -572,21 +579,25 @@ function Feedback({ step }: { step: Step }) {
       data-outcome={g.outcome}
       className={cn(
         "study-in rounded-2xl border p-4",
-        o.tone === "good" && "border-[var(--st-good-border)] bg-[var(--st-good-bg)]",
-        o.tone === "warn" && "border-[var(--st-warn-border)] bg-[var(--st-warn-bg)]",
-        o.tone === "bad" && "border-[var(--st-bad-border)] bg-[var(--st-bad-bg)]"
+        dontKnow && "border-[var(--border)] bg-[var(--surface)]",
+        !dontKnow && o.tone === "good" && "border-[var(--st-good-border)] bg-[var(--st-good-bg)]",
+        !dontKnow && o.tone === "warn" && "border-[var(--st-warn-border)] bg-[var(--st-warn-bg)]",
+        !dontKnow && o.tone === "bad" && "border-[var(--st-bad-border)] bg-[var(--st-bad-bg)]"
       )}
     >
       <div className="flex items-center gap-2">
         <span
           aria-hidden
-          className={cn("study-pop flex h-7 w-7 items-center justify-center rounded-full text-white", o.tone === "good" && "bg-[var(--st-good)]", o.tone === "warn" && "bg-[var(--st-warn)]", o.tone === "bad" && "bg-[var(--st-bad)]")}
+          className={cn(
+            "study-pop flex h-7 w-7 items-center justify-center rounded-full text-white",
+            dontKnow ? "bg-[var(--st-accent)]" : o.tone === "good" ? "bg-[var(--st-good)]" : o.tone === "warn" ? "bg-[var(--st-warn)]" : "bg-[var(--st-bad)]"
+          )}
         >
-          {o.tone === "good" ? <Check className="h-4 w-4" /> : o.tone === "warn" ? <span className="text-sm font-bold">~</span> : <X className="h-4 w-4" />}
+          {dontKnow ? <Lightbulb className="h-4 w-4" /> : o.tone === "good" ? <Check className="h-4 w-4" /> : o.tone === "warn" ? <span className="text-sm font-bold">~</span> : <X className="h-4 w-4" />}
         </span>
-        <h2 className="text-base font-semibold text-[var(--text)]">{dontKnow ? "No problem. Here's the answer" : o.title}</h2>
+        <h2 className="text-base font-semibold text-[var(--text)]">{dontKnow ? "No problem. Here's how it goes" : o.title}</h2>
       </div>
-      {g.feedback_md && <Md text={g.feedback_md} compact className="mt-2" />}
+      {g.feedback_md && !isInstant(step.kind) && <Md text={g.feedback_md} compact className="mt-2" />}
       {g.misconception && (
         <p className="mt-3 rounded-xl bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]">
           <span className="font-semibold">The mix-up: </span>
@@ -619,7 +630,7 @@ function Changes({ changes, concept }: { changes: Change[]; concept: Concept | n
                 {c.by === "test_out" ? <FastForward className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
               </span>
               <p className="text-[15px] text-[var(--text)]">
-                <span className="font-semibold">{c.by === "test_out" ? `Skipping ${c.title}.` : `You've got ${c.title}.`}</span>{" "}
+                <span className="font-semibold">{c.by === "test_out" ? `Skipping ahead: ${c.title}.` : `You've got it: ${c.title}.`}</span>{" "}
                 {c.by === "test_out" ? "You clearly know this already, so it's marked as learned." : "It's marked as learned on your map."}
               </p>
             </li>

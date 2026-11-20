@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { Diagram as DiagramSpec, Step, StepKind } from "@/api/study";
 
 import { clipToBox, describeDiagram, Diagram, flowRows, treeRows } from "../ui/Diagram";
+import { asLine } from "../ui/Md";
 import { draftFromAnswer, emptyDraft } from "./answers";
 import { StepBody } from "./Renderers";
 
@@ -126,6 +127,17 @@ describe("each kind of step draws, before and after it is answered", () => {
     const done = html({ ...s, turns: [...s.turns, { role: "learner", text: "x" }, { role: "student", text: "Got it", resolved: true }], turns_left: 1 });
     expect(done).toContain("Sam gets it now");
     expect(done).not.toContain("<textarea");
+  });
+
+  it("a choice that starts like a list or a heading is shown as written", () => {
+    expect(asLine("1. Low water")).toBe(String.raw`1\. Low water`);
+    expect(asLine("- minus two")).toBe(String.raw`\- minus two`);
+    expect(asLine("# of moons")).toBe(String.raw`\# of moons`);
+    expect(asLine("The 1. thing")).toBe("The 1. thing");
+    const out = html(step("order_steps", { prompt_md: "Order", items: opts("1. Low water", "2. The flood") }));
+    expect(out).toContain("1. Low water");
+    expect(out).not.toContain("<ol start");
+    expect(out).not.toContain("<li>Low water");
   });
 
   it("never renders HTML the model wrote", () => {

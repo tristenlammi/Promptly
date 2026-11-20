@@ -371,18 +371,18 @@ function Course({ subject, onChange }: { subject: SubjectFull; onChange: () => v
 
       {/* The one big button. */}
       {!complete && (
-        <div className="pointer-events-none sticky bottom-0 z-20 flex justify-center px-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+        <div className="pointer-events-none sticky bottom-0 z-20 flex min-w-0 justify-center px-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
           <Button
             variant="primary"
             size="lg"
-            className="pointer-events-auto h-14 max-w-md flex-1 rounded-full px-6 text-base shadow-lg"
+            className="pointer-events-auto h-14 min-w-0 max-w-md flex-1 rounded-full px-6 text-base shadow-lg"
             onClick={() => void start("go", {})}
             loading={starting === "go"}
             disabled={starting !== null}
             leftIcon={<Play className="h-5 w-5" />}
             data-testid="study-continue-course"
           >
-            <span className="truncate">
+            <span className="min-w-0 truncate">
               {subject.active_session ? "Carry on with your lesson" : subject.progress.done + subject.progress.learning > 0 ? "Continue" : "Start learning"}
               {subject.next_concept && !subject.active_session ? `: ${subject.next_concept.title}` : ""}
             </span>
@@ -492,7 +492,8 @@ function ConceptSheet({
   if (!c) return <Sheet open={false} onClose={onClose}>{null}</Sheet>;
   const band = bandOf(c);
   const done = isDone(c);
-  const needs = c.prereqs.map((id) => byId.get(id)).filter((x): x is Concept => !!x && !isDone(x));
+  const builds = c.prereqs.map((id) => byId.get(id)).filter((x): x is Concept => !!x);
+  const needs = builds.filter((x) => !isDone(x));
   const gapFor = c.gap_for ? byId.get(c.gap_for) : null;
   const sources = subject.sources.filter((s) => c.sources.includes(s.n));
   const mixups = subject.misconceptions.filter((m) => m.concept_id === c.id);
@@ -563,6 +564,20 @@ function ConceptSheet({
               ))}
             </ul>
             <p className="mt-1.5 text-[var(--text-muted)]">Already know it? "I know this already" lets you prove it and skip ahead.</p>
+          </div>
+        )}
+
+        {!c.locked && builds.length > 0 && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Builds on</h3>
+            <ul className="flex flex-col gap-0.5">
+              {builds.map((n) => (
+                <li key={n.id} className="flex items-center gap-2 text-sm text-[var(--text)]">
+                  <Check className={cn("h-3.5 w-3.5 shrink-0", isDone(n) ? "text-[var(--st-good)]" : "text-[var(--st-line)]")} aria-hidden />
+                  {n.title}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

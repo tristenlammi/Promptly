@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Concept, Unit } from "@/api/study";
 
-import { bandOf, edgePath, layoutMap, ROW_H, rowX, UNIT_HEAD_H, unitRows } from "./layout";
+import { bandOf, edgePath, layoutMap, ROW_H, rowX, stubPath, UNIT_HEAD_H, unitRows } from "./layout";
 
 function c(id: string, position: number, prereqs: string[] = [], extra: Partial<Concept> = {}): Concept {
   return {
@@ -73,6 +73,20 @@ describe("layoutMap", () => {
     // The gap concept sits between the two.
     expect(g.byId.g.y).toBeGreaterThan(g.byId.a.y);
     expect(g.byId.b.y).toBeGreaterThan(g.byId.g.y);
+  });
+
+  it("across parts, draws a whole line only from the row just above; further back is a short lead-in", () => {
+    const far = layoutMap([
+      unit("u1", 1, [c("a", 1), c("b", 2, ["a"])]),
+      unit("u2", 2, [c("d", 3, ["b"])]),
+      unit("u3", 3, [c("e", 4, ["a", "d"])]),
+    ]);
+    const kind = Object.fromEntries(far.edges.map((e) => [`${e.from}>${e.to}`, e.kind]));
+    expect(kind).toEqual({ "a>b": "full", "b>d": "full", "a>e": "stub", "d>e": "full" });
+    // From a row that isn't the last of its part: a lead-in, not a line through the rows between.
+    const skip = layoutMap([unit("u1", 1, [c("a", 1), c("b", 2, ["a"])]), unit("u2", 2, [c("d", 3, ["a"])])]);
+    expect(skip.edges.find((e) => e.to === "d")?.kind).toBe("stub");
+    expect(stubPath({ id: "d", unitId: "u2", x: 0.5, y: 200, row: 2 })).toBe("M 50 138 L 50 160");
   });
 
   it("drops lines to concepts that are not on the map", () => {

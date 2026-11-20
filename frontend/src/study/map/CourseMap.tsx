@@ -6,7 +6,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/utils/cn";
 
 import { Ring } from "../ui/bits";
-import { BAND_WORDS, bandOf, edgePath, layoutMap, UNIT_HEAD_H, type Band } from "./layout";
+import { BAND_WORDS, bandOf, edgePath, layoutMap, stubPath, UNIT_HEAD_H, type Band } from "./layout";
 
 /*
  * The course as a map: units are regions down the page, concepts are stops
@@ -59,7 +59,7 @@ export function CourseMap({ subject, nextId, onPick }: { subject: SubjectFull; n
         {layout.edges.map((e, i) => (
           <path
             key={i}
-            d={edgePath(layout.byId[e.from], layout.byId[e.to])}
+            d={e.kind === "stub" ? stubPath(layout.byId[e.to]) : edgePath(layout.byId[e.from], layout.byId[e.to])}
             fill="none"
             vectorEffect="non-scaling-stroke"
             stroke={e.gap ? "var(--st-gap)" : e.done ? "var(--st-good)" : "var(--st-line)"}
