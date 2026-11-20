@@ -156,6 +156,7 @@ export function UserFormModal({
           : String(user.monthly_token_budget)
       );
     } else {
+      setStudyLevel("");
       setEmail("");
       setUsername("");
       setPassword("");
@@ -245,7 +246,7 @@ export function UserFormModal({
         allowed_models:
           role === "admin" || fullAccess ? null : Array.from(picked),
         can_generate_images: canGenerateImages,
-        study_level_lock: mode === "edit" ? studyLevel || null : undefined,
+        study_level_lock: studyLevel || null,
         can_reach_private_network: canReachPrivate,
         can_use_automations: canUseAutomations,
         model_locked: role === "user" && !fullAccess && locked,
@@ -466,7 +467,7 @@ export function UserFormModal({
                 </span>
               </span>
             </label>
-            {mode === "edit" && (
+            {
               <label className="mt-2 flex items-start justify-between gap-3 rounded-card border border-[var(--border)] px-3 py-2">
                 <span className="text-xs">
                   <span className="font-medium text-[var(--text)]">Study lessons are for</span>
@@ -487,7 +488,7 @@ export function UserFormModal({
                   <option value="adult">An adult</option>
                 </select>
               </label>
-            )}
+            }
             <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
               <input
                 type="checkbox"

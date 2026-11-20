@@ -827,7 +827,7 @@ export function ExploreStep({ step, draft, setDraft, locked }: StepProps<"explor
         <Md text={p.prompt_md} className="text-[17px] font-medium" />
         {!r && <p className="mt-1 text-sm text-[var(--text-muted)]">{EXPLORE_HOW[spec.type]}</p>}
       </div>
-      <Figure spec={spec} state={state} onChange={(fig) => setDraft({ ...draft, fig })} locked={locked} pick targets={p.targets} solution={r && !right ? r.solution : undefined} />
+      <Figure spec={spec} state={state} onChange={(fig) => setDraft({ ...draft, fig })} locked={locked} pick targets={p.targets} solution={r && !right ? ((step.grade?.detail as { solution?: typeof r.solution } | undefined)?.solution ?? r.solution) : undefined} />
       {r?.explain_md && (
         <Card tone="soft" className="study-in">
           <Label>Why</Label>

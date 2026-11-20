@@ -178,6 +178,8 @@ async def create_user(
         user.can_use_automations = payload.can_use_automations
     if payload.model_locked is not None:
         user.model_locked = payload.model_locked
+    if payload.study_level_lock is not None:
+        user.study_level_lock = payload.study_level_lock
     db.add(user)
     try:
         await db.commit()

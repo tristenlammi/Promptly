@@ -26,6 +26,8 @@ export interface UserImportResult {
 }
 
 export interface CreateUserPayload {
+  /** Study: fix who lessons are pitched at from the start. */
+  study_level_lock?: "child" | "teen" | "adult";
   can_generate_images?: boolean;
   can_reach_private_network?: boolean;
   can_use_automations?: boolean;

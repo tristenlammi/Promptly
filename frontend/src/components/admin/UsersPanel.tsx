@@ -152,6 +152,8 @@ export function UsersPanel() {
       can_generate_images: values.can_generate_images,
       can_reach_private_network: values.can_reach_private_network,
       can_use_automations: values.can_use_automations,
+      // Study pitched at a child or a teenager from the first sign-in.
+      study_level_lock: values.study_level_lock ?? undefined,
       model_locked: values.model_locked,
       must_change_password: values.must_change_password ?? true,
       group_ids: values.group_ids,

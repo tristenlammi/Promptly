@@ -487,7 +487,8 @@ def readme(state: dict[str, Any]) -> bytes:
         + ("porch.json   your Porch posts (with their photos' places in My files), the comments\n"
            "             on them, your comments on other posts, and the groups you're in.\n" if state.get("porch") else "")
         + ("Study/       each subject you are learning as a Markdown file (the map, how far you\n"
-           "             are, what was added for you, the report, the sources), and study.json.\n" if state.get("study") else "")
+           "             are, what was added for you, the report, the sources, and every step\n"
+           "             you answered with your answer and how it went), and study.json.\n" if state.get("study") else "")
         + "\n"
         "To bring it into another Promptly: Files -> Import -> A folder of photos, and add\n"
         "the parts. Dates, places, favourites, albums and notes come with it.\n\n"

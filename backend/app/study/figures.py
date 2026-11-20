@@ -232,21 +232,45 @@ def _miss(fig: dict[str, Any], goal: dict[str, Any], env: dict[str, float]) -> f
     return None if y is None else abs(y - goal["target"]) / goal["tolerance"]
 
 
-def _best(fig: dict[str, Any], goal: dict[str, Any]) -> tuple[dict[str, float], float]:
-    """The slider position nearest the goal, and how far off it is."""
+def _best(fig: dict[str, Any], goal: dict[str, Any], near: dict[str, float] | None = None) -> tuple[dict[str, float], float]:
+    """A slider position that meets the goal, and how far off it is (≤ 1:
+    on target). Of those that meet it, the one that moves the sliders least
+    from ``near`` (where they start, or where the learner left them); when
+    none does, the one that comes closest."""
     controls = _controls(fig)
     grids = [positions(c) for c in controls]
     if math.prod(len(g) for g in grids) > MAX_COMBOS:
         raise FigureInvalid("goal: too many slider positions to check; use fewer sliders or bigger steps")
+    near = near or _starts(controls)
     best: tuple[dict[str, float], float] | None = None
+    hit: tuple[dict[str, float], float, float] | None = None
     for combo in itertools.product(*grids):
         env = {c["name"]: v for c, v in zip(controls, combo)}
         m = _miss(fig, goal, env)
-        if m is not None and (best is None or m < best[1]):
+        if m is None:
+            continue
+        if best is None or m < best[1]:
             best = (env, m)
+        if m <= 1 + 1e-9:
+            moved = sum(abs(env[c["name"]] - near.get(c["name"], c["value"])) / (c["max"] - c["min"]) for c in controls)
+            if hit is None or moved < hit[2] - 1e-12:
+                hit = (env, m, moved)
     if best is None:
         raise FigureInvalid("goal: the formula has no value anywhere")
-    return best
+    return (hit[0], hit[1]) if hit is not None else best
+
+
+def answer_near(fig: dict[str, Any], goal: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any] | None:
+    """For a slider figure: the right setting closest to where the learner
+    left the sliders (what they are shown after a miss). ``None`` for the
+    other figures, whose answer is one thing."""
+    if fig["type"] not in ("plot", "table") or not isinstance(answer.get("values"), dict):
+        return None
+    try:
+        env, miss = _best(fig, goal, near=answer["values"])
+    except FigureInvalid:
+        return None
+    return {"values": env} if miss <= 1 + 1e-9 else None
 
 
 def clean_goal(fig: dict[str, Any], raw: Any) -> tuple[dict[str, Any], dict[str, Any]]:

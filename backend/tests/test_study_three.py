@@ -198,6 +198,19 @@ def test_goals_are_proved_reachable_and_not_already_met():
             figures.clean_goal(parts, bad)
 
 
+def test_after_a_miss_the_answer_shown_is_the_one_nearest_where_they_left_it():
+    from app.study import figures
+
+    raw = {"type": "table", "inputs": [{"name": "m", "min": 1, "max": 5, "step": 0.5, "value": 3}, {"name": "r", "min": 0, "max": 8, "step": 0.5, "value": 2}],
+           "outputs": [{"label": "high", "expr": "m + r / 2"}, {"label": "low", "expr": "m - r / 2"}]}
+    fig = figures.clean(raw)
+    goal, start = figures.clean_goal(fig, {"output": 1, "target": 1, "tolerance": 0.05})
+    assert start == {"values": {"m": 3.0, "r": 4.0}}  # low water 1 m, moving only the range from where it starts
+    # They pushed the mean up to 5: the answer shown keeps their mean and fixes the range.
+    assert figures.answer_near(fig, goal, {"values": {"m": 5, "r": 2}}) == {"values": {"m": 5.0, "r": 8.0}}
+    assert figures.answer_near(figures.clean(kit.FIGURES["scale"]), {"target": 6, "tolerance": 1}, {"value": 2}) is None
+
+
 def test_too_many_slider_positions_to_prove_is_refused():
     from app.study import figures
 
@@ -229,7 +242,8 @@ def test_an_explore_step_keeps_its_answer_back_and_is_graded_in_code(tool):
     bad = steps.check_answer("explore", payload, kit.answer_for(S, "bad"))
     assert steps.grade_local("explore", payload, good)["outcome"] == "correct"
     g = steps.grade_local("explore", payload, bad)
-    assert g["outcome"] == "wrong" and g["detail"]["solution"] == key["solution"]
+    assert g["outcome"] == "wrong" and steps.grade_local("explore", payload, steps.check_answer("explore", payload, g["detail"]["solution"]))["outcome"] == "correct"
+    assert key["solution"]
     for junk in ({}, {"values": {}}, {"values": {"a": 1, "b": 1, "zz": 3}}, {"values": {"a": "1", "b": 0}}, {"value": 9999}, {"value": None}, {"part_id": "p99"}, {"values": {"a": 1e9, "b": 0}}):
         with pytest.raises(steps.AnswerInvalid):
             steps.check_answer("explore", payload, junk)
@@ -635,3 +649,102 @@ async def test_the_study_widget_shows_your_own_due_and_next_and_nobody_elses(cli
     other = await _device(db, ana, ["upload"])
     assert (await client.get("/api/widgets/glance", params={"want": "study"}, auth=other)).status_code == 403
     assert (await client.get("/api/widgets/glance", params={"want": "study"})).status_code == 401
+
+
+# ------------------------------------------------- export, and the level lock
+
+
+async def test_the_export_has_every_step_you_answered_and_never_the_answer_key(db, user, model):
+    from app.study.export import study_export
+
+    model.tools = {1: "table"}
+    s = await kit.make_subject(db, user, placement="none")  # the quick check, every question missed
+
+    def one_slip(step, concept, n):
+        if concept.title == "Concept 2" and n == 0:
+            return "bad", 3
+        return "good", 2
+
+    out = await kit.run_course(db, user, s, one_slip)
+    assert out["complete"]
+    subject = (await study_export(db, user))["subjects"][0]
+    steps_ = subject["steps"]
+    assert len(steps_) >= out["steps"]  # the quick check's questions are there too
+    kinds = {x["kind"] for x in steps_}
+    assert {"explain", "explore", "mcq", "capstone"} <= kinds
+    quick = [x for x in steps_ if x["role"] == "placement"]
+    assert quick and all(x["outcome"] == "wrong" and x["feedback"] is None and x["answer"] == "WRONG 2" for x in quick)
+    explore = next(x for x in steps_ if x["kind"] == "explore")
+    assert explore["idea"] == "Concept 1" and explore["answer"] == "range = 8.0" and explore["outcome"] == "correct"
+    assert "Work the figure." in explore["asked"] and "(A figure to work: Tide height)" in explore["asked"]
+    slipped = next(x for x in steps_ if x["idea"] == "Concept 2" and x["outcome"] == "wrong")
+    assert slipped["confidence"] == 3 and slipped["answer"]
+    written = next(x for x in steps_ if x["kind"] in ("explain_back", "scenario") and x["role"] == "lesson")
+    assert written["answer"] == "GOOD answer" and written["feedback"] == "Yes, that's it."
+    assert next(x for x in steps_ if x["kind"] == "explain")["answer"] is None
+    cap = next(x for x in steps_ if x["kind"] == "capstone")
+    assert cap["idea"] and cap["asked"] == "Plan a sail around the tide."  # its title is the idea, not said twice
+    # What was on the screen, nothing behind it: no rubrics, model answers, hints or solutions.
+    blob = json.dumps(steps_)
+    for secret in ("the moon pulls", "Leave on the ebb", "Think about the moon", "rubric", "model_answer", "correct_id", "solution", '"goal"'):
+        assert secret not in blob, secret
+    md = subject["markdown"]
+    assert "## What you did" in md and "### 1. Quick check (quick check): Concept" in md
+    assert "**Your answer:**" in md and "**Result:** not right, sure" in md and "**Result:** right, fairly sure" in md
+    assert md.index("## Sources") < md.index("## What you did") if "## Sources" in md else True
+
+    # Somebody else's export has none of it.
+    from tests.test_study_api import mk_user as make
+
+    other = await make(db, "ben")
+    assert await study_export(db, other) is None
+
+
+def test_what_an_answer_reads_as_for_every_kind():
+    from app.study import export, steps
+
+    def said(kind, how, **suits):
+        raw = kit.raw_explore("plot") if kind == "explore" else kit.raw_step(kind)
+        payload = steps.build(kind, raw, seed=5, **suits)
+
+        class S:
+            pass
+
+        S.kind, S.payload = kind, payload
+        return export.step_answer(kind, payload["public"], kit.answer_for(S, how), [])
+
+    assert said("mcq", "good") == "RIGHT" and said("predict", "misc") == "WRONG 1"
+    assert said("order_steps", "good") == "1. 1 first\n2. 2 second\n3. 3 third\n4. 4 fourth"
+    assert said("match_pairs", "good").splitlines()[0] == "- L1 → R1"
+    assert said("spot_error", "good") == "ERROR here" and said("worked_example", "good") == "- RIGHT"
+    assert said("explain_back", "good") == "GOOD answer"
+    assert said("explore", "good", tool="plot").startswith("range = ")
+    assert "function double" in said("write_code", "good", tool="code", lang="javascript")
+    pub = steps.build("teach_student", kit.raw_step("teach_student"))["public"]
+    assert export.step_answer("teach_student", pub, {}, [{"role": "learner", "text": "It pulls."}, {"role": "student", "text": "Oh!"}]) == "Me: It pulls.\nSam: Oh!"
+    assert export.step_answer("mcq", pub, {"dont_know": True}, []) == "I don't know"
+    # Junk in, nothing out: never an error from someone's old or odd row.
+    for kind in export._KIND:
+        assert isinstance(export.step_answer(kind, {}, {}, []), str)
+        assert isinstance(export.step_asked(kind, {}), str)
+
+
+async def test_a_new_account_can_be_made_with_study_already_set_for_a_child(client, db, model):  # noqa: F811
+    admin = await mk_user(db, "root", role="admin")
+    body = {"email": "kid@example.com", "username": "kiddo", "password": "Correct-horse-9-battery!", "study_level_lock": "child", "must_change_password": False}
+    r = await client.post("/api/admin/users", json=body, headers=H(admin))
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["study_level_lock"] == "child"
+    from app.auth.models import User
+
+    kid = (await db.execute(select(User).where(User.username == "kiddo"))).scalar_one()
+    prefs = (await client.get(f"{API}/prefs", headers=H(kid))).json()
+    assert prefs["level"] == "child" and prefs["level_locked"] is True
+    assert (await client.put(f"{API}/prefs", json={"level": "adult"}, headers=H(kid))).status_code == 403
+    sid = await ready(client, db, kid, level="adult")  # asked for adult: gets the locked level
+    assert (await client.get(f"{API}/subjects/{sid}", headers=H(kid))).json()["level"] == "child"
+    # Left out, a new account chooses for itself; a level that doesn't exist is refused.
+    r = await client.post("/api/admin/users", json={**body, "email": "b@example.com", "username": "grown", "study_level_lock": None}, headers=H(admin))
+    assert r.status_code in (200, 201) and r.json()["study_level_lock"] is None
+    r = await client.post("/api/admin/users", json={**body, "email": "c@example.com", "username": "odd", "study_level_lock": "toddler"}, headers=H(admin))
+    assert r.status_code == 422

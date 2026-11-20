@@ -408,6 +408,9 @@ class AdminUserCreate(BaseModel):
     can_generate_images: bool | None = None
     can_reach_private_network: bool | None = None
     can_use_automations: bool | None = None
+    # Study: fix who lessons are pitched at from the start (a child account).
+    # None lets the person choose.
+    study_level_lock: Literal["child", "teen", "adult"] | None = None
     model_locked: bool | None = None
     # Admin-chosen passwords are hand-delivered; make the person pick their
     # own on first sign-in (R-259). The dialog can untick it.

@@ -647,7 +647,7 @@ test.describe("study: figures, code, giving a course, its own app", () => {
         await expect(fb).toHaveAttribute("data-outcome", well ? "correct" : "wrong", { timeout: 30_000 });
         if (!well) {
           // The right setting is shown beside theirs, and why.
-          await expect(page.getByTestId("fig-value-r")).toContainText("→ 4");
+          await expect(page.getByTestId("fig-value-m").or(page.getByTestId("fig-value-r")).filter({ hasText: "→" }).first()).toBeVisible();
           await expect(page.locator('[data-testid="study-step"]')).toContainText("half the range");
           await page.screenshot({ path: shot3("explore-table-wrong") });
         }
@@ -783,7 +783,7 @@ test.describe("study: figures, code, giving a course, its own app", () => {
       const give = alice.getByTestId("study-give");
       await expect(give).toContainText("Nothing of yours");
       await expect(alice.getByTestId("study-give-go")).toBeDisabled();
-      await give.getByRole("textbox", { name: "Search people" }).fill("e2e_bob");
+      await give.getByLabel("Search people").fill("e2e_bob");
       await give.getByRole("option", { name: /e2e_bob/ }).first().click();
       found.push(...(await scan(alice, "give a course")));
       await alice.screenshot({ path: shot3("give") });
@@ -819,12 +819,132 @@ test.describe("study: figures, code, giving a course, its own app", () => {
     await expect(page.locator(".study-own")).toHaveCount(0);
     // From the P Study icon: Study alone.
     await page.goto("/study/?source=android");
-    await ready(page);
-    await expect(page.locator(".study-own")).toBeVisible();
+    await expect(page.locator(".study-own")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("heading", { name: "Study" }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: "Workspaces" })).toHaveCount(0);
     await page.screenshot({ path: shot3("own-app") });
     // The launch is remembered for the window: forget it so later tests see Promptly.
     await page.evaluate(() => sessionStorage.removeItem("promptly:launched-app"));
+  });
+});
+
+/** As if the whole of one subject had been learned a while ago: every idea
+ *  learned, every task passed, and three of them due for review. */
+function finishSubject(subjectId: string): void {
+  const py = `
+import asyncio, uuid
+from datetime import datetime, timedelta, timezone
+import app.db_models  # noqa: F401
+from app.auth.models import User
+from app.database import SessionLocal
+from app.study import service
+from app.study.models import StudySubject
+
+async def main():
+    async with SessionLocal() as db:
+        s = await db.get(StudySubject, uuid.UUID(${JSON.stringify(subjectId)}))
+        u = await db.get(User, s.user_id)
+        now = datetime.now(timezone.utc)
+        done = {"status": "passed", "tries": 1, "outcome": "correct", "met": 3, "points": 3, "at": now.isoformat()}
+        for i, c in enumerate(await service.concepts_of(db, s.id)):
+            c.state, c.mastery, c.evidence_count, c.production_ok, c.steps_done = "mastered", 0.9 if i else 0.55, 3, 1, 3
+            c.mastered_at = c.last_seen_at = now - timedelta(days=6)
+            service._schedule(c, "lesson", u)
+            if i < 3:
+                c.due_at = now - timedelta(hours=2)
+                c.fsrs = {**c.fsrs, "due": c.due_at.isoformat()}
+        for unit in await service.units_of(db, s.id):
+            unit.capstone = dict(done)
+        s.capstone, s.status, s.last_studied_at = dict(done), "complete", now - timedelta(days=1)
+        await db.commit()
+asyncio.run(main())
+`;
+  execFileSync("docker", ["exec", "-i", BACKEND, "python", "-"], { input: py });
+}
+
+test.describe("study: the later screens on a phone, in the light theme, and on paper", () => {
+  test("home, map, report, a review and the reminder at phone width in the light theme; the report as printed; the admin's level setting", async ({ alice: page, dana }) => {
+    test.setTimeout(300_000);
+    const found: string[] = [];
+    await withTeacher(dana, async () => {
+      await freshCourse(page, `Tides looked at ${stamp}`);
+      const id = page.url().split("/study/")[1].split(/[/?#]/)[0];
+      finishSubject(id);
+
+      await page.evaluate(() => localStorage.setItem("promptly.theme", JSON.stringify({ state: { theme: "light" }, version: 0 })));
+      await page.setViewportSize({ width: 390, height: 844 });
+      const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+      try {
+        await page.goto("/study");
+        await expect(page.getByTestId("study-review-banner")).toBeVisible({ timeout: 30_000 });
+        expect(await fits()).toBe(true);
+        found.push(...(await scan(page, "home, phone, light")));
+        await page.screenshot({ path: shot3("phone-light-home"), fullPage: true });
+
+        await page.getByRole("button", { name: "Daily reminder" }).click();
+        await expect(page.getByTestId("study-remind")).toBeVisible();
+        found.push(...(await scan(page, "reminder, phone, light")));
+        await page.screenshot({ path: shot3("phone-light-reminder") });
+        await page.keyboard.press("Escape");
+
+        await page.goto(`/study/${id}`);
+        await expect(page.getByTestId("study-map")).toBeVisible({ timeout: 30_000 });
+        expect(await fits()).toBe(true);
+        found.push(...(await scan(page, "map, phone, light")));
+        await page.screenshot({ path: shot3("phone-light-map"), fullPage: true });
+
+        await page.goto(`/study/${id}/report`);
+        const report = page.getByTestId("study-report");
+        await expect(report).toBeVisible({ timeout: 30_000 });
+        await expect(report).toHaveAttribute("data-finished", "true");
+        expect(await fits()).toBe(true);
+        found.push(...(await scan(page, "report, phone, light")));
+        await page.screenshot({ path: shot3("phone-light-report"), fullPage: true });
+
+        // On paper: the report alone, black on white, no buttons or menus.
+        await page.setViewportSize({ width: 794, height: 1123 });
+        await page.emulateMedia({ media: "print" });
+        await expect(report).toBeVisible();
+        await expect(page.getByRole("button", { name: "Print" })).toBeHidden();
+        await expect(page.getByRole("button", { name: /Open navigation menu/ })).toBeHidden();
+        const paper = await report.evaluate((el) => {
+          const c = getComputedStyle(el);
+          return { color: c.color, bg: getComputedStyle(document.body).backgroundColor };
+        });
+        expect(paper.bg === "rgb(255, 255, 255)" || paper.bg === "rgba(0, 0, 0, 0)").toBe(true);
+        await page.screenshot({ path: shot3("report-print"), fullPage: true });
+        await page.emulateMedia({ media: "screen" });
+        await page.setViewportSize({ width: 390, height: 844 });
+
+        // A review, on the phone.
+        await page.goto(`/study/${id}/review`);
+        await expect(page.getByTestId("study-check")).toBeVisible({ timeout: 30_000 });
+        expect(await fits()).toBe(true);
+        found.push(...(await scan(page, "review step, phone, light")));
+        await page.screenshot({ path: shot3("phone-light-review") });
+      } finally {
+        await page.evaluate(() => localStorage.setItem("promptly.theme", JSON.stringify({ state: { theme: "dark" }, version: 0 })));
+        await page.setViewportSize({ width: 1366, height: 860 });
+      }
+
+      // Admin → Users: who Study teaches someone as, when editing and when making an account.
+      await dana.goto("/admin?tab=users");
+      await ready(dana);
+      await dana.getByRole("button", { name: "Edit e2e_bob" }).click();
+      const edit = dana.getByRole("dialog", { name: /Edit e2e_bob/ });
+      const lock = edit.getByLabel("Study lessons are for");
+      await lock.scrollIntoViewIfNeeded();
+      await expect(lock).toHaveValue("");
+      await expect(edit).toContainText("You still can't see their subjects or progress");
+      await dana.screenshot({ path: shot3("admin-level-lock") });
+      await dana.keyboard.press("Escape");
+      await dana.getByRole("button", { name: "Create user" }).first().click();
+      const create = dana.getByRole("dialog", { name: "Create user" });
+      await expect(create.getByLabel("Study lessons are for")).toHaveValue("");
+      await create.getByLabel("Study lessons are for").selectOption("child");
+      await expect(create.getByLabel("Study lessons are for")).toHaveValue("child");
+      await dana.keyboard.press("Escape");
+    });
+    expect(found, found.join("\n")).toEqual([]);
   });
 });

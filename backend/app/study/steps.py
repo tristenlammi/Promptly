@@ -470,7 +470,9 @@ def grade_local(kind: str, payload: dict[str, Any], answer: dict[str, Any]) -> d
     if kind == "explore":
         outcome, miss = figures.grade(key["figure"], key["goal"], answer)
         close = "Close, but not quite on it.\n\n" if outcome == "partial" else ""
-        return {"outcome": outcome, "feedback_md": close + key["explain_md"], "misconception": None, "detail": {"miss": miss, "solution": key["solution"]}}
+        # The right setting nearest to where they left the sliders, not just any right one.
+        solution = (figures.answer_near(key["figure"], key["goal"], answer) if outcome != "correct" else None) or key["solution"]
+        return {"outcome": outcome, "feedback_md": close + key["explain_md"], "misconception": None, "detail": {"miss": miss, "solution": solution}}
     if kind == "write_code":
         labels = {c["id"]: c["label"] for c in key["checks"]}
         failed = [k for k, ok in answer["results"].items() if not ok]
