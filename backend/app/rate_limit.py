@@ -68,6 +68,7 @@ _LIMIT_DAV: RateLimitItem = parse(_settings.RATE_LIMIT_DAV)
 _LIMIT_MFA_VERIFY: RateLimitItem = parse(_settings.RATE_LIMIT_MFA_VERIFY)
 _LIMIT_MFA_EMAIL_SEND: RateLimitItem = parse(_settings.RATE_LIMIT_MFA_EMAIL_SEND)
 _LIMIT_USER_MESSAGES: RateLimitItem = parse(_settings.RATE_LIMIT_USER_MESSAGES)
+_LIMIT_STUDY_STEPS: RateLimitItem = parse(_settings.RATE_LIMIT_STUDY_STEPS)
 
 
 def _client_ip(request: Request) -> str:
@@ -360,4 +361,19 @@ async def enforce_user_message_rate(request: Request, user: User) -> None:
             "and try again in a minute."
         ),
         headers={"Retry-After": str(_retry_after(_LIMIT_USER_MESSAGES))},
+    )
+
+
+async def enforce_user_study_rate(request: Request, user: User) -> None:
+    """Study's own per-user count, so a lesson never eats the chat allowance."""
+    if not _settings.RATE_LIMIT_ENABLED:
+        return
+    allowed = await _moving_limiter.hit(_LIMIT_STUDY_STEPS, "study_steps", str(user.id))
+    if allowed:
+        return
+    await _record_rate_limit_audit(request, bucket=f"study_steps:{user.id}")
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="You're going very fast. Take a short break and carry on in a minute.",
+        headers={"Retry-After": str(_retry_after(_LIMIT_STUDY_STEPS))},
     )

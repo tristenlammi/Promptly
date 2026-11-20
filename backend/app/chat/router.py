@@ -1664,6 +1664,8 @@ async def _enforce_send_quotas(
     request: Request,
     user: User,
     db: AsyncSession,
+    *,
+    rate=None,
 ) -> None:
     """Block a chat-send when the user is rate-limited or over budget.
 
@@ -1675,7 +1677,7 @@ async def _enforce_send_quotas(
     429 itself is intentionally vague so the user can't probe the
     exact cap by binary-searching message lengths.
     """
-    await enforce_user_message_rate(request, user)
+    await (rate or enforce_user_message_rate)(request, user)
 
     snapshot = await check_budget(db, user)
     if snapshot.verdict != "blocked":

@@ -220,6 +220,9 @@ class Settings(BaseSettings):
     # 5 s sustained) but cuts off the runaway-script case where a
     # compromised token is being driven by a bot.
     RATE_LIMIT_USER_MESSAGES: str = "60/5 minutes"
+    # Study lessons: a step, its grade and a question each spend one, so a
+    # lesson needs far more than a chat does. Its own count, apart from chat.
+    RATE_LIMIT_STUDY_STEPS: str = "300/5 minutes"
 
     # ---- Session tokens ----
     # Refresh-token lifetime. The access token is short (15 min) and rotates;

@@ -37,10 +37,11 @@ def _http(e: service.StudyError) -> HTTPException:
 
 
 async def _quotas(request: Request, user: User, db: AsyncSession) -> None:
-    """The same send limits as chat: these routes spend the model."""
+    """Study's own rate count (a lesson spends many calls), chat's budget check."""
     from app.chat.router import _enforce_send_quotas
+    from app.rate_limit import enforce_user_study_rate
 
-    await _enforce_send_quotas(request, user, db)
+    await _enforce_send_quotas(request, user, db, rate=enforce_user_study_rate)
 
 
 # -------------------------------------------------------------------- views
