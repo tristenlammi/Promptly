@@ -24,6 +24,7 @@ import { canRecord } from "../voiceRecorder";
 import { PollSheet } from "./PollSheet";
 import { CameraView } from "./CameraView";
 import { forgetNativeCamera, hasNativeCamera, onNoCameraApp, openNativeCamera, sentFromCamera } from "../nativeCamera";
+import { continueList } from "../listContinue";
 import { VoiceButton } from "./VoiceButton";
 
 // Until the server has said what it allows (1 GB where big uploads are on).
@@ -473,8 +474,20 @@ export const Composer = forwardRef<
   };
 
   const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
-    setCaret(e.target.selectionStart ?? e.target.value.length);
+    const el = e.target;
+    const at = el.selectionStart ?? el.value.length;
+    // A new line after a list line carries the list on ("2. ", "- ").
+    const list = continueList(text, el.value, at);
+    if (list) {
+      setText(list.value);
+      setCaret(list.caret);
+      requestAnimationFrame(() => {
+        if (ta.current) ta.current.selectionStart = ta.current.selectionEnd = list.caret;
+      });
+    } else {
+      setText(el.value);
+      setCaret(at);
+    }
     if (!editing && e.target.value.trim() && Date.now() - lastTyping.current > 3000) {
       lastTyping.current = Date.now();
       void roomsApi.typing(roomId).catch(() => undefined);
