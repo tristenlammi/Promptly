@@ -1333,6 +1333,35 @@ async def suggest_next(db: AsyncSession, user: User, subject: StudySubject) -> l
     return nxt
 
 
+async def catch_up(db: AsyncSession, user: User) -> int:
+    """Bring subjects from before reviews and capstones existed into line:
+    a learned concept with no schedule gets one, and a subject marked
+    complete whose tasks were never set goes back to being in progress (its
+    next lesson is the first task). Cheap when there is nothing to do, which
+    is always, after the first time. Returns how many rows it touched."""
+    rows = list(
+        (
+            await db.execute(
+                select(StudyConcept)
+                .join(StudySubject, StudySubject.id == StudyConcept.subject_id)
+                .where(StudySubject.user_id == user.id, StudyConcept.state.in_(("mastered", "known")), StudyConcept.fsrs.is_(None))
+            )
+        ).scalars()
+    )
+    for c in rows:
+        _schedule(c, "known" if c.state == "known" else "lesson", user)
+    n = len(rows)
+    done = list((await db.execute(select(StudySubject).where(StudySubject.user_id == user.id, StudySubject.status == "complete", StudySubject.capstone.is_(None)))).scalars())
+    for s in done:
+        concepts = await concepts_of(db, s.id)
+        if len(concepts) >= 2:
+            s.status = "active"
+            n += 1
+    if n:
+        await db.commit()
+    return n
+
+
 # ------------------------------------------------------------ days studied
 
 

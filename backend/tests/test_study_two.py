@@ -594,3 +594,24 @@ async def test_voice_is_only_offered_when_the_server_has_it(client, db, model, m
     assert asked == []
     assert await voice.available(fresh=True) == {"listen": True, "speak": False}  # the reader is up, the transcriber isn't
     assert (await client.get(f"{API}/voice")).status_code == 401
+
+
+async def test_a_subject_from_before_reviews_existed_is_brought_into_line(client, db, model):
+    from app.study import service
+    from app.study.models import StudySubject
+
+    u = await mk_user(db, "ana")
+    sid = await ready(client, db, u)
+    s = await db.get(StudySubject, uuid.UUID(sid))
+    rows = await service.concepts_of(db, s.id)
+    for c in rows:  # as phase 1 left a finished subject: learned, no schedule, no tasks
+        c.state, c.mastery, c.mastered_at = "mastered", 0.9, datetime.now(UTC)
+    s.status = "complete"
+    await db.commit()
+
+    home = (await client.get(f"{API}/subjects", headers=H(u))).json()
+    card = home["subjects"][0]
+    assert card["status"] == "active" and card["next_capstone"]["scope"] == "unit" and home["due_total"] == 0
+    rows = await concepts(db, s)
+    assert all(c.fsrs and c.due_at > datetime.now(UTC) for c in rows)  # everything learned now has a review coming
+    assert await service.catch_up(db, u) == 0  # and there is nothing more to do

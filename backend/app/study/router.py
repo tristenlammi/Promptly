@@ -299,6 +299,7 @@ async def get_voice(user: User = Depends(get_current_user)) -> dict[str, bool]:
 
 @router.get("/subjects")
 async def list_subjects(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    await service.catch_up(db, user)
     subs = list(
         (await db.execute(select(StudySubject).where(StudySubject.user_id == user.id, StudySubject.trashed_at.is_(None)).order_by(StudySubject.updated_at.desc()))).scalars()
     )

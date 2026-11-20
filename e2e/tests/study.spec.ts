@@ -513,4 +513,44 @@ test.describe("study", () => {
     });
     expect(found).toEqual([]);
   });
+
+  test("a step is read aloud and a written answer can be spoken, where the server has voice", async ({ bob: page, dana }) => {
+    test.setTimeout(240_000);
+    const auth = { Authorization: await bearer(page) };
+    const voice = await (await page.request.get("/api/study/voice", { headers: auth })).json();
+    // Whisper and the reader are optional containers (stack.sh up <name> --with voice).
+    test.skip(!voice.listen, "this stack has no voice containers: the player rightly shows nothing about voice");
+    await withTeacher(dana, async () => {
+      await newSubject(page, `Tides aloud ${stamp}`);
+      await expect(page.getByTestId("study-placement-offer")).toBeVisible({ timeout: 90_000 });
+      await page.getByRole("button", { name: /I'm new to this/ }).click();
+      await page.getByTestId("study-continue-course").click();
+      await expect(page.locator('[data-testid="study-step"][data-status="pending"]')).toBeVisible({ timeout: 30_000 });
+
+      // Read this step aloud: the app's own reader is asked for the words.
+      const spoken = page.waitForResponse((r) => r.url().includes("/api/voice/tts"), { timeout: 60_000 });
+      await page.getByTestId("study-read-aloud").click();
+      const res = await spoken;
+      expect(res.status()).toBe(200);
+      expect(res.request().postDataJSON().text).toContain("pull");
+      await expect(page.getByRole("button", { name: "Read every step to me" })).toBeVisible();
+      await page.screenshot({ path: shot("voice") });
+
+      // A written step offers the mic (speaking into it needs a real microphone).
+      if (voice.speak) {
+        for (let i = 0; i < 12; i++) {
+          const now = page.locator('[data-testid="study-step"][data-status="pending"]');
+          await expect(now).toBeVisible({ timeout: 30_000 });
+          const kind = (await now.getAttribute("data-kind")) ?? "";
+          if (kind === "explain_back" || kind === "scenario") {
+            await expect(page.getByTestId("study-dictate")).toBeVisible();
+            await page.screenshot({ path: shot("voice-dictate") });
+            break;
+          }
+          await answer(page, "well");
+          if (kind !== "explain") await page.getByTestId("study-continue").click();
+        }
+      }
+    });
+  });
 });
