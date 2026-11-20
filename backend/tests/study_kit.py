@@ -69,6 +69,20 @@ class FakeModel:
             if "MISC" in text:
                 return {"outcome": "wrong", "met": [], "feedback": "Not quite.", "misconception": {"label": MISC, "detail": "Thinks the effect comes first."}}
             return {"outcome": "wrong", "met": [], "feedback": "No.", "misconception": None}
+        if task == "capstone":
+            n = len(re.findall(r"^\d+\. ", prompt, re.M))
+            points = [{"point": f"uses idea {i}", "concept": i} for i in range(1, n + 1)]
+            while len(points) < 3:
+                points.append({"point": f"and again idea 1 ({len(points)})", "concept": 1})
+            return {"task": "Plan a sail around the tide.", "rubric": points, "model_answer": "Leave on the ebb.", "sources": [1]}
+        if task == "grade_capstone":
+            text = prompt.split("<learner_answer>")[1].split("</learner_answer>")[0]
+            n = len(re.findall(r"^\d+\. ", prompt.split("A good answer makes these points:")[1].split("A model answer")[0], re.M))
+            # GOOD: every point. HALF: the first half. LASTONLY: only the last point. Anything else: none.
+            met = list(range(n)) if "GOOD" in text else list(range((n + 1) // 2)) if "HALF" in text else [n - 1] if "LASTONLY" in text else []
+            return {"outcome": "correct", "met": met, "feedback": "Here is how it went.", "misconception": None}
+        if task == "next_subjects":
+            return {"next": [{"title": "Ocean currents", "why": "They move the water the tides lift."}, {"title": "Reading charts", "why": "For the sailing."}]}
         if task == "gap":
             self.gaps += 1
             return {
@@ -169,8 +183,8 @@ def answer_for(step: Any, how: str) -> dict[str, Any]:
         return {"line_id": next(x["id"] for x in lines if ("ERROR" in x["text"]) == good)}
     if kind == "worked_example":
         return {"blanks": {s["id"]: pick(s["options"]) for s in pub["steps"] if s["blank"]}}
-    if kind in ("explain_back", "scenario"):
-        return {"text": {"good": "GOOD answer", "misc": "MISC answer"}.get(how, "a poor answer")}
+    if kind in ("explain_back", "scenario", "capstone"):
+        return {"text": {"good": "GOOD answer", "misc": "MISC answer", "half": "HALF answer", "last": "LASTONLY answer"}.get(how, "a poor answer")}
     return {}
 
 
@@ -230,7 +244,7 @@ async def run_course(db: Any, user: Any, subject: Any, policy: Policy, max_steps
             out["kinds"].append((concept.title, st.kind, st.role, how))
             if st.kind != "explain":
                 out["graded"] += 1
-                if st.role != "recall":
+                if st.role not in ("recall", "capstone"):
                     seen[st.concept_id] = seen.get(st.concept_id, 0) + 1
             out["changes"] += res["changes"]
     return out

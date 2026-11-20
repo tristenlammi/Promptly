@@ -37,6 +37,8 @@ class AdminUserResponse(BaseModel):
     # Whether the ``generate_image`` chat tool is available to this user.
     # Admins are never gated by it (always effectively True for them).
     can_generate_images: bool = True
+    # Study: who lessons are pitched at, fixed by an admin (None = they choose).
+    study_level_lock: Literal["child", "teen", "adult"] | None = None
     # Whether the user's automation HTTP steps may reach the local network.
     can_reach_private_network: bool = False
     # Whether the user may use Automations (off unless an admin turns it on).
@@ -443,6 +445,9 @@ class AdminUserUpdate(BaseModel):
     allowed_models: list[str] | None = None
     # Omit to leave unchanged; send a bool to toggle image-gen access.
     can_generate_images: bool | None = None
+    # Study: fix who lessons are pitched at ("child" / "teen" / "adult");
+    # null lets the person choose again. Omit to leave unchanged.
+    study_level_lock: Literal["child", "teen", "adult"] | None = None
     # Omit to leave unchanged; send a bool to allow/deny local-network
     # access for the user's automation HTTP steps.
     can_reach_private_network: bool | None = None

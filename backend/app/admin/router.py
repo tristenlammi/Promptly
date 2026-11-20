@@ -560,6 +560,9 @@ async def update_user(
     if "can_generate_images" in fields and payload.can_generate_images is not None:
         target.can_generate_images = payload.can_generate_images
 
+    if "study_level_lock" in fields:
+        target.study_level_lock = payload.study_level_lock
+
     if (
         "can_reach_private_network" in fields
         and payload.can_reach_private_network is not None

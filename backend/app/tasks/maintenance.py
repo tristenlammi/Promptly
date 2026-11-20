@@ -33,6 +33,7 @@ async def run_storage_maintenance() -> dict[str, int]:
     from app.workspaces.router import purge_trashed_workspaces
     from app.trash.service import purge_expired_entries, purge_expired_workspace_items
     from app.notes.service import purge_expired as purge_expired_notes
+    from app.study.service import purge_expired as purge_expired_study
 
     out = {
         "trash_purged": 0, "orphan_assets": 0, "docs_rerendered": 0,
@@ -59,6 +60,8 @@ async def run_storage_maintenance() -> dict[str, int]:
         ("link_grants_purged", purge_dead_link_grants),
         # Notes 30+ days in Trash (app/notes).
         ("notes_purged", purge_expired_notes),
+        # Study subjects 30+ days in Trash (app/study).
+        ("study_purged", purge_expired_study),
     ):
         try:
             async with SessionLocal() as db:

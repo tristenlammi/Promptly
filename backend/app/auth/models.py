@@ -43,6 +43,11 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
 
+    # Study: who lessons are pitched at, fixed by an admin ("child" / "teen"
+    # / "adult"). NULL = the person chooses. An admin sets the band; they
+    # never see anyone's subjects or progress.
+    study_level_lock: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
     # May this user's automation HTTP steps reach addresses on the local
     # network (LAN, Tailscale, the Docker host)? FALSE by default — any
     # user used to be able to tick that box per step (R-008, R-015).

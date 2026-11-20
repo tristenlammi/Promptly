@@ -483,7 +483,7 @@ async def test_nobody_else_reaches_a_subject_an_admin_included(client, db, model
     ]
     before = len(model.calls)
     for who in (other, admin):
-        assert (await client.get(f"{API}/subjects", headers=H(who))).json() == {"subjects": []}
+        assert (await client.get(f"{API}/subjects", headers=H(who))).json()["subjects"] == []
         for method, path, body in calls:
             r = await client.request(method, f"{API}{path}", json=body, headers=H(who))
             assert r.status_code == 404, (who.role, method, path, r.status_code)
@@ -502,10 +502,18 @@ async def test_rename_archive_delete(client, db, model):
     await nxt(client, u, se)
     r = await client.patch(f"{API}/subjects/{sid}", json={"title": "Tides and moons", "archived": True}, headers=H(u))
     assert r.status_code == 200 and r.json()["title"] == "Tides and moons" and r.json()["archived"] is True
-    assert (await client.delete(f"{API}/subjects/{sid}", headers=H(u))).json() == {"ok": True}
+    assert (await client.delete(f"{API}/subjects/{sid}", headers=H(u))).json() == {"ok": True, "trashed": True}
+    assert (await client.get(f"{API}/subjects/{sid}", headers=H(u))).status_code == 404
+    assert (await client.get(f"{API}/subjects", headers=H(u))).json()["subjects"] == []
+    # It waits in the trash: put back, it is as it was; deleted from there, everything goes.
+    listed = (await client.get("/api/trash", headers=H(u))).json()["items"]
+    assert [(i["type"], i["app"], i["title"]) for i in listed] == [("study_subject", "study", "Tides and moons")]
+    assert (await client.post("/api/trash/restore", json={"items": [{"type": "study_subject", "id": sid}]}, headers=H(u))).status_code == 200
+    assert (await client.get(f"{API}/subjects/{sid}", headers=H(u))).json()["title"] == "Tides and moons"
+    await client.delete(f"{API}/subjects/{sid}", headers=H(u))
+    assert (await client.post("/api/trash/purge", json={"items": [{"type": "study_subject", "id": sid}]}, headers=H(u))).status_code == 200
     for m in (StudySubject, StudyConcept, StudySession, StudyStep):
         assert (await db.execute(select(func.count(m.id)))).scalar_one() == 0
-    assert (await client.get(f"{API}/subjects/{sid}", headers=H(u))).status_code == 404
 
 
 async def test_deleting_the_account_takes_its_study_with_it(client, db, model):

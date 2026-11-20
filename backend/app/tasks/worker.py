@@ -277,6 +277,16 @@ async def rooms_purge_deleted(ctx) -> int:
         return await purge_deleted(db) + await purge_unsent(db)
 
 
+# Study: the daily nudge (app/study/reminders.py), at each person's own time.
+async def study_nudge_tick(ctx) -> int:
+    """Cron: Study's opt-in daily nudge — once a day, only with something to do."""
+    from app.database import SessionLocal
+    from app.study.reminders import send_due
+
+    async with SessionLocal() as db:
+        return await send_due(db)
+
+
 # Forms (WP-F1.4): telling owners their form closed, and the daily email.
 async def forms_close_tick(ctx) -> int:
     """Cron: forms whose closing time passed — tell their owners once."""
@@ -496,6 +506,8 @@ class WorkerSettings:
         # Forms (WP-F1.4): closing pushes every 5 minutes; the daily email
         # checks four times an hour (it goes at each person's own time).
         cron(forms_close_tick, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True),
+        # Study: the daily nudge, checked every 5 minutes (it goes at each person's own time).
+        cron(study_nudge_tick, minute=set(range(3, 60, 5)), run_at_startup=False, unique=True, timeout=240),
         cron(rooms_purge_deleted, minute=set(range(0, 60, 2)), run_at_startup=False, unique=True),
         cron(forms_digest, minute={7, 22, 37, 52}, run_at_startup=False, unique=True),
         # Forms (WP-F1.5): linked sheets catch up every 10 minutes (collab was

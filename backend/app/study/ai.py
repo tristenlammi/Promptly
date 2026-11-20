@@ -76,6 +76,12 @@ async def raw_call(t: Teacher, call: str, *, system: str, messages: list[dict[st
     from app.chat.titler import _strip_think_blocks
     from app.models_config.provider import ChatMessage, ProviderError, model_router
 
+    if t.user is not None:
+        # Study's spend counts towards this person's usage and budget, also
+        # when the call comes from a background build (no request to say so).
+        from app.billing.usage_context import bill_usage_to
+
+        bill_usage_to(t.user.id)
     msgs = [ChatMessage(role=m["role"], content=m["content"]) for m in messages]
     system = with_now(system, t.user)
 
@@ -244,6 +250,13 @@ GAP_SHAPE = """{"title": "the missing idea, as a short concept name", "summary":
  "objectives": ["can ...", "can ..."], "nature": "fact|process|principle|skill",
  "reason": "one sentence TO the learner saying why this was added, kind and specific (e.g. 'Your answers mixed up X and Y, so we'll sort that out first.')"}
 The missing idea must be something EARLIER and more basic that the current concept rests on, not the current concept again and not anything already on the map."""
+
+CAPSTONE_SHAPE = """{"task": "the task, 80-200 words, Markdown: a realistic situation and what to produce or decide",
+ "rubric": [{"point": "a point a good answer makes", "concept": 1}],
+ "model_answer": "a good answer, 120-260 words", "sources": [1]}
+4 to 7 rubric points. "concept" is the number of the idea (from the list) that the point shows the learner can use."""
+
+NEXT_SHAPE = """{"next": [{"title": "a subject, as someone would type it", "why": "one sentence to the learner: why this follows"}]}"""
 
 PLACEMENT_SHAPE = """{"questions": [{"key": "the concept key given", "question": "...",
   "options": [{"text": "..."}, {"text": "..."}, {"text": "..."}, {"text": "..."}], "correct": 0}]}

@@ -266,6 +266,30 @@ def build(kind: str, raw: Any, *, valid_sources: set[int] | None = None, seed: i
     return {"public": pub, "key": key}
 
 
+def build_capstone(raw: Any, concept_ids: list[str], *, valid_sources: set[int] | None = None) -> dict[str, Any]:
+    """A capstone's stored payload: one applied task and a rubric whose every
+    point is tied to one of ``concept_ids`` (the model gives its number, from
+    1). Raises :class:`StepInvalid`."""
+    if not isinstance(raw, dict):
+        raise StepInvalid("not an object")
+    rubric: list[str] = []
+    owners: list[str] = []
+    for p in _list(raw.get("rubric"), "rubric", 3, 8):
+        if not isinstance(p, dict):
+            raise StepInvalid("each rubric point is an object with point and concept")
+        n = p.get("concept")
+        if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= len(concept_ids):
+            raise StepInvalid("each rubric point names one of the numbered ideas")
+        rubric.append(_need(p.get("point"), "rubric point", 300))
+        owners.append(concept_ids[n - 1])
+    if len(set(owners)) < min(2, len(concept_ids)):
+        raise StepInvalid("the rubric must draw on at least two of the ideas")
+    return {
+        "public": {"task_md": _need(raw.get("task"), "task", 3000), "sources": _sources(raw, valid_sources or set())},
+        "key": {"rubric": rubric, "rubric_concepts": owners, "model_answer_md": _need(raw.get("model_answer"), "model answer", 3500), "hints": []},
+    }
+
+
 # ------------------------------------------------------------------ grading
 
 LOCAL = ("mcq", "predict", "order_steps", "match_pairs", "spot_error", "worked_example")
@@ -291,7 +315,7 @@ def check_answer(kind: str, payload: dict[str, Any], answer: Any) -> dict[str, A
     pub = payload["public"]
     if kind == "explain":
         return {}
-    if answer.get("dont_know") is True and kind in LOCAL + ("explain_back", "scenario"):
+    if answer.get("dont_know") is True and kind in LOCAL + ("explain_back", "scenario", "capstone"):
         return {"dont_know": True}
     if kind in ("mcq", "predict"):
         if answer.get("option_id") not in {o["id"] for o in pub["options"]}:
@@ -319,8 +343,8 @@ def check_answer(kind: str, payload: dict[str, Any], answer: Any) -> dict[str, A
         if not isinstance(blanks, dict) or set(blanks) != set(want) or any(blanks[k] not in want[k] for k in want):
             raise AnswerInvalid("Fill in every step.")
         return {"blanks": {str(k): str(v) for k, v in blanks.items()}}
-    if kind in ("explain_back", "scenario"):
-        text = _s(answer.get("text"), 4000)
+    if kind in ("explain_back", "scenario", "capstone"):
+        text = _s(answer.get("text"), 8000 if kind == "capstone" else 4000)
         if len(text) < 2:
             raise AnswerInvalid("Write an answer first.")
         return {"text": text}

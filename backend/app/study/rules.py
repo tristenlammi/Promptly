@@ -395,3 +395,143 @@ def pick_probes(concepts: Sequence[ConceptState], want: int = 7) -> list[str]:
         if cid not in picks:
             picks.append(cid)
     return picks
+
+
+# ------------------------------------------------------------------ reviews
+#
+# A learned concept comes back on a schedule (FSRS, the Flashcards engine).
+# The step is written fresh each time; what the answer means is decided here.
+
+#: FSRS ratings.
+AGAIN, HARD, GOOD, EASY = 1, 2, 3, 4
+#: The most concepts in one review sitting.
+REVIEW_BATCH = 20
+
+
+def review_rating(outcome: str, *, hints: int = 0, confidence: int | None = None, dont_know: bool = False) -> int:
+    """The FSRS rating an answer to a review step earns.
+
+    * wrong, or "I don't know": Again
+    * half right, or right with a hint, or right but "guessing": Hard
+    * right and "sure", no hints: Easy
+    * right otherwise: Good
+    """
+    if dont_know or outcome == "wrong":
+        return AGAIN
+    if outcome == "partial" or hints > 0 or confidence == 1:
+        return HARD
+    return EASY if confidence == 3 else GOOD
+
+
+def first_rating(how: str) -> int:
+    """The rating that starts a concept's schedule: it was just learned in a
+    lesson (Good), or shown to be known already (placement, test-out: Easy)."""
+    return EASY if how in ("known", "test_out") else GOOD
+
+
+def review_kind(c: ConceptState, reps: int, last_kind: str | None) -> str:
+    """The kind of step for a review: quick recognition most times, and every
+    third time the idea in the learner's own words. Never the kind used last."""
+    if reps % 3 == 2 and last_kind != "explain_back":
+        return "explain_back"
+    recog = RECOGNITION_FOR.get(c.nature, RECOGNITION_FOR["principle"])
+    options = [k for k in recog if k != "predict" and k != last_kind] or ["mcq"]
+    return options[reps % len(options)]
+
+
+def interleave(due: Sequence[tuple[str, str]], limit: int = REVIEW_BATCH) -> list[str]:
+    """Due concepts as ``(concept id, subject id)``, most overdue first, into
+    the order they are reviewed: subjects taken in turn, so two from the same
+    subject are only side by side when nothing else is left."""
+    queues: dict[str, list[str]] = {}
+    for cid, sid in due:
+        queues.setdefault(sid, []).append(cid)
+    out: list[str] = []
+    while len(out) < limit and any(queues.values()):
+        for sid in list(queues):
+            if queues[sid] and len(out) < limit:
+                out.append(queues[sid].pop(0))
+    return out
+
+
+# ---------------------------------------------------------------- capstones
+#
+# A unit ends with one applied task that needs several of its concepts at
+# once; the subject ends with one across the whole course. The model writes
+# the task and says which rubric points it met; this decides what that means.
+
+CAPSTONE_PASS = 0.75
+CAPSTONE_PARTIAL = 0.4
+#: Tries at one capstone before the course moves on anyway.
+CAPSTONE_TRIES = 3
+#: Most concepts one capstone draws on.
+CAPSTONE_CONCEPTS = 6
+#: A concept whose points were all missed is set to this and taught again.
+REOPEN_MASTERY = 0.35
+
+
+def capstone_outcome(points: int, met: int) -> str:
+    """The task as a whole: correct (passed), partial or wrong."""
+    frac = met / points if points else 0.0
+    return "correct" if frac >= CAPSTONE_PASS else "partial" if frac >= CAPSTONE_PARTIAL else "wrong"
+
+
+def capstone_by_concept(point_concepts: Sequence[str], met: Iterable[int]) -> dict[str, str]:
+    """Per concept id: correct (every point of its met), partial, or wrong
+    (none of its points met: that concept is reopened)."""
+    met = set(met)
+    total: dict[str, int] = {}
+    got: dict[str, int] = {}
+    for i, cid in enumerate(point_concepts):
+        total[cid] = total.get(cid, 0) + 1
+        got[cid] = got.get(cid, 0) + (1 if i in met else 0)
+    return {cid: "correct" if got[cid] == n else "wrong" if got[cid] == 0 else "partial" for cid, n in total.items()}
+
+
+def capstone_settled(cap: dict[str, Any] | None) -> bool:
+    return bool(cap) and cap.get("status") in ("passed", "closed")
+
+
+def capstone_pick(concepts: Sequence[ConceptState], unit_of: dict[str, str], limit: int = CAPSTONE_CONCEPTS) -> list[str]:
+    """The concepts a capstone draws on: the least solid one of each unit in
+    turn, until there are enough (for one unit: its least solid ones)."""
+    by_unit: dict[str, list[ConceptState]] = {}
+    for c in sorted(concepts, key=lambda c: c.position):
+        by_unit.setdefault(unit_of[c.id], []).append(c)
+    for u in by_unit:
+        by_unit[u].sort(key=lambda c: (c.mastery, c.position))
+    out: list[str] = []
+    while len(out) < limit and any(by_unit.values()):
+        for u in list(by_unit):
+            if by_unit[u] and len(out) < limit:
+                out.append(by_unit[u].pop(0).id)
+    return out
+
+
+# ---------------------------------------------------------------- reminders
+
+
+def nudge_due(local_minutes: int, at_minutes: int, *, sent_today: bool, window: int = 180) -> bool:
+    """Whether the daily nudge should go now: at or after the chosen time,
+    within ``window`` minutes of it (a server that was down at 17:00 still
+    sends at 18:00, never at midnight), and not already sent today."""
+    return not sent_today and 0 <= local_minutes - at_minutes <= window
+
+
+def nudge_wanted(*, due: int, lesson_open: bool, studied_today: bool, recent_subject: bool) -> bool:
+    """Whether there is anything to nudge about. Quiet when they have already
+    studied today, and when nothing is due and nothing is under way."""
+    if studied_today:
+        return False
+    return due > 0 or lesson_open or recent_subject
+
+
+def streak(days: Iterable[int], today: int) -> int:
+    """Consecutive days studied, ending today or yesterday (day numbers).
+    A day not yet studied doesn't break a run that reached yesterday."""
+    have = set(days)
+    end = today if today in have else today - 1
+    n = 0
+    while end - n in have:
+        n += 1
+    return n

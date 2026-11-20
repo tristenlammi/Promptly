@@ -17,16 +17,18 @@ included, has a route to any of it.
   learner answered, the ``grade`` and the ``evidence`` it gave per concept.
 * :class:`StudySource` — the numbered source pack steps cite.
 
-``StudyConcept.fsrs`` is unused until reviews (Phase 2); it will hold the
-same card state the Flashcards kind keeps (``app.items.kinds.flashcards.fsrs``).
+``StudyConcept.fsrs`` is the review card for a learned concept: the same
+state the Flashcards kind keeps (``app.items.kinds.flashcards.fsrs``), with
+``due_at`` beside it so "what's due" is a query. :class:`StudyDay` is one row
+per person per day they studied. (Phase 2, migration ``0484_study_two``.)
 """
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func, text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -70,6 +72,11 @@ class StudySubject(Base):
     created_at: Mapped[datetime] = _now()
     updated_at: Mapped[datetime] = _now()
     last_studied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The final applied task: {"status": "passed"|"open", "tries": n, "step_id", "outcome", "at"}.
+    capstone: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Written once when the subject is finished: {"next": [{"title", "why"}], "at"}.
+    report: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    trashed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class StudyUnit(Base):
@@ -81,6 +88,8 @@ class StudyUnit(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    # The unit's applied task (same shape as the subject's).
+    capstone: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
 
 class StudyConcept(Base):
@@ -113,6 +122,7 @@ class StudyConcept(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mastered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fsrs: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class StudyMisconception(Base):
@@ -137,7 +147,7 @@ class StudySession(Base):
 
     id: Mapped[uuid.UUID] = _pk()
     subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_subjects.id", ondelete="CASCADE"), nullable=False)
-    kind: Mapped[str] = mapped_column(String(10), nullable=False)  # placement | lesson
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)  # placement | lesson | review
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="active", server_default="active")
     # Working state the engine owns (focus concept, parked concepts, the
     # placement probes and where the search is up to).
@@ -160,7 +170,7 @@ class StudyStep(Base):
     concept_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("study_concepts.id", ondelete="CASCADE"), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    # recall | test_out | placement | "" (an ordinary teaching step)
+    # recall | test_out | placement | review | capstone | "" (an ordinary teaching step)
     role: Mapped[str] = mapped_column(String(10), nullable=False, default="", server_default="")
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="pending", server_default="pending")
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -190,3 +200,13 @@ class StudySource(Base):
     file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
     note_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("notes.id", ondelete="SET NULL"), nullable=True)
     excerpt: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+
+
+class StudyDay(Base):
+    """A day someone studied (their own local date), and how many steps."""
+
+    __tablename__ = "study_days"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    steps: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

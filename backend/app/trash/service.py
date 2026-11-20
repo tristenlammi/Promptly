@@ -510,6 +510,12 @@ async def list_all(db: AsyncSession, user: User) -> list[dict[str, Any]]:
     for n in await trashed_notes(db, user):
         out.append(_item("note", n.id, "notes", "note", display_title(n), n.trashed_at, "Notes"))
 
+    # Study subjects — in place; a subject is its owner's alone (app/study).
+    from app.study import service as study
+
+    for s in await study.trashed_subjects(db, user):
+        out.append(_item("study_subject", s.id, "study", "subject", s.title, s.trashed_at, "Study"))
+
     # Snapshots: calendar events, albums, tasks, contacts.
     for e in (
         await db.execute(select(TrashEntry).where(_entry_visible(user)).order_by(TrashEntry.deleted_at.desc()))
@@ -553,6 +559,9 @@ async def restore(
     if type_ == "note":
         await _restore_note(db, user, id_)
         return "Notes"
+    if type_ == "study_subject":
+        await _study(db, user, id_, purge=False)
+        return "Study"
     entry = await _find_entry(db, user, type_, id_)
     where = await _restore_entry(db, user, entry)
     await db.commit()
@@ -589,6 +598,9 @@ async def purge(
         return 1
     if type_ == "note":
         await _purge_note(db, user, id_)
+        return 1
+    if type_ == "study_subject":
+        await _study(db, user, id_, purge=True)
         return 1
     entry = await _find_entry(db, user, type_, id_)
     await db.delete(entry)
@@ -660,6 +672,16 @@ async def _purge_note(db: AsyncSession, user: User, id_: str) -> None:
     await notes.purge(db, [note])
     await db.commit()
     await notes_events.publish([user.id], notes_events.gone_event(note.id))
+
+
+async def _study(db: AsyncSession, user: User, id_: str, *, purge: bool) -> None:
+    from app.study import service as study
+
+    try:
+        sid = uuid.UUID(id_)
+        await (study.purge_subject if purge else study.restore_subject)(db, user, sid)
+    except (ValueError, study.StudyError):
+        raise _gone() from None
 
 
 # ------------------------------------------------------------------ retention

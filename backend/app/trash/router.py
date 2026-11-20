@@ -33,6 +33,8 @@ TrashType = Literal[
     "file", "folder", "workspace", "workspace_item", "entry", "calendar_event", "album", "task", "contact",
     # Notes (app/notes): trashed in place, by the note's id.
     "note",
+    # Study (app/study): a subject, trashed in place.
+    "study_subject",
 ]
 
 

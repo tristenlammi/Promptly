@@ -39,8 +39,9 @@ async def test_strong_learner_is_quick(db, user, model):
     assert out["complete"]
     rows = await concepts(db, s)
     assert all(c.state == "mastered" and c.mastery >= 0.7 for c in rows)
-    teaching = [k for k in out["kinds"] if k[2] != "recall"]
+    teaching = [k for k in out["kinds"] if k[2] not in ("recall", "capstone")]
     assert len(teaching) == 3 * len(rows)  # explain, a check, their own words
+    assert [k[1] for k in out["kinds"] if k[2] == "capstone"] == ["capstone"] * 3  # each unit's task, then the final one
     assert not [c for c in out["changes"] if c["type"] == "gap_added"]
     assert any(k[2] == "recall" for k in out["kinds"])  # earlier ideas came back
 
