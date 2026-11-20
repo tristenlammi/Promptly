@@ -540,7 +540,7 @@ function Shell({
   return (
     <div className="study flex min-h-0 flex-1 flex-col bg-[var(--bg)]">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--border)] px-2 pt-safe pl-safe pr-safe sm:px-4">
-        <button type="button" onClick={onLeave} aria-label={`Leave. ${backWords}. Your place is kept.`} title={backWords} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]">
+        <button type="button" onClick={onLeave} aria-label={backWords === "Back to the map" ? "Leave and go back to the map. Your place is kept." : "Leave and go back to Study. Your place is kept."} title={backWords} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]">
           <X className="h-5 w-5" />
         </button>
         <h1 className="sr-only">{title}</h1>

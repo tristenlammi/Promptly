@@ -269,7 +269,11 @@ def _editor_ai_reply(system: str, messages: list) -> str | None:
 #     (twice on one concept adds a gap concept), anything else wrong
 #   - the confused student is put right by a reply with "pull" or GOOD in it
 #   - a subject called "… failcheck" gets unusable answers (the build fails);
-#     "… kidcheck" is refused as unsuitable for a child or a teenager
+#     "… kidcheck" is refused as unsuitable for a child or a teenager;
+#     "… slowcheck" takes eight seconds to plan (so the build screen can be seen)
+#   - a capstone (a unit's task, or the final one) has three rubric points; an
+#     answer with "pull" or GOOD meets all three, HALF one, anything else none
+#   - "what next" after a finished subject is always the same two subjects
 
 STUDY_RIGHT = "The moon's gravity pulls the sea towards it"
 STUDY_MISC = "thinks the sea pushes the moon"
@@ -425,7 +429,23 @@ def _study_reply(system: str, messages: list) -> str | None:
     title = found.group(1) if found else ""
     if "failcheck" in title:
         return "Sure! Here is a lovely course for you."
+    if '{"next": [{"title"' in prompt:
+        return json.dumps({"next": [
+            {"title": "Ocean currents", "why": "They move the same water the tides lift, and they matter just as much on a passage."},
+            {"title": "Reading a nautical chart", "why": "It puts what you know about tides to work where you sail."},
+        ]})
+    if '"rubric": [{"point"' in prompt:
+        n = max(1, len(re.findall(r"^\d+\. ", prompt.split("Reply in exactly this shape:")[0], re.M)))
+        points = ["Says the moon's gravity pulls the sea towards it", "Uses that to say when the water will be high", "Leaves a margin for what the coast does to it"]
+        return json.dumps({
+            "task": "You're taking a small boat out tomorrow from a harbour that dries at low water. **Plan the day around the tide**: say when you would leave and be back, and why the water will be where you say it is.",
+            "rubric": [{"point": p, "concept": (i % n) + 1} for i, p in enumerate(points)],
+            "model_answer": "The moon's gravity pulls the sea towards it, so high water comes as the harbour passes under a bulge. Leave on the rising tide and be back before it has fallen far, with an hour in hand because bays and channels shift the times.",
+            "sources": [1],
+        })
     if '"suitable": true' in prompt:
+        if "slowcheck" in title:
+            time.sleep(8)
         if "kidcheck" in title and "The learner is an adult" not in system:
             return json.dumps({"suitable": False, "unsuitable_reason": "This subject isn't a good fit for this age. Try it on the adult setting."})
         found = re.search(r"^Depth wanted: (\w+)", prompt, re.M)

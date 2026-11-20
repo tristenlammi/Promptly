@@ -107,3 +107,32 @@ html.dark .study {
   .study-ring circle.fill, .study-bar > i { transition: none; }
   .study-draw { stroke-dasharray: none; }
 }
+
+/* The report prints on its own: no sidebar, no header, on white paper. */
+@media print {
+  body:has(.study-report) * {
+    visibility: hidden;
+  }
+  body:has(.study-report) .study-report,
+  body:has(.study-report) .study-report * {
+    visibility: visible;
+  }
+  body:has(.study-report) .study-report {
+    position: absolute;
+    inset: 0 auto auto 0;
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    --bg: #fff;
+    --surface: #fff;
+    --text: #111;
+    --text-muted: #555;
+    --border: #d4d4d4;
+    --st-soft: #f3ece8;
+  }
+  body:has(.study-report) .study-report .promptly-scroll {
+    height: auto;
+    overflow: visible;
+  }
+}
