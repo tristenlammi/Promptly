@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+
+- Rooms: lists carry on as you type. Start a new line after "1. milk" and "2. " is put in for you (bullets too), the numbers below stay in step, and a new line on an empty item ends the list. Before, the numbers only came right once the message was sent.
+
 ## [0.51.0] - 2026-11-19
 
 ### Added
