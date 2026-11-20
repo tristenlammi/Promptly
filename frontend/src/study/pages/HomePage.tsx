@@ -270,6 +270,7 @@ function SubjectCard({ s }: { s: Subject }) {
       </Ring>
       <span className="min-w-0 flex-1">
         <span className="line-clamp-2 text-base font-semibold leading-snug text-[var(--text)]">{s.title}</span>
+        {s.shared_from && <span className="block truncate text-xs text-[var(--st-accent-text)]">From {s.shared_from}</span>}
         <span className={cn("mt-0.5 block truncate text-sm", s.status === "failed" ? "text-[var(--st-bad)]" : "text-[var(--text-muted)]")}>{statusLine(s)}</span>
         {(s.status === "active" || s.status === "complete") && (
           <span className="mt-0.5 block text-xs text-[var(--text-muted)]">

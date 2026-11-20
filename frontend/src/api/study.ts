@@ -402,6 +402,12 @@ export interface AnswerReply {
   subject_status: SubjectStatus;
 }
 
+/** Who a course was given to, and who it couldn't be (with why). */
+export interface ShareReply {
+  given: { user_id: string; name: string }[];
+  skipped: { user_id: string; name: string; reason: string }[];
+}
+
 export type AskMode = "question" | "simpler" | "analogy" | "example" | "deeper";
 
 export interface Prefs {
@@ -474,6 +480,10 @@ export const studyApi = {
   },
   async patch(id: string, body: { title?: string; archived?: boolean; level?: Level }): Promise<SubjectFull> {
     return (await apiClient.patch<SubjectFull>(`/study/subjects/${id}`, body)).data;
+  },
+  /** Give a copy of the course (never your progress) to other people. */
+  async share(id: string, userIds: string[]): Promise<ShareReply> {
+    return (await apiClient.post<ShareReply>(`/study/subjects/${id}/share`, { user_ids: userIds })).data;
   },
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/study/subjects/${id}`);

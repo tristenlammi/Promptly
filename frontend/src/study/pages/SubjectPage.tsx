@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowLeft, ArrowRight, BookOpen, CalendarClock, Check, ClipboardCheck, FastForward, FileText, Globe, Lock, PartyPopper, Play, Plus, RotateCcw, ScrollText, Settings2, StickyNote, Trash2 } from "lucide-react";
+import { Archive, ArrowLeft, ArrowRight, BookOpen, CalendarClock, Check, ClipboardCheck, FastForward, FileText, Gift, Globe, Lock, PartyPopper, Play, Plus, RotateCcw, ScrollText, Settings2, StickyNote, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -13,6 +13,7 @@ import { safeHref } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
+import { GiveSheet } from "../GiveSheet";
 import { CourseMap } from "../map/CourseMap";
 import { BAND_WORDS, bandOf, isDone } from "../map/layout";
 import { Bar, LEVEL_WORDS, Thinking } from "../ui/bits";
@@ -653,6 +654,7 @@ function SettingsSheet({ open, onClose, subject, onChange }: { open: boolean; on
   const levelLocked = prefs.data?.level_locked === true;
   const [title, setTitle] = useState(subject.title);
   const [busy, setBusy] = useState(false);
+  const [giving, setGiving] = useState(false);
   useEffect(() => {
     if (open) setTitle(subject.title);
   }, [open, subject.title]);
@@ -671,6 +673,7 @@ function SettingsSheet({ open, onClose, subject, onChange }: { open: boolean; on
   };
 
   return (
+    <>
     <Sheet open={open} onClose={onClose} title="Subject settings">
       <div className="study flex flex-col gap-5">
         <label className="flex flex-col gap-1.5">
@@ -711,7 +714,20 @@ function SettingsSheet({ open, onClose, subject, onChange }: { open: boolean; on
           </div>
         </fieldset>
 
+        {subject.shared_from && (
+          <p className="text-sm text-[var(--text-muted)]" data-testid="study-shared-from">
+            {subject.shared_from} gave you this course. Your progress in it is yours alone.
+          </p>
+        )}
+
         <div className="flex flex-col gap-2 border-t border-[var(--border)] pt-4">
+          <Button leftIcon={<Gift className="h-4 w-4" />} disabled={busy} onClick={() => {
+              onClose();
+              setGiving(true);
+            }}
+            data-testid="study-give-open">
+            Give this course to someone
+          </Button>
           <Button
             leftIcon={<Archive className="h-4 w-4" />}
             disabled={busy}
@@ -744,5 +760,7 @@ function SettingsSheet({ open, onClose, subject, onChange }: { open: boolean; on
         </div>
       </div>
     </Sheet>
+      <GiveSheet open={giving} onClose={() => setGiving(false)} subject={subject} />
+    </>
   );
 }

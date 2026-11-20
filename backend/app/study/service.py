@@ -1441,3 +1441,102 @@ async def purge_expired(db: AsyncSession, days: int = 30) -> int:
     res = await db.execute(delete(StudySubject).where(StudySubject.trashed_at.is_not(None), StudySubject.trashed_at < _now() - timedelta(days=days)))
     await db.commit()
     return res.rowcount or 0
+
+
+# ------------------------------------------------------------------ sharing
+#
+# Giving a course to someone makes THEIR OWN subject from it: the title, the
+# goal, the map and the sources. Never the giver's progress, answers, wrong
+# ideas, the concepts added for their gaps, their capstones or their report.
+# The two subjects are separate from then on; neither can see the other.
+
+LEVEL_RANK = {"child": 0, "teen": 1, "adult": 2}
+MAX_SHARE = 10
+
+
+def level_of(user: User) -> str:
+    """Who Study is pitched at for this person: an admin's lock, else their own setting."""
+    from app.study.models import LEVELS
+
+    lock = user.study_level_lock if user.study_level_lock in LEVELS else None
+    lvl = lock or ((user.settings or {}).get("study") or {}).get("level")
+    return lvl if lvl in LEVELS else "adult"
+
+
+async def share_subject(db: AsyncSession, giver: User, subject: StudySubject, user_ids: list[uuid.UUID]) -> dict[str, Any]:
+    """Give a copy of ``subject``'s course to each of ``user_ids``. Returns
+    ``{"given": [...], "skipped": [...]}`` (each ``{user_id, name}``, skipped
+    ones with a ``reason`` for the giver)."""
+    from app.people import blocks
+
+    if subject.status not in ("placement", "active", "complete"):
+        raise StudyError("not_ready", "This subject isn't ready to give to anyone yet.", 409)
+    ids = [i for i in dict.fromkeys(user_ids) if i != giver.id][:MAX_SHARE]
+    if not ids:
+        raise StudyError("nobody", "Pick someone to give it to.", 422)
+    people = {u.id: u for u in (await db.execute(select(User).where(User.id.in_(ids), User.disabled.is_(False)))).scalars()}
+    units = await units_of(db, subject.id)
+    concepts = [c for c in await concepts_of(db, subject.id) if c.origin == "planned"]
+    srcs = await sources_of(db, subject.id)
+    given: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    made: list[tuple[uuid.UUID, uuid.UUID]] = []
+    for uid in ids:
+        target = people.get(uid)
+        if target is None or await blocks.either(db, giver.id, uid):
+            # The same answer for "no such person" and "blocked": nothing to learn from it.
+            skipped.append({"user_id": str(uid), "name": "", "reason": "This person can't be given a course."})
+            continue
+        level = level_of(target)
+        if LEVEL_RANK[level] < LEVEL_RANK.get(subject.level, 2):
+            skipped.append({
+                "user_id": str(uid), "name": target.username,
+                "reason": f"This course was made for {'an adult' if subject.level == 'adult' else 'a teenager'}, and Study is set for a younger learner on their account.",
+            })
+            continue
+        n = (await db.execute(select(func.count(StudySubject.id)).where(StudySubject.user_id == uid))).scalar_one()
+        if n >= MAX_SUBJECTS:
+            skipped.append({"user_id": str(uid), "name": target.username, "reason": "They already have as many subjects as Study holds."})
+            continue
+        copy = StudySubject(
+            user_id=uid, title=subject.title, goal=subject.goal, prior="", depth=subject.depth, level=level,
+            status="placement", summary=subject.summary, use_web=subject.use_web, attached={},
+            build_stage="done", build_progress=100, code_lang=subject.code_lang, shared_from=giver.username[:120],
+        )
+        db.add(copy)
+        await db.flush()
+        unit_ids: dict[uuid.UUID, uuid.UUID] = {}
+        for u in units:
+            row = StudyUnit(subject_id=copy.id, position=u.position, title=u.title, summary=u.summary)
+            db.add(row)
+            await db.flush()
+            unit_ids[u.id] = row.id
+        new_ids: dict[str, str] = {}
+        for c in concepts:
+            row = StudyConcept(
+                subject_id=copy.id, unit_id=unit_ids[c.unit_id], position=c.position, title=c.title, summary=c.summary,
+                objectives=list(c.objectives or []), nature=c.nature, source_ns=list(c.source_ns or []), tool=c.tool or "",
+                # Only what the course itself depends on: a gap concept (the giver's) isn't in the copy.
+                prereqs=[new_ids[p] for p in (c.prereqs or []) if p in new_ids],
+            )
+            db.add(row)
+            await db.flush()
+            new_ids[str(c.id)] = str(row.id)
+        for s in srcs:
+            # A source that was the giver's own file or note travels as its title and
+            # the passage the course was built from; the file itself stays theirs.
+            db.add(StudySource(subject_id=copy.id, n=s.n, kind=s.kind, title=s.title, url=s.url, excerpt=s.excerpt))
+        given.append({"user_id": str(uid), "name": target.username})
+        made.append((uid, copy.id))
+    await db.commit()
+    from app.notifications.dispatch import notify_user
+
+    title = subject.title.strip()[:60]
+    for uid, copy_id in made:
+        await notify_user(
+            user_id=uid, category="invite", title=f"{giver.username} gave you a course: {title}",
+            body="It's in Study, ready for you to start. Your progress is yours alone.",
+            url=f"/study/{copy_id}", tag=f"study:share:{copy_id}", actor_user_id=giver.id,
+            extra={"app": "study", "kind": "share", "subject_id": str(copy_id)},
+        )
+    return {"given": given, "skipped": skipped}

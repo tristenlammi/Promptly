@@ -439,3 +439,153 @@ async def test_the_browser_gets_the_figure_and_never_the_answer(client, db, mode
     assert done["reveal"]["figure"]["parts"][1]["note"] == "pulled most"
     r = await client.post(f"{API}/steps/{st['id']}/answer", json={"answer": {"part_id": "p1"}}, headers=H(u))
     assert r.status_code == 409
+
+
+# ------------------------------------------------------------------ sharing
+
+
+@pytest.fixture
+def pushes(monkeypatch):
+    from app.notifications import dispatch
+
+    sent = []
+
+    async def fake(**kw):
+        sent.append(kw)
+
+    monkeypatch.setattr(dispatch, "notify_user", fake)
+    return sent
+
+
+async def _studied(client, db, u):  # noqa: F811
+    """A subject with real history: progress, a wrong idea, a concept added for a gap."""
+    import uuid
+
+    from app.study import service
+    from app.study.models import StudyConcept, StudySubject
+
+    sid = await ready(client, db, u, goal="For sailing with Dad")
+    s = await db.get(StudySubject, uuid.UUID(sid))
+    se = await service.start_lesson(db, s)
+    for _ in range(14):
+        st = await service.next_step(db, u, se, s)
+        if st is None:
+            se = await service.start_lesson(db, s)
+            continue
+        c = await db.get(StudyConcept, st.concept_id)
+        graded = sum(1 for x in await service._concept_history(db, c.id) if x.grade)
+        muddled = c.title == "Concept 2" and c.origin == "planned" and graded < 2
+        await kit.answer(db, u, st, "misc" if muddled else "good", 3)
+    return sid
+
+
+async def test_a_shared_course_is_the_map_and_none_of_the_givers_progress(client, db, model, pushes):  # noqa: F811
+    import uuid
+
+    from app.study import service
+    from app.study.models import StudyConcept, StudyMisconception, StudySource, StudyStep, StudySubject
+
+    ana, ben = await mk_user(db, "ana"), await mk_user(db, "ben")
+    sid = await _studied(client, db, ana)
+    mine = (await client.get(f"{API}/subjects/{sid}", headers=H(ana))).json()
+    mine_concepts = [c for u in mine["units"] for c in u["concepts"]]
+    assert any(c["origin"] == "gap" for c in mine_concepts) and mine["misconceptions"] and mine["progress"]["done"] >= 1
+
+    r = await client.post(f"{API}/subjects/{sid}/share", json={"user_ids": [str(ben.id)]}, headers=H(ana))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"given": [{"user_id": str(ben.id), "name": ben.username}], "skipped": []}
+
+    bens = (await client.get(f"{API}/subjects", headers=H(ben))).json()["subjects"]
+    assert len(bens) == 1 and bens[0]["id"] != sid
+    copy_ = (await client.get(f"{API}/subjects/{bens[0]['id']}", headers=H(ben))).json()
+    assert (copy_["title"], copy_["goal"], copy_["shared_from"], copy_["status"]) == ("Tides", "For sailing with Dad", ana.username, "placement")
+    assert copy_["prior"] == "" and copy_["progress"] == {"total": 6, "done": 0, "learning": 0, "percent": 0}
+    theirs = [c for u in copy_["units"] for c in u["concepts"]]
+    # The plan, without the concept that was added for the giver's own gap.
+    assert [c["title"] for c in theirs] == [f"Concept {i}" for i in range(1, 7)]
+    assert all(c["origin"] == "planned" and c["mastery"] == 0 and c["state"] == "new" and c["steps_done"] == 0 and c["reviews"] == 0 for c in theirs)
+    assert copy_["misconceptions"] == [] and copy_["active_session"] is None and copy_["capstone"] is None
+    assert all(u["capstone"] is None for u in copy_["units"])
+    # Its own ids all the way down: nothing in the copy points into the giver's subject.
+    their_ids = {c["id"] for c in theirs}
+    assert not their_ids & {c["id"] for c in mine_concepts}
+    assert all(set(c["prereqs"]) <= their_ids for c in theirs) and theirs[1]["prereqs"] == [theirs[0]["id"]]
+    blob = json.dumps(copy_)
+    assert sid not in blob and str(ana.id) not in blob and kit.MISC not in blob
+    cid = uuid.UUID(copy_["id"])
+    assert (await db.execute(select(StudyStep).where(StudyStep.subject_id == cid))).first() is None
+    assert (await db.execute(select(StudyMisconception).where(StudyMisconception.subject_id == cid))).first() is None
+    for src in (await db.execute(select(StudySource).where(StudySource.subject_id == cid))).scalars():
+        assert src.file_id is None and src.note_id is None
+    # Ben was told, by ana, with a link to HIS copy.
+    assert len(pushes) == 1 and pushes[0]["user_id"] == ben.id and pushes[0]["actor_user_id"] == ana.id
+    assert pushes[0]["url"] == f"/study/{copy_['id']}" and "Tides" in pushes[0]["title"] and ana.username in pushes[0]["title"]
+
+    # Neither can reach the other's, and nor can an admin.
+    admin = await mk_user(db, "root", role="admin")
+    assert (await client.get(f"{API}/subjects/{sid}", headers=H(ben))).status_code == 404
+    assert (await client.get(f"{API}/subjects/{sid}/report", headers=H(ben))).status_code == 404
+    assert (await client.get(f"{API}/subjects/{copy_['id']}", headers=H(ana))).status_code == 404
+    assert (await client.get(f"{API}/subjects/{copy_['id']}/report", headers=H(ana))).status_code == 404
+    assert (await client.get(f"{API}/subjects/{copy_['id']}", headers=H(admin))).status_code == 404
+    assert (await client.post(f"{API}/subjects/{copy_['id']}/share", json={"user_ids": [str(ana.id)]}, headers=H(ana))).status_code == 404
+
+    # Separate from here on: ben studies his, ana deletes hers; each is untouched by the other.
+    before = (await client.get(f"{API}/subjects/{sid}", headers=H(ana))).json()["progress"]
+    assert (await client.post(f"{API}/subjects/{copy_['id']}/placement/skip", headers=H(ben))).status_code == 200
+    bs = await db.get(StudySubject, cid)
+    await db.refresh(bs)
+    out = await kit.run_course(db, ben, bs, kit.strong)
+    assert out["complete"]
+    assert (await client.get(f"{API}/subjects/{sid}", headers=H(ana))).json()["progress"] == before
+    assert (await client.delete(f"{API}/subjects/{sid}", headers=H(ana))).status_code == 200
+    await service.purge_subject(db, ana, uuid.UUID(sid))
+    still = (await client.get(f"{API}/subjects/{copy_['id']}", headers=H(ben))).json()
+    assert still["title"] == "Tides" and still["status"] == "complete"
+    assert (await db.execute(select(StudyConcept).where(StudyConcept.subject_id == cid))).first() is not None
+
+
+async def test_who_a_course_can_and_cannot_be_given_to(client, db, model, pushes):  # noqa: F811
+    from app.people import blocks
+
+    ana, ben, cat, dan, kid = [await mk_user(db, n) for n in ("ana", "ben", "cat", "dan", "kid")]
+    kid.study_level_lock = "child"
+    dan.disabled = True
+    await db.commit()
+    await blocks.block(db, cat.id, ana.id)  # cat has blocked ana
+    await db.commit()
+    sid = await ready(client, db, ana)
+
+    async def give(*who):
+        return await client.post(f"{API}/subjects/{sid}/share", json={"user_ids": [w if isinstance(w, str) else str(w.id) for w in who]}, headers=H(ana))
+
+    assert (await give(ana)).status_code == 422  # not to yourself
+    assert (await client.post(f"{API}/subjects/{sid}/share", json={"user_ids": []}, headers=H(ana))).status_code == 422
+    assert (await client.post(f"{API}/subjects/{sid}/share", json={"user_ids": [str(ben.id)] * 11}, headers=H(ana))).status_code == 422
+    assert (await client.post(f"{API}/subjects/{sid}/share", json={"user_ids": [str(ben.id)]})).status_code == 401
+
+    ghost = "00000000-0000-4000-8000-000000000001"
+    r = (await give(ben, ben, cat, dan, kid, ghost)).json()
+    assert r["given"] == [{"user_id": str(ben.id), "name": ben.username}]  # once, though asked twice
+    reasons = {s["user_id"]: s for s in r["skipped"]}
+    # Blocked, switched off and never-existed all read the same: nothing to learn from the answer.
+    assert reasons[str(cat.id)] == {"user_id": str(cat.id), "name": "", "reason": reasons[ghost]["reason"]}
+    assert reasons[str(dan.id)]["reason"] == reasons[ghost]["reason"] and reasons[str(dan.id)]["name"] == ""
+    assert "younger learner" in reasons[str(kid.id)]["reason"]  # an adult course is not handed to a child account
+    assert [p["user_id"] for p in pushes] == [ben.id]
+    for who, n in ((ben, 1), (cat, 0), (kid, 0)):
+        assert len((await client.get(f"{API}/subjects", headers=H(who))).json()["subjects"]) == n
+
+    # A course made for a child can go to anyone, and is pitched at whoever receives it.
+    kid_sid = await ready(client, db, ana, level="child", title="Rock pools")
+    r = await client.post(f"{API}/subjects/{kid_sid}/share", json={"user_ids": [str(kid.id), str(ben.id)]}, headers=H(ana))
+    assert len(r.json()["given"]) == 2
+    kids = (await client.get(f"{API}/subjects", headers=H(kid))).json()["subjects"]
+    assert len(kids) == 1 and kids[0]["level"] == "child" and kids[0]["shared_from"] == ana.username
+    bens = (await client.get(f"{API}/subjects", headers=H(ben))).json()["subjects"]
+    assert sorted(s["level"] for s in bens) == ["adult", "adult"]
+
+    # Not ready, not shareable.
+    building = (await client.post(f"{API}/subjects", json={"title": "Half built", "use_web": False}, headers=H(ana))).json()["id"]
+    r = await client.post(f"{API}/subjects/{building}/share", json={"user_ids": [str(ben.id)]}, headers=H(ana))
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "not_ready"

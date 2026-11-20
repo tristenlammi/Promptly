@@ -479,7 +479,8 @@ async def test_nobody_else_reaches_a_subject_an_admin_included(client, db, model
         ("post", f"/subjects/{sid}/sessions", {}), ("post", f"/subjects/{sid}/sessions", {"concept_id": c1, "test_out": True}),
         ("get", f"/sessions/{se}", None), ("post", f"/sessions/{se}/next", None), ("post", f"/sessions/{se}/end", None),
         ("post", f"/steps/{step}/answer", {}), ("post", f"/steps/{quiz}/hint", None), ("post", f"/steps/{quiz}/ask", {"mode": "simpler"}),
-        ("post", f"/steps/{talk}/turn", {"text": "hi"}), ("delete", f"/subjects/{sid}", None),
+        ("post", f"/steps/{talk}/turn", {"text": "hi"}), ("get", f"/subjects/{sid}/report", None),
+        ("post", f"/subjects/{sid}/share", {"user_ids": [str(u.id)]}), ("delete", f"/subjects/{sid}", None),
     ]
     before = len(model.calls)
     for who in (other, admin):

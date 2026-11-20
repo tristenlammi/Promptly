@@ -226,6 +226,10 @@ class SubjectPatch(_In):
     level: Literal["child", "teen", "adult"] | None = None
 
 
+class ShareIn(_In):
+    user_ids: list[uuid.UUID] = Field(min_length=1, max_length=10)
+
+
 class LessonIn(_In):
     concept_id: uuid.UUID | None = None
     test_out: bool = False
@@ -254,8 +258,7 @@ def _locked(user: User) -> str | None:
 
 
 def _level(user: User) -> str:
-    lvl = _locked(user) or ((user.settings or {}).get("study") or {}).get("level")
-    return lvl if lvl in LEVELS else "adult"
+    return service.level_of(user)
 
 
 def _level_locked() -> HTTPException:
@@ -389,6 +392,20 @@ async def delete_subject(subject_id: uuid.UUID, db: AsyncSession = Depends(get_d
         raise _http(e) from e
     await service.trash_subject(db, s)  # 30 days in the trash, then gone
     return {"ok": True, "trashed": True}
+
+
+@router.post("/subjects/{subject_id:uuid}/share")
+async def share_subject(
+    subject_id: uuid.UUID, body: ShareIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict[str, Any]:
+    """Give a copy of this course to other people. Each gets their own
+    subject (the map and the sources, none of your progress or answers) and
+    is told. What you and they do afterwards stays separate."""
+    try:
+        s = await service.get_subject(db, user, subject_id)
+        return await service.share_subject(db, user, s, body.user_ids)
+    except service.StudyError as e:
+        raise _http(e) from e
 
 
 @router.get("/subjects/{subject_id:uuid}/report")
