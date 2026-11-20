@@ -183,6 +183,8 @@ class SubjectIn(_In):
 class SubjectPatch(_In):
     title: str | None = Field(default=None, min_length=2, max_length=200)
     archived: bool | None = None
+    # Who it is pitched at; the next step written uses the new level.
+    level: Literal["child", "teen", "adult"] | None = None
 
 
 class LessonIn(_In):
@@ -296,6 +298,8 @@ async def patch_subject(
         s.title = body.title.strip()
     if body.archived is not None:
         s.archived = body.archived
+    if body.level is not None:
+        s.level = body.level
     await db.commit()
     return await _subject_full(db, s)
 

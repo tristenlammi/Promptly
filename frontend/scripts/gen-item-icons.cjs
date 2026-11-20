@@ -36,6 +36,7 @@ const KINDS = [
   ["passwords", "KeyRound", TERRACOTTA],
   ["forms", "ClipboardList", "#7C4DCC"],
   ["notes", "Lightbulb", "#E0A526"], // Notes
+  ["study", "GraduationCap", "#3F5E8C"], // Study (the AI teacher)
   // Porch
   ["porch", "House", "#E0803A"],
   // Promptly Home (lights and devices)

@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Clock,
   Dumbbell,
+  BookOpenCheck,
   GraduationCap,
   HeartPulse,
   House,
@@ -1064,6 +1065,27 @@ export function ComingCard({ coming, today, bookings = [] }: { coming: TodayComi
 }
 
 // -------------------------------------------------------------- notes
+
+/** Study: the subject you're learning, how far along, and what comes next. */
+export function LearnCard({ l }: { l: NonNullable<Sections["learn"]> }) {
+  const url = `/study/${l.subject_id}`;
+  return (
+    <HubCard icon={BookOpenCheck} title="Study" to="/study" open="Subjects">
+      <Link to={url} state={{ from: "/today" }} className="block rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text)]">{l.title}</span>
+          <span className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]">{l.progress.percent}%</span>
+        </span>
+        <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-[var(--hover-strong)]" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.progress.percent} aria-label={`${l.title}: ${l.progress.done} of ${l.progress.total} ideas learned`}>
+          <span className="block h-full rounded-full bg-[var(--accent)]" style={{ width: `${l.progress.percent}%` }} />
+        </span>
+        <span className="mt-1.5 block truncate text-xs text-[var(--text-muted)]">
+          {l.status === "placement" ? "Your course is ready to start" : l.next_concept ? `Next: ${l.next_concept.title}` : `${l.progress.done} of ${l.progress.total} ideas learned`}
+        </span>
+      </Link>
+    </HubCard>
+  );
+}
 
 /** Notes (app/notes): your pinned notes — a list says how much is left —
  *  and voice notes whose words are still being worked out. */

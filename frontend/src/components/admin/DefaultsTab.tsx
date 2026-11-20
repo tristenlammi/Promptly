@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AudioLines, Bot, Brain, CheckCircle2, Eye, FlaskConical, ImagePlus, Images } from "lucide-react";
+import { AudioLines, Bot, Brain, CheckCircle2, Eye, FlaskConical, GraduationCap, ImagePlus, Images } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
@@ -103,6 +103,11 @@ export function DefaultsTab() {
         busy={update.isPending}
       />
       <MemoryModelCard
+        settings={data}
+        onSubmit={submit}
+        busy={update.isPending}
+      />
+      <StudyModelCard
         settings={data}
         onSubmit={submit}
         busy={update.isPending}
@@ -1305,6 +1310,122 @@ function MemoryModelCard({ settings, onSubmit, busy }: CardProps) {
         {modelsLoading && (
           <span className="text-xs text-[var(--text-muted)]">Loading models…</span>
         )}
+      </label>
+    </SettingsCard>
+  );
+}
+
+// Study model (the teacher in the Study app)
+// --------------------------------------------------------------------
+
+function StudyModelCard({ settings, onSubmit, busy }: CardProps) {
+  const OFF = "";
+
+  const initialKey =
+    settings.study_configured && settings.study_provider_id && settings.study_model_id
+      ? `${settings.study_provider_id}::${settings.study_model_id}`
+      : OFF;
+
+  const [value, setValue] = useState(initialKey);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const { data: models, isLoading: modelsLoading } = useAvailableModels();
+
+  useEffect(() => { setValue(initialKey); }, [initialKey]);
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  const grouped = useMemo(() => {
+    const byProvider = new Map<string, AvailableModel[]>();
+    for (const m of models ?? []) {
+      const existing = byProvider.get(m.provider_name) ?? [];
+      existing.push(m);
+      byProvider.set(m.provider_name, existing);
+    }
+    return Array.from(byProvider.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [models]);
+
+  const dirty = value !== initialKey;
+
+  const handleSave = async () => {
+    setError(null);
+    try {
+      if (value === OFF) {
+        await onSubmit({ study_provider_id: null, study_model_id: null });
+      } else {
+        const [provider_id, ...rest] = value.split("::");
+        const model_id = rest.join("::");
+        if (!provider_id || !model_id) {
+          setError("Pick a model from the list, or choose the default.");
+          return;
+        }
+        await onSubmit({ study_provider_id: provider_id, study_model_id: model_id });
+      }
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <SettingsCard
+      title="Study model"
+      icon={<GraduationCap className="h-4 w-4" />}
+      footer={
+        <>
+          {error && <span className="mr-auto text-xs text-red-600 dark:text-red-400">{error}</span>}
+          {savedAt && !error && (
+            <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          )}
+          {dirty && (
+            <Button variant="ghost" size="sm" onClick={() => { setValue(initialKey); setError(null); }} disabled={busy}>
+              Discard
+            </Button>
+          )}
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={busy || !dirty} loading={busy}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        The teacher in the Study app: it plans each course, writes every lesson
+        step and marks written answers. Teaching well is hard, so this is the
+        place for your strongest model. A lesson is about a dozen calls, and
+        building a course is one large one.
+      </p>
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-xs font-medium text-[var(--text-muted)]">Study model</span>
+        <select
+          data-testid="study-model-select"
+          value={value}
+          onChange={(e) => { setValue(e.target.value); setError(null); setSavedAt(null); }}
+          disabled={busy || modelsLoading}
+          className={cn(
+            "rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+          )}
+        >
+          <option value={OFF}>Use the default chat model</option>
+          {grouped.map(([providerName, entries]) => (
+            <optgroup key={providerName} label={providerName}>
+              {entries.map((m) => (
+                <option key={`${m.provider_id}::${m.model_id}`} value={`${m.provider_id}::${m.model_id}`}>
+                  {m.display_name || m.model_id}{m.is_custom ? " (custom)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        {modelsLoading && <span className="text-xs text-[var(--text-muted)]">Loading models…</span>}
       </label>
     </SettingsCard>
   );

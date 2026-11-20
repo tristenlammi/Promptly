@@ -1,0 +1,109 @@
+/* Study. Everything is scoped under .study; colours come from the app's theme
+   tokens so both themes work without a second set here. */
+
+.study {
+  --st-accent: var(--accent);
+  --st-accent-text: var(--accent-text);
+  --st-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --st-softer: color-mix(in srgb, var(--accent) 7%, transparent);
+  --st-line: color-mix(in srgb, var(--text-muted) 34%, transparent);
+  --st-good: var(--success);
+  --st-good-bg: var(--success-bg);
+  --st-good-border: var(--success-border);
+  --st-warn: var(--warning);
+  --st-warn-bg: var(--warning-bg);
+  --st-warn-border: var(--warning-border);
+  --st-bad: var(--danger);
+  --st-bad-bg: var(--danger-bg);
+  --st-bad-border: var(--danger-border);
+  /* An idea added because of a gap: a second colour, so it never reads as an error. */
+  --st-gap: #7c6fd6;
+  --st-gap-bg: color-mix(in srgb, #7c6fd6 13%, transparent);
+  --st-gap-border: color-mix(in srgb, #7c6fd6 45%, transparent);
+}
+html.dark .study {
+  --st-gap: #a79df0;
+}
+
+/* Markdown from the teacher. */
+.study-md { font-size: 1rem; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.study-md > :first-child { margin-top: 0; }
+.study-md > :last-child { margin-bottom: 0; }
+.study-md p { margin: 0.6em 0; }
+.study-md ul, .study-md ol { margin: 0.6em 0; padding-left: 1.3em; }
+.study-md ul { list-style: disc; }
+.study-md ol { list-style: decimal; }
+.study-md li { margin: 0.2em 0; }
+.study-md strong { font-weight: 650; }
+.study-md h1, .study-md h2, .study-md h3, .study-md h4 { font-weight: 650; margin: 0.9em 0 0.3em; font-size: 1.05em; }
+.study-md code { font-size: 0.9em; background: var(--hover-strong); border-radius: 4px; padding: 0.1em 0.3em; }
+.study-md pre { background: var(--hover-strong); border-radius: 8px; padding: 0.7em 0.9em; overflow-x: auto; margin: 0.7em 0; }
+.study-md pre code { background: none; padding: 0; }
+.study-md blockquote { border-left: 3px solid var(--st-accent); padding-left: 0.8em; color: var(--text-muted); margin: 0.7em 0; }
+.study-md table { border-collapse: collapse; margin: 0.7em 0; font-size: 0.95em; }
+.study-md th, .study-md td { border: 1px solid var(--border); padding: 0.3em 0.6em; text-align: left; }
+.study-md a { color: var(--st-accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.study-md .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.2em 0; }
+.study-md.compact { font-size: 0.95rem; line-height: 1.5; }
+.study-md.compact p { margin: 0.35em 0; }
+
+/* A step arriving. */
+@keyframes study-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.study-in { animation: study-in 260ms var(--ease-out, ease-out) both; }
+
+@keyframes study-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.study-pop { animation: study-pop 360ms var(--ease-out, ease-out) both; }
+
+@keyframes study-shake {
+  0%, 100% { transform: none; }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+.study-shake { animation: study-shake 240ms ease-in-out 1; }
+
+/* The concept to do next, on the map. */
+@keyframes study-halo {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--st-accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 16px transparent; }
+}
+.study-halo { animation: study-halo 1.9s ease-out infinite; }
+
+/* The teacher is thinking. */
+@keyframes study-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+.study-dots span {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin: 0 2px;
+  animation: study-dot 1.2s ease-in-out infinite;
+}
+.study-dots span:nth-child(2) { animation-delay: 0.15s; }
+.study-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+/* Mastery ring and bars fill smoothly when the number changes. */
+.study-ring circle.fill { transition: stroke-dashoffset 700ms var(--ease-out, ease-out), stroke 300ms; }
+.study-bar > i { display: block; height: 100%; border-radius: inherit; transition: width 700ms var(--ease-out, ease-out); }
+
+/* A lesson that has been completed: a short burst behind the tick. */
+@keyframes study-burst {
+  from { transform: scale(0.4); opacity: 0.7; }
+  to { transform: scale(2.1); opacity: 0; }
+}
+.study-burst { animation: study-burst 900ms var(--ease-out, ease-out) both; }
+
+/* Diagram edges draw themselves in. */
+@keyframes study-draw { from { stroke-dashoffset: var(--len, 400); } to { stroke-dashoffset: 0; } }
+.study-draw { stroke-dasharray: var(--len, 400); animation: study-draw 700ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .study-in, .study-pop, .study-shake, .study-halo, .study-burst, .study-draw, .study-dots span { animation: none !important; }
+  .study-ring circle.fill, .study-bar > i { transition: none; }
+  .study-draw { stroke-dasharray: none; }
+}

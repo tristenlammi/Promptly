@@ -276,6 +276,9 @@ export interface AppSettingsPatch {
    */
   memory_provider_id?: string | null;
   memory_model_id?: string | null;
+  /** The Study app's teacher. Send both halves together; null+null to clear. */
+  study_provider_id?: string | null;
+  study_model_id?: string | null;
   /**
    * Admin-selected default image-generation model. Paired: send both
    * together to set, null+null to clear, omit to leave unchanged.

@@ -189,6 +189,11 @@ const FormsHomePage = lazyWithRetry(
   () => import("@/pages/FormsHomePage").then((m) => ({ default: m.FormsHomePage })),
   "FormsHomePage"
 );
+// Study: an AI teacher for any subject (subjects, the map, the lesson player).
+const StudyApp = lazyWithRetry(
+  () => import("@/study/StudyApp").then((m) => ({ default: m.StudyApp })),
+  "StudyApp"
+);
 const SyncLandingPage = lazyWithRetry(
   () => import("@/pages/SyncLandingPage").then((m) => ({ default: m.SyncLandingPage })),
   "SyncLandingPage"
@@ -983,6 +988,8 @@ export default function App() {
         {/* Forms: the builder (a form is a file) and the Forms home. */}
         <Route path="/files/form/:fileId" element={<FormBuilderPage />} />
         <Route path="/forms" element={<FormsHomePage />} />
+        {/* Study: your subjects, a subject's map, and the lesson player. */}
+        <Route path="/study/*" element={<StudyApp />} />
         <Route path="/files/item/:fileId" element={<ItemPage />} />
         {/* Apps: the launcher, the store, and each app (its file). Every
             app's data lives in My files › Apps › <App>. */}

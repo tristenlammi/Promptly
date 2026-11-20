@@ -428,6 +428,13 @@ export interface AppSettings {
   memory_model_id: string | null;
   memory_configured: boolean;
   /**
+   * The model that teaches in the Study app (plans the course, writes the
+   * steps, marks written answers). Both NULL = the default chat model.
+   */
+  study_provider_id: string | null;
+  study_model_id: string | null;
+  study_configured: boolean;
+  /**
    * Admin-selected model the `generate_image` chat tool renders with.
    * Image-output models are never user-selectable — the tool fires when
    * a user asks for a picture and uses this one model. Both fields NULL

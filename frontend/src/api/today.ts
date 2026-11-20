@@ -158,6 +158,15 @@ export interface TodayNoteCard {
 }
 
 export interface TodayHub {
+  /** Study: the subject in hand, how far along, and the idea that comes next. */
+  learn?: {
+    subject_id: string;
+    title: string;
+    status: "placement" | "active";
+    progress: { total: number; done: number; learning: number; percent: number };
+    next_concept: { id: string; title: string } | null;
+    last_studied_at: string | null;
+  };
   passwords?: { attention: number; updated_at: string | null };
   /** Forms (WP-F1.4): answers you haven't seen, and your forms closing today. Counts only. */
   forms?: {

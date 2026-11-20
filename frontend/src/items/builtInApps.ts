@@ -1,4 +1,4 @@
-import { CalendarDays, ClipboardList, House, KeyRound, Lamp, Lightbulb, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
+import { CalendarDays, ClipboardList, GraduationCap, House, KeyRound, Lamp, Lightbulb, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
 
 // Plain data, no stores or API client: the Passwords page's copy of the
 // sidebar (passwords/ui/PromptlyNav.tsx) reads it too.
@@ -27,6 +27,8 @@ export const BUILT_IN_APPS: NavApp[] = [
   { id: "forms", name: "Forms", icon: "/item-icons/forms-192.png", glyph: ClipboardList, to: "/forms", blurb: "Sign-ups & surveys" },
   // Notes (Keep-style notes and lists).
   { id: "notes", name: "Notes", icon: "/item-icons/notes-192.png", glyph: Lightbulb, to: "/notes", blurb: "Notes & lists" },
+  // Study: an AI teacher for any subject you pick.
+  { id: "study", name: "Study", icon: "/item-icons/study-192.png", glyph: GraduationCap, to: "/study", blurb: "Learn anything" },
   // Porch (shown only to people it's turned on for: useBuiltInApps)
   { id: "porch", name: "Porch", icon: "/item-icons/porch-192.png", glyph: House, to: "/porch", blurb: "Family news" },
   // Promptly Home (shown only once an admin has turned it on: useBuiltInApps)
