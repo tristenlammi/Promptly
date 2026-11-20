@@ -69,8 +69,8 @@ async def resolve(db: AsyncSession, user: User) -> Teacher:
     raise NoModel()
 
 
-async def raw_call(t: Teacher, task: str, *, system: str, messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.4) -> str:
-    """One whole answer from the model, as text. ``task`` names what is being
+async def raw_call(t: Teacher, call: str, *, system: str, messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.4) -> str:
+    """One whole answer from the model, as text. ``call`` names what is being
     asked for (``plan``, ``step:mcq``, ``grade``…): the model never sees it."""
     from app.chat.personal_context import with_now
     from app.chat.titler import _strip_think_blocks
@@ -99,7 +99,7 @@ async def raw_call(t: Teacher, task: str, *, system: str, messages: list[dict[st
     except TimeoutError as e:
         raise ModelFailed("The model took too long.") from e
     except ProviderError as e:
-        logger.info("study model call failed (%s): %s", task, type(e).__name__)
+        logger.info("study model call failed (%s): %s", call, type(e).__name__)
         raise ModelFailed("The model couldn't be reached.") from e
     return _strip_think_blocks(raw).strip()
 
@@ -119,7 +119,7 @@ def parse_json(raw: str) -> Any:
 
 
 async def ask_json(
-    t: Teacher, task: str, *, system: str, prompt: str, check: Callable[[Any], Any], max_tokens: int = 2500, temperature: float = 0.4
+    t: Teacher, call: str, *, system: str, prompt: str, check: Callable[[Any], Any], max_tokens: int = 2500, temperature: float = 0.4
 ) -> Any:
     """Ask for JSON and return ``check(parsed)``. ``check`` raises
     :class:`StepInvalid` for an answer that can't be used; the model is then
@@ -127,12 +127,12 @@ async def ask_json(
     messages = [{"role": "user", "content": prompt}]
     last = ""
     for attempt in range(TRIES):
-        raw = await raw_call(t, task, system=system, messages=messages, max_tokens=max_tokens, temperature=temperature)
+        raw = await raw_call(t, call, system=system, messages=messages, max_tokens=max_tokens, temperature=temperature)
         try:
             return check(parse_json(raw))
         except StepInvalid as e:
             last = str(e)
-            logger.info("study: unusable %s answer (try %d): %s", task, attempt + 1, last)
+            logger.info("study: unusable %s answer (try %d)", call, attempt + 1)
             messages = [
                 {"role": "user", "content": prompt},
                 {"role": "assistant", "content": raw[:6000] or "(nothing)"},
