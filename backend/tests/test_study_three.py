@@ -205,9 +205,12 @@ def test_after_a_miss_the_answer_shown_is_the_one_nearest_where_they_left_it():
            "outputs": [{"label": "high", "expr": "m + r / 2"}, {"label": "low", "expr": "m - r / 2"}]}
     fig = figures.clean(raw)
     goal, start = figures.clean_goal(fig, {"output": 1, "target": 1, "tolerance": 0.05})
-    assert start == {"values": {"m": 3.0, "r": 4.0}}  # low water 1 m, moving only the range from where it starts
-    # They pushed the mean up to 5: the answer shown keeps their mean and fixes the range.
-    assert figures.answer_near(fig, goal, {"values": {"m": 5, "r": 2}}) == {"values": {"m": 5.0, "r": 8.0}}
+    # Low water 1 m with the least moving from where the sliders start (two ways tie: either is right).
+    assert start in ({"values": {"m": 2.0, "r": 2.0}}, {"values": {"m": 3.0, "r": 4.0}})
+    assert figures.grade(fig, goal, start)[0] == "correct"
+    # They got the range nearly there: the answer shown keeps their mean and finishes the range.
+    assert figures.answer_near(fig, goal, {"values": {"m": 3, "r": 3.5}}) == {"values": {"m": 3.0, "r": 4.0}}
+    assert figures.answer_near(fig, goal, {"values": {"m": 5, "r": 7.5}}) == {"values": {"m": 5.0, "r": 8.0}}
     assert figures.answer_near(figures.clean(kit.FIGURES["scale"]), {"target": 6, "tolerance": 1}, {"value": 2}) is None
 
 
