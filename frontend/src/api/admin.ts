@@ -149,6 +149,8 @@ export interface UpdateUserPayload {
   allowed_models?: string[] | null;
   /** Toggle image-gen access. Omit to leave unchanged. */
   can_generate_images?: boolean;
+  /** Study: fix who lessons are pitched at; null lets them choose. Omit to leave unchanged. */
+  study_level_lock?: "child" | "teen" | "adult" | null;
   /** Toggle local-network access for automations. Omit to leave unchanged. */
   can_reach_private_network?: boolean;
   /** Turn Automations on/off for the user. Omit to leave unchanged. */

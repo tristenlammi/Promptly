@@ -285,6 +285,15 @@ async def put_prefs(body: PrefsIn, db: AsyncSession = Depends(get_db), user: Use
     return _prefs(user)
 
 
+@router.get("/voice")
+async def get_voice(user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """Whether steps can be read aloud / answered by speaking here (the
+    optional voice containers). The player hides voice when both are false."""
+    from app.study import voice
+
+    return await voice.available()
+
+
 # ----------------------------------------------------------------- subjects
 
 

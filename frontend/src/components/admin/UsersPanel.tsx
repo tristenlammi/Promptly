@@ -187,6 +187,10 @@ export function UsersPanel() {
           values.can_generate_images !== target.can_generate_images
             ? values.can_generate_images
             : undefined,
+        study_level_lock:
+          values.study_level_lock !== undefined && (values.study_level_lock ?? null) !== (target.study_level_lock ?? null)
+            ? values.study_level_lock
+            : undefined,
         can_reach_private_network:
           values.can_reach_private_network !== target.can_reach_private_network
             ? values.can_reach_private_network

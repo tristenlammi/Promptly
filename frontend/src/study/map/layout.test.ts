@@ -7,10 +7,10 @@ import { bandOf, edgePath, layoutMap, ROW_H, rowX, stubPath, UNIT_HEAD_H, unitRo
 function c(id: string, position: number, prereqs: string[] = [], extra: Partial<Concept> = {}): Concept {
   return {
     id, unit_id: "u", position, title: id, summary: "", objectives: [], nature: "principle", prereqs, mastery: 0, state: "new", locked: false,
-    origin: "planned", reason: "", gap_for: null, steps_done: 0, sources: [], last_seen_at: null, mastered_at: null, ...extra,
+    origin: "planned", reason: "", gap_for: null, steps_done: 0, sources: [], last_seen_at: null, mastered_at: null, due_at: null, due: false, reviews: 0, lapses: 0, ...extra,
   };
 }
-const unit = (id: string, position: number, concepts: Concept[]): Unit => ({ id, position, title: id, summary: "", concepts });
+const unit = (id: string, position: number, concepts: Concept[]): Unit => ({ id, position, title: id, summary: "", capstone: null, concepts });
 
 describe("unitRows", () => {
   it("puts a concept below what it depends on, and independent ones side by side", () => {

@@ -255,6 +255,8 @@ export interface AdminUser {
   /** Whether the `generate_image` chat tool is available to this user.
    *  Admins are never gated (effectively always true for them). */
   can_generate_images: boolean;
+  /** Study: who lessons are pitched at, fixed by an admin. Null = they choose. */
+  study_level_lock?: "child" | "teen" | "adult" | null;
   /** Whether the user's automation HTTP steps may reach the local network
    *  (LAN, Tailscale, the Docker host). Admins are never gated. */
   can_reach_private_network: boolean;

@@ -8,6 +8,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  GraduationCap,
   Image,
   LayoutGrid,
   ListChecks,
@@ -37,6 +38,7 @@ const APPS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: "tasks", label: "Tasks", icon: ListChecks },
   { key: "contacts", label: "Contacts", icon: Contact },
   { key: "notes", label: "Notes", icon: StickyNote },
+  { key: "study", label: "Study", icon: GraduationCap },
   { key: "apps", label: "Apps", icon: Blocks },
 ];
 

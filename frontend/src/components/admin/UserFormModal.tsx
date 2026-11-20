@@ -28,6 +28,8 @@ export interface UserFormValues {
   allowed_models: string[] | null;
   /** Whether the user can use the `generate_image` chat tool. */
   can_generate_images: boolean;
+  /** Study: who lessons are pitched at, fixed here. Null = they choose. Edit only. */
+  study_level_lock?: "child" | "teen" | "adult" | null;
   can_reach_private_network: boolean;
   /** Whether the user may use Automations (off unless turned on). */
   can_use_automations: boolean;
@@ -88,6 +90,7 @@ export function UserFormModal({
   const [role, setRole] = useState<UserRole>("user");
   const [fullAccess, setFullAccess] = useState(true);
   const [canGenerateImages, setCanGenerateImages] = useState(true);
+  const [studyLevel, setStudyLevel] = useState<"" | "child" | "teen" | "adult">("");
   const [canReachPrivate, setCanReachPrivate] = useState(false);
   const [canUseAutomations, setCanUseAutomations] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -131,6 +134,7 @@ export function UserFormModal({
       setRole(user.role);
       setFullAccess(user.allowed_models === null);
       setCanGenerateImages(user.can_generate_images ?? true);
+      setStudyLevel(user.study_level_lock ?? "");
       setCanReachPrivate(user.can_reach_private_network ?? false);
       setCanUseAutomations(user.can_use_automations ?? false);
       setLocked(!!user.model_locked && user.allowed_models !== null);
@@ -241,6 +245,7 @@ export function UserFormModal({
         allowed_models:
           role === "admin" || fullAccess ? null : Array.from(picked),
         can_generate_images: canGenerateImages,
+        study_level_lock: mode === "edit" ? studyLevel || null : undefined,
         can_reach_private_network: canReachPrivate,
         can_use_automations: canUseAutomations,
         model_locked: role === "user" && !fullAccess && locked,
@@ -461,6 +466,28 @@ export function UserFormModal({
                 </span>
               </span>
             </label>
+            {mode === "edit" && (
+              <label className="mt-2 flex items-start justify-between gap-3 rounded-card border border-[var(--border)] px-3 py-2">
+                <span className="text-xs">
+                  <span className="font-medium text-[var(--text)]">Study lessons are for</span>
+                  <span className="block text-[11px] text-[var(--text-muted)]">
+                    Fix who Study teaches this person as (for a child's account). They can't change it. You
+                    still can't see their subjects or progress.
+                  </span>
+                </span>
+                <select
+                  value={studyLevel}
+                  onChange={(e) => setStudyLevel(e.target.value as "" | "child" | "teen" | "adult")}
+                  aria-label="Study lessons are for"
+                  className="h-8 shrink-0 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2 text-xs text-[var(--text)]"
+                >
+                  <option value="">They choose</option>
+                  <option value="child">A child (8 to 11)</option>
+                  <option value="teen">A teenager (12 to 16)</option>
+                  <option value="adult">An adult</option>
+                </select>
+              </label>
+            )}
             <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
               <input
                 type="checkbox"

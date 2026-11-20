@@ -29,7 +29,8 @@ export function NewSubjectPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const prefs = useQuery({ queryKey: ["study", "prefs"], queryFn: studyApi.prefs, staleTime: 60_000 });
-  const [title, setTitle] = useState("");
+  // "Start this" on a report's suggestions opens the form with the name in.
+  const [title, setTitle] = useState(() => new URLSearchParams(window.location.search).get("title")?.slice(0, 200) ?? "");
   const [goal, setGoal] = useState("");
   const [prior, setPrior] = useState("");
   const [depth, setDepth] = useState<Depth>("solid");
@@ -42,7 +43,8 @@ export function NewSubjectPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
 
-  const who = level ?? prefs.data?.level ?? "adult";
+  const levelLocked = prefs.data?.level_locked === true;
+  const who = levelLocked ? (prefs.data?.level ?? "adult") : (level ?? prefs.data?.level ?? "adult");
   const ok = title.trim().length >= 2;
   const nothingToRead = !useWeb && files.length === 0 && notes.length === 0;
 
@@ -62,7 +64,7 @@ export function NewSubjectPage() {
         note_ids: notes.map((n) => n.id),
       });
       // Remember who is learning for next time.
-      if (prefs.data && prefs.data.level !== who) void studyApi.setPrefs(who).then(() => qc.invalidateQueries({ queryKey: ["study", "prefs"] })).catch(() => undefined);
+      if (prefs.data && !levelLocked && prefs.data.level !== who) void studyApi.setPrefs(who).then(() => qc.invalidateQueries({ queryKey: ["study", "prefs"] })).catch(() => undefined);
       void qc.invalidateQueries({ queryKey: ["study", "subjects"] });
       navigate(`/study/${s.id}`, { replace: true });
     } catch (e) {
@@ -148,7 +150,7 @@ export function NewSubjectPage() {
 
           <Choices
             legend="Who is learning?"
-            hint="Sets how the teacher talks, and what's suitable."
+            hint={levelLocked ? "This is set for your account. An admin can change it." : "Sets how the teacher talks, and what's suitable."}
             value={who}
             onChange={(l) => setLevel(l)}
             options={(Object.keys(LEVEL_WORDS) as Level[]).map((l) => ({ value: l, ...LEVEL_WORDS[l] }))}

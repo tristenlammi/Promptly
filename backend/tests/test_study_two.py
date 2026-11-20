@@ -531,3 +531,66 @@ async def test_studys_model_calls_count_as_the_learners_usage(db, user, monkeypa
     bill_usage_to(None)  # as in a background build: no request said who
     out = await ai.raw_call(ai.Teacher(None, "m", user), "plan", system="s", messages=[{"role": "user", "content": "x"}], max_tokens=10)
     assert out == '{"ok": true}' and seen == [user.id]
+
+
+async def test_study_is_in_export_my_library(db, model, tmp_path, monkeypatch):
+    import io
+    import json
+    import zipfile
+
+    from app.files import library_export, storage
+    from app.study.models import StudySubject
+
+    monkeypatch.setattr(storage, "UPLOAD_ROOT", (tmp_path / "uploads").resolve())
+    u, other = await mk_user(db, "ana"), await mk_user(db, "ben")
+    done = await kit.make_subject(db, u, goal="I sail")
+    await kit.run_course(db, u, done, kit.strong)
+    await kit.make_subject(db, u, title="Knots")
+    gone = await kit.make_subject(db, u, title="Thrown away")
+    from app.study import service
+
+    await service.trash_subject(db, gone)
+    await kit.make_subject(db, other, title="Not yours")
+
+    planned = await library_export.plan(db, u, 2)
+    assert [s["title"] for s in planned["study"]["subjects"]] == ["Tides", "Knots"]  # not the trashed one, not someone else's
+    export_id = await library_export.create(u, planned)
+    blob = b"".join([chunk async for chunk in library_export.stream_part(export_id, 1)])
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    names = set(z.namelist())
+    assert {"Promptly/Study/Tides.md", "Promptly/Study/Knots.md", "Promptly/Study/study.json"} <= names
+    assert "Study/" in z.read("Promptly/README.txt").decode()
+    md = z.read("Promptly/Study/Tides.md").decode()
+    assert md.startswith("# Tides") and "Why: I sail" in md and "6 of 6 ideas learned (complete)" in md
+    assert "- [x] **Concept 1** (learned" in md and "Unit task: passed (3 of 3 points)." in md and "Ocean currents" in md
+    assert "- [ ] **Concept 1** (not started, 0%)" in z.read("Promptly/Study/Knots.md").decode()
+    data = json.loads(z.read("Promptly/Study/study.json"))
+    assert [s["title"] for s in data["subjects"]] == ["Tides", "Knots"] and "markdown" not in data["subjects"][0]
+    assert data["subjects"][0]["units"][0]["concepts"][0]["next_review_at"]
+    assert isinstance(await db.get(StudySubject, done.id), StudySubject)
+
+
+async def test_voice_is_only_offered_when_the_server_has_it(client, db, model, monkeypatch):
+    from app.study import voice
+
+    u = await mk_user(db, "ana")
+    s = voice.get_settings()
+    monkeypatch.setattr(s, "TTS_URL", "")
+    monkeypatch.setattr(s, "WHISPER_URL", "")
+    monkeypatch.setattr(s, "STT_BACKEND", "local")
+    monkeypatch.setattr(voice, "_cache", None)
+    assert (await client.get(f"{API}/voice", headers=H(u))).json() == {"listen": False, "speak": False}
+
+    asked = []
+
+    async def up(base):
+        asked.append(base)
+        return base == "http://tts:8000"
+
+    monkeypatch.setattr(s, "TTS_URL", "http://tts:8000")
+    monkeypatch.setattr(s, "WHISPER_URL", "http://whisper:8000")
+    monkeypatch.setattr(voice, "_up", up)
+    assert (await client.get(f"{API}/voice", headers=H(u))).json() == {"listen": False, "speak": False}  # remembered for two minutes
+    assert asked == []
+    assert await voice.available(fresh=True) == {"listen": True, "speak": False}  # the reader is up, the transcriber isn't
+    assert (await client.get(f"{API}/voice")).status_code == 401

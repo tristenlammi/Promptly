@@ -160,12 +160,16 @@ export interface TodayNoteCard {
 export interface TodayHub {
   /** Study: the subject in hand, how far along, and the idea that comes next. */
   learn?: {
-    subject_id: string;
-    title: string;
-    status: "placement" | "active";
-    progress: { total: number; done: number; learning: number; percent: number };
+    /** Null when nothing is being learned but reviews have come due. */
+    subject_id: string | null;
+    title: string | null;
+    status: "placement" | "active" | null;
+    progress: { total: number; done: number; learning: number; percent: number } | null;
     next_concept: { id: string; title: string } | null;
+    next_capstone?: { scope: "unit" | "final"; unit_id: string | null; title: string } | null;
     last_studied_at: string | null;
+    /** Learned ideas due for review now, across every subject. */
+    due_count?: number;
   };
   passwords?: { attention: number; updated_at: string | null };
   /** Forms (WP-F1.4): answers you haven't seen, and your forms closing today. Counts only. */

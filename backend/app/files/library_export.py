@@ -252,6 +252,15 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 — the library still exports without it
         logger.exception("porch export failed")
 
+    # Study: each subject's map, progress and report (app/study/export.py).
+    study = None
+    try:
+        from app.study.export import study_export
+
+        study = await study_export(db, user)
+    except Exception:  # noqa: BLE001 — the library still exports without it
+        logger.exception("study export failed")
+
     maps = {"offline_areas": await _offline_areas(db, user)}
 
     # Parts: in order, each up to the chosen size (a bigger single file
@@ -268,7 +277,7 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
         used += size
     return {
         "user_id": str(user.id), "created": time.time(), "part_gb": int(part_gb),
-        "parts": parts, "albums": albums, "maps": maps, "porch": porch, "counts": counts,
+        "parts": parts, "albums": albums, "maps": maps, "porch": porch, "study": study, "counts": counts,
         "bytes": sum(e["s"] for e in entries), "zone": str(zone) if zone else None,
         "voice": await _voice_sessions(db, user.id),
     }
@@ -477,6 +486,8 @@ def readme(state: dict[str, Any]) -> bytes:
         "             My files), and notes.json with all of them for other apps.\n"
         + ("porch.json   your Porch posts (with their photos' places in My files), the comments\n"
            "             on them, your comments on other posts, and the groups you're in.\n" if state.get("porch") else "")
+        + ("Study/       each subject you are learning as a Markdown file (the map, how far you\n"
+           "             are, what was added for you, the report, the sources), and study.json.\n" if state.get("study") else "")
         + "\n"
         "To bring it into another Promptly: Files -> Import -> A folder of photos, and add\n"
         "the parts. Dates, places, favourites, albums and notes come with it.\n\n"
@@ -631,6 +642,19 @@ async def stream_part(export_id: str, n: int) -> AsyncIterator[bytes]:
                 zf.writestr(
                     _info(ROOT + "porch.json", int(planned["created"]), zone, zipfile.ZIP_DEFLATED),
                     json.dumps(planned["porch"], ensure_ascii=False, indent=2).encode("utf-8"),
+                )
+            used: set[str] = set()
+            for sub in (planned.get("study") or {}).get("subjects") or []:
+                name = _safe(sub["title"])[:80]
+                while name.lower() in used:
+                    name += " (2)"
+                used.add(name.lower())
+                zf.writestr(_info(f"{ROOT}Study/{name}.md", int(planned["created"]), zone, zipfile.ZIP_DEFLATED), sub["markdown"].encode("utf-8"))
+            if planned.get("study"):
+                plain = {**planned["study"], "subjects": [{k: v for k, v in sub.items() if k != "markdown"} for sub in planned["study"]["subjects"]]}
+                zf.writestr(
+                    _info(ROOT + "Study/study.json", int(planned["created"]), zone, zipfile.ZIP_DEFLATED),
+                    json.dumps(plain, ensure_ascii=False, indent=2).encode("utf-8"),
                 )
             yield sink.take()
         for e in entries:

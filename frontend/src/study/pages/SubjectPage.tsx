@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowLeft, ArrowRight, BookOpen, Check, FastForward, FileText, Globe, Lock, PartyPopper, Play, Plus, RotateCcw, Settings2, StickyNote, Trash2 } from "lucide-react";
+import { Archive, ArrowLeft, ArrowRight, BookOpen, CalendarClock, Check, ClipboardCheck, FastForward, FileText, Globe, Lock, PartyPopper, Play, Plus, RotateCcw, ScrollText, Settings2, StickyNote, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -16,6 +16,7 @@ import { cn } from "@/utils/cn";
 import { CourseMap } from "../map/CourseMap";
 import { BAND_WORDS, bandOf, isDone } from "../map/layout";
 import { Bar, LEVEL_WORDS, Thinking } from "../ui/bits";
+import { reviewWhen } from "../ui/words";
 import "../study.css";
 
 /* One subject: being built, the placement offer, then the map. */
@@ -187,7 +188,7 @@ function Failed({ subject, onChange }: { subject: SubjectFull; onChange: () => v
         <Button
           leftIcon={<Trash2 className="h-4 w-4" />}
           onClick={async () => {
-            if (!(await confirm({ title: "Delete this subject?", message: "It will be gone for good.", confirmLabel: "Delete", danger: true }))) return;
+            if (!(await confirm({ title: "Delete this subject?", message: "It goes to the trash, where it stays for 30 days.", confirmLabel: "Delete", danger: true }))) return;
             try {
               await studyApi.remove(subject.id);
               onChange();
@@ -337,9 +338,29 @@ function Course({ subject, onChange }: { subject: SubjectFull; onChange: () => v
         {complete && (
           <p className="mt-3 flex items-center gap-2 rounded-xl bg-[var(--st-good-bg)] px-3 py-2 text-sm font-medium text-[var(--text)]">
             <PartyPopper className="h-4 w-4 text-[var(--st-good)]" aria-hidden />
-            You've learned every idea in this subject.
+            You've finished this subject: every idea, and the tasks that put them together.
           </p>
         )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {subject.due_count > 0 && (
+            <Link
+              to={`/study/${subject.id}/review`}
+              data-testid="study-review-subject"
+              className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
+            >
+              <CalendarClock className="h-4 w-4" aria-hidden />
+              Review {subject.due_count} {subject.due_count === 1 ? "idea" : "ideas"}
+            </Link>
+          )}
+          <Link
+            to={`/study/${subject.id}/report`}
+            data-testid="study-report-link"
+            className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[var(--border)] px-4 text-sm font-medium text-[var(--text)] hover:border-[var(--st-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]"
+          >
+            <ScrollText className="h-4 w-4" aria-hidden />
+            {complete ? "Your report" : "How you're doing"}
+          </Link>
+        </div>
       </section>
 
       {open.length > 0 && (
@@ -384,7 +405,15 @@ function Course({ subject, onChange }: { subject: SubjectFull; onChange: () => v
           >
             <span className="min-w-0 truncate">
               {subject.active_session ? "Carry on with your lesson" : subject.progress.done + subject.progress.learning > 0 ? "Continue" : "Start learning"}
-              {subject.next_concept && !subject.active_session ? `: ${subject.next_concept.title}` : ""}
+              {subject.active_session
+                ? ""
+                : subject.next_concept
+                  ? `: ${subject.next_concept.title}`
+                  : subject.next_capstone
+                    ? subject.next_capstone.scope === "final"
+                      ? ": the final task"
+                      : `: a task on ${subject.next_capstone.title}`
+                    : ""}
             </span>
           </Button>
         </div>
@@ -410,6 +439,8 @@ function Legend() {
     { icon: <Check className="h-3 w-3" />, label: "Learned", cls: "bg-[var(--st-good)] text-white" },
     { icon: <FastForward className="h-3 w-3" />, label: "Knew it already", cls: "bg-[var(--st-good)] text-white" },
     { icon: <Plus className="h-3 w-3" />, label: "Added for you", cls: "bg-[var(--st-gap-bg)] text-[var(--st-gap)]" },
+    { icon: <CalendarClock className="h-3 w-3" />, label: "Due for review", cls: "bg-[var(--accent-strong)] text-white" },
+    { icon: <ClipboardCheck className="h-3 w-3" />, label: "Unit task", cls: "bg-[var(--st-soft)] text-[var(--st-accent-text)]" },
     { icon: <Lock className="h-3 w-3" />, label: "Comes later", cls: "bg-[var(--hover-strong)] text-[var(--text-muted)]" },
   ];
   return (
@@ -528,6 +559,13 @@ function ConceptSheet({
               {c.steps_done} {c.steps_done === 1 ? "step" : "steps"} done so far
             </p>
           )}
+          {done && c.due_at && (
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-[var(--text-muted)]" data-testid="study-concept-review">
+              <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+              {c.due ? "Due for a quick review now." : `Comes back for review ${reviewWhen(c.due_at)}.`}
+              {c.lapses > 0 ? ` It has slipped ${c.lapses === 1 ? "once" : `${c.lapses} times`}.` : ""}
+            </p>
+          )}
         </div>
 
         {c.origin === "gap" && (
@@ -611,6 +649,8 @@ function ConceptSheet({
 
 function SettingsSheet({ open, onClose, subject, onChange }: { open: boolean; onClose: () => void; subject: SubjectFull; onChange: () => void }) {
   const navigate = useNavigate();
+  const prefs = useQuery({ queryKey: ["study", "prefs"], queryFn: studyApi.prefs, staleTime: 60_000, enabled: open });
+  const levelLocked = prefs.data?.level_locked === true;
   const [title, setTitle] = useState(subject.title);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -649,7 +689,7 @@ function SettingsSheet({ open, onClose, subject, onChange }: { open: boolean; on
 
         <fieldset>
           <legend className="text-sm font-medium text-[var(--text)]">Who is learning</legend>
-          <p className="mb-2 text-xs text-[var(--text-muted)]">Changes how the teacher talks from the next step on.</p>
+          <p className="mb-2 text-xs text-[var(--text-muted)]">{levelLocked ? "This is set for your account. An admin can change it." : "Changes how the teacher talks from the next step on."}</p>
           <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Who is learning">
             {(Object.keys(LEVEL_WORDS) as Level[]).map((l) => (
               <button
@@ -657,7 +697,7 @@ function SettingsSheet({ open, onClose, subject, onChange }: { open: boolean; on
                 type="button"
                 role="radio"
                 aria-checked={subject.level === l}
-                disabled={busy}
+                disabled={busy || levelLocked}
                 onClick={() => subject.level !== l && void patch({ level: l })}
                 className={cn(
                   "rounded-xl border px-2 py-2.5 text-center text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]",
@@ -688,10 +728,11 @@ function SettingsSheet({ open, onClose, subject, onChange }: { open: boolean; on
             leftIcon={<Trash2 className="h-4 w-4" />}
             disabled={busy}
             onClick={async () => {
-              if (!(await confirm({ title: `Delete "${subject.title}"?`, message: "The course and all your progress in it will be gone for good. This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
+              if (!(await confirm({ title: `Delete "${subject.title}"?`, message: "The course and your progress in it go to the trash. You can put it back from there for 30 days.", confirmLabel: "Delete", danger: true }))) return;
               try {
                 await studyApi.remove(subject.id);
                 onChange();
+                toast.success("Moved to the trash");
                 navigate("/study", { replace: true });
               } catch (e) {
                 toast.error(studyError(e).message);

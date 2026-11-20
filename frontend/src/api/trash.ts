@@ -7,6 +7,7 @@ export type TrashType =
   | "workspace"
   | "workspace_item"
   | "entry"
+  | "study_subject"
   // An app's Undo only knows what it deleted: these take the thing's own id.
   | "calendar_event"
   | "album"

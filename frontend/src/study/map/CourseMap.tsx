@@ -1,4 +1,4 @@
-import { Check, FastForward, Lock, Play, Plus } from "lucide-react";
+import { CalendarClock, Check, ClipboardCheck, FastForward, Lock, Play, Plus } from "lucide-react";
 import { useMemo } from "react";
 
 import type { Concept, SubjectFull } from "@/api/study";
@@ -46,8 +46,24 @@ export function CourseMap({ subject, nextId, onPick }: { subject: SubjectFull; n
                 <h2 className="truncate text-[15px] font-semibold text-[var(--text)]">{unit.title}</h2>
                 <p className="line-clamp-2 text-xs leading-snug text-[var(--text-muted)]">{unit.summary}</p>
               </div>
-              <span className="shrink-0 pt-1 text-xs tabular-nums text-[var(--text-muted)]" aria-label={`${done} of ${unit.concepts.length} learned`}>
-                {done}/{unit.concepts.length}
+              <span className="flex shrink-0 items-center gap-1.5 pt-1">
+                {unit.concepts.length >= 2 && (unit.capstone || done === unit.concepts.length) && (
+                  <span
+                    data-testid="study-unit-task"
+                    data-status={unit.capstone?.status ?? "due"}
+                    title={unit.capstone?.status === "passed" ? "Unit task done" : unit.capstone?.status === "closed" ? "Unit task left for now" : "Unit task to do"}
+                    className={cn(
+                      "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                      unit.capstone?.status === "passed" ? "bg-[var(--st-good-bg)] text-[var(--st-good)]" : "bg-[var(--st-soft)] text-[var(--st-accent-text)]"
+                    )}
+                  >
+                    <ClipboardCheck className="h-3 w-3" aria-hidden />
+                    {unit.capstone?.status === "passed" ? "Task done" : unit.capstone?.status === "closed" ? "Task left" : "Task"}
+                  </span>
+                )}
+                <span className="text-xs tabular-nums text-[var(--text-muted)]" aria-label={`${done} of ${unit.concepts.length} learned`}>
+                  {done}/{unit.concepts.length}
+                </span>
               </span>
             </header>
           </section>
@@ -86,7 +102,8 @@ function Stop({ concept: c, x, y, next, onPick }: { concept: Concept; x: number;
   const gap = c.origin === "gap";
   const done = band === "known" || band === "mastered";
   const pct = Math.round(c.mastery * 100);
-  const words = `${c.title}. ${gap ? "Added for you. " : ""}${BAND_WORDS[band]}${band === "learning" || band === "nearly" ? `, ${pct}%` : ""}${next ? ". Up next" : ""}`;
+  const due = done && c.due;
+  const words = `${c.title}. ${gap ? "Added for you. " : ""}${BAND_WORDS[band]}${band === "learning" || band === "nearly" ? `, ${pct}%` : ""}${next ? ". Up next" : ""}${due ? ". Due for review" : ""}`;
   return (
     <button
       type="button"
@@ -96,6 +113,7 @@ function Stop({ concept: c, x, y, next, onPick }: { concept: Concept; x: number;
       data-band={band}
       data-gap={gap || undefined}
       data-next={next || undefined}
+      data-due={due || undefined}
       className="group absolute flex w-[8.5rem] -translate-x-1/2 flex-col items-center gap-1 rounded-2xl px-1 pb-1 pt-1 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]"
       style={{ left: `${x * 100}%`, top: y - 40 }}
     >
@@ -129,6 +147,11 @@ function Stop({ concept: c, x, y, next, onPick }: { concept: Concept; x: number;
             )}
           </span>
         </Ring>
+        {due && (
+          <span aria-hidden className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white ring-2 ring-[var(--surface)]">
+            <CalendarClock className="h-3 w-3" />
+          </span>
+        )}
       </span>
       <span className={cn("line-clamp-2 rounded-md bg-[var(--surface)] px-1 text-xs font-medium leading-tight", band === "locked" ? "text-[var(--text-muted)]" : "text-[var(--text)]")}>{c.title}</span>
       {gap ? (

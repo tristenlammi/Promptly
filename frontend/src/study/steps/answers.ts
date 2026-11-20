@@ -25,6 +25,8 @@ export function emptyDraft(step?: Pick<Step, "kind" | "public">): Draft {
 
 export const WRITTEN_MIN = 2;
 export const WRITTEN_MAX = 4000;
+/** A capstone answer draws several ideas together: more room. */
+export const CAPSTONE_MAX = 8000;
 
 const blankSteps = (steps: WStep[]) => steps.filter((s): s is Extract<WStep, { blank: true }> => s.blank);
 
@@ -53,6 +55,10 @@ export function isReady(step: Pick<Step, "kind" | "public" | "turns">, d: Draft)
     case "scenario": {
       const n = d.text.trim().length;
       return n >= WRITTEN_MIN && n <= WRITTEN_MAX;
+    }
+    case "capstone": {
+      const n = d.text.trim().length;
+      return n >= WRITTEN_MIN && n <= CAPSTONE_MAX;
     }
     case "teach_student":
       return step.turns.some((t) => t.role === "learner");
@@ -83,6 +89,8 @@ export function buildAnswer(step: Pick<Step, "kind" | "public">, d: Draft): Reco
     case "explain_back":
     case "scenario":
       return { text: d.text.trim().slice(0, WRITTEN_MAX) };
+    case "capstone":
+      return { text: d.text.trim().slice(0, CAPSTONE_MAX) };
   }
 }
 
@@ -142,4 +150,8 @@ export const KIND_LABEL: Record<StepKind, string> = {
   explain_back: "In your own words",
   scenario: "Use it",
   teach_student: "You're the teacher",
+  capstone: "Put it together",
 };
+
+/** The kinds answered in writing: these can be dictated. */
+export const isWritten = (kind: StepKind) => kind === "explain_back" || kind === "scenario" || kind === "capstone";

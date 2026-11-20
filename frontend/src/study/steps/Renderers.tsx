@@ -7,7 +7,9 @@ import { cn } from "@/utils/cn";
 import { Thinking } from "../ui/bits";
 import { Diagram } from "../ui/Diagram";
 import { Md } from "../ui/Md";
-import { clearPair, moveItem, setPair, WRITTEN_MAX, type Draft } from "./answers";
+import { DictateButton } from "../ui/Voice";
+import { CAPSTONE_MAX, clearPair, moveItem, setPair, WRITTEN_MAX, type Draft } from "./answers";
+import { appendDictation } from "./speech";
 
 /*
  * One renderer per step kind. Each shows the step, takes the learner's
@@ -21,6 +23,8 @@ export interface StepProps<K extends StepKind = StepKind> {
   setDraft: (d: Draft) => void;
   /** Answered, or being sent: nothing can be changed. */
   locked: boolean;
+  /** A written answer can be spoken (this server and browser can do it). */
+  canDictate?: boolean;
 }
 
 const ANGLE_WORDS: Record<string, string> = {
@@ -516,7 +520,19 @@ export function WorkedStep({ step, draft, setDraft, locked }: StepProps<"worked_
 
 // ------------------------------------------------ explain back / scenario
 
-function Written({ step, draft, setDraft, locked, placeholder }: StepProps<"explain_back" | "scenario"> & { placeholder: string }) {
+type WrittenKind = "explain_back" | "scenario" | "capstone";
+
+function Written({
+  step,
+  draft,
+  setDraft,
+  locked,
+  placeholder,
+  canDictate,
+  max = WRITTEN_MAX,
+  rows = 6,
+  owners,
+}: StepProps<WrittenKind> & { placeholder: string; max?: number; rows?: number; owners?: string[] }) {
   const r = step.reveal as RevealByKind["explain_back"] | null;
   const met = new Set(((step.grade?.detail as { met?: number[] } | undefined)?.met ?? []) as number[]);
   const n = draft.text.length;
@@ -527,19 +543,20 @@ function Written({ step, draft, setDraft, locked, placeholder }: StepProps<"expl
           <Label>Your answer</Label>
           <p className="whitespace-pre-wrap text-[15px] text-[var(--text)]">{draft.text || <span className="text-[var(--text-muted)]">No answer</span>}</p>
         </Card>
-        <Rubric rubric={r.rubric} met={met} />
+        <Rubric rubric={r.rubric} met={met} owners={owners} />
         <ModelAnswer text={r.model_answer_md} />
       </div>
     );
   }
   return (
+    <div className="flex flex-col gap-1.5">
     <label className="flex flex-col gap-1.5">
       <span className="sr-only">Your answer</span>
       <textarea
         value={draft.text}
-        onChange={(e) => setDraft({ ...draft, text: e.target.value.slice(0, WRITTEN_MAX) })}
+        onChange={(e) => setDraft({ ...draft, text: e.target.value.slice(0, max) })}
         disabled={locked}
-        rows={6}
+        rows={rows}
         // A keyboard is already there on a computer; on a phone it would cover the question.
         autoFocus={typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches === true}
         placeholder={placeholder}
@@ -547,13 +564,15 @@ function Written({ step, draft, setDraft, locked, placeholder }: StepProps<"expl
       />
       <span className="flex justify-between text-xs text-[var(--text-muted)]">
         <span>Your own words. Spelling doesn't matter.</span>
-        {n > WRITTEN_MAX - 400 && <span>{WRITTEN_MAX - n} left</span>}
+        {n > max - 400 && <span>{max - n} left</span>}
       </span>
     </label>
+    {canDictate && !locked && <DictateButton onText={(spoken) => setDraft({ ...draft, text: appendDictation(draft.text, spoken, max) })} />}
+    </div>
   );
 }
 
-function Rubric({ rubric, met }: { rubric: string[]; met: Set<number> }) {
+function Rubric({ rubric, met, owners }: { rubric: string[]; met: Set<number>; owners?: string[] }) {
   if (!rubric.length) return null;
   return (
     <Card>
@@ -567,6 +586,7 @@ function Rubric({ rubric, met }: { rubric: string[]; met: Set<number> }) {
             <span className={met.has(i) ? "text-[var(--text)]" : "text-[var(--text-muted)]"}>
               {x}
               <span className="sr-only">{met.has(i) ? " (you covered this)" : " (missing from your answer)"}</span>
+              {owners?.[i] && <span className="block text-xs text-[var(--text-muted)]">Shows: {owners[i]}</span>}
             </span>
           </li>
         ))}
@@ -592,7 +612,7 @@ export function ExplainBackStep(props: StepProps<"explain_back">) {
   return (
     <div className="flex flex-col gap-4">
       <Md text={props.step.public.prompt_md} className="text-[17px] font-medium" />
-      <Written {...(props as unknown as StepProps<"explain_back" | "scenario">)} placeholder="Explain it the way you'd say it out loud…" />
+      <Written {...(props as unknown as StepProps<WrittenKind>)} placeholder="Explain it the way you'd say it out loud…" />
     </div>
   );
 }
@@ -606,7 +626,40 @@ export function ScenarioStep(props: StepProps<"scenario">) {
         <Md text={p.scenario_md} />
       </Card>
       <Md text={p.question_md} className="text-[17px] font-medium" />
-      <Written {...(props as unknown as StepProps<"explain_back" | "scenario">)} placeholder="What would you do, and why?" />
+      <Written {...(props as unknown as StepProps<WrittenKind>)} placeholder="What would you do, and why?" />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- capstone
+
+/** A unit's (or the subject's) applied task: several ideas, used together. */
+export function CapstoneStep(props: StepProps<"capstone">) {
+  const p = props.step.public;
+  const r = props.step.reveal;
+  const title = new Map(p.concepts.map((c) => [c.id, c.title]));
+  const owners = r?.rubric_concepts.map((id) => title.get(id) ?? "");
+  return (
+    <div className="flex flex-col gap-4" data-testid="study-capstone">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--st-accent-text)]">{p.scope === "final" ? "The final task" : "Unit task"}</p>
+        <h2 className="mt-0.5 text-xl font-semibold leading-tight text-[var(--text)]">{p.title}</h2>
+      </div>
+      <Card>
+        <Label>The task</Label>
+        <Md text={p.task_md} />
+      </Card>
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">It draws on</p>
+        <ul className="flex flex-wrap gap-1.5" aria-label="Ideas this task draws on">
+          {p.concepts.map((c) => (
+            <li key={c.id} className="rounded-full bg-[var(--st-soft)] px-2.5 py-1 text-xs font-medium text-[var(--st-accent-text)]">
+              {c.title}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <Written {...(props as unknown as StepProps<WrittenKind>)} placeholder="Take your time. Use what you've learned, and say why." max={CAPSTONE_MAX} rows={9} owners={owners} />
     </div>
   );
 }
@@ -775,6 +828,8 @@ export function StepBody(props: StepProps & { onTurn: (text: string) => void; se
       return <ScenarioStep {...(rest as StepProps<"scenario">)} />;
     case "teach_student":
       return <TeachStudentStep {...(rest as StepProps<"teach_student">)} onTurn={onTurn} sending={sending} error={turnError} />;
+    case "capstone":
+      return <CapstoneStep {...(rest as StepProps<"capstone">)} />;
     default:
       return <p className="text-sm text-[var(--text-muted)]">This kind of step can't be shown here yet. Update Promptly, or skip it.</p>;
   }

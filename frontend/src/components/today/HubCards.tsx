@@ -1069,8 +1069,17 @@ export function ComingCard({ coming, today, bookings = [] }: { coming: TodayComi
 /** Study: the subject you're learning, how far along, and what comes next. */
 export function LearnCard({ l }: { l: NonNullable<Sections["learn"]> }) {
   const url = `/study/${l.subject_id}`;
+  const due = l.due_count ?? 0;
+  const review = due > 0 && (
+    <Link to="/study/review" state={{ from: "/today" }} className="flex items-center justify-between gap-2 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+      <span className="text-sm font-medium text-[var(--text)]">{due === 1 ? "1 idea to review" : `${due} ideas to review`}</span>
+      <span className="shrink-0 text-xs font-medium text-[var(--accent)]">Review</span>
+    </Link>
+  );
+  if (!l.subject_id || !l.progress) return <HubCard icon={BookOpenCheck} title="Study" to="/study" open="Subjects">{review}</HubCard>;
   return (
     <HubCard icon={BookOpenCheck} title="Study" to="/study" open="Subjects">
+      {review}
       <Link to={url} state={{ from: "/today" }} className="block rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text)]">{l.title}</span>
@@ -1080,7 +1089,15 @@ export function LearnCard({ l }: { l: NonNullable<Sections["learn"]> }) {
           <span className="block h-full rounded-full bg-[var(--accent)]" style={{ width: `${l.progress.percent}%` }} />
         </span>
         <span className="mt-1.5 block truncate text-xs text-[var(--text-muted)]">
-          {l.status === "placement" ? "Your course is ready to start" : l.next_concept ? `Next: ${l.next_concept.title}` : `${l.progress.done} of ${l.progress.total} ideas learned`}
+          {l.status === "placement"
+            ? "Your course is ready to start"
+            : l.next_concept
+              ? `Next: ${l.next_concept.title}`
+              : l.next_capstone
+                ? l.next_capstone.scope === "final"
+                  ? "Next: the final task"
+                  : `Next: a task on ${l.next_capstone.title}`
+                : `${l.progress.done} of ${l.progress.total} ideas learned`}
         </span>
       </Link>
     </HubCard>

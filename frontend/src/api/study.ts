@@ -43,9 +43,38 @@ export interface Subject {
   build: Build;
   progress: Progress;
   next_concept: { id: string; title: string } | null;
+  /** The applied task that comes next (a finished unit's, or the final one). */
+  next_capstone: { scope: "unit" | "final"; unit_id: string | null; title: string } | null;
+  /** Learned ideas whose review is due now. */
+  due_count: number;
+  capstone: Capstone | null;
   created_at: string;
   updated_at: string;
   last_studied_at: string | null;
+}
+
+/** Where a unit's (or the subject's) applied task is up to. */
+export interface Capstone {
+  status: "passed" | "open" | "closed";
+  tries: number;
+  outcome: "correct" | "partial" | "wrong";
+  met: number;
+  points: number;
+  at: string;
+}
+
+/** Days studied: honest counts, nothing to protect. */
+export interface StudyStats {
+  today: boolean;
+  week: number;
+  streak: number;
+  total: number;
+}
+
+export interface StudyHome {
+  subjects: Subject[];
+  due_total: number;
+  stats: StudyStats;
 }
 
 export type ConceptState = "new" | "learning" | "mastered" | "known";
@@ -69,6 +98,11 @@ export interface Concept {
   sources: number[];
   last_seen_at: string | null;
   mastered_at: string | null;
+  /** When it next comes back for review (learned ideas only). */
+  due_at: string | null;
+  due: boolean;
+  reviews: number;
+  lapses: number;
 }
 
 export interface Unit {
@@ -76,6 +110,7 @@ export interface Unit {
   position: number;
   title: string;
   summary: string;
+  capstone: Capstone | null;
   concepts: Concept[];
 }
 
@@ -106,6 +141,15 @@ export interface LessonSummary {
   parked: string[];
   next: string | null;
   subject_complete: boolean;
+  capstones?: { scope: "unit" | "final"; title: string; outcome: "correct" | "partial" | "wrong" }[];
+}
+
+export interface ReviewSummary {
+  reviewed: number;
+  remembered: number;
+  slipped: number;
+  reopened: string[];
+  left: number;
 }
 
 export interface PlacementSummary {
@@ -119,13 +163,13 @@ export interface PlacementSummary {
 export interface Session {
   id: string;
   subject_id: string;
-  kind: "placement" | "lesson";
+  kind: "placement" | "lesson" | "review";
   status: "active" | "done";
   started_at: string;
   ended_at: string | null;
   target_steps: number;
   focus_concept_id: string | null;
-  summary: LessonSummary | PlacementSummary | null;
+  summary: LessonSummary | PlacementSummary | ReviewSummary | null;
   steps?: Step[];
 }
 
@@ -146,7 +190,8 @@ export type StepKind =
   | "worked_example"
   | "explain_back"
   | "scenario"
-  | "teach_student";
+  | "teach_student"
+  | "capstone";
 
 export interface Opt {
   id: string;
@@ -185,6 +230,7 @@ export interface PublicByKind {
   explain_back: { prompt_md: string; sources: number[] };
   scenario: { scenario_md: string; question_md: string; sources: number[] };
   teach_student: { student_name: string; opening_md: string; max_turns: number; sources: number[] };
+  capstone: { task_md: string; scope: "unit" | "final"; title: string; concepts: { id: string; title: string }[]; sources: number[] };
 }
 
 /** The answer key, once answered. */
@@ -199,6 +245,8 @@ export interface RevealByKind {
   explain_back: { rubric: string[]; model_answer_md: string };
   scenario: RevealByKind["explain_back"];
   teach_student: { misconception: string; rubric: string[]; model_answer_md: string };
+  /** ``rubric_concepts[i]`` is the id of the idea rubric point ``i`` shows. */
+  capstone: { rubric: string[]; rubric_concepts: string[]; model_answer_md: string };
 }
 
 export interface Grade {
@@ -227,7 +275,7 @@ export interface Step<K extends StepKind = StepKind> {
   concept_id: string;
   position: number;
   kind: K;
-  role: "" | "recall" | "test_out" | "placement";
+  role: "" | "recall" | "test_out" | "placement" | "review" | "capstone";
   status: "pending" | "answered" | "skipped";
   graded: boolean;
   public: PublicByKind[K];
@@ -249,6 +297,9 @@ export type Change =
   | { type: "mastered"; concept_id: string; title: string; by: "lesson" | "test_out" }
   | { type: "relearn"; concept_id: string; title: string }
   | { type: "gap_added"; concept_id: string; title: string; reason: string; for_concept_id: string }
+  /** A review answer: the rating it earned (1 again … 4 easy) and when it comes back. */
+  | { type: "review"; concept_id: string; rating: 1 | 2 | 3 | 4; next_days: number | null }
+  | { type: "capstone"; scope: "unit" | "final"; unit_id: string | null; title: string; outcome: "correct" | "partial" | "wrong"; status: "passed" | "open" | "closed"; reopened: string[] }
   | { type: "subject_complete" };
 
 export interface NextReply {
@@ -257,6 +308,36 @@ export interface NextReply {
   concept: Concept | null;
   session: Session;
   subject_status: SubjectStatus;
+  /** The subject the step belongs to (a review can span subjects). */
+  subject?: { id: string; title: string };
+}
+
+export interface ReportRow {
+  id: string;
+  title: string;
+  summary: string;
+  mastery: number;
+  state: ConceptState;
+  mastered_at: string | null;
+  steps: number;
+}
+
+export interface Report {
+  subject: Subject;
+  finished: boolean;
+  totals: { concepts: number; known_before: number; steps: number; lessons: number };
+  units: { id: string; title: string; capstone: Capstone | null; solid: ReportRow[] }[];
+  shaky: (ReportRow & { why: string })[];
+  added: (ReportRow & { reason: string; for: string | null })[];
+  capstone: Capstone | null;
+  sources: { n: number; kind: "web" | "file" | "note"; title: string; url: string | null }[];
+  next: { title: string; why: string }[];
+}
+
+export interface Remind {
+  on: boolean;
+  /** "HH:MM", in the person's own time zone. */
+  time: string;
 }
 
 export interface AnswerReply {
@@ -271,8 +352,18 @@ export type AskMode = "question" | "simpler" | "analogy" | "example" | "deeper";
 
 export interface Prefs {
   level: Level;
+  /** An admin has fixed the level for this account. */
+  level_locked: boolean;
   levels: Level[];
   depths: Depth[];
+  remind: Remind;
+}
+
+export interface VoiceSupport {
+  /** Steps can be read aloud. */
+  listen: boolean;
+  /** Written answers can be dictated. */
+  speak: boolean;
 }
 
 export interface NewSubject {
@@ -293,8 +384,27 @@ export const studyApi = {
   async setPrefs(level: Level): Promise<Prefs> {
     return (await apiClient.put<Prefs>("/study/prefs", { level })).data;
   },
+  async setRemind(remind: Remind): Promise<Prefs> {
+    return (await apiClient.put<Prefs>("/study/prefs", { remind })).data;
+  },
+  async voice(): Promise<VoiceSupport> {
+    return (await apiClient.get<VoiceSupport>("/study/voice")).data;
+  },
   async subjects(): Promise<Subject[]> {
     return (await apiClient.get<{ subjects: Subject[] }>("/study/subjects")).data.subjects;
+  },
+  async home(): Promise<StudyHome> {
+    return (await apiClient.get<StudyHome>("/study/subjects")).data;
+  },
+  /** A review sitting over what is due: one subject's, or everything's. */
+  async startReview(subjectId?: string): Promise<Session> {
+    return (await apiClient.post<{ session: Session }>("/study/reviews", subjectId ? { subject_id: subjectId } : {})).data.session;
+  },
+  async report(id: string): Promise<Report> {
+    return (await apiClient.get<Report>(`/study/subjects/${id}/report`)).data;
+  },
+  async suggestNext(id: string): Promise<{ title: string; why: string }[]> {
+    return (await apiClient.post<{ next: { title: string; why: string }[] }>(`/study/subjects/${id}/report/suggest`)).data.next;
   },
   async create(body: NewSubject): Promise<Subject> {
     return (await apiClient.post<Subject>("/study/subjects", body)).data;

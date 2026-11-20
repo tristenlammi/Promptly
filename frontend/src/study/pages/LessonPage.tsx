@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Check, CircleHelp, FastForward, Lightbulb, MessageCircleQuestion, PartyPopper, Plus, RotateCcw, Sparkles, X } from "lucide-react";
+import { ArrowRight, CalendarClock, Check, CircleHelp, ClipboardCheck, FastForward, Headphones, Lightbulb, MessageCircleQuestion, PartyPopper, Plus, RotateCcw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -12,6 +12,7 @@ import {
   type Concept,
   type LessonSummary,
   type PlacementSummary,
+  type ReviewSummary,
   type Session,
   type Step,
 } from "@/api/study";
@@ -21,16 +22,19 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/utils/cn";
 
 import { AskPanel } from "../AskPanel";
-import { buildAnswer, canSayDontKnow, DONT_KNOW, draftFromAnswer, emptyDraft, isInstant, isReady, KIND_LABEL, type Draft } from "../steps/answers";
+import { buildAnswer, canSayDontKnow, DONT_KNOW, draftFromAnswer, emptyDraft, isInstant, isReady, isWritten, KIND_LABEL, type Draft } from "../steps/answers";
 import { StepBody } from "../steps/Renderers";
+import { feedbackSpeech, speechFor } from "../steps/speech";
 import { Bar, Thinking } from "../ui/bits";
 import { Md } from "../ui/Md";
+import { ReadAloud, readListenPref, useVoiceSupport, writeListenPref } from "../ui/Voice";
 import "../study.css";
 
 /*
  * The lesson player (and the placement check, which is the same loop with
- * the feedback turned off): ask the server for the step to show, render it
- * by kind, send the answer, show what it changed, repeat until done.
+ * the feedback turned off, and a review sitting, which is the same loop over
+ * what has come due): ask the server for the step to show, render it by
+ * kind, send the answer, show what it changed, repeat until done.
  */
 
 type Phase = "loading" | "step" | "sending" | "answered" | "advancing" | "done" | "error";
@@ -48,8 +52,12 @@ const OUTCOME = {
 } as const;
 
 export function LessonPage() {
-  const { subjectId = "", sessionId = "" } = useParams();
+  const params = useParams();
+  const sessionId = params.sessionId ?? "";
   const navigate = useNavigate();
+  const voice = useVoiceSupport();
+  const [listen, setListen] = useState(readListenPref);
+  const [stepSubject, setStepSubject] = useState<{ id: string; title: string } | null>(null);
   const qc = useQueryClient();
   const isPhone = useIsMobile(1023);
 
@@ -81,7 +89,12 @@ export function LessonPage() {
   }, []);
 
   const placement = session?.kind === "placement";
-  const mapPath = `/study/${subjectId}`;
+  const review = session?.kind === "review";
+  // A review of everything is opened from the Study home, and goes back there.
+  const subjectId = params.subjectId ?? session?.subject_id ?? "";
+  const mapPath = params.subjectId ? `/study/${params.subjectId}` : "/study";
+  const backWords = params.subjectId ? "Back to the map" : "Back to Study";
+  const title = placement ? "Quick check" : review ? "Review" : "Lesson";
 
   const show = useCallback((s: Step | null, c: Concept | null) => {
     setStep(s);
@@ -102,6 +115,7 @@ export function LessonPage() {
         const out = await studyApi.next(sessionId);
         if (!alive.current) return;
         setSession((prev) => ({ ...(prev ?? out.session), ...out.session, steps: prev?.steps }));
+        setStepSubject(out.subject ?? null);
         if (out.done || !out.step) {
           show(null, null);
           setPhase("done");
@@ -278,7 +292,7 @@ export function LessonPage() {
 
   if (phase === "error" && !step) {
     return (
-      <Shell onLeave={leave} title="Lesson">
+      <Shell onLeave={leave} title={title} backWords={backWords}>
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
           <p role="alert" className="max-w-sm text-[15px] text-[var(--text)]">
             {loadError ?? "This lesson couldn't be opened."}
@@ -287,7 +301,7 @@ export function LessonPage() {
             <Button variant="primary" onClick={() => void load()} leftIcon={<RotateCcw className="h-4 w-4" />}>
               Try again
             </Button>
-            <Button onClick={leave}>Back to the map</Button>
+            <Button onClick={leave}>{backWords}</Button>
           </div>
         </div>
       </Shell>
@@ -296,13 +310,23 @@ export function LessonPage() {
 
   if (phase === "done" && session) {
     return (
-      <Shell onLeave={leave} title={placement ? "Quick check" : "Lesson"} rail={<Rail session={session} history={history} current={null} />}>
+      <Shell onLeave={leave} title={title} backWords={backWords} rail={<Rail session={session} history={history} current={null} />}>
         <div ref={bodyRef} className="promptly-scroll min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-xl px-4 py-8">
             {placement ? (
               <PlacementDone summary={session.summary as PlacementSummary | null} onGo={() => navigate(mapPath, { replace: true })} />
+            ) : review ? (
+              <ReviewDone summary={session.summary as ReviewSummary | null} onBack={() => navigate(mapPath)} backWords={backWords} />
             ) : (
-              <LessonDone summary={session.summary as LessonSummary | null} history={history} onMap={() => navigate(mapPath)} onMore={keepGoing} starting={starting} error={error} />
+              <LessonDone
+                summary={session.summary as LessonSummary | null}
+                history={history}
+                onMap={() => navigate(mapPath)}
+                onMore={keepGoing}
+                onReport={() => navigate(`/study/${subjectId}/report`)}
+                starting={starting}
+                error={error}
+              />
             )}
           </div>
         </div>
@@ -312,7 +336,7 @@ export function LessonPage() {
 
   if (phase === "loading" || !step || !session) {
     return (
-      <Shell onLeave={leave} title="Lesson">
+      <Shell onLeave={leave} title={title} backWords={backWords}>
         <div className="flex flex-1 items-center justify-center">
           <Thinking label={sessionId ? "Getting your next step ready" : "Loading"} />
         </div>
@@ -328,13 +352,41 @@ export function LessonPage() {
   const before = result?.changes.find((c): c is Extract<Change, { type: "mastery" }> => c.type === "mastery" && c.concept_id === step.concept_id);
 
   const askPanel = <AskPanel step={step} onAsks={(asks: Ask[]) => setStep((s) => (s ? { ...s, asks } : s))} />;
+  // Read aloud: the step while it waits, what the teacher said once it's answered.
+  const spoken = answered ? (step.kind === "explain" || quiet ? "" : feedbackSpeech(step)) : speechFor(step);
+  const canDictate = voice.speak && isWritten(step.kind);
 
   return (
     <Shell
       onLeave={leave}
       onEnd={quiet ? undefined : endNow}
-      title={quiet ? "Quick check" : "Lesson"}
+      title={title}
+      backWords={backWords}
       rail={<Rail session={session} history={history} current={step} />}
+      voice={
+        voice.listen ? (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                writeListenPref(!listen);
+                setListen(!listen);
+              }}
+              aria-pressed={listen}
+              aria-label="Read every step to me"
+              title={listen ? "Reading every step to you. Tap to stop." : "Read every step to me"}
+              data-testid="study-listen"
+              className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]",
+                listen ? "bg-[var(--st-soft)] text-[var(--st-accent-text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
+              )}
+            >
+              <Headphones className="h-5 w-5" aria-hidden />
+            </button>
+            <ReadAloud text={spoken} speakKey={`${step.id}:${step.status}`} auto={listen} />
+          </>
+        ) : undefined
+      }
       action={
         showAsk ? (
           <button
@@ -358,8 +410,8 @@ export function LessonPage() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div ref={bodyRef} className="promptly-scroll min-h-0 flex-1 overflow-y-auto">
             <div key={step.id} data-testid="study-step" data-step={step.id} data-kind={step.kind} data-status={step.status} className="study-in mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-8 pt-5 sm:px-6">
-              <ConceptLine step={step} concept={concept} quiet={quiet} before={before?.before} />
-              <StepBody step={step} draft={draft} setDraft={setDraft} locked={answered || busy} onTurn={turn} sending={turnBusy} turnError={turnError} />
+              <ConceptLine step={step} concept={concept} quiet={quiet} before={before?.before} subject={review && !params.subjectId ? stepSubject?.title : undefined} />
+              <StepBody step={step} draft={draft} setDraft={setDraft} locked={answered || busy} onTurn={turn} sending={turnBusy} turnError={turnError} canDictate={canDictate} />
 
               {step.hints_shown.length > 0 && !answered && (
                 <ul className="flex flex-col gap-2" aria-label="Hints">
@@ -377,7 +429,7 @@ export function LessonPage() {
               {answered && step.grade && !quiet && step.kind !== "explain" && (
                 <div ref={feedbackRef} tabIndex={-1} className="flex flex-col gap-3 outline-none">
                   <Feedback step={step} />
-                  {result && <Changes changes={result.changes} concept={concept} />}
+                  {result && <Changes changes={result.changes} concept={step.role === "capstone" ? null : concept} />}
                 </div>
               )}
 
@@ -473,6 +525,8 @@ function Shell({
   title,
   rail,
   action,
+  voice,
+  backWords = "Back to the map",
 }: {
   children: React.ReactNode;
   onLeave: () => void;
@@ -480,11 +534,13 @@ function Shell({
   title: string;
   rail?: React.ReactNode;
   action?: React.ReactNode;
+  voice?: React.ReactNode;
+  backWords?: string;
 }) {
   return (
     <div className="study flex min-h-0 flex-1 flex-col bg-[var(--bg)]">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--border)] px-2 pt-safe pl-safe pr-safe sm:px-4">
-        <button type="button" onClick={onLeave} aria-label="Leave and go back to the map. Your place is kept." title="Back to the map" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]">
+        <button type="button" onClick={onLeave} aria-label={`Leave. ${backWords}. Your place is kept.`} title={backWords} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--st-accent)]">
           <X className="h-5 w-5" />
         </button>
         <h1 className="sr-only">{title}</h1>
@@ -494,6 +550,7 @@ function Shell({
             Finish for now
           </button>
         )}
+        {voice}
         {action}
       </header>
       {children}
@@ -503,7 +560,7 @@ function Shell({
 
 /** Where you are in the lesson: one segment per step, coloured by how it went. */
 function Rail({ session, history, current }: { session: Session; history: Step[]; current: Step | null }) {
-  const lesson = session.kind === "lesson";
+  const lesson = session.kind !== "placement";
   const done = history.filter((s) => s.status === "answered" || s.status === "skipped");
   const total = lesson ? Math.max(session.target_steps, done.length + (current && current.status === "pending" ? 1 : 0)) : 0;
   if (!lesson) {
@@ -540,7 +597,7 @@ function Rail({ session, history, current }: { session: Session; history: Step[]
   );
 }
 
-function ConceptLine({ step, concept, quiet, before }: { step: Step; concept: Concept | null; quiet: boolean; before?: number }) {
+function ConceptLine({ step, concept, quiet, before, subject }: { step: Step; concept: Concept | null; quiet: boolean; before?: number; subject?: string }) {
   // Start the bar where it was, then let it move to where it is now.
   const [shown, setShown] = useState(before ?? concept?.mastery ?? 0);
   useEffect(() => {
@@ -553,9 +610,11 @@ function ConceptLine({ step, concept, quiet, before }: { step: Step; concept: Co
         <span className="rounded-full bg-[var(--st-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--st-accent-text)]">{KIND_LABEL[step.kind]}</span>
         {step.role === "recall" && <span className="rounded-full bg-[var(--hover-strong)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-muted)]">From earlier</span>}
         {step.role === "test_out" && <span className="rounded-full bg-[var(--hover-strong)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-muted)]">Show you know it</span>}
+        {step.role === "review" && <span className="rounded-full bg-[var(--hover-strong)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-muted)]">Review</span>}
+        {subject && <span className="min-w-0 truncate text-xs text-[var(--text-muted)]">{subject}</span>}
         {concept?.origin === "gap" && <span className="rounded-full bg-[var(--st-gap-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--st-gap)]">Added for you</span>}
       </div>
-      {concept && !quiet && (
+      {concept && !quiet && step.role !== "capstone" && (
         <div className="flex items-center gap-3">
           <p className="min-w-0 flex-1 truncate text-sm text-[var(--text-muted)]">{concept.title}</p>
           <span className="w-24 shrink-0">
@@ -657,13 +716,51 @@ function Changes({ changes, concept }: { changes: Change[]; concept: Concept | n
               </p>
             </li>
           );
+        if (c.type === "review")
+          return c.next_days == null ? null : (
+            <li key={i} className="flex items-center gap-2 px-1 text-sm text-[var(--text-muted)]" data-change="review">
+              <CalendarClock className="h-4 w-4 shrink-0" aria-hidden />
+              <span>{c.next_days <= 1 ? "It comes back tomorrow." : `It comes back in ${c.next_days} days.`}</span>
+            </li>
+          );
+        if (c.type === "capstone")
+          return (
+            <li
+              key={i}
+              className={cn("study-in flex items-start gap-3 rounded-2xl border p-3.5", c.status === "passed" ? "border-[var(--st-good-border)] bg-[var(--st-good-bg)]" : "border-[var(--st-warn-border)] bg-[var(--st-warn-bg)]")}
+              data-change="capstone"
+              data-status={c.status}
+            >
+              <span aria-hidden className={cn("study-pop flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white", c.status === "passed" ? "bg-[var(--st-good)]" : "bg-[var(--st-warn)]")}>
+                <ClipboardCheck className="h-4 w-4" />
+              </span>
+              <p className="text-[15px] text-[var(--text)]">
+                <span className="font-semibold">
+                  {c.status === "passed"
+                    ? c.scope === "final"
+                      ? "Final task done."
+                      : `Unit task done: ${c.title}.`
+                    : c.status === "closed"
+                      ? "We'll leave this task here."
+                      : "Not there yet on this task."}
+                </span>{" "}
+                {c.status === "passed"
+                  ? "You used the ideas together, which is the real test."
+                  : c.status === "closed"
+                    ? "You've had a few goes. The course moves on, and your report says what to look at again."
+                    : c.reopened.length > 0
+                      ? "The parts that were missing go back on your list first, then you get a new task."
+                      : "You get a fresh task next lesson."}
+              </p>
+            </li>
+          );
         if (c.type === "subject_complete")
           return (
             <li key={i} className="study-in flex items-start gap-3 rounded-2xl border border-[var(--st-good-border)] bg-[var(--st-good-bg)] p-3.5" data-change="subject_complete">
               <span aria-hidden className="study-pop flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--st-good)] text-white">
                 <PartyPopper className="h-4 w-4" />
               </span>
-              <p className="text-[15px] font-semibold text-[var(--text)]">That was the last idea. You've covered the whole subject.</p>
+              <p className="text-[15px] font-semibold text-[var(--text)]">That's the whole subject. Your report is ready.</p>
             </li>
           );
         return null;
@@ -678,6 +775,35 @@ function BigTick({ icon }: { icon?: React.ReactNode }) {
       <span className="study-burst absolute inset-0 rounded-full bg-[var(--st-accent)]" />
       <span className="study-pop relative flex h-20 w-20 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white">{icon ?? <Check className="h-9 w-9" />}</span>
     </span>
+  );
+}
+
+function ReviewDone({ summary, onBack, backWords }: { summary: ReviewSummary | null; onBack: () => void; backWords: string }) {
+  const n = summary?.reviewed ?? 0;
+  return (
+    <div className="study-in" data-testid="study-review-done">
+      <div className="text-center">
+        <BigTick />
+        <h2 className="text-2xl font-semibold text-[var(--text)]">Review done</h2>
+        <p className="mt-1 text-[15px] text-[var(--text-muted)]">
+          {n === 0 ? "Nothing was answered this time." : `${summary?.remembered ?? 0} of ${n} remembered`}
+          {summary && summary.left > 0 ? ` · ${summary.left} left for later` : ""}
+        </p>
+      </div>
+      <div className="mt-6 flex flex-col gap-3">
+        {summary && summary.reopened.length > 0 && (
+          <SummaryList tone="warn" icon={<RotateCcw className="h-4 w-4" />} title="Going back on your list" items={summary.reopened} note="These have slipped, so your next lesson teaches them again. That's what reviews are for." />
+        )}
+        {summary && summary.slipped > 0 && summary.reopened.length === 0 && (
+          <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-[15px] text-[var(--text)]">The ones you missed come back sooner, so they get another go.</p>
+        )}
+      </div>
+      <div className="mt-6 flex justify-center">
+        <Button size="lg" variant="primary" onClick={onBack}>
+          {backWords}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -706,6 +832,7 @@ function LessonDone({
   history,
   onMap,
   onMore,
+  onReport,
   starting,
   error,
 }: {
@@ -713,6 +840,7 @@ function LessonDone({
   history: Step[];
   onMap: () => void;
   onMore: () => void;
+  onReport: () => void;
   starting: boolean;
   error: string | null;
 }) {
@@ -732,6 +860,14 @@ function LessonDone({
       <div className="mt-6 flex flex-col gap-3">
         {summary && summary.mastered.length > 0 && (
           <SummaryList tone="good" icon={<Sparkles className="h-4 w-4" />} title={`Learned ${summary.mastered.length === 1 ? "this" : "these"}`} items={summary.mastered} />
+        )}
+        {summary?.capstones && summary.capstones.length > 0 && (
+          <SummaryList
+            tone={summary.capstones.every((c) => c.outcome === "correct") ? "good" : "warn"}
+            icon={<ClipboardCheck className="h-4 w-4" />}
+            title={summary.capstones.length === 1 ? "A task that put it together" : "Tasks that put it together"}
+            items={summary.capstones.map((c) => `${c.scope === "final" ? "The final task" : c.title}: ${c.outcome === "correct" ? "done" : c.outcome === "partial" ? "partly there" : "another go to come"}`)}
+          />
         )}
         {summary && summary.gaps_added.length > 0 && <SummaryList tone="gap" icon={<Plus className="h-4 w-4" />} title="Added to your map, to fill a gap" items={summary.gaps_added} />}
         {summary && summary.parked.length > 0 && <SummaryList tone="warn" icon={<RotateCcw className="h-4 w-4" />} title="Put aside for next time" items={summary.parked} note="These were hard going. A fresh start next time usually does it." />}
@@ -753,7 +889,12 @@ function LessonDone({
             Keep going
           </Button>
         )}
-        <Button size="lg" variant={complete || !summary?.next ? "primary" : "secondary"} onClick={onMap}>
+        {complete && (
+          <Button variant="primary" size="lg" onClick={onReport} rightIcon={<ArrowRight className="h-4 w-4" />} data-testid="study-see-report">
+            See your report
+          </Button>
+        )}
+        <Button size="lg" variant={!complete && !summary?.next ? "primary" : "secondary"} onClick={onMap}>
           Back to the map
         </Button>
       </div>
