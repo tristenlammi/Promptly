@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.52.1] - 2026-11-21
+
 ### Fixed
 
 - Study: the course map is tidy. An idea now sits straight under the one it builds on (or under the middle of them when it builds on several), lines turn in the clear space between rows instead of running through names and other ideas, and a line another route already shows is left out. The short loose lines above some ideas are gone: lines are drawn inside a part only.
