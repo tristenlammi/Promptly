@@ -6,11 +6,11 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/utils/cn";
 
 import { Ring } from "../ui/bits";
-import { BAND_WORDS, bandOf, edgePath, layoutMap, stubPath, UNIT_HEAD_H, type Band } from "./layout";
+import { BAND_WORDS, bandOf, layoutMap, routePath, UNIT_HEAD_H, type Band } from "./layout";
 
 /*
- * The course as a map: units are regions down the page, concepts are stops
- * on a winding route, lines join an idea to what it builds on. Each stop
+ * The course as a map: units are regions down the page, concepts are stops,
+ * and inside a unit lines join an idea to what it builds on. Each stop
  * wears how well you know it; ideas added for a gap look different and say
  * why; the stop to do next glows.
  */
@@ -75,13 +75,14 @@ export function CourseMap({ subject, nextId, onPick }: { subject: SubjectFull; n
         {layout.edges.map((e, i) => (
           <path
             key={i}
-            d={e.kind === "stub" ? stubPath(layout.byId[e.to]) : edgePath(layout.byId[e.from], layout.byId[e.to])}
+            d={routePath(e.points)}
             fill="none"
             vectorEffect="non-scaling-stroke"
             stroke={e.gap ? "var(--st-gap)" : e.done ? "var(--st-good)" : "var(--st-line)"}
-            strokeWidth={e.done ? 3 : 2.5}
-            strokeDasharray={e.gap ? "2 7" : e.done ? undefined : "1 8"}
+            strokeWidth={e.done ? 2.5 : 2}
+            strokeDasharray={e.gap ? "2 7" : undefined}
             strokeLinecap="round"
+            strokeLinejoin="round"
             opacity={e.done ? 0.7 : 1}
           />
         ))}
