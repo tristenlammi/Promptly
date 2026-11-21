@@ -625,3 +625,32 @@ describe("lessons from the blind sets", () => {
     expect(best?.fields.find((f) => (f.el as HTMLInputElement).name === "sc")?.role).toBe("card-cvv");
   });
 });
+
+describe("dates that aren't a card's expiry", () => {
+  const rental = `<iframe></iframe><form><h2>Previous address</h2>
+    <label for="e">Contact Email</label><input id="e" type="email">
+    <label for="p">Contact Phone</label><input id="p" type="tel">
+    <label for="s">Date started living here *</label><input id="s" placeholder="dd/mm/yyyy">
+    <label for="f">Date finished living here</label><input id="f" placeholder="dd/mm/yyyy">
+    <button>Save</button></form>`;
+
+  it("a day/month/year box on a form with no card is nothing of ours", () => {
+    set(rental);
+    const page = analyzePage(document, DOM);
+    expect(page.forms.some((f) => f.kind === "card")).toBe(false);
+    const dated = page.forms.flatMap((f) => f.fields).filter((f) => ["s", "f"].includes((f.el as HTMLInputElement).id));
+    expect(dated).toEqual([]);
+  });
+
+  it("a date picker and a date of birth aren't an expiry either", () => {
+    set(`<iframe></iframe><form><label for="dob">Date of birth</label><input id="dob" type="date"><label for="moved">Moved in (MM/DD/YYYY)</label><input id="moved"><button>Next</button></form>`);
+    expect(analyzePage(document, DOM).forms.some((f) => f.kind === "card")).toBe(false);
+  });
+
+  it("a real expiry still reads as one", () => {
+    set(`<form><h2>Payment</h2><input autocomplete="cc-number"><label for="x">Expiry</label><input id="x" placeholder="MM/YY"><input id="mm" placeholder="MM"><input id="yy" placeholder="YYYY"><button>Pay now</button></form>`);
+    const { best } = analyzePage(document, DOM);
+    expect(best?.kind).toBe("card");
+    expect(best?.fields.map((f) => f.role)).toEqual(expect.arrayContaining(["card-number", "card-exp", "card-exp-month", "card-exp-year"]));
+  });
+});

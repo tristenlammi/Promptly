@@ -168,12 +168,22 @@ function main() {
     );
   }
 
+  /** The kind of the form the menu's box is in: a date or a name box on a page that also
+   *  has a card form somewhere isn't offered cards. */
+  function menuKinds(): string[] | undefined {
+    const box = menuField ?? liftedFor;
+    if (!box) return undefined;
+    const form = forms.find((f) => f.fields.some((x) => x.el === box));
+    return form ? [form.kind] : undefined;
+  }
+
   function report(strict = false): PageReport {
     const fields = strict ? (best?.fields ?? []).filter(showing) : best?.fields ?? [];
     return {
       url: location.href,
       origin: self.origin,
       kinds: forms.filter((f) => f.fields.length).map((f) => f.kind),
+      menuKinds: menuKinds(),
       roles: fields.map((f) => f.role),
       fieldCount: fields.length,
       top: window === window.top,

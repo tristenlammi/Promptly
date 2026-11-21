@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head><title>Rental application</title></head>
+  <body>
+    <!-- A page with a sign-in box, a long form with dates in it, a frame, and a card form:
+         each box is offered only what fits it, and a date box nothing at all. -->
+    <form id="signin" action="/login">
+      <h2>Log in</h2>
+      <label>Username <input id="user" name="username" autocomplete="username" /></label>
+      <label>Password <input id="pass" name="password" type="password" autocomplete="current-password" /></label>
+      <button>Log in</button>
+    </form>
+    <iframe src="about:blank" title="chat" style="width: 10px; height: 10px; border: 0"></iframe>
+    <form id="history">
+      <h2>Previous address</h2>
+      <label for="cemail">Contact Email</label><input id="cemail" type="email" />
+      <label for="cphone">Contact Phone</label><input id="cphone" type="tel" />
+      <label for="started">Date started living here *</label><input id="started" placeholder="dd/mm/yyyy" />
+      <label for="finished">Date finished living here</label><input id="finished" placeholder="dd/mm/yyyy" />
+      <label for="dob">Date of birth</label><input id="dob" type="date" />
+      <button type="button">Save</button>
+    </form>
+    <form id="pay">
+      <h2>Payment</h2>
+      <label>Card number <input id="num" name="cardnumber" autocomplete="cc-number" /></label>
+      <label>Expiry <input id="exp" name="exp" placeholder="MM/YY" /></label>
+      <button type="button">Pay now</button>
+    </form>
+  </body>
+</html>

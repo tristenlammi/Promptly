@@ -406,6 +406,17 @@ function scoreRoles(s: Signals): Map<FieldRole, number> {
   }
   if (/\bexp[-_ ]?m(m|onth)?\b/i.test(s.rawOwn)) add("card-exp-month", 5);
   if (/\bexp[-_ ]?y(y|yyy|ear)?\b/i.test(s.rawOwn)) add("card-exp-year", 5);
+  // A whole date, with a day in it, is a birthday or a moving-in day. A card's expiry has
+  // no day, so "dd/mm/yyyy" and a date picker are never one unless the box says it is.
+  const whole = /\bd{1,2}\s*[/.\- ]\s*m{1,2}\b|\bm{1,2}\s*[/.\- ]\s*d{1,2}\b|\by{2,4}\s*[/.\- ]\s*m{1,2}\s*[/.\- ]\s*d{1,2}\b/i;
+  const wholeDate = s.type === "date" || whole.test(`${s.placeholderRaw} ${s.labelRaw}`);
+  // The same written beside the box, when that's all that made it look like an expiry.
+  const wholeBeside = whole.test(s.nearRaw);
+  if (!s.autocomplete.includes("cc-")) {
+    for (const r of ["card-exp", "card-exp-month", "card-exp-year"] as const) {
+      if (wholeDate || (wholeBeside && (scores.get(r) ?? 0) <= 2)) scores.delete(r);
+    }
+  }
   return scores;
 }
 

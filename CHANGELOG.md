@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+
+- Promptly Passwords extension: the suggestion menu no longer pops up on boxes it has nothing for. A date box ("dd/mm/yyyy", a date picker, a date of birth) was being read as a card's expiry, which on many pages made the whole form look like a payment form. And the menu now offers what fits the box you're in: a sign-in box is offered logins, a card box cards, instead of everything the page has a form for.
+
 ## [0.52.1] - 2026-11-21
 
 ### Fixed

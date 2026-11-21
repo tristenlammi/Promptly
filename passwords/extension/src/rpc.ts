@@ -2,7 +2,8 @@
 // to a content script at fill time, and to trusted extension pages when asked.
 export const ext: typeof chrome = (globalThis as unknown as { browser?: typeof chrome }).browser ?? chrome;
 
-export type PageReport = { url: string; origin: string; kinds: string[]; roles: string[]; fieldCount: number; top: boolean };
+/** `menuKinds`: the kind of the form the open menu's box is in, so the menu offers what fits that box and not everything on the page. */
+export type PageReport = { url: string; origin: string; kinds: string[]; menuKinds?: string[]; roles: string[]; fieldCount: number; top: boolean };
 
 /** `other`: a login for another service on the same domain, listed apart (match.ts, Auto). */
 export type Candidate = { id: string; title: string; username: string; hasTotp: boolean; kind: string; downgrade: boolean; reprompt: boolean; other?: boolean };

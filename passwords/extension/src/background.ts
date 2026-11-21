@@ -1909,7 +1909,8 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
   if (relayed && m.t !== "menuList" && m.t !== "menuOpenPopup" && m.t !== "menuClose") return { ok: false, reason: "popup", locked: false, candidates: [] };
   const kindsOf = async (): Promise<string[]> => {
     const report = relayed ? await inTime(send<PageReport>(tabId, relayed.frameId, { t: "report" }, relayed.documentId), REPORT_MS) : await inFrame<PageReport>({ t: "report" });
-    return report?.kinds ?? [];
+    // What fits the box the menu is on, when the page can say; the whole page otherwise.
+    return report?.menuKinds ?? report?.kinds ?? [];
   };
   const checked = async (itemId: string) => (await inFrame<{ ok: boolean; reason?: string }>({ t: "menuCheck", itemId, token: m.token })) ?? { ok: false };
   switch (m.t) {
