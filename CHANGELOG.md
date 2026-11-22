@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.52.4] - 2026-11-23
+
 ### Fixed
 - Chat: a wide table in an answer scrolls sideways on a phone. It ran off the edge of the screen and the columns past it couldn't be reached.
 
