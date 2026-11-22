@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.52.3] - 2026-11-22
+
 ### Changed
 - Study: ideas are smaller. The course planner no longer bundles several separate things (four kinds of network, say) under one idea; each gets its own or is left out.
 - Study: "in your own words" questions ask one thing that a few sentences can answer, instead of a list of things to cover at once.
