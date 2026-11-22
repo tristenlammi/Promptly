@@ -603,8 +603,16 @@ body {
 .promptly-prose table {
   border-collapse: collapse;
   margin: 0.5rem 0 0.75rem 0;
-  width: 100%;
   font-size: 0.9em;
+  /* A table wider than the message scrolls sideways inside itself (a phone
+     can't reach the columns past the edge otherwise). As a block it is its
+     own scroll box; the rows inside still lay out as a table. */
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .promptly-prose th,
 .promptly-prose td {
