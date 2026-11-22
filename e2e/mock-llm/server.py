@@ -457,7 +457,7 @@ _STUDY_KINDS = (
     ("explore", '"goal": <the goal>'), ("write_code", '"starter"'),
     ("teach_student", '"student_name"'), ("explain", '"key_points"'), ("predict", '"setup"'), ("mcq", "Test understanding, not wording"),
     ("order_steps", "IN THE CORRECT ORDER"), ("match_pairs", '"pairs": [{"left"'), ("spot_error", "exactly ONE mistake"),
-    ("worked_example", '"problem": "a concrete problem"'), ("explain_back", "explain the idea in their own words"), ("scenario", '"scenario": "a realistic'),
+    ("worked_example", '"problem": "a concrete problem"'), ("explain_back", "in their own words, to a named audience"), ("scenario", '"scenario": "a realistic'),
 )
 
 

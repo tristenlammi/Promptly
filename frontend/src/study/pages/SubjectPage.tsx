@@ -140,7 +140,7 @@ export function Building({ subject, onDone }: { subject: SubjectFull; onDone: ()
           );
         })}
       </ol>
-      <p className="mt-6 text-sm text-[var(--text-muted)]">This usually takes under two minutes. You can leave and come back: it carries on.</p>
+      <p className="mt-6 text-sm text-[var(--text-muted)]">This usually takes a couple of minutes, and a thorough course a few more. You can leave and come back: it carries on.</p>
       {poll.isError && <p className="mt-3 text-sm text-[var(--st-bad)]">Can't check on it just now. Still trying…</p>}
       {stalled && (
         <div className="mt-4 flex flex-col items-center gap-2">

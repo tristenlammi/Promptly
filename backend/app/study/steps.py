@@ -504,8 +504,12 @@ def clean_written_grade(raw: Any, rubric: list[str]) -> dict[str, Any]:
     met = [i for i in raw.get("met") if isinstance(i, int) and not isinstance(i, bool) and 0 <= i < len(rubric)] if isinstance(raw.get("met"), list) else []
     misc = raw.get("misconception")
     label = _s(misc.get("label") if isinstance(misc, dict) else misc, 200)
+    outcome = raw["outcome"]
+    if outcome == "wrong" and rubric and len(set(met)) * 2 >= len(rubric):
+        # Half the points made is not a miss, whatever the label says.
+        outcome = "partial"
     return {
-        "outcome": raw["outcome"],
+        "outcome": outcome,
         "feedback_md": _need(raw.get("feedback"), "feedback", 2500),
         "misconception": label or None,
         "detail": {

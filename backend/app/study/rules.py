@@ -10,10 +10,15 @@ Mastery (0–1 per concept)
 One graded answer is one piece of evidence::
 
     score   = 1 correct · 0.5 partial · 0 wrong
+              (a written answer is scored by how much of it was there:
+              partial 0.4 to 0.8, wrong 0 to 0.3, by the share of points made)
     score  *= 0.7 for each hint used
     weight  = how much the kind of step proves (KIND_WEIGHT)
     weight *= 0.6 when the answer was right but the learner said "guessing"
-    mastery += RATE * weight * (score - mastery)
+    mastery += RATE * weight * (score - mastery)      (RATE_DOWN when that lowers it
+              on a concept still being learned: one poor answer shouldn't undo
+              what several good ones showed. A learned concept that is missed at
+              a recall or review falls at the full rate: that is forgetting.)
     mastery *= 0.85 when the answer was wrong and the learner said "sure"
 
 A concept is **mastered** when mastery ≥ GATE, with at least MIN_EVIDENCE
@@ -28,6 +33,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 RATE = 0.6
+RATE_DOWN = 0.4
 GATE = 0.7
 MIN_EVIDENCE = 2
 #: Entering a concept at or above this (placement said "probably known"):
@@ -98,6 +104,8 @@ class Evidence:
     hints: int = 0
     confidence: int | None = None  # 1 guessing · 2 think so · 3 sure
     test_out: bool = False
+    #: A written answer: the share of the points a good answer makes that this one made (0–1).
+    credit: float | None = None
 
 
 @dataclass
@@ -123,17 +131,26 @@ class ConceptState:
 
 
 def score_of(ev: Evidence) -> float:
-    return OUTCOME_SCORE[ev.outcome] * (0.7 ** max(0, ev.hints))
+    base = OUTCOME_SCORE[ev.outcome]
+    if ev.credit is not None:
+        credit = min(1.0, max(0.0, ev.credit))
+        if ev.outcome == "partial":
+            base = 0.4 + 0.4 * credit
+        elif ev.outcome == "wrong":
+            base = 0.3 * credit
+    return base * (0.7 ** max(0, ev.hints))
 
 
-def update_mastery(mastery: float, ev: Evidence) -> float:
-    """Mastery after one piece of evidence (see the module docstring)."""
+def update_mastery(mastery: float, ev: Evidence, *, settled: bool = False) -> float:
+    """Mastery after one piece of evidence (see the module docstring).
+    ``settled``: the concept was already learned (a recall or a review)."""
     if ev.kind in UNGRADED:
         return mastery
     weight = KIND_WEIGHT[ev.kind]
     if ev.outcome == "correct" and ev.confidence == 1:
         weight *= 0.6
-    new = mastery + RATE * weight * (score_of(ev) - mastery)
+    score = score_of(ev)
+    new = mastery + (RATE if score >= mastery or settled else RATE_DOWN) * weight * (score - mastery)
     if ev.outcome == "wrong" and ev.confidence == 3:
         new *= 0.85
     return round(min(1.0, max(0.0, new)), 4)
@@ -145,7 +162,7 @@ def apply_evidence(c: ConceptState, ev: Evidence) -> ConceptState:
         if c.state == "new":
             c.state = "learning"
         return c
-    c.mastery = update_mastery(c.mastery, ev)
+    c.mastery = update_mastery(c.mastery, ev, settled=c.done)
     c.evidence_count += 1
     clean = ev.outcome == "correct" and ev.hints == 0
     if ev.kind in PRODUCTION and ev.outcome == "correct":
@@ -342,26 +359,42 @@ def gap_allowed(
 
 # --------------------------------------------------------------- placement
 
+#: Questions asked after the search, on the nearest ideas below where it ended.
+PLACEMENT_CONFIRM = 2
+
 
 @dataclass
 class Placement:
-    """A binary search over probe questions laid out in course order."""
+    """A binary search over probe questions laid out in course order, then up
+    to ``confirm`` more just below where it ended: one lucky guess shouldn't
+    skip a stretch of the course, and each one answered right is an idea known
+    for sure. (``confirm`` is set for a course longer than its check, where the
+    probes are a sample; a short course keeps the plain search.)"""
 
     n: int
     lo: int = 0
     hi: int | None = None
     asked: dict[int, bool] = field(default_factory=dict)  # probe index -> right?
+    confirm: int = 0  # how many to ask after the search
+    confirmed: int = 0  # how many of those have been asked
 
     def __post_init__(self) -> None:
         if self.hi is None:
             self.hi = self.n - 1
 
     def next_probe(self) -> int | None:
-        if self.lo > self.hi:
+        if self.lo <= self.hi:
+            return (self.lo + self.hi) // 2
+        if self.confirmed >= self.confirm:
             return None
-        return (self.lo + self.hi) // 2
+        return next((i for i in range(self.lo - 1, -1, -1) if i not in self.asked), None)
 
     def record(self, index: int, right: bool) -> None:
+        if self.lo > self.hi:
+            # After the search: it settles this one idea, not where the frontier is.
+            self.asked[index] = right
+            self.confirmed += 1
+            return
         self.asked[index] = right
         if right:
             self.lo = index + 1
@@ -374,11 +407,11 @@ class Placement:
         return self.lo - 1
 
     def to_json(self) -> dict[str, Any]:
-        return {"n": self.n, "lo": self.lo, "hi": self.hi, "asked": {str(k): v for k, v in self.asked.items()}}
+        return {"n": self.n, "lo": self.lo, "hi": self.hi, "asked": {str(k): v for k, v in self.asked.items()}, "confirm": self.confirm, "confirmed": self.confirmed}
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> "Placement":
-        return cls(n=int(d["n"]), lo=int(d["lo"]), hi=int(d["hi"]), asked={int(k): bool(v) for k, v in (d.get("asked") or {}).items()})
+        return cls(n=int(d["n"]), lo=int(d["lo"]), hi=int(d["hi"]), asked={int(k): bool(v) for k, v in (d.get("asked") or {}).items()}, confirm=int(d.get("confirm") or 0), confirmed=int(d.get("confirmed") or 0))
 
 
 def placement_result(
@@ -405,6 +438,11 @@ def placement_result(
             continue
         out[c.id] = (KNOWN_MASTERY, "known") if c.id in right else (LIKELY_MASTERY, "new")
     return out
+
+
+def probe_count(concepts: int) -> int:
+    """How many probes a course of this size gets: a long course needs a finer search."""
+    return min(11, max(7, round(concepts / 4)))
 
 
 def pick_probes(concepts: Sequence[ConceptState], want: int = 7) -> list[str]:

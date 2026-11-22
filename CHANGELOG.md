@@ -21,6 +21,19 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+- Study: ideas are smaller. The course planner no longer bundles several separate things (four kinds of network, say) under one idea; each gets its own or is left out.
+- Study: "in your own words" questions ask one thing that a few sentences can answer, instead of a list of things to cover at once.
+- Study: written answers are marked more fairly. A point counts when the idea is there, even briefly; an answer with half its points made is never marked as a miss; and the score follows how much of the answer was there. While you're learning an idea, one poor answer also lowers its score less than it did (scores fall more slowly than they rise); missing something you'd already learned counts as before.
+- Study: the quick check asks more. A long course gets a finer search, and on any course longer than the check itself there are two more questions after it, on the ideas just below where it ended, so one lucky guess doesn't skip part of the course and more of what you know is marked as known. Usually five or six questions on a long course, still two or three when you're new to it.
+- Study: wording. The course-building page says how long it really takes, and "you already know 1 of the ideas" reads properly.
+
+### Fixed
+
+- Study: a lesson with commands or code in it no longer fails with "the JSON was cut off". The teacher's answers were being read up to the first block of code inside them, so most answers for a technical subject were thrown away and asked for again, and a whole course could fail to build.
+- Study: a Thorough course builds. Its plan (30 to 44 ideas) had less room than it needs and was cut short every time; plans now get room by depth, and more time.
+- Study: the page waits for the teacher. It gave up after 30 seconds and said it couldn't reach Promptly, while the server carried on and finished; the placement check and slow steps hit this with a real model.
+
 ## [0.52.2] - 2026-11-21
 
 ### Fixed

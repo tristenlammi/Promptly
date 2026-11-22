@@ -49,7 +49,7 @@ def test_recognition_alone_never_masters():
 def test_wrong_answers_pull_mastery_down_and_keep_it_from_the_gate():
     c = C("a", 1, mastery=0.6)
     rules.apply_evidence(c, ev("explain_back", "wrong"))
-    assert c.mastery == pytest.approx(0.24) and c.state == "learning"
+    assert c.mastery == pytest.approx(0.36) and c.state == "learning"
 
 
 def test_partial_counts_for_half():
@@ -361,3 +361,99 @@ def test_placement_state_survives_being_saved_at_every_point():
         p = rules.Placement.from_json(p.to_json())
         assert len(asked) < 10
     assert asked == [2, 0] and p.frontier == -1
+
+
+# ---- Reading a model's answer --------------------------------------------------
+
+
+def test_an_answer_with_code_fences_inside_its_strings_is_read_whole():
+    """A lesson about commands has fences inside its text. Unwrapping the first
+    pair of fences found used to cut such an answer short, every time."""
+    from app.study.ai import parse_json
+
+    inner = "Run this:\n```\nSwitch# show vlan brief\n```\nthen read the table."
+    import json as _json
+
+    raw = "```json\n" + _json.dumps({"kind": "explain", "body_md": inner, "more": {"x": "```y```"}}) + "\n```"
+    assert parse_json(raw)["body_md"] == inner
+    assert parse_json(raw)["more"] == {"x": "```y```"}
+
+
+def test_a_line_break_typed_inside_a_string_is_taken_as_written():
+    from app.study.ai import parse_json
+
+    assert parse_json('{"body_md": "line one\nline two"}') == {"body_md": "line one\nline two"}
+
+
+def test_an_answer_that_stops_short_says_where_for_the_log_only():
+    from app.study.ai import parse_json
+    from app.study.steps import StepInvalid
+
+    import pytest as _pytest
+
+    with _pytest.raises(StepInvalid) as e:
+        parse_json('{"a": [1, 2')
+    assert str(e.value) == "no JSON object in the answer"
+    with _pytest.raises(StepInvalid) as e:
+        parse_json('{"a": "x", "b": {"c": 1}')
+    assert str(e.value) == "the JSON was cut off or malformed"
+    assert "character" in e.value.where
+
+
+# ------------------------------------------------------------ real-model tuning
+
+
+def test_a_written_answer_is_scored_by_how_much_of_it_was_there():
+    full = rules.score_of(ev("explain_back", "partial", credit=1.0))
+    some = rules.score_of(ev("explain_back", "partial", credit=0.5))
+    none = rules.score_of(ev("explain_back", "partial", credit=0.0))
+    assert full == pytest.approx(0.8) and some == pytest.approx(0.6) and none == pytest.approx(0.4)
+    assert rules.score_of(ev("explain_back", "wrong", credit=0.4)) == pytest.approx(0.12)
+    assert rules.score_of(ev("explain_back", "wrong")) == 0 and rules.score_of(ev("mcq", "partial")) == 0.5
+
+
+def test_one_half_right_answer_does_not_knock_a_concept_flat():
+    # What a real lesson did: 0.42, then an explain-back with two of five points made.
+    after = rules.update_mastery(0.42, ev("explain_back", "partial", credit=0.4))
+    assert after > 0.42
+    assert rules.update_mastery(0.42, ev("explain_back", "wrong", credit=0.4)) > 0.28
+
+
+def test_mastery_falls_more_slowly_than_it_rises():
+    up = rules.update_mastery(0.5, ev("mcq")) - 0.5
+    down = 0.5 - rules.update_mastery(0.5, ev("mcq", "wrong"))
+    assert up > down > 0
+    # Something already learned and then missed is forgetting: the full drop.
+    assert 0.9 - rules.update_mastery(0.9, ev("mcq", "wrong"), settled=True) == pytest.approx(0.6 * 0.7 * 0.9)
+
+
+def test_half_the_points_made_is_never_graded_wrong():
+    rubric = ["a", "b", "c", "d"]
+    g = steps.clean_written_grade({"outcome": "wrong", "met": [0, 2], "feedback": "ok"}, rubric)
+    assert g["outcome"] == "partial"
+    assert steps.clean_written_grade({"outcome": "wrong", "met": [0], "feedback": "ok"}, rubric)["outcome"] == "wrong"
+
+
+def test_placement_confirms_below_where_the_search_ended():
+    p = rules.Placement(n=10, confirm=rules.PLACEMENT_CONFIRM)
+    asked = []
+    while (i := p.next_probe()) is not None:
+        asked.append(i)
+        p.record(i, i <= 6)
+        p = rules.Placement.from_json(p.to_json())
+    # The search (4, 7, 5, 6), then the two nearest unasked below the frontier.
+    assert asked == [4, 7, 5, 6, 3, 2] and p.frontier == 6 and p.confirmed == 2
+
+
+def test_a_missed_confirming_question_keeps_that_idea_in_the_course():
+    cs = [C(str(i), float(i)) for i in range(1, 8)]
+    probes = [c.id for c in cs]
+    p = rules.Placement(n=7, confirm=2)
+    while (i := p.next_probe()) is not None:
+        p.record(i, i in (3, 5, 4))  # the search (3, 5, 6) ends knowing up to probe 5; then 4 right, 2 missed
+    res = rules.placement_result(cs, probes, p)
+    assert p.frontier == 5 and "3" not in res and res["5"][1] == "known" and res["6"][1] == "known" and res["2"][1] == "new"
+
+
+def test_a_long_course_gets_more_probes():
+    assert rules.probe_count(7) == 7 and rules.probe_count(28) == 7 and rules.probe_count(41) == 10 and rules.probe_count(200) == 11

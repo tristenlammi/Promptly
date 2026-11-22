@@ -825,7 +825,7 @@ function PlacementDone({ summary, onGo }: { summary: PlacementSummary | null; on
       <h2 className="text-2xl font-semibold text-[var(--text)]">Your course is set</h2>
       <p className="mx-auto mt-2 max-w-sm text-[15px] text-[var(--text-muted)]">
         {known > 0
-          ? `You already know ${known} of the ${summary?.total} ideas, so those are skipped.`
+          ? `You already know ${known} of the ${summary?.total} ideas, so ${known === 1 ? "that one is" : "those are"} skipped.`
           : "We'll start from the beginning, which is exactly the right place."}
         {likely > 0 && ` ${likely} more look familiar, so we'll move through ${likely === 1 ? "it" : "them"} quickly.`}
       </p>

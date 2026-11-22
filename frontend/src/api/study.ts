@@ -437,6 +437,11 @@ export interface NewSubject {
   note_ids?: string[];
 }
 
+/** Calls that wait on the teacher. A real model can take most of a minute for one
+ *  answer, and is asked again when its answer can't be used: the usual 30 seconds gave
+ *  up on work that then finished with nobody listening. */
+const SLOW = { timeout: 240_000 };
+
 export const studyApi = {
   async prefs(): Promise<Prefs> {
     return (await apiClient.get<Prefs>("/study/prefs")).data;
@@ -458,13 +463,13 @@ export const studyApi = {
   },
   /** A review sitting over what is due: one subject's, or everything's. */
   async startReview(subjectId?: string): Promise<Session> {
-    return (await apiClient.post<{ session: Session }>("/study/reviews", subjectId ? { subject_id: subjectId } : {})).data.session;
+    return (await apiClient.post<{ session: Session }>("/study/reviews", subjectId ? { subject_id: subjectId } : {}, SLOW)).data.session;
   },
   async report(id: string): Promise<Report> {
     return (await apiClient.get<Report>(`/study/subjects/${id}/report`)).data;
   },
   async suggestNext(id: string): Promise<{ title: string; why: string }[]> {
-    return (await apiClient.post<{ next: { title: string; why: string }[] }>(`/study/subjects/${id}/report/suggest`)).data.next;
+    return (await apiClient.post<{ next: { title: string; why: string }[] }>(`/study/subjects/${id}/report/suggest`, undefined, SLOW)).data.next;
   },
   async create(body: NewSubject): Promise<Subject> {
     return (await apiClient.post<Subject>("/study/subjects", body)).data;
@@ -489,16 +494,16 @@ export const studyApi = {
     await apiClient.delete(`/study/subjects/${id}`);
   },
   async startPlacement(id: string): Promise<{ session: Session; step: Step | null }> {
-    return (await apiClient.post<{ session: Session; step: Step | null }>(`/study/subjects/${id}/placement`)).data;
+    return (await apiClient.post<{ session: Session; step: Step | null }>(`/study/subjects/${id}/placement`, undefined, SLOW)).data;
   },
   async skipPlacement(id: string): Promise<SubjectFull> {
     return (await apiClient.post<SubjectFull>(`/study/subjects/${id}/placement/skip`)).data;
   },
   async startSession(id: string, body: { concept_id?: string; test_out?: boolean } = {}): Promise<Session> {
-    return (await apiClient.post<{ session: Session }>(`/study/subjects/${id}/sessions`, body)).data.session;
+    return (await apiClient.post<{ session: Session }>(`/study/subjects/${id}/sessions`, body, SLOW)).data.session;
   },
   async next(sessionId: string): Promise<NextReply> {
-    return (await apiClient.post<NextReply>(`/study/sessions/${sessionId}/next`)).data;
+    return (await apiClient.post<NextReply>(`/study/sessions/${sessionId}/next`, undefined, SLOW)).data;
   },
   async session(sessionId: string): Promise<Session> {
     return (await apiClient.get<{ session: Session }>(`/study/sessions/${sessionId}`)).data.session;
@@ -509,18 +514,18 @@ export const studyApi = {
   async answer(stepId: string, answer: Record<string, unknown>, confidence?: 1 | 2 | 3 | null): Promise<AnswerReply> {
     const body: Record<string, unknown> = { answer };
     if (confidence) body.confidence = confidence;
-    return (await apiClient.post<AnswerReply>(`/study/steps/${stepId}/answer`, body)).data;
+    return (await apiClient.post<AnswerReply>(`/study/steps/${stepId}/answer`, body, SLOW)).data;
   },
   async hint(stepId: string): Promise<{ hint: string; hints_left: number }> {
-    return (await apiClient.post<{ hint: string; hints_left: number }>(`/study/steps/${stepId}/hint`)).data;
+    return (await apiClient.post<{ hint: string; hints_left: number }>(`/study/steps/${stepId}/hint`, undefined, SLOW)).data;
   },
   async turn(stepId: string, text: string): Promise<Step> {
-    return (await apiClient.post<{ step: Step }>(`/study/steps/${stepId}/turn`, { text })).data.step;
+    return (await apiClient.post<{ step: Step }>(`/study/steps/${stepId}/turn`, { text }, SLOW)).data.step;
   },
   async ask(stepId: string, mode: AskMode, question?: string): Promise<{ answer_md: string; asks: Ask[] }> {
     const body: Record<string, unknown> = { mode };
     if (question) body.question = question;
-    return (await apiClient.post<{ answer_md: string; asks: Ask[] }>(`/study/steps/${stepId}/ask`, body)).data;
+    return (await apiClient.post<{ answer_md: string; asks: Ask[] }>(`/study/steps/${stepId}/ask`, body, SLOW)).data;
   },
 };
 

@@ -281,7 +281,10 @@ async def build_subject(subject_id: uuid.UUID) -> None:
             prompt = (
                 f"{ai.subject_block(subject)}\n\n"
                 f"Design the course as a map of concepts: {ai.DEPTH_SIZE[subject.depth]}.\n"
-                "A concept is ONE idea that can be taught and checked in a few minutes. Order them so each builds on the ones "
+                "A concept is ONE idea that can be taught and checked in a few minutes: something the learner could explain "
+                "back in three or four sentences. Where a topic has several separate kinds, parts or cases that each need "
+                "explaining, give each its own concept, or keep only the ones this learner needs; never bundle them under "
+                "one title. Order them so each builds on the ones "
                 "before it, and list as prereqs only the earlier concepts it truly needs. Shape the course around why this "
                 "learner wants it. Leave out history and trivia unless the goal asks for it.\n"
                 "If the subject is not suitable for this learner's age, set suitable false and say why in a sentence.\n\n"
@@ -290,7 +293,7 @@ async def build_subject(subject_id: uuid.UUID) -> None:
             )
             await db.commit()
             plan = await _ask(
-                teacher, "plan", system=ai.system_for(subject.level), prompt=prompt, max_tokens=7000,
+                teacher, "plan", system=ai.system_for(subject.level), prompt=prompt, max_tokens=ai.PLAN_ROOM.get(subject.depth, 9000),
                 check=lambda r: check_plan(r, depth=subject.depth, level=subject.level, valid_sources=valid),
             )
             if "unsuitable" in plan:
@@ -350,7 +353,7 @@ async def start_placement(db: AsyncSession, user: User, subject: StudySubject) -
         return active
     concepts = await concepts_of(db, subject.id)
     by_id = {str(c.id): c for c in concepts}
-    probe_ids = rules.pick_probes([_state(c) for c in concepts])
+    probe_ids = rules.pick_probes([_state(c) for c in concepts], want=rules.probe_count(len(concepts)))
     listing = "\n".join(f'- key "{i}": {by_id[i].title} — {by_id[i].summary}' for i in probe_ids)
     teacher = await _teacher(db, user)
     system, block = ai.system_for(subject.level), ai.subject_block(subject)
@@ -370,13 +373,13 @@ async def start_placement(db: AsyncSession, user: User, subject: StudySubject) -
         return out
 
     probes = await _ask(
-        teacher, "placement", system=system, max_tokens=4500, check=check,
+        teacher, "placement", system=system, max_tokens=7000, check=check,
         prompt=(
             f"{block}\n\nBefore teaching, find out what this learner already knows. Write one multiple-choice question for "
             f"each of these concepts from the course:\n{listing}\n\nReply in exactly this shape:\n{ai.PLACEMENT_SHAPE}"
         ),
     )
-    se = StudySession(subject_id=subject.id, kind="placement", plan={"probes": probes, "search": rules.Placement(n=len(probes)).to_json()})
+    se = StudySession(subject_id=subject.id, kind="placement", plan={"probes": probes, "search": rules.Placement(n=len(probes), confirm=rules.PLACEMENT_CONFIRM if len(probes) < len(concepts) else 0).to_json()})
     db.add(se)
     await db.commit()
     await db.refresh(se)
@@ -690,9 +693,13 @@ async def answer_step(db: AsyncSession, user: User, step_id: uuid.UUID, answer: 
     state = _state(concept)
     before, was_done = concept.mastery, state.done
     outcome = grade["outcome"] if grade else None
+    credit = None
+    if grade and st.kind in steps.WRITTEN and not clean.get("dont_know"):
+        points = len(st.payload["key"].get("rubric") or [])
+        credit = len((grade.get("detail") or {}).get("met") or []) / points if points else None
     ev = rules.Evidence(
         kind=st.kind if grade else "explain", outcome=outcome or "correct", hints=st.hints_used, confidence=confidence,
-        test_out=st.role == "test_out" and bool(grade),
+        test_out=st.role == "test_out" and bool(grade), credit=credit,
     )
     state = rules.apply_evidence(state, ev)
     concept.mastery, concept.state = state.mastery, state.state
