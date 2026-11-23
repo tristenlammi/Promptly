@@ -29,13 +29,48 @@ function Write-Ok($m)      { Write-Host "  OK  $m" -ForegroundColor Green }
 function Write-Warn($m)    { Write-Host "  !!  $m" -ForegroundColor Yellow }
 function Write-Fail($m)    { Write-Host "  ERR $m" -ForegroundColor Red }
 
+# Run a program with whatever it prints on stderr thrown away. Windows
+# PowerShell 5.1 turns redirected stderr into a terminating error when
+# $ErrorActionPreference is Stop (and `docker compose up` prints its progress
+# there), so the preference is relaxed in here only.
+function Invoke-Quiet([scriptblock]$Cmd) {
+    $ErrorActionPreference = "Continue"
+    & $Cmd 2>$null
+}
+
 if (-not (Test-Path ".env")) { throw "No .env found - run .\install.ps1 first." }
+
+# git and Docker have to work here before anything is touched.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    throw "Git isn't installed, and the update needs it to fetch the new version (winget install --id Git.Git -e, then a new PowerShell window)."
+}
+$ErrorActionPreference = "Continue"
+$gitSays = (git rev-parse --git-dir 2>&1 | ForEach-Object { "$_" }) -join "`n"
+$gitRc = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($gitRc -ne 0) {
+    Write-Fail "git can't work in this folder. It said:"
+    $gitSays -split "`n" | ForEach-Object { Write-Host "      $_" }
+    if ($gitSays -match "dubious ownership") {
+        Write-Host "  The folder belongs to a different Windows user than the one running this."
+        Write-Host "  Run the update as the user who installed Promptly, or tell git the folder is fine:"
+        Write-Host "      git config --global --add safe.directory `"$($ScriptDir -replace '\\', '/')`""
+    } elseif (-not (Test-Path ".git")) {
+        Write-Host "  This folder isn't a git checkout (was it downloaded as a zip?), so there's nothing"
+        Write-Host "  to update from. Install with the one-line installer from the README into a new"
+        Write-Host "  folder, then copy your .env and data over."
+    }
+    exit 1
+}
+Invoke-Quiet { docker info } | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Docker isn't running. Start Docker Desktop, wait until it says it's running, and try again." }
+
 New-Item -ItemType Directory -Force data\backups | Out-Null
 $StateFile = "data\.last-update.json"
 
 function Wait-Db {
     for ($i = 0; $i -lt 30; $i++) {
-        docker compose exec -T postgres pg_isready -U promptly 2>$null | Out-Null
+        Invoke-Quiet { docker compose exec -T postgres pg_isready -U promptly } | Out-Null
         if ($LASTEXITCODE -eq 0) { return $true }
         Start-Sleep 2
     }
@@ -46,9 +81,9 @@ function Invoke-NginxReload {
     # Recreated, not reloaded: nginx.conf is a single-file bind mount, and
     # git replaces the file on update - a running container keeps the old
     # one, so a reload never saw the new config.
-    docker compose up -d --force-recreate --no-deps nginx 2>$null | Out-Null
+    Invoke-Quiet { docker compose up -d --force-recreate --no-deps nginx } | Out-Null
     Start-Sleep -Seconds 2
-    docker compose exec -T nginx nginx -t 2>$null | Out-Null
+    Invoke-Quiet { docker compose exec -T nginx nginx -t } | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "nginx didn't accept its config. Recent logs:"
         docker compose logs --tail=20 nginx
@@ -58,7 +93,7 @@ function Invoke-NginxReload {
 function Wait-Healthy {
     $healthy = $false
     for ($i = 0; $i -lt 150; $i++) {
-        $s = docker inspect -f '{{.State.Health.Status}}' Promptly-Backend 2>$null
+        $s = Invoke-Quiet { docker inspect -f '{{.State.Health.Status}}' Promptly-Backend }
         if ($s -eq "healthy") { $healthy = $true; break }
         Write-Host "." -NoNewline; Start-Sleep 2
     }
@@ -69,11 +104,11 @@ function Wait-Healthy {
         return $false
     }
     Write-Ok "backend healthy"
-    $before = docker inspect -f '{{.RestartCount}}' Promptly-ArqWorker Promptly-MediaWorker Promptly-Collab 2>$null
+    $before = Invoke-Quiet { docker inspect -f '{{.RestartCount}}' Promptly-ArqWorker Promptly-MediaWorker Promptly-Collab }
     Start-Sleep 15
-    $after = docker inspect -f '{{.RestartCount}}' Promptly-ArqWorker Promptly-MediaWorker Promptly-Collab 2>$null
+    $after = Invoke-Quiet { docker inspect -f '{{.RestartCount}}' Promptly-ArqWorker Promptly-MediaWorker Promptly-Collab }
     foreach ($c in "Promptly-ArqWorker", "Promptly-MediaWorker", "Promptly-Collab") {
-        if ((docker inspect -f '{{.State.Status}}' $c 2>$null) -ne "running") {
+        if ((Invoke-Quiet { docker inspect -f '{{.State.Status}}' $c }) -ne "running") {
             Write-Fail "$c isn't running. Recent logs:"; docker logs --tail=30 $c; return $false
         }
     }
@@ -123,10 +158,10 @@ if ($Rollback) {
 # rest over to it below, and the new script picks up here.
 if (-not $env:PROMPTLY_UPDATE_RESUME) {
 Write-Section "1/6  Checking for local changes"
-git diff --quiet HEAD -- 2>$null
+Invoke-Quiet { git diff --quiet HEAD -- }
 if (-not $AllowDirty -and $LASTEXITCODE -ne 0) {
     Write-Fail "These tracked files have local edits, which an update would overwrite or fail on:"
-    git diff --name-only HEAD -- 2>$null | ForEach-Object { Write-Host "    $_" }
+    Invoke-Quiet { git diff --name-only HEAD -- } | ForEach-Object { Write-Host "    $_" }
     Write-Fail "Move your settings into .env or docker-compose.override.yml (both are kept"
     Write-Fail "across updates), or undo the edits with: git checkout -- <file>"
     Write-Fail "To update anyway: .\update.ps1 -AllowDirty"
@@ -135,15 +170,16 @@ if (-not $AllowDirty -and $LASTEXITCODE -ne 0) {
 
 Write-Section "2/6  Finding the update"
 git fetch --quiet --tags origin
+if ($LASTEXITCODE -ne 0) { throw "Couldn't check for a new version (git's message is above). Check the internet connection and try again. Nothing was changed." }
 $prevSha = (git rev-parse HEAD).Trim()
-$prevRef = (git describe --tags --always 2>$null)
+$prevRef = (Invoke-Quiet { git describe --tags --always })
 if (-not $prevRef) { $prevRef = $prevSha }
 if ($Version) { $target = $Version }
 elseif ($Channel -eq "release") {
     $target = git tag --list 'v[0-9]*' --sort=-v:refname | Select-Object -First 1
     if (-not $target) { throw "No releases found - use -Channel main." }
 } else { $target = "origin/main" }
-$targetSha = (git rev-parse "$target^{commit}" 2>$null)
+$targetSha = (Invoke-Quiet { git rev-parse "$target^{commit}" })
 if ($LASTEXITCODE -ne 0) { throw "Unknown version: $target" }
 if ($targetSha -eq $prevSha) {
     Write-Ok "Already on $target - rebuilding and restarting anyway."
@@ -184,7 +220,7 @@ if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
 # A newer update.ps1 can have one-time set-up steps this run doesn't know
 # (the first update with Promptly Home ran the old script, so Home's
 # containers were never added). Let the new script do the rest.
-git diff --quiet $prevSha HEAD -- update.ps1 2>$null
+Invoke-Quiet { git diff --quiet $prevSha HEAD -- update.ps1 }
 if ($LASTEXITCODE -ne 0) {
     $env:PROMPTLY_UPDATE_RESUME = "1"
     $env:PROMPTLY_UPDATE_PREV_REF = "$prevRef"
@@ -288,7 +324,7 @@ if ($LASTEXITCODE -ne 0) { throw "docker compose build failed" }
 # by compose, so tidy that too; harmless when it isn't there.
 docker compose up -d --remove-orphans
 if ($LASTEXITCODE -ne 0) { throw "docker compose up failed" }
-try { docker network rm promptly-sandbox 2>$null | Out-Null } catch { }
+Invoke-Quiet { docker network rm promptly-sandbox } | Out-Null
 
 Write-Section "5/6  Reloading nginx config"
 Invoke-NginxReload
@@ -307,7 +343,7 @@ if (-not (Wait-Healthy)) {
     Write-Fail "was before the update:   .\update.ps1 -Rollback"
     exit 1
 }
-docker image prune -f 2>$null | Out-Null
+Invoke-Quiet { docker image prune -f } | Out-Null
 
 Write-Host ""
 docker compose ps

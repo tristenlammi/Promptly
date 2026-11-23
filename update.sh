@@ -47,6 +47,69 @@ done
 [[ "$CHANNEL" == "release" || "$CHANNEL" == "main" ]] || { red "--channel must be 'release' or 'main'"; exit 1; }
 
 [[ -f .env ]] || { red "No .env found — run ./install.sh first."; exit 1; }
+
+# git and Docker have to work here before anything is touched. The usual
+# reason git doesn't: the folder belongs to one user and the update is run
+# as another ("dubious ownership"), which used to look like local edits.
+preflight() {
+  command -v git >/dev/null 2>&1 || { red "git isn't installed, and the update needs it to fetch the new version."; exit 1; }
+  local err owner me
+  if ! err="$(git rev-parse --git-dir 2>&1 >/dev/null)"; then
+    owner="$(stat -c %U . 2>/dev/null || stat -f %Su . 2>/dev/null || echo another user)"
+    me="$(id -un 2>/dev/null || echo you)"
+    if [[ "$err" == *"dubious ownership"* ]]; then
+      if [[ "$(id -u)" == "0" ]]; then
+        # Root, on purpose, in a folder it was pointed at: trust it for this
+        # run only (nothing is written to anyone's git settings).
+        local n="${GIT_CONFIG_COUNT:-0}"
+        export GIT_CONFIG_COUNT=$((n + 1)) "GIT_CONFIG_KEY_$n=safe.directory" "GIT_CONFIG_VALUE_$n=$ROOT_DIR"
+        if git rev-parse --git-dir >/dev/null 2>&1; then
+          yellow "  Note: this folder belongs to $owner and the update is running as root. Carrying on."
+          yellow "  Files this update adds will belong to root, so keep running updates as root."
+        else
+          red "git refuses to work in this folder: it belongs to $owner, and this is root."
+          red "Run the update as $owner instead:   sudo -u $owner ./update.sh"
+          exit 1
+        fi
+      else
+        red "git refuses to work in this folder: it belongs to $owner, and you are $me."
+        if [[ "$owner" == "root" ]]; then
+          red "Run the update the way it was installed:   sudo ./update.sh"
+        else
+          red "Run the update as $owner:   sudo -u $owner ./update.sh"
+        fi
+        red "(Or, if the folder really is yours:  git config --global --add safe.directory \"$ROOT_DIR\")"
+        exit 1
+      fi
+    elif [[ ! -e .git ]]; then
+      red "This folder isn't a git checkout (was it downloaded as a zip?), so there's"
+      red "nothing to update from. Install with the one-line installer from the README"
+      red "into a new folder, then copy your .env and data over."
+      exit 1
+    else
+      red "git can't read this folder. It said:"
+      printf '%s\n' "$err" | sed 's/^/    /' >&2
+      exit 1
+    fi
+  fi
+  if [[ ! -w .git || ! -w . ]]; then
+    owner="$(stat -c %U . 2>/dev/null || stat -f %Su . 2>/dev/null || echo another user)"
+    red "This folder belongs to $owner and $(id -un 2>/dev/null || echo this user) can't write to it."
+    if [[ "$owner" == "root" ]]; then red "Run:   sudo ./update.sh"; else red "Run the update as $owner:   sudo -u $owner ./update.sh"; fi
+    exit 1
+  fi
+  if ! err="$(docker info 2>&1 >/dev/null)"; then
+    if [[ "$err" == *"ermission denied"* ]]; then
+      red "Docker won't let $(id -un 2>/dev/null || echo this user) use it. Run the update with sudo, or add"
+      red "yourself to the docker group (sudo usermod -aG docker $(id -un 2>/dev/null || echo USER), then log out and in)."
+    else
+      red "Docker isn't running. Start it and try again."
+    fi
+    exit 1
+  fi
+}
+preflight
+
 mkdir -p data/backups
 STATE=data/.last-update
 
@@ -250,7 +313,11 @@ if ! $ALLOW_DIRTY && ! git diff --quiet HEAD -- 2>/dev/null; then
 fi
 
 bold "2/6  Finding the update"
-git fetch --quiet --tags origin
+git fetch --quiet --tags origin || {
+  red "Couldn't check for a new version (git's message is above). Check the internet"
+  red "connection and try again. Nothing was changed."
+  exit 1
+}
 PREV_SHA="$(git rev-parse HEAD)"
 PREV_REF="$(git describe --tags --always 2>/dev/null || echo "$PREV_SHA")"
 if [[ -n "$VERSION" ]]; then

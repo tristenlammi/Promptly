@@ -6,6 +6,12 @@
 # is configured through the first-run wizard in your browser after
 # this completes.
 #
+# Fresh machine, one line in PowerShell (needs Git and Docker Desktop;
+# downloads the latest release into .\Promptly and installs it):
+#   irm https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.ps1 | iex
+# The same, with options:
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.ps1))) -NoMaps
+#
 # Usage from the repo root:
 #   .\install.ps1               # cloud-first: bring your API keys (set in
 #                               # the setup wizard). Auto-detects and uses a
@@ -22,6 +28,14 @@
 #   .\install.ps1 -NoCalls      # skip the calls server (LiveKit) behind voice
 #                               # channels in Rooms. On by default; voice stays
 #                               # off for people until an admin turns it on.
+#   .\install.ps1 -NoHome       # skip Promptly Home's bundled Home Assistant
+#                               # (smart devices; about 3.5 GB of disk).
+#   .\install.ps1 -NoStart      # set the folder up (.env, secrets, choices) but
+#                               # don't build or start anything yet.
+#
+# One-line install only: $env:PROMPTLY_DIR (where to put it; default
+# .\Promptly), $env:PROMPTLY_REF (a release tag or branch; default the latest
+# release) and $env:PROMPTLY_REPO (where to download from).
 #
 # The choice persists in COMPOSE_PROFILES in .env, so a plain
 # `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
@@ -42,6 +56,8 @@ param(
     [switch]$NoCalls,
     # Skip Promptly Home's bundled Home Assistant (smart devices; about 3.5 GB).
     [switch]$NoHome,
+    # Set the folder up but don't build or start anything.
+    [switch]$NoStart,
     # Back-compat: -NoOllama is now the default, -Minimal == -NoSearch.
     [switch]$NoOllama,
     [switch]$Minimal
@@ -50,34 +66,135 @@ param(
 if ($Minimal) { $NoSearch = $true }
 $ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoMaps -or $NoCalls -or $NoHome -or $NoOllama -or $Minimal
 
-$ErrorActionPreference = "Stop"
-
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $ScriptDir
-
 function Write-Section($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)      { Write-Host "  OK  $msg" -ForegroundColor Green }
-function Write-Skip($msg)    { Write-Host "  SKIP $msg" -ForegroundColor Yellow }
+function Write-Skip($msg)    { Write-Host "  NOTE $msg" -ForegroundColor Yellow }
 function Write-Fail($msg)    { Write-Host "  ERR $msg" -ForegroundColor Red }
+
+# Run a program with whatever it prints on stderr thrown away. Windows
+# PowerShell 5.1 turns redirected stderr into a terminating error when
+# $ErrorActionPreference is Stop, so the preference is relaxed in here only.
+function Invoke-Quiet([scriptblock]$Cmd) {
+    $ErrorActionPreference = "Continue"
+    & $Cmd 2>$null
+}
+
+# Promptly's containers have fixed names, so one Docker can run one install.
+# Returns the folder of an install that already owns them, or $null.
+function Get-OtherInstall([string]$Here) {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $null }
+    # As JSON: Windows PowerShell 5.1 drops double quotes inside a program's
+    # arguments, so a template that indexes the label by name can't be passed.
+    $labels = Invoke-Quiet { docker inspect -f '{{json .Config.Labels}}' Promptly-Backend }
+    if ($LASTEXITCODE -ne 0 -or -not $labels) { return $null }
+    $dir = $null
+    try { $dir = ("$labels" | ConvertFrom-Json).'com.docker.compose.project.working_dir' } catch { }
+    if (-not $dir) { return $null }
+    $dir = "$dir".Trim()
+    if ($Here -and ($dir.TrimEnd('\', '/') -ieq $Here.TrimEnd('\', '/'))) { return $null }
+    return $dir
+}
+function Write-OtherInstall([string]$Other) {
+    Write-Fail "Promptly is already installed on this computer, in: $Other"
+    Write-Host "      To move it to the newest version:  cd `"$Other`"; .\update.ps1"
+    Write-Host "      One Docker can run one Promptly (its containers have fixed names), so a"
+    Write-Host "      second install here would take over the first one's containers."
+}
+
+# ---------- 0. one-line install ----------
+# Run from the web (irm ... | iex) or as a lone downloaded file: there is no
+# Promptly folder around this script yet. Fetch the latest release into
+# .\Promptly and run the install.ps1 in there. No `exit` and no Stop
+# preference in this part: under iex both would hit the person's own window.
+$ScriptDir = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { "" }
+if (-not $ScriptDir -or -not (Test-Path (Join-Path $ScriptDir "docker-compose.yml"))) {
+    $repo = if ($env:PROMPTLY_REPO) { $env:PROMPTLY_REPO } else { "https://github.com/tristenlammi/Promptly.git" }
+    $ref  = $env:PROMPTLY_REF
+    $dir  = if ($env:PROMPTLY_DIR) { $env:PROMPTLY_DIR } else { Join-Path (Get-Location).Path "Promptly" }
+    Write-Host "Promptly installer" -ForegroundColor Cyan
+    if ((Test-Path (Join-Path $dir "install.ps1")) -and (Test-Path (Join-Path $dir "docker-compose.yml"))) {
+        Write-Skip "$dir is already there, so the install carries on in it."
+    } else {
+        if ((Test-Path $dir) -and (Get-ChildItem -Force $dir | Select-Object -First 1)) {
+            Write-Fail "$dir already exists and isn't a Promptly folder."
+            Write-Host "      Move it away, or choose another place first:  `$env:PROMPTLY_DIR = 'D:\somewhere\Promptly'"
+            return
+        }
+        $missing = $false
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Fail "Git isn't installed. It downloads Promptly now and updates it later. Get it with:"
+            Write-Host "          winget install --id Git.Git -e"
+            Write-Host "      (or https://git-scm.com/download/win), then open a NEW PowerShell window."
+            $missing = $true
+        }
+        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            Write-Fail "Docker isn't installed. Promptly runs in Docker Desktop. Get it with:"
+            Write-Host "          winget install --id Docker.DockerDesktop -e"
+            Write-Host "      (or https://www.docker.com/products/docker-desktop/), start it, wait until it"
+            Write-Host "      says it's running, then open a NEW PowerShell window."
+            $missing = $true
+        }
+        if ($missing) { Write-Host "      Then run this installer again."; return }
+        if (-not $NoStart) {
+            $other = Get-OtherInstall ""
+            if ($other) { Write-OtherInstall $other; return }
+        }
+        if (-not $ref) {
+            # Newest vX.Y.Z tag. No tags (a fork, a mirror): the default branch.
+            $ref = git ls-remote --tags --refs $repo "v[0-9]*" |
+                ForEach-Object { ($_ -split "refs/tags/")[-1].Trim() } |
+                Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+                Sort-Object { [version]$_.Substring(1) } | Select-Object -Last 1
+        }
+        Write-Host "  Downloading Promptly $(if ($ref) { $ref } else { '(newest)' }) into $dir"
+        if ($ref) { git -c advice.detachedHead=false clone --branch $ref $repo $dir }
+        else      { git clone $repo $dir }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $dir "install.ps1"))) {
+            Write-Fail "The download didn't work (git's message is above). Check the internet connection"
+            Write-Host "      and that this folder can be written to, then try again."
+            return
+        }
+        Write-Ok "Downloaded"
+    }
+    $flags = @()
+    foreach ($name in "WithOllama", "NoSearch", "NoMaps", "NoCalls", "NoHome", "NoStart", "NoOllama", "Minimal") {
+        if ((Get-Variable -Name $name -ValueOnly -ErrorAction SilentlyContinue)) { $flags += "-$name" }
+    }
+    # A new process: scripts on disk are blocked by the default execution
+    # policy, and the main script may `exit`.
+    $psExe = (Get-Process -Id $PID).Path
+    & $psExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir "install.ps1") @flags
+    if ($LASTEXITCODE -eq 0) { Set-Location $dir }
+    return
+}
+
+$ErrorActionPreference = "Stop"
+Set-Location $ScriptDir
 
 # ---------- 1. prerequisite checks ----------
 Write-Section "Checking prerequisites"
 # Native commands don't throw when they fail - check $LASTEXITCODE.
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    throw "Docker isn't installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/"
+    throw "Docker isn't installed. Install Docker Desktop (winget install --id Docker.DockerDesktop -e, or https://www.docker.com/products/docker-desktop/), start it, then open a new PowerShell window and run this again."
 }
-docker info *> $null
-if ($LASTEXITCODE -ne 0) { throw "The Docker daemon isn't reachable. Start Docker Desktop and try again." }
+Invoke-Quiet { docker info } | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Docker is installed but isn't running. Start Docker Desktop, wait until it says it's running, and run this again." }
 
-$composeVer = (docker compose version --short 2>$null)
-if ($LASTEXITCODE -ne 0 -or -not $composeVer) { throw "docker compose v2 is not available. Update Docker Desktop." }
+$composeVer = (Invoke-Quiet { docker compose version --short })
+if ($LASTEXITCODE -ne 0 -or -not $composeVer) { throw "This Docker has no 'docker compose' (version 2). Update Docker Desktop." }
 # The compose file needs >= 2.24 (optional env_file / depends_on entries).
 $composeNum = ($composeVer -replace '^v', '') -replace '[^0-9.].*$', ''
 if ([version]$composeNum -lt [version]"2.24.0") {
     throw "docker compose $composeVer is too old (need 2.24 or newer). Update Docker Desktop."
 }
 
-Write-Ok "Docker and docker compose v2 detected"
+Write-Ok "Docker and docker compose are ready"
+
+$FreshEnv = -not (Test-Path ".env")
+if ($FreshEnv -and -not $NoStart) {
+    $other = Get-OtherInstall $ScriptDir
+    if ($other) { Write-OtherInstall $other; exit 1 }
+}
 
 function New-HexSecret([int]$Bytes) {
     $buf = New-Object byte[] $Bytes
@@ -92,7 +209,6 @@ function New-HexSecret([int]$Bytes) {
 # ---------- 2. .env bootstrap ----------
 # A brand-new .env copies COMPOSE_PROFILES from the example, so "the line is
 # missing" can't be how a first install is recognised.
-$FreshEnv = -not (Test-Path ".env")
 if ($FreshEnv) {
     Write-Section "Creating .env from .env.example"
     Copy-Item ".env.example" ".env"
@@ -159,7 +275,7 @@ function Set-EnvLine([ref]$Text, [string]$Key, [string]$Value) {
     }
 }
 
-# Ollama mode. Default: no bundled container — cloud-first, or wire to a
+# Ollama mode. Default: no bundled container - cloud-first, or wire to a
 # native host Ollama if one's running (better GPU support than the
 # container on every platform). -WithOllama bundles a container instead:
 # NVIDIA accelerates via the WSL2 backend; AMD/Intel run CPU (Docker on
@@ -182,7 +298,7 @@ if ($WithOllama) {
     $OllamaMode = "bundled"
     $hasNvidia = $false
     if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
-        try { nvidia-smi -L *> $null; $hasNvidia = ($LASTEXITCODE -eq 0) } catch {}
+        try { Invoke-Quiet { nvidia-smi -L } | Out-Null; $hasNvidia = ($LASTEXITCODE -eq 0) } catch {}
     }
     if ($hasNvidia) {
         $OllamaProfile = "gpu"
@@ -253,23 +369,52 @@ $envText = $envText -replace "`r`n", "`n"
 [System.IO.File]::WriteAllText((Join-Path $ScriptDir ".env"), $envText)
 
 # ---------- 4. build + start ----------
-Write-Section "Building images (first run can take 3-5 minutes)"
-docker compose build
-if ($LASTEXITCODE -ne 0) { throw "docker compose build failed" }
+if ($NoStart) {
+    Write-Host ""
+    Write-Host "The folder is set up; nothing was built or started (-NoStart)." -ForegroundColor Green
+    Write-Host "  Settings are in $(Join-Path $ScriptDir '.env') (the web port is NGINX_HTTP_PORT)."
+    Write-Host "  When you're ready:  cd `"$ScriptDir`"; .\install.ps1"
+    exit 0
+}
 
-Write-Section "Starting the stack"
+$portLine = (Get-Content ".env" | Where-Object { $_ -match "^NGINX_HTTP_PORT=" } | Select-Object -First 1)
+$usePort  = if ($portLine) { $portLine.Substring(16).Trim() } else { "" }
+if (-not $usePort) { $usePort = "8087" }
+
+Write-Section "Building Promptly (about 10 minutes the first time, longer on a slow connection)"
+Write-Host "  A lot of text scrolls past, some of it marked WARNING. That is normal."
+docker compose build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Fail "The build stopped before it finished (the reason is in the lines above)."
+    Write-Host "      * Internet dropped or a download timed out: run .\install.ps1 again in"
+    Write-Host "        $ScriptDir - it carries on from where it stopped."
+    Write-Host "      * 'no space left on device': free some disk, or give Docker Desktop a bigger"
+    Write-Host "        disk (Settings -> Resources). A full install needs about 25 GB."
+    exit 1
+}
+
+Write-Section "Starting Promptly (downloads a few more parts, then starts everything)"
 docker compose up -d
-if ($LASTEXITCODE -ne 0) { throw "docker compose up failed" }
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Fail "Promptly didn't start (the reason is in the lines above)."
+    Write-Host "      * 'port is already allocated' / 'address already in use': another program has"
+    Write-Host "        that port. For the web port, change NGINX_HTTP_PORT (now $usePort) in"
+    Write-Host "        $(Join-Path $ScriptDir '.env') and run .\install.ps1 again."
+    Write-Host "      * Anything else: run .\install.ps1 again; 'docker compose ps' shows what is unhealthy."
+    exit 1
+}
 
 # ---------- 5. wait for backend health ----------
-Write-Section "Waiting for the backend to become healthy"
+Write-Section "Waiting for Promptly to answer"
 $healthy = $false
-for ($i = 1; $i -le 90; $i++) {
+for ($i = 1; $i -le 150; $i++) {
     Start-Sleep -Seconds 2
-    $json = docker compose ps --format json backend 2>$null
+    $json = Invoke-Quiet { docker compose ps --format json backend }
     if ($json -match '"Health":"healthy"') {
         Write-Host ""
-        Write-Ok "backend is healthy"
+        Write-Ok "Promptly is answering"
         $healthy = $true
         break
     }
@@ -284,7 +429,7 @@ for ($i = 1; $i -le 90; $i++) {
 
 if (-not $healthy) {
     Write-Host ""
-    Write-Fail "backend never became healthy after 3 minutes."
+    Write-Fail "backend never became healthy after 5 minutes."
     Write-Fail "Last 60 lines of backend logs:"
     docker compose logs --tail=60 backend
     Write-Host ""
@@ -295,9 +440,6 @@ if (-not $healthy) {
 }
 
 # ---------- 6. final report ----------
-$portLine = (Get-Content ".env" | Where-Object { $_ -match "^NGINX_HTTP_PORT=" } | Select-Object -First 1)
-$usePort  = if ($portLine) { $portLine.Substring(16).Trim() } else { "" }
-if (-not $usePort) { $usePort = "8087" }
 $setupLine = (Get-Content ".env" | Where-Object { $_ -match "^SETUP_TOKEN=" } | Select-Object -First 1)
 $setupCode = if ($setupLine) { $setupLine.Substring(12).Trim() } else { "" }
 $lanIp = $null
@@ -342,8 +484,10 @@ if ($NoSearch) {
     Write-Skip "Bundled web search (SearXNG) is disabled. Add a Brave or Tavily API key under Admin -> Settings to enable web search."
 }
 Write-Host ""
-Write-Host "  Useful commands:"
-Write-Host "    docker compose logs -f backend     # tail backend logs"
-Write-Host "    docker compose ps                  # container health"
-Write-Host "    docker compose down                # stop everything"
+Write-Host "  Promptly lives in $ScriptDir. From that folder:"
+Write-Host "    .\update.ps1                       # move to the newest version (backs up first)"
+Write-Host "    docker compose ps                  # is everything running?"
+Write-Host "    docker compose logs -f backend     # watch what the app is doing"
+Write-Host "    docker compose down                # stop everything (docker compose up -d starts it again)"
+Write-Host "  It starts by itself whenever Docker Desktop is running."
 Write-Host ""

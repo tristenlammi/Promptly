@@ -122,6 +122,19 @@ check_docker() {
   fi
 }
 
+# Promptly's containers have fixed names, so one Docker can run one install.
+# Stops when another folder's install already owns them ($1: this folder, or "").
+refuse_second_install() {
+  local other
+  other="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' Promptly-Backend 2>/dev/null || true)"
+  [[ -n "$other" && "${other%/}" != "${1%/}" ]] || return 0
+  red "Promptly is already installed on this machine, in: $other"
+  red "  To move it to the newest version:  cd \"$other\" && ./update.sh"
+  red "  One Docker can run one Promptly (its containers have fixed names), so a"
+  red "  second install here would take over the first one's containers."
+  exit 1
+}
+
 # ---------- 0. one-line install ----------
 # Piped from the web (curl ... | bash), or run as a lone downloaded file:
 # there is no Promptly folder around this script yet. Fetch the latest
@@ -149,6 +162,7 @@ bootstrap() {
       exit 1
     fi
     check_docker
+    [[ " $* " == *" --no-start "* ]] || refuse_second_install ""
     if [[ -z "$ref" ]]; then
       # Newest vX.Y.Z tag. No tags (a fork, a mirror): the default branch.
       ref="$(git ls-remote --tags --refs "$repo" 'v[0-9]*' 2>/dev/null \
@@ -219,6 +233,7 @@ if [[ ! -w . ]]; then
   exit 1
 fi
 green "  Docker and docker compose are ready"
+if [[ ! -f .env ]] && ! $NO_START; then refuse_second_install "$ROOT_DIR"; fi
 
 # Random hex for secrets: openssl when it's there, the kernel's generator when not.
 rand_hex() {
@@ -430,22 +445,40 @@ if $NO_START; then
   exit 0
 fi
 
-bold "Building images (first run can take 3-5 minutes)"
-docker compose build
+http_port=$(grep -E '^NGINX_HTTP_PORT=' .env | cut -d= -f2- || echo "8087")
+http_port=${http_port:-8087}
 
-bold "Starting the stack"
-docker compose up -d
+bold "Building Promptly (about 10 minutes the first time, longer on a slow connection)"
+echo "  A lot of text scrolls past, some of it marked WARNING. That is normal."
+if ! docker compose build; then
+  red ""
+  red "The build stopped before it finished (the reason is in the lines above)."
+  red "  * Internet dropped or a download timed out: run ./install.sh again in"
+  red "    $ROOT_DIR - it carries on from where it stopped."
+  red "  * \"no space left on device\": free some disk (a full install needs about 25 GB)."
+  exit 1
+fi
+
+bold "Starting Promptly (downloads a few more parts, then starts everything)"
+if ! docker compose up -d; then
+  red ""
+  red "Promptly didn't start (the reason is in the lines above)."
+  red "  * \"port is already allocated\" / \"address already in use\": another program has"
+  red "    that port. For the web port, change NGINX_HTTP_PORT (now ${http_port}) in"
+  red "    $ROOT_DIR/.env and run ./install.sh again."
+  red "  * Anything else: run ./install.sh again; 'docker compose ps' shows what is unhealthy."
+  exit 1
+fi
 
 # ---------- 5. wait for the backend to come up ----------
-bold "Waiting for the backend to become healthy"
+bold "Waiting for Promptly to answer"
 healthy=false
-for i in $(seq 1 90); do
+for i in $(seq 1 150); do
   status=$(docker compose ps --format json backend 2>/dev/null \
     | grep -oE '"Health":"[a-z]+"' | head -n1 | cut -d'"' -f4 || true)
   if [[ "$status" == "healthy" ]]; then
     healthy=true
     printf '\n'
-    green "  backend is healthy"
     break
   fi
   if [[ "$status" == "unhealthy" ]]; then
@@ -460,7 +493,7 @@ done
 
 if ! $healthy; then
   printf '\n'
-  red "  backend never became healthy after 3 minutes."
+  red "  backend never became healthy after 5 minutes."
   red "  Last 60 lines of backend logs:"
   docker compose logs --tail=60 backend || true
   red ""
@@ -470,9 +503,26 @@ if ! $healthy; then
   exit 1
 fi
 
+# The page itself, through the web server, the way a browser gets it.
+web_ok=""
+if command -v curl >/dev/null 2>&1; then
+  web_ok=false
+  for i in $(seq 1 30); do
+    if curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:${http_port}/api/auth/setup-status" 2>/dev/null; then
+      web_ok=true; break
+    fi
+    printf '.'; sleep 2
+  done
+  printf '\n'
+fi
+if [[ "$web_ok" == "false" ]]; then
+  yellow "  The app is running, but http://127.0.0.1:${http_port} didn't answer from this machine yet."
+  yellow "  Give it a minute; if it still doesn't open, look at: docker compose logs --tail=40 nginx"
+else
+  green "  Promptly is answering"
+fi
+
 # ---------- 6. final report ----------
-http_port=$(grep -E '^NGINX_HTTP_PORT=' .env | cut -d= -f2- || echo "8087")
-http_port=${http_port:-8087}
 
 bold ""
 bold "=========================================================="
@@ -516,8 +566,10 @@ if $NO_SEARCH; then
   yellow "  Tavily API key under Admin -> Settings to enable web search."
 fi
 echo
-echo "  Useful commands:"
-echo "    docker compose logs -f backend     # tail backend logs"
-echo "    docker compose ps                  # container health"
-echo "    docker compose down                # stop everything"
+echo "  Promptly lives in $ROOT_DIR. From that folder:"
+echo "    ./update.sh                        # move to the newest version (backs up first)"
+echo "    docker compose ps                  # is everything running?"
+echo "    docker compose logs -f backend     # watch what the app is doing"
+echo "    docker compose down                # stop everything (docker compose up -d starts it again)"
+echo "  It starts by itself when this machine restarts."
 echo
