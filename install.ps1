@@ -190,6 +190,14 @@ if ([version]$composeNum -lt [version]"2.24.0") {
 
 Write-Ok "Docker and docker compose are ready"
 
+# Memory: what Docker Desktop has been given, not what the PC has. A warning
+# the person can act on, not a stop.
+$dockerMem = 0
+try { $dockerMem = [int64](Invoke-Quiet { docker info --format '{{.MemTotal}}' }) } catch { }
+if (-not $NoStart -and $dockerMem -gt 0 -and $dockerMem -lt 7.2GB) {
+    Write-Skip "Docker has about $([math]::Round($dockerMem / 1GB)) GB of memory here. Promptly needs 8 GB (16 GB is comfortable); with less, the build or the app itself can run out and stop. Docker Desktop: Settings -> Resources (or memory= in .wslconfig)."
+}
+
 $FreshEnv = -not (Test-Path ".env")
 if ($FreshEnv -and -not $NoStart) {
     $other = Get-OtherInstall $ScriptDir
