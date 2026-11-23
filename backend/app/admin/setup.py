@@ -327,7 +327,7 @@ async def checklist(db: AsyncSession, admin: User, redis, *, request_host: str |
         add(Row(
             "mfa", "Protect your account with a second step", "recommended", "todo",
             "Your account controls the whole server. A code from your phone keeps it safe if the password leaks.",
-            "/account/security", "Turn on",
+            "/setup?step=mfa", "Turn on",
         ))
 
     if offsite.configured and offsite.healthy:
@@ -381,6 +381,14 @@ async def checklist(db: AsyncSession, admin: User, redis, *, request_host: str |
     if has_maps:
         if maps["ready"] and maps["state"] != "failed":
             add(Row("maps", "Maps", "extra", "done", "The map is ready."))
+        elif maps["state"] == "none":
+            # Written by the maps service once it waits for a country to be
+            # chosen (maps-regions); older builds never say it.
+            add(Row(
+                "maps", "Maps", "extra", "todo",
+                "No map chosen yet. Pick your country and Promptly downloads it in the background.",
+                "/setup?step=maps", "Choose",
+            ))
         elif maps["state"] == "failed":
             add(Row(
                 "maps", "Maps", "extra", "problem",

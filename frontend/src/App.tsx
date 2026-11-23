@@ -14,7 +14,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { ForgotPasswordPage, ResetPasswordPage } from "@/pages/PasswordResetPages";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
 import { MfaVerifyPage } from "@/pages/MfaVerifyPage";
-import { SetupPage, setupInProgress } from "@/pages/SetupPage";
+import { SetupPage, setupInProgress, singleSetupStep } from "@/pages/SetupPage";
 import { ForcePasswordChangePage } from "@/pages/ForcePasswordChangePage";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { rememberReturnTo, takeReturnTo } from "@/lib/returnTo";
@@ -549,6 +549,14 @@ function useResumeSetup(status: string) {
   }, [status, isAdmin]);
 }
 
+/** /setup once signed in: the wizard where it was left, or one step of it
+ *  opened from the "Finish setting up" list (``/setup?step=models``). */
+function SetupRoute({ isAdmin }: { isAdmin: boolean }) {
+  const location = useLocation();
+  const open = isAdmin && (setupInProgress() || singleSetupStep(location.search) !== null);
+  return open ? <SetupPage resume /> : <Navigate to="/chat" replace />;
+}
+
 /** Send a signed-out visitor to sign in, remembering where they were going
  *  so a link to a chat or file isn't lost (R-102). */
 function ToLogin() {
@@ -825,7 +833,7 @@ export default function App() {
       <Route
         path="/setup"
         element={
-          isAdmin && setupInProgress() ? <SetupPage resume /> : <Navigate to="/chat" replace />
+          <SetupRoute isAdmin={!!isAdmin} />
         }
       />
       {/* Share-link landing page lives OUTSIDE AppLayout so it has

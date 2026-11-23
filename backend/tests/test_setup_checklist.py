@@ -156,6 +156,9 @@ async def test_calls_follow_the_test_call_from_outside(db, user, client, quiet):
 
 async def test_maps_say_they_are_still_building(db, user, client, quiet):
     hdr = _auth(user)
+    quiet["maps"] = {"state": "none", "step": None, "ready": False}
+    row = _rows((await client.get("/api/admin/setup", headers=hdr)).json())["maps"]
+    assert row["status"] == "todo" and row["to"] == "/setup?step=maps"
     quiet["maps"] = {"state": "building", "step": "routing", "ready": False}
     row = _rows((await client.get("/api/admin/setup", headers=hdr)).json())["maps"]
     assert row["status"] == "working" and "routing" in row["detail"] and row["to"] is None

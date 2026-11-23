@@ -78,6 +78,8 @@ export interface UserSettings {
   /** One-shot: this member has answered the first-sign-in "pick your
    *  apps" prompt. */
   features_chosen?: boolean;
+  /** An admin closed the "Finish setting up" card on Today. */
+  setup_card_dismissed?: boolean;
   /** Legacy master switch for cross-chat memory (Phase 6). Superseded by
    *  ``memory_mode``; kept for back-compat reads. */
   memory_enabled?: boolean;
@@ -164,6 +166,8 @@ export interface UserPreferencesUpdate {
   onboarding_completed?: boolean;
   /** Mark the first-sign-in "pick your apps" prompt as answered. */
   features_chosen?: boolean;
+  /** An admin closed the "Finish setting up" card on Today. */
+  setup_card_dismissed?: boolean;
   /** Toggle cross-chat memory capture + injection (legacy). */
   memory_enabled?: boolean;
   /** Memory behaviour: off / auto / manual. */
