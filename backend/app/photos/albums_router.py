@@ -111,6 +111,8 @@ async def _counts(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, int
         await db.execute(
             select(AlbumItem.album_id, func.count())
             .join(UserFile, UserFile.id == AlbumItem.file_id)
+            # Counted once it's in the library, as the album shows it.
+            .join(PhotoAsset, PhotoAsset.file_id == AlbumItem.file_id)
             .where(AlbumItem.album_id.in_(ids), _visible_items())
             .group_by(AlbumItem.album_id)
         )
@@ -221,15 +223,28 @@ async def list_albums(db: AsyncSession = Depends(get_db), user: User = Depends(g
 
 
 async def _own_photos(db: AsyncSession, user: User, file_ids: list[uuid.UUID]) -> list[uuid.UUID]:
-    """The ones that are the caller's own photos or videos (and not trashed)."""
+    """The ones that are the caller's own photos or videos (and not trashed).
+
+    A photo that was uploaded a moment ago has no ``photo_assets`` row yet:
+    the media worker makes it when it has read the file. Those count too
+    (a picture or video the worker hasn't read), or an album made straight
+    after an upload would quietly come out short. They show in the album
+    once they're read, like everywhere else in Photos."""
+    from app.files.media_meta import media_kind
+
     rows = (
         await db.execute(
-            select(UserFile.id)
-            .join(PhotoAsset, PhotoAsset.file_id == UserFile.id)
+            select(UserFile.id, UserFile.mime_type, UserFile.filename, PhotoAsset.file_id, FileMedia.extracted_at)
+            .outerjoin(PhotoAsset, PhotoAsset.file_id == UserFile.id)
+            .outerjoin(FileMedia, FileMedia.file_id == UserFile.id)
             .where(UserFile.id.in_(file_ids), UserFile.user_id == user.id, UserFile.trashed_at.is_(None))
         )
-    ).scalars().all()
-    return list(rows)
+    ).all()
+    return [
+        fid
+        for fid, mime, name, asset, extracted_at in rows
+        if asset is not None or (extracted_at is None and media_kind(mime, name) is not None)
+    ]
 
 
 async def _add_items(db: AsyncSession, album: Album, user: User, file_ids: list[uuid.UUID]) -> int:
@@ -261,7 +276,9 @@ async def create_album(
         added += got[0] if got else 0
     await db.commit()
     await db.refresh(album)
-    return await _out(db, album, "owner", user, added, user)
+    # What it shows now: a photo still being read joins the count when it's in.
+    count = (await _counts(db, [album.id])).get(album.id, 0)
+    return {**(await _out(db, album, "owner", user, count, user)), "added": added}
 
 
 @router.post("/preview")

@@ -144,3 +144,59 @@ async def test_the_owner_arranges_and_deletes_it(client, db, user):
     assert (await client.delete(f"/api/photos/albums/{aid}", headers=_auth(user))).status_code == 204
     assert await db.get(UserFile, uuid.UUID(a)) is not None
     assert (await client.get(f"/api/photos/albums/{aid}", headers=_auth(user))).status_code == 404
+
+
+async def _upload(db, user, name, mime="image/jpeg", folder=True):
+    """A file as it is straight after an upload: saved, not yet read by the media worker."""
+    from app.files.models import UserFile
+
+    fid = uuid.uuid4()
+    db.add(UserFile(id=fid, user_id=user.id, folder_id=(await _photos_folder(db, user)).id if folder else None, filename=name,
+                    original_filename=name, mime_type=mime, size_bytes=1, storage_path=f"u/{fid}"))
+    await db.commit()
+    return str(fid)
+
+
+async def _read_by_the_worker(db, fid):
+    from app.files.models import FileMedia
+    from app.photos.library import sync
+
+    db.add(FileMedia(file_id=uuid.UUID(fid), kind="image", taken_at=datetime(2026, 7, 9, tzinfo=timezone.utc),
+                     extracted_at=datetime.now(timezone.utc)))
+    await db.flush()
+    await sync(db, uuid.UUID(fid))
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_an_album_keeps_photos_the_worker_has_not_read_yet(client, db, user):
+    """Made straight after an upload, an album used to come out short with
+    no word of it: photos not yet in the library were dropped."""
+    ready = await _photo(db, user, "ready.jpg", 1)
+    fresh = await _upload(db, user, "fresh.jpg")
+    later = await _upload(db, user, "later.jpg")
+    notes = await _upload(db, user, "notes.pdf", mime="application/pdf")
+
+    r = await client.post("/api/photos/albums", json={"title": "Trip", "file_ids": [ready, fresh, notes]}, headers=_auth(user))
+    assert r.status_code == 201, r.text
+    album = r.json()
+    assert album["added"] == 2  # both photos; the PDF is not one
+    assert album["count"] == 1  # what can be seen so far
+    assert await _names(client, user, album["id"]) == ["ready.jpg"]
+
+    r = await client.post(f"/api/photos/albums/{album['id']}/items", json={"file_ids": [later, fresh]}, headers=_auth(user))
+    assert r.status_code == 200 and r.json()["added"] == 1, r.text  # fresh was already in
+
+    for fid in (fresh, later):
+        await _read_by_the_worker(db, fid)
+    assert sorted(await _names(client, user, album["id"])) == ["fresh.jpg", "later.jpg", "ready.jpg"]
+    r = await client.get("/api/photos/albums", headers=_auth(user))
+    assert [a["count"] for a in r.json()["albums"] if a["id"] == album["id"]] == [3]
+
+
+@pytest.mark.asyncio
+async def test_someone_elses_unread_upload_is_not_taken(client, db, user):
+    other = await _person(db, "pat")
+    theirs = await _upload(db, other, "theirs.jpg")
+    r = await client.post("/api/photos/albums", json={"title": "Mine", "file_ids": [theirs]}, headers=_auth(user))
+    assert r.status_code == 201 and r.json()["added"] == 0, r.text

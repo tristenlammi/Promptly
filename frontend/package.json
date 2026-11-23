@@ -5,9 +5,9 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-excalidraw-assets.mjs",
+    "predev": "node scripts/patch-fortune-sheet.mjs && node scripts/copy-excalidraw-assets.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/generate-pwa-icons.mjs && node scripts/copy-excalidraw-assets.mjs",
+    "prebuild": "node scripts/patch-fortune-sheet.mjs && node scripts/generate-pwa-icons.mjs && node scripts/copy-excalidraw-assets.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "generate-icons": "node scripts/generate-pwa-icons.mjs",
