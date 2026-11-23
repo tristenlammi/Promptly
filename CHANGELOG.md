@@ -21,6 +21,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Setup: right after the admin account is made, a choice between "Set everything up now" and "Just look around". Looking around goes straight in; nothing skipped is lost.
+- Setup: a "Finish setting up" list that reads what is and isn't set up from the server (AI service, models, the reading model, address, email, second sign-in step, off-site backup, family, calls from outside, maps, speech, photos, web search). It closes the wizard, sits on Today for admins until it's done or closed, and stays under Admin → Setup. Each row opens the setup step or admin page where it's done.
+- Setup: a models step that suggests a model for chat, quick jobs, Talk, reading pictures and making pictures from what the connected AI service offers, saved with one click. With nothing connected it says plainly what won't work.
+- Setup: an "at home and away" step for the services this install has: the address at home, why the web port must never be forwarded and what to use instead, the two ports calls need on the router (with this machine's home-network address when known) and the result of the last test call from outside, the microphone needing https on phones, and how the map download is going.
+- Setup: a Maps step to choose the country to download, with the size and time shown first. It appears once the server offers a choice of map.
+
+### Changed
+- Setup finishes on a summary of what's ready and what was skipped, then opens Today. The wizard has a Back link, and its words are plainer ("the reading model" for the embedding model, "a second step" for MFA).
+- Setup: the address step no longer fills in localhost as the public address.
+
+### Fixed
+- Setup: a provider that was already connected counted its embedding models as chat models.
+
 ## [0.52.4] - 2026-11-23
 
 ### Fixed

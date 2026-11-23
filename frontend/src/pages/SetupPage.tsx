@@ -408,8 +408,8 @@ function SummaryStep({ onStep, onFinish }: { onStep: (step: string) => void; onF
           <p className="text-sm text-[var(--text)]">
             {data.left === 0
               ? "Everything is set up."
-              : data.essential_left > 0
-                ? `${data.done} of ${data.total} things are ready. The assistant still needs ${data.essential_left === 1 ? "one thing" : `${data.essential_left} things`} before it can help.`
+              : data.rows.some((r) => r.id === "provider" && r.status !== "done")
+                ? `${data.done} of ${data.total} things are ready. The assistant can't answer until an AI service is connected.`
                 : `${data.done} of ${data.total} things are ready.`}
           </p>
           <SetupChecklist data={data} onStep={onStep} compact />
@@ -822,7 +822,7 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
         const existing = providers.find((p) => p.enabled);
         if (existing) {
           setDone(true);
-          setModelCount(existing.models?.length ?? 0);
+          setModelCount((existing.models ?? []).filter((m) => !/embed/i.test(m.id)).length);
           setPicked(existing.type);
         }
       })
@@ -1370,7 +1370,7 @@ function StepDots({ current, total }: { current: number; total: number }) {
             n === current
               ? "bg-[var(--accent-strong)]"
               : n < current
-                ? "bg-[var(--accent)]/40"
+                ? "bg-[var(--accent-strong)] opacity-40"
                 : "bg-[var(--border)]",
           ].join(" ")}
         />

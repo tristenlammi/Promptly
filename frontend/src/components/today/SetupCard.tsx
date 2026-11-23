@@ -52,7 +52,7 @@ export function SetupCard() {
           <h2 className="text-sm font-semibold text-[var(--text)]">Finish setting up Promptly</h2>
           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
             {data.done} of {data.total} done.
-            {data.essential_left > 0 ? " The assistant can't help yet." : ""}
+            {data.rows.some((r) => r.id === "provider" && r.status !== "done") ? " The assistant can't answer yet." : ""}
           </p>
         </div>
         <button

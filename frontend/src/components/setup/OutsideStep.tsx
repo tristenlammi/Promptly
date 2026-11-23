@@ -200,7 +200,7 @@ export function OutsideStep({ onDone, inApp, doneLabel = "Continue" }: { onDone:
         ))}
       </Block>
 
-      {info.voice.there && (
+      {(info.voice.there || info.calls.there) && (
         <Block
           icon={<Mic className="h-4 w-4" />}
           title="The microphone on phones"
