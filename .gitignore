@@ -124,3 +124,9 @@ e2e/test-results-passwords/
 
 # The memory scorecard's latest results
 backend/tests/memory_eval/last_run.json
+
+# ---- README screenshot tooling ----
+# Source photographs for the Photos screenshots (CC0, fetched, never committed).
+e2e/readme-shots/photos/
+# Tracked guides (everything else under *.md stays local).
+!docs/guide-*.md
