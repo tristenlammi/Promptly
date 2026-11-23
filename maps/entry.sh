@@ -18,6 +18,9 @@ control_loop() {
 control_loop &
 
 refresh_loop() {
+  # Map data from before maps were chosen becomes the choice here, once, so
+  # writing it down doesn't look like a change of mind below.
+  python3 /opt/maps/regions.py plan > /dev/null || true
   while true; do
     seen=$(stamp)
     # Its own process group, so a change of maps can stop a build mid-step.
