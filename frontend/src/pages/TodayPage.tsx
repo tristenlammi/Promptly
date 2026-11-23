@@ -34,6 +34,7 @@ import { cn } from "@/utils/cn";
 import { RecentStrip } from "@/components/today/RecentStrip";
 import { ReadMyDayButton } from "@/components/today/ReadMyDay";
 import { InstallNudge } from "@/components/today/InstallNudge";
+import { SetupCard } from "@/components/today/SetupCard";
 import {
   AttentionStrip,
   AutomationsCard,
@@ -110,6 +111,7 @@ export function TodayPage() {
       />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-7xl px-4 py-5 md:py-8">
+          <SetupCard />
           <InstallNudge />
           {isLoading ? (
             <div aria-busy="true" aria-label="Loading your day">

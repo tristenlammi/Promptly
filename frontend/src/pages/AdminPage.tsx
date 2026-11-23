@@ -11,7 +11,7 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2, MessageSquare, MessagesSquare, KeyRound, ClipboardList, PhoneCall, House, Router } from "lucide-react";
+  Users2, ListChecks, MessageSquare, MessagesSquare, KeyRound, ClipboardList, PhoneCall, House, Router } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
@@ -24,6 +24,7 @@ import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
 import { PorchPanel } from "@/components/admin/PorchPanel";
 import { RoomsPanel } from "@/components/admin/RoomsPanel";
 import { HomePanel } from "@/components/admin/HomePanel";
+import { SetupPanel } from "@/components/admin/SetupPanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
 import { TalkAdminPanel } from "@/components/admin/TalkAdminPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
@@ -54,7 +55,8 @@ type TabId =
   | "forms"
   | "rooms"
   | "calls"
-  | "home";
+  | "home"
+  | "setup";
 
 interface TabDef {
   id: TabId;
@@ -69,6 +71,12 @@ const TABS: TabDef[] = [
     label: "Users",
     icon: <Users className="h-3.5 w-3.5" />,
     subtitle: "Manage accounts, model access and per-user security state.",
+  },
+  {
+    id: "setup",
+    label: "Setup",
+    icon: <ListChecks className="h-3.5 w-3.5" />,
+    subtitle: "What's set up on this server and what's still to do.",
   },
   {
     id: "groups",
@@ -217,6 +225,7 @@ export function AdminPage() {
         <div className="mx-auto w-full max-w-5xl px-4 py-5 md:px-6 md:py-6">
           <Tabs tabs={visibleTabs} current={tab} onChange={setTab} />
           <div className="mt-5">
+            {tab === "setup" && <SetupPanel />}
             {tab === "users" && <UsersPanel />}
             {tab === "groups" && <GroupsPanel />}
             {tab === "models" && <ModelsPanel />}

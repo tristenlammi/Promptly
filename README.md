@@ -37,7 +37,10 @@ installs from there. Options go after `bash -s --`, for example
 
 The script generates all secrets, builds and starts the stack, and waits for
 it to come up healthy. Open **http://localhost:8087** and the first-run wizard
-takes it from there — admin account, optional public URL, embeddings, MFA.
+takes it from there: make the admin account, then either set everything up
+(AI service and models, address, calls, email, two-step sign-in) or just look
+around. Whatever you skip waits on a "Finish setting up" list on Today and
+under Admin → Setup.
 
 By default Promptly is **cloud-first**: connect your API keys (OpenAI,
 Anthropic, OpenRouter, …) in the wizard. It does not bundle an Ollama

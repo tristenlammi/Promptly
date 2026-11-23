@@ -49,9 +49,13 @@ async def resolve(db: AsyncSession, user: User) -> Teacher:
     d = await load_effective_defaults(db)
     for pid, mid in ((d.study_provider_id, d.study_model_id), (d.default_chat_provider_id, d.default_chat_model_id)):
         if pid and mid:
-            p = await db.get(ModelProvider, pid)
-            if p is not None and p.enabled:
-                return Teacher(p, mid, user)
+            # A custom default (the built-in Promptly model) teaches with
+            # the model behind it.
+            from app.custom_models.resolver import base_pair
+
+            pair = await base_pair(db, pid, mid)
+            if pair is not None:
+                return Teacher(pair[0], pair[1], user)
     from app.chat.models import Conversation
 
     row = (

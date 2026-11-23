@@ -78,6 +78,8 @@ export interface UserSettings {
   /** One-shot: this member has answered the first-sign-in "pick your
    *  apps" prompt. */
   features_chosen?: boolean;
+  /** An admin closed the "Finish setting up" card on Today. */
+  setup_card_dismissed?: boolean;
   /** Legacy master switch for cross-chat memory (Phase 6). Superseded by
    *  ``memory_mode``; kept for back-compat reads. */
   memory_enabled?: boolean;
@@ -164,6 +166,8 @@ export interface UserPreferencesUpdate {
   onboarding_completed?: boolean;
   /** Mark the first-sign-in "pick your apps" prompt as answered. */
   features_chosen?: boolean;
+  /** An admin closed the "Finish setting up" card on Today. */
+  setup_card_dismissed?: boolean;
   /** Toggle cross-chat memory capture + injection (legacy). */
   memory_enabled?: boolean;
   /** Memory behaviour: off / auto / manual. */
@@ -769,6 +773,11 @@ export interface AvailableModel {
    *  the backend resolves it back to the underlying base model at
    *  chat time. */
   is_custom?: boolean;
+  /** A custom model with no model behind it yet (the built-in Promptly
+   *  model before an admin picks one). It's listed so the picker can say
+   *  so; a message sent to it gets a plain "an admin needs to choose a
+   *  model" answer. Its ``provider_id`` is only a placeholder. */
+  needs_setup?: boolean;
   /** Only set when ``is_custom`` is true. Raw ``CustomModel.id`` uuid. */
   custom_model_id?: string | null;
   /** Only set when ``is_custom`` is true. Used as the subtitle in the

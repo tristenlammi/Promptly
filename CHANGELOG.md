@@ -32,6 +32,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Frontend image build no longer prints npm's audit summary.
 - P Maps: a new server downloads no map data until an admin chooses a country (it used to start on Australia straight away). Servers that already have map data, or set `MAPS_PBF_URL` / `MAPS_PHOTON_URL` / `MAPS_BBOX` in `.env`, carry on exactly as before with no re-download.
 - P Maps: the map opens on the maps this server has, rather than always on Australia.
+- Setup finishes on a summary of what's ready and what was skipped, then opens Today. The wizard has a Back link, and its words are plainer ("the reading model" for the embedding model, "a second step" for MFA).
+- Setup: the address step no longer fills in localhost as the public address.
 
 ### Fixed
 - `update.ps1` and `install.ps1` on Windows PowerShell 5.1 (the one that ships with Windows): anything Docker or git printed on stderr stopped the script, so an update died at "Reloading nginx config" after the new version was already running.
@@ -43,6 +45,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: admins choose which countries' maps the server keeps (Admin > App settings > Maps on this server): a searchable list of countries and parts of big ones, with download size, disk space and time shown before confirming, progress while it builds, and add or remove later. Maps you already have keep working while a change is built.
 - P Maps: `/api/maps/regions` (admin only) and a reusable `MapRegionPicker` for the first-time setup wizard.
 - P Maps: a map download no longer fails when the mirror's "latest" file is missing during its daily update; the previous day's file is used.
+- Setup: right after the admin account is made, a choice between "Set everything up now" and "Just look around". Looking around goes straight in; nothing skipped is lost.
+- Setup: a "Finish setting up" list that reads what is and isn't set up from the server (AI service, models, the reading model, address, email, second sign-in step, off-site backup, family, calls from outside, maps, speech, photos, web search). It closes the wizard, sits on Today for admins until it's done or closed, and stays under Admin → Setup. Each row opens the setup step or admin page where it's done.
+- Setup: a models step that suggests a model for chat, quick jobs, Talk, reading pictures and making pictures from what the connected AI service offers, saved with one click. With nothing connected it says plainly what won't work.
+- Setup: an "at home and away" step for the services this install has: the address at home, why the web port must never be forwarded and what to use instead, the two ports calls need on the router (with this machine's home-network address when known) and the result of the last test call from outside, the microphone needing https on phones, and how the map download is going.
+- Models: every server has a built-in custom model called Promptly. In setup's Models step the chat choice is "the model behind Promptly", and accepting it makes Promptly what new chats start on, so a new person's first chat says Promptly. The other connected models stay in the list. Servers that update get Promptly pointed at their current default chat model; their default itself is not changed.
+- Models: until an admin has chosen the model behind it, Promptly is listed as "Not ready" in the model list, and a message sent to it gets a plain answer saying an admin needs to choose one (admins get a button to do it), not an error.
+- Setup: an OpenRouter key can now provide the reading (embedding) model in one click (OpenRouter's embeddings endpoint, `openai/text-embedding-3-small`), the same as an OpenAI key could.
+- Setup: a Maps step to choose the country to download, with the size and time shown first. It appears once the server offers a choice of map.
+- Setup: the progress bar now shows finished steps filled in. They were invisible, so the bar seemed to lose a step each time.
+- Memory and Study now work when the default chat model is a custom model: they called the provider with the custom model's id rather than the model behind it.
+- Talk: spoken turns on the built-in Promptly model use the admin's voice model, like plain models do.
+- Setup: a provider that was already connected counted its embedding models as chat models.
 
 ## [0.52.4] - 2026-11-23
 

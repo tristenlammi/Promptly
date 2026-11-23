@@ -66,9 +66,50 @@ async def resolve_custom_model(
     cm = await db.get(CustomModel, cm_id)
     if cm is None:
         return None
+    if cm.base_provider_id is None or not cm.base_model_id:
+        # No model behind it yet: see :func:`unavailable_reason`.
+        return None
     provider = await db.get(ModelProvider, cm.base_provider_id)
     if provider is None or not provider.enabled:
         return None
     return ResolvedCustomModel(
         custom_model=cm, base_provider=provider, base_model_id=cm.base_model_id
     )
+
+
+async def unavailable_reason(model_id: str, db: AsyncSession, *, admin: bool) -> str:
+    """Why :func:`resolve_custom_model` returned ``None``, in words fit to
+    show the person who sent the message."""
+    cm_id = parse_custom_model_id(model_id)
+    cm = await db.get(CustomModel, cm_id) if cm_id else None
+    if cm is not None and (cm.base_provider_id is None or not cm.base_model_id):
+        from app.custom_models.builtin import not_ready_message
+
+        return not_ready_message(cm, admin=admin)
+    return (
+        "This custom model is no longer available. "
+        "Ask an admin to re-create it, or pick a different model."
+    )
+
+
+async def base_pair(
+    db: AsyncSession, provider_id: uuid.UUID | None, model_id: str | None
+) -> tuple[ModelProvider, str] | None:
+    """The enabled provider and real model id behind a stored
+    ``(provider_id, model_id)`` pair, custom or not. ``None`` when it can't
+    be used (unset, provider gone or disabled, custom model not ready).
+
+    For callers that hold a default pair and call the provider directly:
+    a ``custom:<uuid>`` id means nothing to a provider.
+    """
+    if not model_id:
+        return None
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
+        return (resolved.base_provider, resolved.base_model_id) if resolved is not None else None
+    if provider_id is None:
+        return None
+    provider = await db.get(ModelProvider, provider_id)
+    if provider is None or not provider.enabled:
+        return None
+    return provider, model_id

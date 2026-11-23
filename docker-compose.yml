@@ -245,6 +245,10 @@ services:
       # Promptly Home: what the bundled home box (home-connector below)
       # proves itself with. Made by install/update; empty = not bundled.
       - HOME_BOX_SECRET=${HOME_BOX_SECRET:-}
+      # Finish setting up: which optional services this install has, and
+      # this machine's home-network address when the installer knows it.
+      - PROMPTLY_PROFILES=${COMPOSE_PROFILES:-}
+      - SERVER_LAN_IP=${SERVER_LAN_IP:-${LIVEKIT_NODE_IP:-}}
     # Uncomment to let Home Assistant reach the Wyoming bridge. Left
     # commented so enabling voice satellites is a deliberate act rather
     # than a port that quietly appears on your network — see

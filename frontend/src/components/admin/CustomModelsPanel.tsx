@@ -968,9 +968,20 @@ function CustomModelRow({
           <span className="truncate text-sm font-semibold">
             {model.display_name}
           </span>
-          <span className="text-xs text-[var(--text-muted)]">
-            on {baseLabel}
-          </span>
+          {model.base_model_id ? (
+            <span className="text-xs text-[var(--text-muted)]">
+              on {baseLabel}
+            </span>
+          ) : (
+            <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+              Not ready: no model behind it yet. Edit to choose one.
+            </span>
+          )}
+          {model.is_builtin && (
+            <span className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
+              Built in
+            </span>
+          )}
         </div>
         {model.description && (
           <div className="mt-0.5 line-clamp-1 text-xs text-[var(--text-muted)]">

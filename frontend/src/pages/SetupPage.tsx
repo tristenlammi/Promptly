@@ -1,67 +1,100 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { usePasswordPolicy } from "@/hooks/usePasswordPolicy";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
+  ArrowLeft,
   Cloud,
-  Globe,
+  Compass,
   HardDrive,
+  ListChecks,
   Mail,
   ShieldCheck,
   Sparkles,
   Check,
 } from "lucide-react";
 
-import { adminApi, type OriginPreview } from "@/api/admin";
+import { adminApi } from "@/api/admin";
 import { authApi } from "@/api/auth";
 import { apiErrorMessage } from "@/utils/apiError";
 import { customModelsApi } from "@/api/customModels";
 import { mfaApi } from "@/api/mfa";
 import { modelsApi } from "@/api/models";
+import { setupApi, type EmbeddingOption, type SetupChecklist as Checklist } from "@/api/setup";
 import type { ProviderType } from "@/api/types";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/shared/Button";
 import { EnrollmentWizard } from "@/components/mfa/EnrollmentWizard";
+import { MapsStep, mapsStepAvailable } from "@/components/setup/MapsStep";
+import { ModelsStep } from "@/components/setup/ModelsStep";
+import { OutsideStep } from "@/components/setup/OutsideStep";
+import { SetupChecklist } from "@/components/setup/SetupChecklist";
 
 /**
  * First-run wizard shown when ``GET /auth/setup-status`` returns
  * ``requires_setup: true``.
  *
- * Step 1 — create the initial admin account (auto-logs in).
- * Step 2 — connect a model provider. This one comes first among the
- *          optional-ish steps because without it the app finishes setup
- *          unable to answer a single message — the previous wizard
- *          configured SMTP and CORS but never the model, so a fresh
- *          install landed on a chat screen that couldn't reply. Auto-
- *          satisfied when ``bootstrap.py`` already seeded a provider
- *          from an ``*_API_KEY`` env var.
- * Step 3 — declare the public URL the operator wants to reach
- *          Promptly on. Persists to ``app_settings.public_origins``
- *          which feeds the dynamic CORS middleware on every request.
- *          Skippable for "I'll set this up later" / "I'm only using
- *          this on localhost".
- * Step 4 — pick how Custom-Model knowledge gets embedded (local
- *          Ollama vs API model). Persists to ``app_settings``.
- * Step 5 — outgoing email (SMTP), optional.
- * Step 6 — offer two-step verification for the freshly-created admin
- *          account (embeds the self-service ``EnrollmentWizard``).
+ *   account   create the first admin (auto-logs in; needs the installer's
+ *             setup code when the install has one).
+ *   path      "Set everything up now" or "Just look around". Looking around
+ *             skips straight to the summary: nothing else has to be done
+ *             before the app opens, and nothing skipped is lost, because
+ *             the same list lives on Today and in Admin → Setup.
+ *   provider  connect an AI service (auto-satisfied when ``bootstrap.py``
+ *             seeded one from an ``*_API_KEY`` env var).
+ *   models    which model does each job, pre-filled with suggestions.
+ *   search    the embedding model that lets the assistant read your files.
+ *   maps      which country Maps downloads (only when this install has
+ *             Maps and the regions API; see ``setup/mapsRegions.ts``).
+ *   outside   the address people use, and what to do outside Promptly
+ *             (tunnel, router ports for calls), for the services this
+ *             install has.
+ *   email     outgoing email (SMTP), optional.
+ *   mfa       two-step verification for the new admin account.
+ *   summary   what's ready and what was skipped, read from the server.
  *
- * The user can skip steps 2–6 entirely; CORS will continue to accept
- * localhost requests, Custom Models just won't be usable until an
- * embedding provider is configured from the admin panel later, and
- * MFA stays available under Account → Security. Skipping step 2 warns
- * explicitly that chat won't work until a provider is added.
+ * The same page also opens one step by itself (``/setup?step=models``) for
+ * the "Finish setting up" checklist; it then returns to Admin → Setup.
  */
-type Step = 1 | 2 | 3 | 4 | 5 | 6;
-const TOTAL_STEPS: Step = 6;
+type Step =
+  | "account"
+  | "path"
+  | "provider"
+  | "models"
+  | "search"
+  | "maps"
+  | "outside"
+  | "email"
+  | "mfa"
+  | "summary";
+
+const FULL: Step[] = ["account", "path", "provider", "models", "search", "maps", "outside", "email", "mfa", "summary"];
+/** Steps the checklist may open by themselves. */
+const SINGLE: Step[] = ["provider", "models", "search", "maps", "outside", "email", "mfa"];
+
+const SUBTITLE: Record<Step, string> = {
+  account: "Create the first administrator account to get started.",
+  path: "How would you like to start?",
+  provider: "Connect an AI service so Promptly can answer.",
+  models: "Choose which model does each job.",
+  search: "Let the assistant read your files.",
+  maps: "Choose the map to download.",
+  outside: "Using Promptly at home and away.",
+  email: "Set up outgoing email (optional).",
+  mfa: "One last thing: protect your admin account.",
+  summary: "Here's where things stand.",
+};
 
 // The wizard's progress, so a reload or a closed tab resumes it rather than
-// dropping the admin into the app with steps 2-6 lost (R-281).
+// dropping the admin into the app with the remaining steps lost (R-281).
 const SETUP_PROGRESS_KEY = "promptly.setup-step";
+// The step numbers this key held before steps had names.
+const OLD_STEPS: Record<string, Step> = { "2": "provider", "3": "outside", "4": "search", "5": "email", "6": "mfa" };
 
 function savedStep(): Step | null {
   try {
-    const n = Number(localStorage.getItem(SETUP_PROGRESS_KEY));
-    return n >= 2 && n <= TOTAL_STEPS ? (n as Step) : null;
+    const raw = localStorage.getItem(SETUP_PROGRESS_KEY) ?? "";
+    if (OLD_STEPS[raw]) return OLD_STEPS[raw];
+    return raw !== "account" && (FULL as string[]).includes(raw) ? (raw as Step) : null;
   } catch {
     return null;
   }
@@ -72,13 +105,27 @@ export function setupInProgress(): boolean {
   return savedStep() !== null;
 }
 
+/** The step a "Finish setting up" row asked for (``/setup?step=…``). */
+export function singleSetupStep(search: string): string | null {
+  const step = new URLSearchParams(search).get("step");
+  return step && (SINGLE as string[]).includes(step) ? step : null;
+}
+
 export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
   const policy = usePasswordPolicy();
-  const [step, setStepState] = useState<Step>(() => (resume ? savedStep() ?? 2 : 1));
+  const [params] = useSearchParams();
+  // One step by itself, opened from the checklist by a signed-in admin.
+  const single = resume ? (singleSetupStep(`?${params.toString()}`) as Step | null) : null;
+  const [step, setStepState] = useState<Step>(() => single ?? (resume ? savedStep() ?? "path" : "account"));
+  useEffect(() => {
+    if (single) setStepState(single);
+  }, [single]);
   const setStep = (next: Step) => {
     setStepState(next);
+    window.scrollTo({ top: 0 });
+    if (single) return;
     try {
-      localStorage.setItem(SETUP_PROGRESS_KEY, String(next));
+      localStorage.setItem(SETUP_PROGRESS_KEY, next);
     } catch {
       /* resume just won't work */
     }
@@ -100,10 +147,38 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const setAccessToken = useAuthStore((s) => s.setAccessToken);
   const setStatus = useAuthStore((s) => s.setStatus);
   const navigate = useNavigate();
+
+  // Does this install have Maps, and can it offer a choice of country?
+  // Asked once signed in; until it's known the Maps step is left out.
+  const [hasMaps, setHasMaps] = useState<boolean | null>(null);
+  const signedIn = step !== "account";
+  useEffect(() => {
+    if (!signedIn) return;
+    let alive = true;
+    Promise.all([setupApi.checklist(), mapsStepAvailable()])
+      .then(([c, choice]) => alive && setHasMaps(!!c.services.maps && choice))
+      .catch(() => alive && setHasMaps(false));
+    return () => {
+      alive = false;
+    };
+  }, [signedIn]);
+
+  const order = useMemo(() => FULL.filter((s) => s !== "maps" || hasMaps === true), [hasMaps]);
+  const after = (s: Step): Step => order[Math.min(order.indexOf(s) + 1, order.length - 1)];
+  const before = (s: Step): Step | null => {
+    const i = order.indexOf(s);
+    // Not back to the account form (it's made) and not from the summary.
+    return i > 1 && s !== "summary" ? order[i - 1] : null;
+  };
+  // Resumed on the Maps step, but this server has no choice of map: move on.
+  useEffect(() => {
+    if (!single && step === "maps" && hasMaps === false) setStepState("outside");
+  }, [single, step, hasMaps]);
 
   const onSubmitAccount = async (e: FormEvent) => {
     e.preventDefault();
@@ -148,7 +223,7 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
       // remaining steps still make authenticated calls: the axios client
       // reads `accessToken`, which is set above, and never looks at `status`.
       // The flip happens in `finish()` instead.
-      setStep(2);
+      setStep("path");
     } catch (err) {
       setError(extractError(err, "Setup failed"));
     } finally {
@@ -159,7 +234,8 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
   /** Leaving the wizard is the one place auth status flips to
    *  "authenticated" — that's what swaps App.tsx over to the real app
    *  routes. Must happen before the navigate, or the "needs_setup"
-   *  catch-all bounces /chat straight back to /setup. */
+   *  catch-all bounces straight back to /setup. Lands on Today, where the
+   *  "Finish setting up" card lists whatever was skipped. */
   const finish = () => {
     try {
       localStorage.removeItem(SETUP_PROGRESS_KEY);
@@ -167,39 +243,61 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
       /* ignore */
     }
     setStatus("authenticated");
-    navigate("/chat", { replace: true });
+    navigate("/today", { replace: true });
   };
 
+  // One step by itself: back to the checklist when it's done.
+  const backToList = () => navigate("/admin?tab=setup", { replace: true });
+  const next = (s: Step) => (single ? backToList : () => setStep(after(s)));
+  const wide = step === "summary" || step === "outside" || step === "path";
+  const back = single ? null : before(step);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-4 text-[var(--text)]">
-      <div className="w-full max-w-md rounded-card border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm">
+    <div className="flex min-h-screen items-start justify-center bg-[var(--bg)] px-4 py-6 text-[var(--text)] sm:items-center sm:py-10">
+      <div
+        className={[
+          "w-full rounded-card border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-8",
+          wide ? "max-w-xl" : "max-w-md",
+        ].join(" ")}
+        data-testid="setup-wizard"
+        data-step={step}
+      >
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white">
             <Sparkles className="h-4 w-4" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-lg font-semibold tracking-tight">
-              Welcome to Promptly
+              {single ? "Finish setting up" : step === "summary" ? "You're in" : "Welcome to Promptly"}
             </h1>
-            <p className="text-xs text-[var(--text-muted)]">
-              {step === 1
-                ? "Create the first administrator account to get started."
-                : step === 2
-                  ? "Connect a model so Promptly can answer."
-                  : step === 3
-                    ? "Where will people reach Promptly?"
-                    : step === 4
-                      ? "Choose an embedding model — the one that powers search."
-                      : step === 5
-                        ? "Set up outgoing email (optional)."
-                        : "One last thing — protect your admin account."}
-            </p>
+            <p className="text-xs text-[var(--text-muted)]">{SUBTITLE[step]}</p>
           </div>
         </div>
 
-        <StepDots current={step} total={TOTAL_STEPS} />
+        {single ? (
+          <Link
+            to="/admin?tab=setup"
+            className="mb-4 inline-flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+            Back to the list
+          </Link>
+        ) : (
+          step !== "summary" && <StepDots current={order.indexOf(step) + 1} total={order.length} />
+        )}
 
-        {step === 1 && (
+        {back && (
+          <button
+            type="button"
+            onClick={() => setStep(back)}
+            className="mb-3 inline-flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+            Back
+          </button>
+        )}
+
+        {step === "account" && (
           <AccountStep
             email={email}
             onEmail={setEmail}
@@ -218,16 +316,120 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
           />
         )}
 
-        {step === 2 && <ProviderStep onDone={() => setStep(3)} />}
+        {step === "path" && <PathStep onFull={() => setStep("provider")} onLook={() => setStep("summary")} />}
 
-        {step === 3 && <PublicUrlStep onContinue={() => setStep(4)} />}
+        {step === "provider" && <ProviderStep onDone={next("provider")} />}
 
-        {step === 4 && <EmbeddingStep onDone={() => setStep(5)} />}
+        {step === "models" && (
+          <ModelsStep
+            onDone={next("models")}
+            onConnect={() => (single ? navigate("/setup?step=provider", { replace: true }) : setStep("provider"))}
+            doneLabel={single ? "Save" : "Use these"}
+          />
+        )}
 
-        {step === 5 && <EmailStep onDone={() => setStep(6)} />}
+        {step === "search" && <EmbeddingStep onDone={next("search")} />}
 
-        {step === 6 && <MfaStep email={email} onFinish={finish} />}
+        {step === "maps" && <MapsStep onDone={next("maps")} doneLabel={single ? "Done" : "Continue"} />}
+
+        {step === "outside" && <OutsideStep onDone={next("outside")} inApp={!!single} doneLabel={single ? "Done" : "Continue"} />}
+
+        {step === "email" && <EmailStep onDone={next("email")} />}
+
+        {step === "mfa" && <MfaStep email={email || user?.email || ""} onFinish={next("mfa")} />}
+
+        {step === "summary" && <SummaryStep onStep={(s) => setStep(s as Step)} onFinish={finish} />}
       </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------
+// Two ways in: everything now, or just a look around
+// --------------------------------------------------------------------
+
+function PathStep({ onFull, onLook }: { onFull: () => void; onLook: () => void }) {
+  const card =
+    "w-full rounded-card border border-[var(--border)] px-4 py-4 text-left transition hover:border-[var(--accent)]/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
+  return (
+    <div className="space-y-3" data-testid="setup-path">
+      <p className="text-sm text-[var(--text)]">Your account is ready. What next?</p>
+      <button type="button" className={card} onClick={onFull} data-testid="setup-path-full">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-strong)] text-white">
+            <ListChecks className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="text-sm font-medium">Set everything up now</div>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+              About ten minutes. Connect the AI, pick its models, and get Promptly ready for your family: its
+              address, email, calls and a second sign-in step. You can skip any part.
+            </p>
+          </div>
+        </div>
+      </button>
+      <button type="button" className={card} onClick={onLook} data-testid="setup-path-look">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--bg)] text-[var(--text-muted)]">
+            <Compass className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="text-sm font-medium">Just look around</div>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+              Go straight in and explore. Files, photos, notes, calendar and messages work right away; the assistant
+              won't answer until an AI service is connected. Nothing is lost: a "Finish setting up" list waits for
+              you on Today and in Admin.
+            </p>
+          </div>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------
+// The end: what's ready and what was skipped, as the server sees it
+// --------------------------------------------------------------------
+
+function SummaryStep({ onStep, onFinish }: { onStep: (step: string) => void; onFinish: () => void }) {
+  const [data, setData] = useState<Checklist | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setupApi
+      .checklist()
+      .then(setData)
+      .catch(() => setFailed(true));
+  }, []);
+
+  return (
+    <div className="space-y-4" data-testid="setup-summary">
+      {data ? (
+        <>
+          <p className="text-sm text-[var(--text)]">
+            {data.left === 0
+              ? "Everything is set up."
+              : data.rows.some((r) => r.id === "provider" && r.status !== "done")
+                ? `${data.done} of ${data.total} things are ready. The assistant can't answer until an AI service is connected.`
+                : `${data.done} of ${data.total} things are ready.`}
+          </p>
+          <SetupChecklist data={data} onStep={onStep} compact />
+          {data.left > 0 && (
+            <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+              You can do the rest any time. This list stays on <span className="font-medium text-[var(--text)]">Today</span>{" "}
+              and under <span className="font-medium text-[var(--text)]">Admin → Setup</span>.
+            </p>
+          )}
+        </>
+      ) : failed ? (
+        <p className="text-sm text-[var(--text-muted)]">
+          Couldn't load the list just now. It's under Admin → Setup whenever you want it.
+        </p>
+      ) : (
+        <div className="py-6 text-center text-xs text-[var(--text-muted)]">Checking what's ready…</div>
+      )}
+      <Button type="button" variant="primary" className="w-full" onClick={onFinish} data-testid="setup-finish">
+        Start using Promptly
+      </Button>
     </div>
   );
 }
@@ -361,169 +563,11 @@ function AccountStep({
 }
 
 // --------------------------------------------------------------------
-// Step 3 — public URL / CORS
-// --------------------------------------------------------------------
-
-function PublicUrlStep({ onContinue }: { onContinue: () => void }) {
-  // Default to wherever the operator is currently loading the page
-  // from. On first install that's almost always ``http://localhost:8087``,
-  // which is exactly what the always-allowed defaults already cover —
-  // saving it is harmless and the operator can skip if they're not
-  // ready to commit a real public hostname yet.
-  const initial = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    const origin = window.location.origin;
-    return origin.startsWith("http") ? origin : "";
-  }, []);
-  const [value, setValue] = useState(initial);
-  const [preview, setPreview] = useState<OriginPreview | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [skipping, setSkipping] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  // Debounced preview — every keystroke would hammer the API but
-  // ~400 ms after the operator stops typing is plenty quick for the
-  // warning chip to feel live.
-  useEffect(() => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setPreview(null);
-      setPreviewError(null);
-      return;
-    }
-    const handle = window.setTimeout(async () => {
-      try {
-        const result = await adminApi.previewOrigin(trimmed);
-        setPreview(result);
-        setPreviewError(null);
-      } catch (err) {
-        setPreview(null);
-        setPreviewError(extractError(err, "Couldn't validate that URL."));
-      }
-    }, 400);
-    return () => window.clearTimeout(handle);
-  }, [value]);
-
-  const save = async () => {
-    setSaveError(null);
-    if (!preview) {
-      setSaveError("Enter a valid URL first.");
-      return;
-    }
-    setSaving(true);
-    try {
-      await adminApi.updateAppSettings({ public_origins: [preview.canonical] });
-      onContinue();
-    } catch (err) {
-      setSaveError(extractError(err, "Couldn't save the public URL."));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const skip = async () => {
-    // "Skip" = leave public_origins empty; localhost stays allowed by
-    // the always-on defaults so the install is still reachable. The
-    // admin can come back later via Admin → Settings.
-    setSaving(false);
-    setSkipping(true);
-    try {
-      onContinue();
-    } finally {
-      setSkipping(false);
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-        Enter the URL people will use to reach Promptly. This is what gets
-        added to the CORS allow-list so logins work from a real domain.
-        Localhost is always allowed — you only need this for a public
-        hostname (e.g. a Cloudflare Tunnel or your own DNS name).
-      </p>
-
-      <LabeledInput
-        label="Public URL"
-        value={value}
-        onChange={setValue}
-        placeholder="https://chat.example.com"
-        autoFocus
-      />
-
-      {previewError && (
-        <div
-          role="alert"
-          className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
-        >
-          {previewError}
-        </div>
-      )}
-
-      {preview && preview.canonical !== value.trim() && (
-        <div className="flex items-start gap-2 rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--text-muted)]">
-          <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span>
-            Will be saved as{" "}
-            <span className="font-mono text-[var(--text)]">
-              {preview.canonical}
-            </span>
-          </span>
-        </div>
-      )}
-
-      {preview?.warnings.map((warning, i) => (
-        <div
-          key={i}
-          role="status"
-          className="rounded-card border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
-        >
-          {warning}
-        </div>
-      ))}
-
-      {saveError && (
-        <div
-          role="alert"
-          className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
-        >
-          {saveError}
-        </div>
-      )}
-
-      <div className="flex gap-2 pt-1">
-        <Button
-          type="button"
-          variant="secondary"
-          className="flex-1"
-          onClick={skip}
-          disabled={saving}
-          loading={skipping}
-        >
-          Skip for now
-        </Button>
-        <Button
-          type="button"
-          variant="primary"
-          className="flex-1"
-          onClick={save}
-          disabled={!preview || skipping}
-          loading={saving}
-        >
-          Save and continue
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// --------------------------------------------------------------------
 // Step 4 — embedding model
 // --------------------------------------------------------------------
 
 function EmbeddingStep({ onDone }: { onDone: () => void }) {
-  const [choice, setChoice] = useState<"local" | "openai" | "skip" | null>(null);
+  const [choice, setChoice] = useState<"local" | "cloud" | "skip" | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -535,19 +579,18 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
     model: string;
     model_installed: boolean;
   } | null>(null);
-  const [openai, setOpenai] = useState<{ id: string; name: string } | null>(null);
+  // A reading model the connected AI service can provide with the key it
+  // already has (OpenAI direct, or OpenRouter's embeddings endpoint).
+  const [cloud, setCloud] = useState<EmbeddingOption | null>(null);
   useEffect(() => {
     customModelsApi.localEmbeddingStatus().then(setLocal).catch(() => setLocal(null));
-    modelsApi
-      .list()
-      .then((ps) => {
-        const p = ps.find((x) => x.enabled && x.type === "openai");
-        if (p) setOpenai({ id: p.id, name: p.name });
-      })
+    setupApi
+      .embeddingOptions()
+      .then((options) => setCloud(options[0] ?? null))
       .catch(() => {});
   }, []);
 
-  const choose = async (pick: "local" | "openai" | "skip") => {
+  const choose = async (pick: "local" | "cloud" | "skip") => {
     setError(null);
     setChoice(pick);
     if (pick === "skip") {
@@ -556,20 +599,20 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
     }
     setLoading(true);
     try {
-      if (pick === "openai" && openai) {
+      if (pick === "cloud" && cloud) {
         await customModelsApi.setEmbeddingConfig({
-          embedding_provider_id: openai.id,
-          embedding_model_id: "text-embedding-3-small",
-          embedding_dim: 1536,
+          embedding_provider_id: cloud.provider_id,
+          embedding_model_id: cloud.model_id,
+          embedding_dim: cloud.dim,
         });
         const test = await customModelsApi.testEmbeddingConfig();
-        if (!test.ok) throw new Error(test.error || "OpenAI didn't answer a test request.");
+        if (!test.ok) throw new Error(test.error || `${cloud.provider_name} didn't answer a test request.`);
       } else {
         await customModelsApi.bootstrapLocalEmbedding();
       }
       setDone(true);
     } catch (err) {
-      setError(extractError(err, "Could not configure local embeddings"));
+      setError(extractError(err, "Couldn't set up the reading model."));
       setChoice(null);
     } finally {
       setLoading(false);
@@ -586,36 +629,37 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
           model. */}
       <div className="rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5">
         <div className="text-sm font-medium text-[var(--text)]">
-          Embedding model
+          The reading model
         </div>
         <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
-          This is the model that powers{" "}
-          <span className="font-medium text-[var(--text)]">search</span> — it
-          turns your files, notes and workspace content into vectors so
-          Promptly can find the relevant parts to answer from.
+          A small second model that{" "}
+          <span className="font-medium text-[var(--text)]">reads</span> your
+          files, notes and photos ahead of time, so the assistant can find the
+          right page when you ask about them. (Its technical name is an
+          embedding model.)
         </p>
         <p className="mt-1.5 text-xs leading-relaxed text-[var(--text-muted)]">
           It's{" "}
           <span className="font-medium text-[var(--text)]">
             not the chat model
           </span>{" "}
-          you connected earlier and it never writes replies. Without one, file
-          search and workspace knowledge stay switched off.
+          and it never writes replies. Without one, the assistant can't look
+          things up in your files, and search only matches exact words.
         </p>
       </div>
 
       <p className="text-xs leading-relaxed text-[var(--text-muted)]">
-        You can change this later in Admin → Models.
+        You can change this later in Admin → Models → Defaults.
       </p>
 
       <ProviderCard
         icon={<HardDrive className="h-5 w-5" />}
-        title="Local embedding model"
+        title="On this server"
         subtitle={
           local === null
             ? "Checking whether this server can run one…"
             : local.ollama_reachable
-              ? "Runs on this server — nothing leaves it. Recommended."
+              ? "Nothing leaves this server. Recommended."
               : "Not available: no Ollama is running for this install."
         }
         bullet={
@@ -631,16 +675,16 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
         onClick={() => choose("local")}
       />
 
-      {openai && (
+      {cloud && (
         <ProviderCard
           icon={<Cloud className="h-5 w-5" />}
-          title="OpenAI embeddings"
-          subtitle={`Use your ${openai.name} key with text-embedding-3-small.`}
-          bullet="Set up now in one click; costs a few cents per thousand pages"
-          selected={choice === "openai"}
-          loading={loading && choice === "openai"}
+          title={`Through ${cloud.provider_name}`}
+          subtitle={`Uses the ${cloud.provider_name} key you already connected (${cloud.model_id}).`}
+          bullet="Set up now in one click. Costs a few cents per thousand pages; the text of your files is sent to that service to be read"
+          selected={choice === "cloud"}
+          loading={loading && choice === "cloud"}
           disabled={done || loading}
-          onClick={() => choose("openai")}
+          onClick={() => choose("cloud")}
         />
       )}
 
@@ -648,9 +692,9 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
           "API provider" label implied it set something up here. */}
       <ProviderCard
         icon={<Cloud className="h-5 w-5" />}
-        title="Cloud embedding model — set up later"
-        subtitle="OpenAI, Gemini, or any OpenAI-compatible API."
-        bullet="Nothing is configured now; you'll finish this in Admin → Models"
+        title="Set up later"
+        subtitle={cloud ? "Or choose a different one in Admin later." : "Needs Ollama on this server, or an OpenAI or OpenRouter key."}
+        bullet="Nothing is set up now. It stays on your Finish setting up list"
         selected={choice === "skip"}
         disabled={done || loading}
         onClick={() => choose("skip")}
@@ -671,14 +715,14 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
         <div
           className={[
             "rounded-card border px-3 py-2 text-xs",
-            choice === "local"
+            choice === "local" || choice === "cloud"
               ? "border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)]"
               : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
           ].join(" ")}
         >
-          {choice === "local" || choice === "openai"
-            ? "Embedding model set up and answering — file and workspace search are on."
-            : "No embedding model set yet. File and workspace search stay off until you add one in Admin → Models."}
+          {choice === "local" || choice === "cloud"
+            ? "Set up and answering. The assistant can now read your files."
+            : "Not set up yet. The assistant can't look things up in your files until you add one (Admin → Models → Defaults)."}
         </div>
       )}
 
@@ -756,10 +800,6 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
   const [skipped, setSkipped] = useState(false);
   const [modelCount, setModelCount] = useState<number | null>(null);
   const [checking, setChecking] = useState(true);
-  // Chat models of the connected provider, for picking everyone's default
-  // (R-262). Without one, the first chat ran on whatever sorted first.
-  const [chatModels, setChatModels] = useState<{ providerId: string; ids: string[] } | null>(null);
-  const [defaultModel, setDefaultModel] = useState("");
   const [ollamaReachable, setOllamaReachable] = useState<boolean | null>(null);
   useEffect(() => {
     customModelsApi
@@ -767,20 +807,6 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
       .then((s) => setOllamaReachable(s.ollama_reachable))
       .catch(() => setOllamaReachable(null));
   }, []);
-
-  const finishStep = async () => {
-    if (chatModels && defaultModel) {
-      try {
-        await adminApi.updateAppSettings({
-          default_chat_provider_id: chatModels.providerId,
-          default_chat_model_id: defaultModel,
-        });
-      } catch {
-        /* Not fatal — it can be set in Admin → Models. */
-      }
-    }
-    onDone();
-  };
 
   const choice = SETUP_PROVIDERS.find((p) => p.type === picked) ?? null;
 
@@ -795,7 +821,7 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
         const existing = providers.find((p) => p.enabled);
         if (existing) {
           setDone(true);
-          setModelCount(existing.models?.length ?? 0);
+          setModelCount((existing.models ?? []).filter((m) => !/embed/i.test(m.id)).length);
           setPicked(existing.type);
         }
       })
@@ -833,10 +859,6 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
           .filter((m) => (m as { kind?: string }).kind !== "embedding" && !/embed/i.test(m.id))
           .map((m) => m.id);
         count = chat.length;
-        if (chat.length) {
-          setChatModels({ providerId: provider.id, ids: chat });
-          setDefaultModel(chat[0]);
-        }
       } catch {
         // The provider saved fine but the model list couldn't be fetched
         // (bad key, provider down, Ollama not running). Say so rather than
@@ -869,8 +891,8 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
   return (
     <div className="space-y-3">
       <p className="text-xs leading-relaxed text-[var(--text-muted)]">
-        Promptly needs at least one model provider before it can answer
-        anything. Pick one now — you can add more later in Admin → Models.
+        Promptly's assistant runs on an AI service you connect. Pick one
+        now; you can add more later in Admin → Models.
       </p>
 
       {!done &&
@@ -946,32 +968,14 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
         </div>
       )}
 
-      {done && chatModels && (
-        <label className="block text-xs">
-          <span className="mb-1 block font-medium text-[var(--text-muted)]">
-            Default model for new chats
-          </span>
-          <select
-            value={defaultModel}
-            onChange={(e) => setDefaultModel(e.target.value)}
-            className="w-full rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-          >
-            {chatModels.ids.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
       {skipped && (
         <div
           role="alert"
           className="rounded-card border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
         >
-          Chat won't work until you add a provider. You can do it any time from
-          Admin → Models.
+          Chat, the assistant inside each app and Talk won't answer until an AI
+          service is connected. Everything else works. You can connect one any
+          time from your Finish setting up list.
         </div>
       )}
 
@@ -992,7 +996,7 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
           type="button"
           variant="primary"
           className="w-full"
-          onClick={() => void finishStep()}
+          onClick={onDone}
         >
           Continue
         </Button>
@@ -1002,7 +1006,7 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
           onClick={onDone}
           className="w-full text-center text-xs text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--text)]"
         >
-          Continue without a provider
+          Continue without one
         </button>
       ) : (
         <button
@@ -1365,7 +1369,7 @@ function StepDots({ current, total }: { current: number; total: number }) {
             n === current
               ? "bg-[var(--accent-strong)]"
               : n < current
-                ? "bg-[var(--accent)]/40"
+                ? "bg-[var(--accent-strong)] opacity-40"
                 : "bg-[var(--border)]",
           ].join(" ")}
         />
@@ -1405,16 +1409,16 @@ function MfaStep({ email, onFinish }: { email: string; onFinish: () => void }) {
         <div>
           <p className="text-sm font-medium">Two-step verification</p>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            This is the administrator account for your whole install — with
-            MFA, a stolen password alone can't get in. Takes about a minute
-            with an authenticator app or email codes. You can also set it up
-            any time under Account → Security.
+            This account controls the whole server. With a second step, a
+            stolen password alone can't get in. It takes about a minute with
+            an authenticator app or email codes. You can also turn it on any
+            time under Account → Security.
           </p>
         </div>
       </div>
       <div className="flex gap-2">
-        <Button className="flex-1" onClick={() => setEnrolling(true)}>
-          Set up MFA
+        <Button variant="primary" className="flex-1" onClick={() => setEnrolling(true)}>
+          Turn it on
         </Button>
         <Button variant="secondary" className="flex-1" onClick={onFinish}>
           Skip for now

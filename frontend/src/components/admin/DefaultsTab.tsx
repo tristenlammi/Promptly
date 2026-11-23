@@ -162,7 +162,7 @@ function DefaultChatModelCard({ settings, onSubmit, busy }: CardProps) {
   }, [savedAt]);
 
   // No filter: any model can serve as the default chat starter.
-  const eligible: AvailableModel[] = models ?? [];
+  const eligible: AvailableModel[] = (models ?? []).filter((m) => !m.needs_setup);
 
   const grouped = useMemo(() => {
     const byProvider = new Map<string, AvailableModel[]>();
@@ -741,7 +741,7 @@ function VoiceModelCard({ settings, onSubmit, busy }: CardProps) {
     return () => window.clearTimeout(t);
   }, [savedAt]);
 
-  const eligible: AvailableModel[] = models ?? [];
+  const eligible: AvailableModel[] = (models ?? []).filter((m) => !m.needs_setup);
 
   const grouped = useMemo(() => {
     const byProvider = new Map<string, AvailableModel[]>();
@@ -1059,7 +1059,7 @@ function ResearchModelCard({ settings, onSubmit, busy }: CardProps) {
     return () => window.clearTimeout(t);
   }, [savedAt]);
 
-  const eligible: AvailableModel[] = models ?? [];
+  const eligible: AvailableModel[] = (models ?? []).filter((m) => !m.needs_setup);
 
   const grouped = useMemo(() => {
     const byProvider = new Map<string, AvailableModel[]>();
@@ -1208,7 +1208,7 @@ function MemoryModelCard({ settings, onSubmit, busy }: CardProps) {
     return () => window.clearTimeout(t);
   }, [savedAt]);
 
-  const eligible: AvailableModel[] = models ?? [];
+  const eligible: AvailableModel[] = (models ?? []).filter((m) => !m.needs_setup);
 
   const grouped = useMemo(() => {
     const byProvider = new Map<string, AvailableModel[]>();

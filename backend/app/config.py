@@ -338,6 +338,15 @@ class Settings(BaseSettings):
     LIVEKIT_UDP_PORT: int = 7882
     LIVEKIT_TCP_PORT: int = 7881
 
+    # ---- Finish setting up (app/admin/setup.py) ----
+    # The compose profiles the stack was started with (COMPOSE_PROFILES),
+    # so the checklist knows which optional services this install has even
+    # while one is down. Empty = unknown: only what answers counts.
+    PROMPTLY_PROFILES: str = ""
+    # This machine's address on the home network, shown next to "forward
+    # these ports to this machine". Empty = unknown.
+    SERVER_LAN_IP: str = ""
+
     # ---- Search ----
     SEARXNG_URL: str = "http://searxng:8080"
     # False when the operator installed without the bundled SearXNG

@@ -102,6 +102,11 @@ ADMIN_ROUTES: dict[str, str] = {
     "GET /api/calls/usage": "counts",
     "GET /api/admin/talk/usage": "counts",
     # --- server settings
+    # Finish setting up: switches, counts and whether services answer.
+    "GET /api/admin/setup": "health",
+    "GET /api/admin/setup/model-suggestions": "config",
+    "GET /api/admin/setup/embedding-options": "config",
+    "PUT /api/admin/setup/promptly-model": "config",
     "GET /api/admin/app-settings": "config",
     "PATCH /api/admin/app-settings": "config",
     "GET /api/admin/app-settings/email-autoconfig": "config",

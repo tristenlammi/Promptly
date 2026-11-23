@@ -175,6 +175,11 @@ class AvailableModel(BaseModel):
     # custom rows is the synthetic ``custom:<uuid>`` that the chat
     # router resolves at send time.
     is_custom: bool = False
+    # A custom model with no model behind it yet (the built-in Promptly
+    # model before an admin picks one). Listed so the picker can say so;
+    # sending to it answers with a plain "an admin needs to choose a model".
+    # ``provider_id`` on such a row is only a placeholder.
+    needs_setup: bool = False
     # The id of the underlying ``custom_models`` row — handy for the
     # frontend when it needs to deep-link into the admin edit drawer.
     # ``None`` for non-custom rows.

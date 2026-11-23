@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, ExternalLink, RotateCw, X } from "lucide-react";
 
+import { Link } from "react-router-dom";
+
+import { useAuthStore } from "@/store/authStore";
 import type { StreamErrorMeta } from "@/store/chatStore";
 import { cn } from "@/utils/cn";
 
@@ -57,6 +60,45 @@ export function StreamErrorCard({
     return () => clearInterval(t);
   }, [initialWait]);
   const retryBlocked = remaining > 0;
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+
+  // A custom model with no model behind it yet (the built-in Promptly
+  // model before setup): not a failure, something to set up.
+  if (!meta && /doesn't have a model behind it yet/.test(error)) {
+    return (
+      <div
+        className="mx-4 my-3 rounded-card border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-[var(--text)]"
+        role="alert"
+        data-testid="model-not-ready"
+      >
+        <div className="flex items-start gap-2">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <div className="min-w-0 flex-1 break-words">{error}</div>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="shrink-0 rounded p-0.5 opacity-70 hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+            aria-label="Dismiss"
+            title="Dismiss"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-2.5 flex flex-wrap items-center gap-3 pl-6 text-xs">
+          {isAdmin && (
+            <Link to="/setup?step=models" className="rounded-md bg-[var(--accent-strong)] px-2.5 py-1 font-medium text-white hover:opacity-90">
+              Choose its model
+            </Link>
+          )}
+          {onPickAnotherModel && (
+            <button type="button" onClick={onPickAnotherModel} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+              Pick another model
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!meta) {
     return (
