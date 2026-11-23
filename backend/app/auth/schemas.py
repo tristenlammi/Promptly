@@ -303,6 +303,9 @@ class UserPreferencesUpdate(BaseModel):
     # One-shot flag: this member has been through the first-sign-in "pick
     # your apps" prompt (Places / Workspaces / Automations start hidden).
     features_chosen: bool | None = None
+    # An admin closed the "Finish setting up" card on Today. The checklist
+    # itself stays in Admin → Setup.
+    setup_card_dismissed: bool | None = None
     # Master switch for cross-chat memory (Phase 6). When off, the
     # post-turn extraction pass is skipped and saved facts are not
     # injected into the system prompt. Absent = on (the default).

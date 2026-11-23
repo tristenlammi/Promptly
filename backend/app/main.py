@@ -474,6 +474,9 @@ from app.voice.router import router as voice_router  # noqa: E402
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(mfa_router, prefix="/api/auth/mfa", tags=["mfa"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+from app.admin.setup_router import router as admin_setup_router  # noqa: E402
+
+app.include_router(admin_setup_router, prefix="/api/admin/setup", tags=["admin"])
 from app.backups.router import router as backups_router  # noqa: E402
 
 app.include_router(backups_router, prefix="/api/admin", tags=["admin"])
