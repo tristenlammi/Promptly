@@ -57,6 +57,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Memory and Study now work when the default chat model is a custom model: they called the provider with the custom model's id rather than the model behind it.
 - Talk: spoken turns on the built-in Promptly model use the admin's voice model, like plain models do.
 - Setup: a provider that was already connected counted its embedding models as chat models.
+- Sheets: the name box of a sheet nobody had clicked in yet read "A1:NaN". It reads "A1".
+- Sheets: the Sum, Average, Max and Min at the bottom read a number's display text, so "5,570" counted as 5 and "50%" as 50. They use the number.
+- Sheets: a cell with no font of its own (anything typed, imported or filled in by the AI) was drawn in Times New Roman. It's now the plain sans-serif default, and the toolbar shows Arial for it.
+- Photos: an album made, or added to, straight after an upload came out short without saying so, because photos still being read weren't in the library yet. They're kept, and show in the album as soon as they've been read.
 
 ## [0.52.4] - 2026-11-23
 
