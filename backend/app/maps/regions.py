@@ -268,19 +268,35 @@ async def catalog(*, refresh: bool = False) -> dict[str, Any]:
 
 # ---- What a set of maps costs ---------------------------------------------------
 
-# Measured on real builds (see OVERVIEW.md, P Maps > Choosing maps), as
-# multiples of the OpenStreetMap file's size. They are rough on purpose: road
-# density, address coverage and coastline change them from country to country.
-ROUTING_PER_OSM = 1.9      # Valhalla's tile archive
-BASEMAP_PER_OSM = 1.1      # the cut of the Protomaps basemap
-SEARCH_PER_OSM = 1.6       # Photon's index
+# Measured on real builds, as multiples of the OpenStreetMap file's size: New
+# Zealand (406 MB file: basemap 642 MB, routing 329 MB, search 724 MB, offline
+# packs 1,077 MB, 4.4 GB at the peak, 12 minutes on 4 CPUs and a fast line),
+# Monaco and Liechtenstein for the fixed part, and Australia's known totals
+# for the address file. They are rough on purpose: road density, address
+# coverage and coastline change them from country to country, and nothing the
+# size of Germany or the United States has been built to check them.
+ROUTING_PER_OSM = 1.0      # Valhalla's tile archive
+BASEMAP_PER_OSM = 1.6      # the cut of the Protomaps basemap
+SEARCH_PER_OSM = 1.8       # Photon's index
+FIXED_MB = 15.0            # what even the smallest map takes
 OFFLINE_PER_BUILD = 0.65   # offline packs for phones, on top of the rest
-WORK_PER_OSM = 2.6         # scratch space while building (loose tiles, the files themselves)
+WORK_PER_OSM = 4.2         # scratch space while building (the files themselves, loose tiles, the offline search copy)
 GNAF_DOWNLOAD_MB = 1700.0  # Australia's address file
-GNAF_SEARCH_MB = 2600.0    # ...and what it adds to the search index
-MINUTES_PER_GB = 45.0      # on the container's default 4 CPUs
+GNAF_SEARCH_MB = 2600.0    # ...what it adds to the search index
+GNAF_WORK_MB = 3500.0      # ...and to the scratch space
+GNAF_MINUTES = 30.0
+MINUTES_PER_GB = 25.0      # on the container's default 4 CPUs
 MINUTES_FLAT = 4.0
-MINUTES_PER_SHARED_GB = 3.0  # reading a neighbour's search file to pick one country out
+MINUTES_PER_SHARED_GB = 5.5  # downloading and reading the search files (France's 1.6 GB for Monaco: 9 minutes)
+
+
+def _built_mb(osm_mb: float, *, gnaf: bool, offline: bool) -> float:
+    built = FIXED_MB + osm_mb * (ROUTING_PER_OSM + BASEMAP_PER_OSM + SEARCH_PER_OSM) + (GNAF_SEARCH_MB if gnaf else 0)
+    return built * (1 + OFFLINE_PER_BUILD) if offline else built
+
+
+def _minutes(osm_mb: float, search_files_mb: float, *, gnaf: bool) -> float:
+    return MINUTES_FLAT + osm_mb / 1000 * MINUTES_PER_GB + search_files_mb / 1000 * MINUTES_PER_SHARED_GB + (GNAF_MINUTES if gnaf else 0)
 
 
 def public(region: dict[str, Any]) -> dict[str, Any]:
@@ -303,12 +319,8 @@ def estimate_one(region: dict[str, Any], osm_mb: float | None, *, offline: bool 
     if not osm_mb:
         return {"disk_mb": None, "minutes": None}
     gnaf = region["id"] == "australia"
-    built = osm_mb * (ROUTING_PER_OSM + BASEMAP_PER_OSM + SEARCH_PER_OSM) + (GNAF_SEARCH_MB if gnaf else 0)
-    if offline:
-        built *= 1 + OFFLINE_PER_BUILD
     shared = sum(sizes()["photon"].get(p["path"], 0) for p in region["photon"])
-    minutes = MINUTES_FLAT + osm_mb / 1000 * MINUTES_PER_GB + shared / 1000 * MINUTES_PER_SHARED_GB + (15 if gnaf else 0)
-    return {"disk_mb": round(built), "minutes": round(minutes)}
+    return {"disk_mb": round(_built_mb(osm_mb, gnaf=gnaf, offline=offline)), "minutes": round(_minutes(osm_mb, shared, gnaf=gnaf))}
 
 
 def estimate(regions: list[dict[str, Any]], osm_mb: dict[str, float], *, offline: bool, live_bytes: int, free_bytes: int | None) -> dict[str, Any]:
@@ -319,12 +331,10 @@ def estimate(regions: list[dict[str, Any]], osm_mb: dict[str, float], *, offline
     gnaf = any(r["id"] == "australia" for r in regions)
     paths = {p["path"] for r in regions for p in r["photon"]}
     search_files = sum(table["photon"].get(p, 0) for p in paths)
-    built = osm * (ROUTING_PER_OSM + BASEMAP_PER_OSM + SEARCH_PER_OSM) + (GNAF_SEARCH_MB if gnaf else 0)
-    if offline:
-        built *= 1 + OFFLINE_PER_BUILD
-    work = osm * WORK_PER_OSM + (GNAF_DOWNLOAD_MB if gnaf else 0)
+    built = _built_mb(osm, gnaf=gnaf, offline=offline)
+    work = osm * WORK_PER_OSM + (GNAF_WORK_MB if gnaf else 0)
     download = osm + search_files + osm * BASEMAP_PER_OSM + (GNAF_DOWNLOAD_MB if gnaf else 0)
-    minutes = MINUTES_FLAT + osm / 1000 * MINUTES_PER_GB + search_files / 1000 * MINUTES_PER_SHARED_GB + (15 if gnaf else 0)
+    minutes = _minutes(osm, search_files, gnaf=gnaf)
     needs = int((built + work) * 1_000_000)
     return {
         "complete": len(known) == len(regions),

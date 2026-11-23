@@ -67,8 +67,7 @@ export function MapRegionPicker({ value, onChange, installed = [], single = fals
       if (r.parent && ids.has(r.parent)) continue;
       out.push(r);
       const stack = open.has(r.id) ? [...(children.get(r.id) ?? [])] : [];
-      while (stack.length) {
-        const child = stack.shift()!;
+      for (let child = stack.shift(); child; child = stack.shift()) {
         out.push(child);
         if (open.has(child.id)) stack.unshift(...(children.get(child.id) ?? []));
       }

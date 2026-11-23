@@ -263,13 +263,12 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       const style = await serverMapStyle(maplibre, theme, basemap);
       if (off || !box.current) return;
       libRef.current = maplibre;
+      const opening = view.current === WHOLE_COUNTRY ? mapBounds(queryClient.getQueryData<MapsConfig>(["maps-config"])) : null;
       map = new maplibre.Map({
         container: box.current,
         style,
         // Nowhere remembered: open on the maps this server has.
-        ...(view.current === WHOLE_COUNTRY && mapBounds(queryClient.getQueryData<MapsConfig>(["maps-config"]))
-          ? { bounds: mapBounds(queryClient.getQueryData<MapsConfig>(["maps-config"]))!, fitBoundsOptions: { padding: 24 } }
-          : { center: view.current.center, zoom: view.current.zoom }),
+        ...(opening ? { bounds: opening, fitBoundsOptions: { padding: 24 } } : { center: view.current.center, zoom: view.current.zoom }),
         attributionControl: { compact: true },
         transformRequest: signTrafficRequest,
       });
@@ -374,7 +373,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       map?.remove();
       mapRef.current = null;
     };
-  }, [basemap, theme]);
+  }, [basemap, theme, queryClient]);
 
   const routeLines = useMemo(() => routes.map((r) => r.legs.flatMap((l) => decodeShape(l.shape))), [routes]);
 
