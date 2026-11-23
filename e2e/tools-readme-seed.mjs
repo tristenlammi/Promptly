@@ -1,12 +1,21 @@
 // Demo data for the README screenshots, part two: everything that has an
 // ordinary API, written as the made-up Hartley family (Claire, Tom, Ellie,
-// Max). Not a test. Only for a throwaway stack:
+// Max). Not a test. Only for a throwaway stack. The whole run, from the
+// repo root in Git Bash:
 //
 //   bash scripts/stack.sh up shots --with media,maps,convert
 //   docker stop PromptlyShots-MailWorker          # the demo mailbox has no server behind it
+//   mkdir -p .stacks/shots/readme
 //   docker exec -i PromptlyShots-Backend python - < e2e/readme-shots/seed.py > .stacks/shots/readme/auth.json
-//   cd e2e && node tools-readme-seed.mjs          # every section, or name some: calendar notes
-//   node tools-readme-shots.mjs
+//   (cd e2e && node readme-shots/fetch-photos.mjs get)     # once: CC0 photographs, not committed
+//   (cd e2e && node tools-readme-seed.mjs)                 # every section, or name some: calendar notes
+//   docker exec -i PromptlyShots-Backend python - < e2e/readme-shots/backdate.py
+//   (cd e2e && node tools-readme-shots.mjs)
+//   then e2e/readme-shots/shrink.py (its header says how), and
+//   bash scripts/stack.sh down shots
+//
+// A section that finds its data already there does nothing; to start again,
+// take the stack down and bring it up.
 //
 // README_BASE_URL (default http://localhost:8093) and README_AUTH (default
 // ../.stacks/shots/readme/auth.json) point it elsewhere. Dates are worked
