@@ -29,8 +29,11 @@ export interface CustomModelSummary {
   name: string;
   display_name: string;
   description: string | null;
-  base_provider_id: string;
-  base_model_id: string;
+  /** Both null = no model behind it yet. */
+  base_provider_id: string | null;
+  base_model_id: string | null;
+  /** The server's own "Promptly" model. */
+  is_builtin?: boolean;
   base_display_name: string | null;
   file_count: number;
   ready_file_count: number;

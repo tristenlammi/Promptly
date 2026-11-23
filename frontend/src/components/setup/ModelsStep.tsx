@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 
 import { adminApi, type AppSettingsPatch } from "@/api/admin";
@@ -6,6 +7,7 @@ import { modelsApi } from "@/api/models";
 import { setupApi, type ModelRole, type ModelSuggestions } from "@/api/setup";
 import type { AvailableModel } from "@/api/types";
 import { Button } from "@/components/shared/Button";
+import { AVAILABLE_MODELS_KEY } from "@/hooks/useProviders";
 import { useModelStore } from "@/store/modelStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -48,6 +50,7 @@ export function ModelsStep({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
 
   useEffect(() => {
     let alive = true;
@@ -76,15 +79,25 @@ export function ModelsStep({
     setSaving(true);
     try {
       const patch: Record<string, string | null> = {};
+      const chat = split(picked.chat ?? "");
+      // With the built-in Promptly model, the chat pick is the model
+      // behind it, and Promptly becomes what new chats start on.
+      const viaPromptly = !!info.promptly && !!chat;
       for (const r of info.roles) {
+        if (r.role === "chat" && (viaPromptly || info.promptly)) continue;
         const pair = split(picked[r.role] ?? "");
         patch[`${r.field}_provider_id`] = pair ? pair[0] : null;
         patch[`${r.field}_model_id`] = pair ? pair[1] : null;
       }
-      await adminApi.updateAppSettings(patch as AppSettingsPatch);
+      if (Object.keys(patch).length) await adminApi.updateAppSettings(patch as AppSettingsPatch);
       // The admin's own chat picker follows straight away.
-      const chat = split(picked.chat ?? "");
-      useModelStore.getState().setAdminDefault(chat ? chat[0] : null, chat ? chat[1] : null);
+      if (viaPromptly && chat) {
+        const saved = await setupApi.setPromptlyModel(chat[0], chat[1], true);
+        useModelStore.getState().setAdminDefault(saved.default_chat_provider_id, saved.default_chat_model_id);
+        await qc.invalidateQueries({ queryKey: AVAILABLE_MODELS_KEY });
+      } else if (!info.promptly) {
+        useModelStore.getState().setAdminDefault(chat ? chat[0] : null, chat ? chat[1] : null);
+      }
       const see = split(picked.see ?? "");
       useModelStore.getState().setVisionRelay(see ? see[0] : null, see ? see[1] : null);
       onDone();
@@ -147,7 +160,7 @@ export function ModelsStep({
         <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-hidden />
         <div>
           Promptly uses a model for each of these jobs. We've picked one for each from what you connected. Keep them
-          or change any: you can always change them later in Admin → Models → Defaults.
+          or change any: you can always change them later in Admin → Models.
         </div>
       </div>
 

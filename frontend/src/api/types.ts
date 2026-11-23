@@ -773,6 +773,11 @@ export interface AvailableModel {
    *  the backend resolves it back to the underlying base model at
    *  chat time. */
   is_custom?: boolean;
+  /** A custom model with no model behind it yet (the built-in Promptly
+   *  model before an admin picks one). It's listed so the picker can say
+   *  so; a message sent to it gets a plain "an admin needs to choose a
+   *  model" answer. Its ``provider_id`` is only a placeholder. */
+  needs_setup?: boolean;
   /** Only set when ``is_custom`` is true. Raw ``CustomModel.id`` uuid. */
   custom_model_id?: string | null;
   /** Only set when ``is_custom`` is true. Used as the subtitle in the

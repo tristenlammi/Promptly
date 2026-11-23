@@ -19,7 +19,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { customModelsApi } from "@/api/customModels";
 import { mfaApi } from "@/api/mfa";
 import { modelsApi } from "@/api/models";
-import { setupApi, type SetupChecklist as Checklist } from "@/api/setup";
+import { setupApi, type EmbeddingOption, type SetupChecklist as Checklist } from "@/api/setup";
 import type { ProviderType } from "@/api/types";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/shared/Button";
@@ -567,7 +567,7 @@ function AccountStep({
 // --------------------------------------------------------------------
 
 function EmbeddingStep({ onDone }: { onDone: () => void }) {
-  const [choice, setChoice] = useState<"local" | "openai" | "skip" | null>(null);
+  const [choice, setChoice] = useState<"local" | "cloud" | "skip" | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -579,19 +579,18 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
     model: string;
     model_installed: boolean;
   } | null>(null);
-  const [openai, setOpenai] = useState<{ id: string; name: string } | null>(null);
+  // A reading model the connected AI service can provide with the key it
+  // already has (OpenAI direct, or OpenRouter's embeddings endpoint).
+  const [cloud, setCloud] = useState<EmbeddingOption | null>(null);
   useEffect(() => {
     customModelsApi.localEmbeddingStatus().then(setLocal).catch(() => setLocal(null));
-    modelsApi
-      .list()
-      .then((ps) => {
-        const p = ps.find((x) => x.enabled && x.type === "openai");
-        if (p) setOpenai({ id: p.id, name: p.name });
-      })
+    setupApi
+      .embeddingOptions()
+      .then((options) => setCloud(options[0] ?? null))
       .catch(() => {});
   }, []);
 
-  const choose = async (pick: "local" | "openai" | "skip") => {
+  const choose = async (pick: "local" | "cloud" | "skip") => {
     setError(null);
     setChoice(pick);
     if (pick === "skip") {
@@ -600,20 +599,20 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
     }
     setLoading(true);
     try {
-      if (pick === "openai" && openai) {
+      if (pick === "cloud" && cloud) {
         await customModelsApi.setEmbeddingConfig({
-          embedding_provider_id: openai.id,
-          embedding_model_id: "text-embedding-3-small",
-          embedding_dim: 1536,
+          embedding_provider_id: cloud.provider_id,
+          embedding_model_id: cloud.model_id,
+          embedding_dim: cloud.dim,
         });
         const test = await customModelsApi.testEmbeddingConfig();
-        if (!test.ok) throw new Error(test.error || "OpenAI didn't answer a test request.");
+        if (!test.ok) throw new Error(test.error || `${cloud.provider_name} didn't answer a test request.`);
       } else {
         await customModelsApi.bootstrapLocalEmbedding();
       }
       setDone(true);
     } catch (err) {
-      setError(extractError(err, "Could not configure local embeddings"));
+      setError(extractError(err, "Couldn't set up the reading model."));
       setChoice(null);
     } finally {
       setLoading(false);
@@ -676,16 +675,16 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
         onClick={() => choose("local")}
       />
 
-      {openai && (
+      {cloud && (
         <ProviderCard
           icon={<Cloud className="h-5 w-5" />}
-          title="OpenAI"
-          subtitle={`Use your ${openai.name} key with text-embedding-3-small.`}
-          bullet="Set up now in one click; costs a few cents per thousand pages"
-          selected={choice === "openai"}
-          loading={loading && choice === "openai"}
+          title={`Through ${cloud.provider_name}`}
+          subtitle={`Uses the ${cloud.provider_name} key you already connected (${cloud.model_id}).`}
+          bullet="Set up now in one click. Costs a few cents per thousand pages; the text of your files is sent to that service to be read"
+          selected={choice === "cloud"}
+          loading={loading && choice === "cloud"}
           disabled={done || loading}
-          onClick={() => choose("openai")}
+          onClick={() => choose("cloud")}
         />
       )}
 
@@ -694,7 +693,7 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
       <ProviderCard
         icon={<Cloud className="h-5 w-5" />}
         title="Set up later"
-        subtitle="Another service: OpenAI, Gemini, or any OpenAI-compatible one."
+        subtitle={cloud ? "Or choose a different one in Admin later." : "Needs Ollama on this server, or an OpenAI or OpenRouter key."}
         bullet="Nothing is set up now. It stays on your Finish setting up list"
         selected={choice === "skip"}
         disabled={done || loading}
@@ -716,12 +715,12 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
         <div
           className={[
             "rounded-card border px-3 py-2 text-xs",
-            choice === "local"
+            choice === "local" || choice === "cloud"
               ? "border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)]"
               : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
           ].join(" ")}
         >
-          {choice === "local" || choice === "openai"
+          {choice === "local" || choice === "cloud"
             ? "Set up and answering. The assistant can now read your files."
             : "Not set up yet. The assistant can't look things up in your files until you add one (Admin → Models → Defaults)."}
         </div>

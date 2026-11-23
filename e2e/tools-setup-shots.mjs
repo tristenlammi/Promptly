@@ -9,9 +9,12 @@
 //   scripts/stack.sh down setup --keep-images && scripts/stack.sh up setup --with calls,maps,voice --no-build
 //   ... SETUP_PASS=phone node tools-setup-shots.mjs
 //
-// desktop: "Set everything up now", every step, a reload in the middle
-//          (resume), then Today's card, Admin → Setup and one step reopened.
-// phone:   "Just look around" first, then a step from the summary.
+// desktop:  "Set everything up now", every step, a reload in the middle
+//           (resume), then Today's card, Admin → Setup and one step reopened.
+// phone:    "Just look around" first, then a step from the summary.
+// notready: "Just look around" and straight in; an AI service is connected
+//           afterwards, so the built-in Promptly model shows as not ready
+//           in the chat's model list until its model is chosen.
 //
 // No real AI service is used: once the "nothing connected" screens are shot,
 // a provider with a made-up catalogue is put straight into the stack's
@@ -63,7 +66,7 @@ function seedProvider() {
   execFileSync("docker", ["exec", "-i", BACKEND, "python", "-"], { input: SEED, stdio: ["pipe", "inherit", "inherit"] });
 }
 
-const sizes = { desktop: { width: 1280, height: 800 }, phone: { width: 390, height: 844 } };
+const sizes = { desktop: { width: 1280, height: 800 }, phone: { width: 390, height: 844 }, notready: { width: 1280, height: 800 } };
 const viewport = sizes[PASS];
 if (!viewport) throw new Error(`SETUP_PASS must be desktop or phone, not ${PASS}`);
 
@@ -104,6 +107,47 @@ await page.getByRole("button", { name: "Continue" }).click();
 await at("path");
 await shot("path");
 
+const picker = page.locator('button[aria-haspopup="listbox"]').first();
+
+if (PASS === "notready") {
+  await page.getByTestId("setup-path-look").click();
+  await at("summary");
+  await page.getByTestId("setup-checklist").waitFor();
+  await page.getByTestId("setup-finish").click();
+  await page.waitForURL(/\/today$/, { timeout: 30_000 });
+  // An AI service is connected later, outside the wizard.
+  seedProvider();
+  await page.goto(`${BASE}/chat`);
+  await picker.waitFor({ timeout: 30_000 });
+  await picker.click();
+  const row = page.locator('[role="option"][data-needs-setup="true"]');
+  await row.waitFor();
+  if (!/Promptly/.test(await row.innerText()) || !/Not ready/.test(await row.innerText())) throw new Error("Promptly isn't listed as not ready");
+  await shot("picker-promptly-not-ready");
+  // For an admin the row goes straight to choosing its model.
+  await row.click();
+  await at("models");
+  await page.getByTestId("models-step").waitFor();
+  await page.getByLabel("The model behind Promptly").waitFor();
+  await shot("choose-model-behind-promptly");
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.waitForURL(/\/admin\?tab=setup/);
+  await page.getByTestId("setup-row-models").and(page.locator('[data-status="done"]')).waitFor();
+  await page.goto(`${BASE}/chat`);
+  await picker.waitFor({ timeout: 30_000 });
+  await page.waitForFunction(() => /Promptly/.test(((b) => `${b?.textContent ?? ""} ${b?.getAttribute("aria-label") ?? ""}`)(document.querySelector('button[aria-haspopup="listbox"]'))), null, { timeout: 20_000 });
+  await picker.click();
+  await page.locator('[role="option"]').first().waitFor();
+  if (await page.locator('[role="option"][data-needs-setup="true"]').count()) throw new Error("Promptly still says not ready");
+  await shot("chat-starts-on-promptly");
+  await page.goto(`${BASE}/admin?tab=models`);
+  await page.waitForTimeout(1500);
+  await browser.close();
+  if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);
+  console.log(`done: ${n} screenshots in ${OUT}`);
+  process.exit(0);
+}
+
 if (PASS === "phone") {
   // Just look around: straight to the summary, nothing else asked.
   await page.getByTestId("setup-path-look").click();
@@ -138,6 +182,7 @@ await page.getByRole("button", { name: "Continue" }).click();
 // ---- Default models, suggested ----
 await at("models");
 await page.getByTestId("models-step").waitFor();
+await page.getByLabel("The model behind Promptly").waitFor();
 const picked = async (role) => page.locator(`#setup-model-${role} option:checked`).innerText();
 const picks = { chat: await picked("chat"), quick: await picked("quick"), voice: await picked("voice"), see: await picked("see"), draw: await picked("draw") };
 console.log("   suggested:", JSON.stringify(picks));
@@ -147,9 +192,10 @@ if (!/Claude Sonnet 4\.5/.test(picks.chat) || !/Haiku 4\.5/.test(picks.quick) ||
 await shot("models");
 await page.getByRole("button", { name: "Use these" }).click();
 
-// ---- The reading model ----
+// ---- The reading model: OpenRouter can do it with the key it has ----
 await at("search");
 await page.getByText("The reading model").waitFor();
+await page.getByRole("button", { name: /Through OpenRouter/ }).waitFor();
 await page.waitForTimeout(1500);
 await shot("search");
 await page.getByRole("button", { name: /Set up later/ }).click();
@@ -193,6 +239,12 @@ await page.waitForURL(/\/today$/, { timeout: 30_000 });
 await page.getByTestId("today-setup-card").waitFor({ timeout: 30_000 });
 await page.waitForTimeout(1500);
 await shot("today-card");
+// A new chat starts on Promptly, by name.
+await page.goto(`${BASE}/chat`);
+await page.waitForFunction(() => /Promptly/.test(((b) => `${b?.textContent ?? ""} ${b?.getAttribute("aria-label") ?? ""}`)(document.querySelector('button[aria-haspopup="listbox"]'))), null, { timeout: 30_000 });
+await picker.click();
+await page.locator('[role="option"]').first().waitFor();
+await shot("chat-starts-on-promptly");
 await page.goto(`${BASE}/admin?tab=setup`);
 await page.getByTestId("setup-panel").waitFor({ timeout: 30_000 });
 await shot("admin-setup");

@@ -69,7 +69,18 @@ export interface ModelRole {
 
 export interface ModelSuggestions {
   has_models: boolean;
+  /** The built-in Promptly model, when it still exists: the chat job is
+   *  then "the model behind Promptly". */
+  promptly: { id: string; display_name: string; ready: boolean; is_default: boolean } | null;
   roles: ModelRole[];
+}
+
+export interface EmbeddingOption {
+  provider_id: string;
+  provider_name: string;
+  provider_type: string;
+  model_id: string;
+  dim: number;
 }
 
 export const SETUP_QUERY_KEY = ["admin", "setup"] as const;
@@ -78,6 +89,22 @@ export const setupApi = {
   async checklist(): Promise<SetupChecklist> {
     const { data } = await apiClient.get<SetupChecklist>("/admin/setup");
     return data;
+  },
+  /** Put a model behind the built-in Promptly model; by default new chats
+   *  then start on Promptly. */
+  async setPromptlyModel(provider_id: string, model_id: string, make_default = true): Promise<{
+    model_id: string;
+    provider_id: string;
+    default_chat_provider_id: string | null;
+    default_chat_model_id: string | null;
+  }> {
+    const { data } = await apiClient.put("/admin/setup/promptly-model", { provider_id, model_id, make_default });
+    return data;
+  },
+  /** Reading (embedding) models the connected services offer in one click. */
+  async embeddingOptions(): Promise<EmbeddingOption[]> {
+    const { data } = await apiClient.get<{ options: EmbeddingOption[] }>("/admin/setup/embedding-options");
+    return data.options;
   },
   async modelSuggestions(): Promise<ModelSuggestions> {
     const { data } = await apiClient.get<ModelSuggestions>("/admin/setup/model-suggestions");

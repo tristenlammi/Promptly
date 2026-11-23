@@ -238,7 +238,11 @@ export function ModelSelector({ compact = false, upward = false }: ModelSelector
                 const active =
                   selected?.provider_id === m.provider_id &&
                   selected?.model_id === m.model_id;
-                const subtitle = m.is_custom
+                const subtitle = m.needs_setup
+                  ? isAdmin
+                    ? "Not ready: choose the model behind it"
+                    : "Not ready: an admin needs to choose its model"
+                  : m.is_custom
                   ? `Internal model${m.context_window ? ` · ${(m.context_window / 1000).toFixed(0)}k ctx` : ""}`
                   : `${m.model_id}${m.context_window ? ` · ${(m.context_window / 1000).toFixed(0)}k ctx` : ""}`;
                 return (
@@ -246,9 +250,17 @@ export function ModelSelector({ compact = false, upward = false }: ModelSelector
                     key={`${m.provider_id}:${m.model_id}`}
                     role="option"
                     aria-selected={active}
+                    data-needs-setup={m.needs_setup ? "true" : undefined}
                     onClick={() => {
-                      setSelection(m.provider_id, m.model_id);
                       setOpen(false);
+                      // Not ready: an admin goes straight to choosing its
+                      // model; for anyone else it stays selectable, and a
+                      // message to it explains itself.
+                      if (m.needs_setup && isAdmin) {
+                        navigate("/setup?step=models");
+                        return;
+                      }
+                      setSelection(m.provider_id, m.model_id);
                     }}
                     className={cn(
                       "flex w-full items-start gap-2 px-3 py-2 text-left text-sm transition",
@@ -263,7 +275,12 @@ export function ModelSelector({ compact = false, upward = false }: ModelSelector
                         </span>
                         {m.supports_vision && <VisionBadge />}
                       </div>
-                      <div className="truncate text-[11px] text-[var(--text-muted)]">
+                      <div
+                        className={cn(
+                          "truncate text-[11px]",
+                          m.needs_setup ? "text-amber-700 dark:text-amber-400" : "text-[var(--text-muted)]"
+                        )}
+                      >
                         {subtitle}
                       </div>
                     </div>
