@@ -18,13 +18,22 @@ all on hardware you control.
 
 ## Install
 
-One command. Any machine that runs Docker (Compose v2 ≥ 2.24).
+One command. Any machine that has git and Docker (Compose v2 ≥ 2.24).
 
 ```bash
-git clone https://github.com/tristenlammi/Promptly.git && cd Promptly && ./install.sh
+curl -fsSL https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.sh | bash
 ```
 
-Windows PowerShell: `.\install.ps1`
+Windows PowerShell (with Docker Desktop running):
+
+```powershell
+irm https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.ps1 | iex
+```
+
+It downloads the latest release into a `Promptly` folder where you run it and
+installs from there. Options go after `bash -s --`, for example
+`... | bash -s -- --no-maps`. Already cloned the repository? Run `./install.sh`
+(Windows: `.\install.ps1`) in it instead.
 
 The script generates all secrets, builds and starts the stack, and waits for
 it to come up healthy. Open **http://localhost:8087** and the first-run wizard
@@ -224,6 +233,7 @@ stdout logs on the host may still hold raw request lines from before v0.34.0.
 ## Updating
 
 ```bash
+cd Promptly                 # the folder the installer made
 ./update.sh                 # Linux/macOS: update to the latest release
 .\update.ps1                # Windows
 ```

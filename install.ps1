@@ -406,6 +406,18 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# A part switched off by a flag on a re-run: its container is still running
+# (compose only starts things), so stop it.
+if ($ProfileFlagsGiven -and -not $FreshEnv) {
+    $active = @(Invoke-Quiet { docker compose config --services })
+    foreach ($svc in @(Invoke-Quiet { docker compose --profile '*' ps --services })) {
+        if ($svc -and ($active -notcontains $svc)) {
+            Invoke-Quiet { docker compose --profile '*' rm -sf $svc } | Out-Null
+            if ($LASTEXITCODE -eq 0) { Write-Skip "Stopped $svc (switched off)" }
+        }
+    }
+}
+
 # ---------- 5. wait for backend health ----------
 Write-Section "Waiting for Promptly to answer"
 $healthy = $false

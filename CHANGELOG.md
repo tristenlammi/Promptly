@@ -21,6 +21,22 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- One-line install: `curl -fsSL https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.sh | bash` (Windows: `irm .../install.ps1 | iex`) downloads the latest release into `./Promptly` and installs it; `PROMPTLY_DIR`, `PROMPTLY_REF` and `PROMPTLY_REPO` change where and what.
+- Installer: `--no-start` / `-NoStart` sets the folder up (.env, secrets, choices) without building or starting, so the port can be changed first.
+
+### Changed
+- Installer: says how to get git or Docker when they're missing, tells "Docker isn't running" from "your user isn't allowed to use Docker", warns when disk or memory is short, no longer needs openssl, says how long the build takes, and ends with the folder and the update command.
+- Installer: refuses to start a second install on a machine that already runs Promptly (it would take over the first one's containers) and points at the existing folder.
+- Installer: re-running with a flag that switches a part off (`--no-search`, `--no-calls`, ...) now stops that part's container too.
+- Frontend image build no longer prints npm's audit summary.
+
+### Fixed
+- `update.ps1` and `install.ps1` on Windows PowerShell 5.1 (the one that ships with Windows): anything Docker or git printed on stderr stopped the script, so an update died at "Reloading nginx config" after the new version was already running.
+- `update.sh` run as root on a folder owned by another user (git's "dubious ownership") now carries on with a note; run by a user who can't write to the folder, or without access to Docker, it says so before anything is touched.
+- Update scripts stop with a plain message when the new version can't be fetched (no internet) instead of carrying on with the old list of releases (Windows) or a bare git error.
+- Installer: a failed build or start now says the likely cause (connection dropped, disk full, port taken) and what to do, and waits up to 5 minutes for the first start instead of 3.
+
 ## [0.52.4] - 2026-11-23
 
 ### Fixed

@@ -470,6 +470,17 @@ if ! docker compose up -d; then
   exit 1
 fi
 
+# A part switched off by a flag on a re-run: its container is still running
+# (compose only starts things), so stop it.
+if $PROFILE_FLAGS_GIVEN && ! $FRESH_ENV; then
+  active="$(docker compose config --services 2>/dev/null || true)"
+  for svc in $(docker compose --profile '*' ps --services 2>/dev/null || true); do
+    if ! grep -qxF "$svc" <<<"$active"; then
+      docker compose --profile '*' rm -sf "$svc" >/dev/null 2>&1 && yellow "  Stopped $svc (switched off)" || true
+    fi
+  done
+fi
+
 # ---------- 5. wait for the backend to come up ----------
 bold "Waiting for Promptly to answer"
 healthy=false
