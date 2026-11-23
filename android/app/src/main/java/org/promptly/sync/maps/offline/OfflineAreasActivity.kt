@@ -142,6 +142,10 @@ private fun OfflineScreens(link: OfflineAreasActivity.Link?, onClose: () -> Unit
     var loading by remember { mutableStateOf(true) }
     var style by remember { mutableStateOf<String?>(null) }
     var home by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    // For where "Choose an area" opens: where you are (only if location is already
+    // allowed), else the maps the server keeps.
+    var near by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var serverMaps by remember { mutableStateOf<DoubleArray?>(null) }
     val changed by Offline.changed.collectAsState()
     var tick by remember { mutableIntStateOf(0) }
 
@@ -187,6 +191,8 @@ private fun OfflineScreens(link: OfflineAreasActivity.Link?, onClose: () -> Unit
             loading = false
             style = runCatching { Maps.styleFile(context) }.getOrNull()
             home = runCatching { Maps.myPlaces(context).firstOrNull { it.kind == "home" }?.let { it.lat to it.lon } }.getOrNull()
+            near = org.promptly.sync.maps.MapStart.lastKnown(context)
+            serverMaps = Maps.serverBounds(context)
         }
         onPauseOrDispose { job.cancel() }
     }
@@ -226,7 +232,7 @@ private fun OfflineScreens(link: OfflineAreasActivity.Link?, onClose: () -> Unit
                 if (st == null) {
                     Message("Choose an area", loadProblem ?: "The map needs a connection to your server. Try again when you have signal.") { screen = Screen.List }
                 } else {
-                    ChooseArea(st, home, onBack = { screen = Screen.List }) { area ->
+                    ChooseArea(st, near, serverMaps, onBack = { screen = Screen.List }) { area ->
                         overview = Offline.saved(context)
                         screen = Screen.List
                         if (overview?.areas?.none { it.id == area.id } == true) overview = overview?.copy(areas = listOf(area) + overview!!.areas)

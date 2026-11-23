@@ -65,7 +65,6 @@ import com.stadiamaps.ferrostar.core.extensions.currentStep
 import com.stadiamaps.ferrostar.core.extensions.progress
 import com.stadiamaps.ferrostar.core.extensions.visualInstruction
 import org.promptly.sync.BuildConfig
-import uniffi.ferrostar.DrivingSide
 import com.stadiamaps.ferrostar.car.app.template.models.toCarDistance
 import com.stadiamaps.ferrostar.core.NavigationUiState
 import com.stadiamaps.ferrostar.maplibreui.runtime.navigationCameraOptions
@@ -490,7 +489,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             carContext,
             instruction = trip?.visualInstruction(),
             metresToTurn = trip?.progress()?.distanceToNextManeuver,
-            side = step?.drivingSide ?: DrivingSide.LEFT,
+            side = DrivingSides.side(step?.drivingSide, state.location?.coordinates?.let { it.lat to it.lng }, MapStart.savedBounds(carContext)),
             exit = step?.roundaboutExitNumber?.toInt(),
             rerouting = state.isCalculatingNewRoute == true,
         )?.let { builder.setNavigationInfo(it) }

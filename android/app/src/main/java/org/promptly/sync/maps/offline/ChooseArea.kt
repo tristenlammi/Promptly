@@ -81,6 +81,7 @@ import org.maplibre.spatialk.geojson.Position
 fun ChooseArea(
     style: String,
     start: Pair<Double, Double>?,
+    bounds: DoubleArray?,
     onBack: () -> Unit,
     onSaved: (OfflineApi.Area) -> Unit,
 ) {
@@ -88,9 +89,9 @@ fun ChooseArea(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val accent = MaterialTheme.colorScheme.primary
-    val camera = rememberCameraState(
-        CameraPosition(target = Position(start?.second ?: 151.21, start?.first ?: -33.87), zoom = if (start != null) 8.5 else 7.0),
-    )
+    // Where you are ([start]: latitude, longitude), else the maps the server keeps, else the world.
+    val opening = remember { org.promptly.sync.maps.MapStart.view(start, bounds, zoomHere = 8.5) }
+    val camera = rememberCameraState(CameraPosition(target = Position(opening.lon, opening.lat), zoom = opening.zoom))
     var mapSize by remember { mutableStateOf(IntSize.Zero) }
     // The frame's size without the keyboard: typing a name doesn't change the area.
     var frameSize by remember { mutableStateOf(IntSize.Zero) }

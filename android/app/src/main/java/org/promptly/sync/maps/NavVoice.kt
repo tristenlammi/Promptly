@@ -115,7 +115,7 @@ class NavVoice(context: Context) : SpokenInstructionObserver {
                 waiting.toList().also { waiting.clear() }
             }
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.forLanguageTag("en-AU")
+                tts?.language = voiceLocale()
                 tts?.setAudioAttributes(attributes)
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) = Unit
@@ -217,3 +217,8 @@ class NavVoice(context: Context) : SpokenInstructionObserver {
         const val BEEP_TAIL_MS = 200L
     }
 }
+
+/** The voice directions are read in. They are written in English, so: the phone's own
+ *  English (en-NZ, en-GB, en-US...) when it is set to one, else plain English. Never a
+ *  fixed country's accent. */
+internal fun voiceLocale(device: Locale = Locale.getDefault()): Locale = if (device.language == "en") device else Locale.ENGLISH

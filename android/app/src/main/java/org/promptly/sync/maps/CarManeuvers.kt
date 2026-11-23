@@ -55,7 +55,7 @@ object CarManeuvers {
     fun safeStep(context: Context, step: RouteStep): RouteStep {
         val exit = step.roundaboutExitNumber?.toInt()
         if (exit != null) return step
-        val side = step.drivingSide ?: DrivingSide.RIGHT
+        val side = DrivingSides.side(step.drivingSide, step.geometry.firstOrNull()?.let { it.lat to it.lng }, MapStart.savedBounds(context))
         val fixed = step.visualInstructions.map { safeInstruction(context, it, side, null) }
         return if (fixed == step.visualInstructions) step else step.copy(visualInstructions = fixed)
     }

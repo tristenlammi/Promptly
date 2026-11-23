@@ -337,12 +337,22 @@ fun DriveHome(
         }
     }
 
-    // The map: where you are first (Home until there's a fix), then the ways to where you picked.
-    val start = remember { mine.firstOrNull { it.kind == "home" } }
-    val camera = rememberCameraState(
-        if (start != null) CameraPosition(target = Position(start.lon, start.lat), zoom = 12.0) else CameraPosition(target = Position(134.0, -27.0), zoom = 3.4),
-    )
+    // The map opens where you are: the phone's last known position at once (when
+    // location is already allowed; nothing is asked for here), then the live fix.
+    // Until there is one, the maps your server keeps; failing that, the world.
+    val opening = remember { MapStart.view(MapStart.lastKnown(context), MapStart.savedBounds(context), zoomHere = 15.0) }
+    val camera = rememberCameraState(CameraPosition(target = Position(opening.lon, opening.lat), zoom = opening.zoom))
     var centred by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        // Asked afresh each time: the server's maps may have changed, or never been heard of.
+        val box = Maps.serverBounds(context)
+        if (opening.from == MapStart.From.HERE || box == null) return@LaunchedEffect
+        camera.awaitProjection()
+        // Still nowhere to show you: all of the server's maps.
+        if (here == null && !centred && picked == null) {
+            runCatching { camera.animateTo(boundingBox = BoundingBox(box[0], box[1], box[2], box[3]), padding = PaddingValues(24.dp)) }
+        }
+    }
     // Moving the map yourself stops it following, until Re-centre.
     LaunchedEffect(camera) {
         snapshotFlow { camera.moveReason }.collect { if (it == CameraMoveReason.GESTURE) following = false }

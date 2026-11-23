@@ -186,15 +186,33 @@ class OfflineApi(val server: String, private val http: OkHttpClient) {
     }
 
     companion object {
-        private val STATES = Regex(
-            "\\s*(New South Wales|Victoria|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|" +
-                "Australian Capital Territory|NSW|VIC|QLD|SA|WA|TAS|NT|ACT)?\\s*(\\d{4})?\\s*$",
+        private const val STATE_NAMES = "New South Wales|Victoria|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|" +
+            "Australian Capital Territory|NSW|VIC|QLD|SA|WA|TAS|NT|ACT"
+
+        // An Australian state after the town ("Mudgee NSW"): only with a town in front of
+        // it, so a town elsewhere that is simply called Victoria keeps its name.
+        private val STATE_AFTER_TOWN = Regex("(?<=\\S)\\s+(?:$STATE_NAMES)$")
+        // A part that is nothing but a state. The one-word names (Victoria, Queensland,
+        // Tasmania) are left out: by themselves they may just as well be a town.
+        private val ONLY_A_STATE = Regex(
+            "^(?:New South Wales|South Australia|Western Australia|Northern Territory|Australian Capital Territory|NSW|VIC|QLD|SA|WA|TAS|NT|ACT)$",
         )
+        private val POSTCODE_AFTER = Regex("\\s+\\d{4,5}$")
+        private val POSTCODE_BEFORE = Regex("^\\d{4,5}\\s+")
+
+        /** The town in the last part of an address, whatever the country's habit:
+         *  "Dubbo NSW 2830", "Taupō 3330", "10115 Berlin", "Mudgee NSW". Empty when
+         *  that part is only a state or a postcode. */
+        internal fun town(part: String): String {
+            val plain = part.trim().replace(POSTCODE_BEFORE, "").replace(POSTCODE_AFTER, "").trim()
+            if (plain.all(Char::isDigit) || ONLY_A_STATE.matches(plain)) return ""
+            return plain.replace(STATE_AFTER_TOWN, "").trim()
+        }
 
         /** A short name for an area from a reverse look-up: the town or suburb, else the place. */
         internal fun nameFrom(j: JSONObject): String? {
             val address = j.text("address")
-            val town = address?.split(",")?.lastOrNull()?.replace(STATES, "")?.trim()
+            val town = address?.split(",")?.lastOrNull()?.let { town(it) }
             if (!town.isNullOrBlank()) return town
             return j.text("name")?.takeIf { it != "Dropped pin" }
         }

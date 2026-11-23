@@ -94,6 +94,22 @@ object Maps {
         org.promptly.sync.push.NativePush.start(context, force = true)
     }
 
+    /**
+     * The box around the maps this server keeps (west, south, east, north): asked
+     * afresh and remembered, or what it said last time when there's no signal. Null
+     * when the server has no map (or is too old to say).
+     */
+    suspend fun serverBounds(context: Context): DoubleArray? = withContext(Dispatchers.IO) {
+        try {
+            MapStart.saveBounds(context, get(context, "/api/maps/config", CAR_TIMEOUT_SECONDS).optJSONArray("bounds"))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // No signal, or not signed in: what's remembered stands.
+        }
+        MapStart.savedBounds(context)
+    }
+
     /** Whether this phone's sign-in works. With no signal it can't be checked, and the
      *  phone carries on with what it has (offline maps need no server); only the server
      *  saying no (401, 403) means signing in again. */
@@ -180,6 +196,7 @@ object Maps {
         } else {
             try {
                 val config = get(context, "/api/maps/config", CAR_TIMEOUT_SECONDS)
+                MapStart.saveBounds(context, config.optJSONArray("bounds"))
                 if (config.optString("basemap").let { it.isEmpty() || it == "null" }) throw NotSetUp()
                 val (code, text) = call(context, CAR_TIMEOUT_SECONDS) { url("$server/map-assets/style-$flavor.json") }
                 if (code != 200) throw IOException("Server said $code")

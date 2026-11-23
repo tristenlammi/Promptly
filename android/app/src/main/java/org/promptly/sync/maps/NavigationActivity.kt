@@ -81,7 +81,6 @@ import org.maplibre.compose.style.BaseStyle
 import org.promptly.sync.R
 import org.promptly.sync.maps.offline.Offline
 import uniffi.ferrostar.ManeuverType
-import uniffi.ferrostar.DrivingSide
 
 /** The driving screen: `promptlymaps://navigate?server=…&code=…&stops=…`.
  *  Native because voice with the screen off and steady GPS need an app, not a
@@ -565,7 +564,11 @@ private val driveViews = NavigationViewComponentBuilder.Default()
                 instruction = instruction,
                 metres = uiState.progress?.distanceToNextManeuver,
                 then = then,
-                side = uiState.remainingSteps?.firstOrNull()?.drivingSide ?: DrivingSide.LEFT,
+                side = DrivingSides.side(
+                    uiState.remainingSteps?.firstOrNull()?.drivingSide,
+                    uiState.location?.coordinates?.let { it.lat to it.lng },
+                    MapStart.savedBounds(LocalContext.current),
+                ),
                 modifier = modifier.onSizeChanged { DriveLayout.banner = it.height },
             )
         }
