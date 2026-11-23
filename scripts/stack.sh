@@ -23,7 +23,7 @@
 #                           search     SearXNG
 #                           calls      LiveKit (voice channels), bridged; media ports not published
 #                           home       Promptly Home: the bundled Home Assistant and its connector
-#                                      (the image is about 3.5 GB, pulled once)
+#                                      (about 7 GB on disk, pulled once)
 #                           all        everything above except maps-full
 #         --e2e           add what the e2e suite exercises (media, photos-ml, maps, convert, voice)
 #         --build-extras  build whisper/tts/photos-ml/maps from this worktree
