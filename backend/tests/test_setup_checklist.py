@@ -395,3 +395,28 @@ async def test_suggestions_endpoint_reports_what_is_saved(db, user, client, quie
     assert roles["voice"]["current"]["model_id"] == "anthropic/claude-haiku-4.5"
     rows = _rows((await client.get("/api/admin/setup", headers=hdr)).json())
     assert rows["models"]["status"] == "done" and "Talk" in rows["models"]["detail"]
+
+
+async def test_finding_the_calls_service_never_blocks_the_other_checks(monkeypatch):
+    """Looking the calls service up is a blocking DNS call (4 seconds when it
+    isn't there). It runs off the event loop, so the Maps, speech and photo
+    checks next to it don't time out and vanish from the list."""
+    import threading
+
+    from app.admin import setup
+    from app.calls import checks
+    from app.rtc import config as rtc_config
+
+    seen: dict = {}
+
+    def api_url() -> str:
+        seen["thread"] = threading.current_thread()
+        return "http://livekit:7880"
+
+    async def server_status():
+        return "down", "not there", None
+
+    monkeypatch.setattr(rtc_config, "api_url", api_url)
+    monkeypatch.setattr(checks, "server_status", server_status)
+    assert await setup._calls_state() == "down"
+    assert seen["thread"] is not threading.main_thread()

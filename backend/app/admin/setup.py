@@ -130,7 +130,13 @@ async def _ollama_there() -> bool:
 
 async def _calls_state() -> str:
     from app.calls import checks
+    from app.rtc import config as rtc_config
 
+    # Finding the calls service looks its name up the slow way (a blocking
+    # DNS call, 4 seconds on Docker Desktop when the service isn't there).
+    # Off the event loop, or every other probe here times out with it and
+    # the list says Maps, speech and photos aren't installed.
+    await asyncio.to_thread(rtc_config.api_url)
     state, _err, _rooms = await checks.server_status()
     return state
 
