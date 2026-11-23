@@ -26,6 +26,9 @@ fs.mkdirSync(OUT, { recursive: true });
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 390, height: 844 };
 
+const WELLINGTON = "-41.2866,174.7756,Wellington";
+const AUCKLAND = "-36.8485,174.7633,Auckland";
+
 // name → { path, who?, viewport?, theme?, ready(page), before(page) }
 const SHOTS = {
   today: { path: "/today", ready: (p) => p.getByText("Parent-teacher interviews").first().waitFor() },
@@ -47,6 +50,17 @@ const SHOTS = {
   mealplan: { path: "/app/open/mealplan", ready: (p) => p.getByText("Chickpea and spinach curry").first().waitFor() },
   budget: { path: "/app/open/budget", ready: (p) => p.getByText(/Groceries/).first().waitFor() },
   apps: { path: "/apps/store" },
+  // A drive between two cities on the map the demo stack was given
+  // (readme-shots/choose-map.mjs: New Zealand). Needs the real maps container.
+  maps: {
+    path: `/maps?route=${WELLINGTON};${AUCKLAND}&mode=drive`,
+    ready: async (p) => {
+      await p.getByTestId("route-actions").waitFor({ timeout: 60_000 });
+      await p.getByText(/\d+ (h|hr|min)/).first().waitFor({ timeout: 60_000 });
+      await p.waitForLoadState("networkidle").catch(() => undefined);
+      await p.waitForTimeout(5000); // the map's tiles and the camera settling on the route
+    },
+  },
   "phone-today": { path: "/today", viewport: PHONE, ready: (p) => p.getByText("Parent-teacher interviews").first().waitFor() },
   "phone-rooms": { path: "/rooms", viewport: PHONE, before: async (p) => { await p.getByText("Spaces", { exact: true }).click(); await p.getByText("Hartley HQ").first().click(); await p.getByText("general", { exact: true }).first().click(); await p.getByText("He has a type").first().waitFor(); } },
   "phone-photos": { path: "/photos", viewport: PHONE, ready: (p) => p.waitForTimeout(3000) },

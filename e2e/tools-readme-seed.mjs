@@ -3,12 +3,17 @@
 // Max). Not a test. Only for a throwaway stack. The whole run, from the
 // repo root in Git Bash:
 //
-//   bash scripts/stack.sh up shots --with media,maps,convert
+//   bash scripts/stack.sh up shots --with media,maps-full,convert --build-extras
+//       (maps-full is the real maps container, for the Maps screenshot. ALWAYS
+//       with --build-extras: without it the stack reuses the main app's older
+//       maps image, which may start downloading Australia by itself. For every
+//       shot but "maps", --with media,maps,convert is enough.)
 //   docker stop PromptlyShots-MailWorker          # the demo mailbox has no server behind it
 //   mkdir -p .stacks/shots/readme
 //   docker exec -i PromptlyShots-Backend python - < e2e/readme-shots/seed.py > .stacks/shots/readme/auth.json
 //   (cd e2e && node readme-shots/fetch-photos.mjs get)     # once: CC0 photographs, not committed
 //   (cd e2e && node tools-readme-seed.mjs)                 # every section, or name some: calendar notes
+//   (cd e2e && node readme-shots/choose-map.mjs)           # a real map (New Zealand, about 15 minutes), chosen in Admin
 //   docker exec -i PromptlyShots-Backend python - < e2e/readme-shots/backdate.py
 //   (cd e2e && node tools-readme-shots.mjs)
 //   then e2e/readme-shots/shrink.py (its header says how), and
