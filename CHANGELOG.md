@@ -74,6 +74,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Sheets: a cell with no font of its own (anything typed, imported or filled in by the AI) was drawn in Times New Roman. It's now the plain sans-serif default, and the toolbar shows Arial for it.
 - Photos: an album made, or added to, straight after an upload came out short without saying so, because photos still being read weren't in the library yet. They're kept, and show in the album as soon as they've been read.
 - P Maps: "Send to my phone" in the route panel wrapped onto three lines on a computer. It has its own line now.
+- update.sh: when git itself can't read the folder, the update says what git said. It used to stop at "These tracked files have local edits" with nothing listed.
 
 ## [0.52.4] - 2026-11-23
 

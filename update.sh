@@ -308,9 +308,18 @@ fi
 # rest over to it below, and the new script picks up here.
 if [[ -z "${PROMPTLY_UPDATE_RESUME:-}" ]]; then
 bold "1/6  Checking for local changes"
-if ! $ALLOW_DIRTY && ! git diff --quiet HEAD -- 2>/dev/null; then
+DIRTY=0
+git diff --quiet HEAD -- 2>/dev/null || DIRTY=$?
+if [[ $DIRTY -gt 1 ]]; then
+  # Not "there are edits": git itself couldn't look. Say what it said.
+  red "Git couldn't check this folder for local changes. It said:"
+  git status --short 2>&1 | head -20 | sed 's/^/    /' >&2 || true
+  red "Fix that first (a common one: git config --global --add safe.directory \"$ROOT_DIR\"), then run ./update.sh again."
+  exit 1
+fi
+if ! $ALLOW_DIRTY && [[ $DIRTY -eq 1 ]]; then
   red "These tracked files have local edits, which an update would overwrite or fail on:"
-  git diff --name-only HEAD -- 2>/dev/null | sed 's/^/    /' >&2
+  git diff --name-only HEAD -- 2>/dev/null | sed 's/^/    /' >&2 || true
   red "Move your settings into .env or docker-compose.override.yml (both are kept"
   red "across updates), or undo the edits with: git checkout -- <file>"
   red "To update anyway (and keep resolving conflicts yourself): ./update.sh --allow-dirty"
