@@ -194,6 +194,127 @@ test("a map too big for the disk can't be started; a stopped build can be tried 
   await expect.poll(() => box.sent.at(-1)?.url).toBe("retry");
 });
 
+/** The browser says it is in New Zealand (its time zone), without any look-up. */
+async function inNewZealand(page: Page) {
+  await page.addInitScript(() => {
+    const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+    Intl.DateTimeFormat.prototype.resolvedOptions = function (this: Intl.DateTimeFormat) {
+      return { ...real.call(this), timeZone: "Pacific/Auckland" };
+    };
+  });
+}
+
+/** The list as the server sends it now: each map says which countries it covers. */
+const CODES: Record<string, string[]> = { australia: ["au"], "new-zealand": ["nz"], france: ["fr"], monaco: ["mc"], us: ["us"], "us/california": ["us"], "us/texas": ["us"] };
+const withCodes = { ...CATALOG, regions: CATALOG.regions.map((r) => ({ ...r, codes: CODES[r.id] })) };
+
+test("the picker offers your own country first, and is plain about addresses and shared downloads", async ({ dana: page }) => {
+  await inNewZealand(page);
+  await fakeMaps(page, state());
+  await page.route("**/api/maps/regions/catalog*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify(withCodes) }));
+  // Monaco: nearly all of the download is France's search file, which is read and not kept.
+  await page.route("**/api/maps/regions/estimate", (r) => {
+    const ids = r.request().postDataJSON().ids as string[];
+    const monaco = ids.length === 1 && ids[0] === "monaco";
+    return r.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        complete: true, download_bytes: monaco ? 1_614_000_000 : 520_000_000, streamed_bytes: monaco ? 1_610_000_000 : 110_000_000,
+        disk_after_bytes: monaco ? 5_000_000 : 2_600_000_000, disk_needed_bytes: monaco ? 7_000_000 : 4_400_000_000, disk_live_bytes: 0,
+        free_bytes: 120_000_000_000, fits: true, minutes: monaco ? 9 : 25,
+      }),
+    });
+  });
+  const card = await openCard(page);
+  await card.getByTestId("maps-regions-add").click();
+  const picker = card.getByTestId("map-region-picker");
+  // First in the list, under its own heading, and still in its place below.
+  await expect(picker.getByTestId("map-region-yours-group")).toContainText("Probably yours");
+  await expect(picker.getByTestId("map-region-yours")).toHaveAttribute("data-region", "new-zealand");
+  expect(await picker.getByRole("option").first().getAttribute("data-region")).toBe("new-zealand");
+  await expect(picker.getByTestId("map-region-new-zealand")).toBeVisible();
+  // Nothing about addresses until something is ticked.
+  await expect(picker.getByTestId("map-region-addresses")).toHaveCount(0);
+  await picker.getByTestId("map-region-yours").click();
+  await expect(picker.getByTestId("map-region-new-zealand")).toHaveAttribute("aria-selected", "true");
+  await expect(picker.getByTestId("map-region-addresses")).toContainText("depend on how well OpenStreetMap covers the country");
+  await expect(picker.getByTestId("map-region-addresses")).toContainText("Australia also gets the full official address file");
+  await expect(picker.getByTestId("map-region-estimate")).toContainText("Disk space");
+  await expect(picker.getByTestId("map-region-shared")).toHaveCount(0);
+  // Searching hides the suggestion: the list is what was asked for.
+  await picker.getByTestId("map-region-search").fill("monaco");
+  await expect(picker.getByTestId("map-region-yours-group")).toHaveCount(0);
+  await picker.getByTestId("map-region-search").fill("");
+  await picker.getByTestId("map-region-yours").click();
+  await picker.getByTestId("map-region-monaco").click();
+  await expect(picker.getByTestId("map-region-shared")).toContainText("1.6 GB of the download is a search file shared with neighbouring countries");
+  await expect(picker.getByTestId("map-region-shared")).toContainText("not kept");
+  // The whole of Australia has the official address file: no caveat for it alone.
+  await picker.getByTestId("map-region-monaco").click();
+  await picker.getByTestId("map-region-australia").click();
+  await expect(picker.getByTestId("map-region-addresses")).toHaveCount(0);
+});
+
+test("the setup wizard's Maps step: several countries, nothing started when it won't fit, and Not now", async ({ dana: page }) => {
+  await inNewZealand(page);
+  const box = await fakeMaps(page, state());
+  box.freeBytes = 30_000_000_000;
+  await page.route("**/api/maps/regions/catalog*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify(withCodes) }));
+  const chosen: unknown[] = [];
+  await page.route("**/api/maps/regions", (r) => {
+    if (r.request().method() !== "PUT") return r.fallback();
+    const body = r.request().postDataJSON() as { ids: string[] };
+    chosen.push(body);
+    box.state = state({
+      chosen: true, building: true, step: "osm", step_number: 1, steps_total: 6, progress: 0,
+      regions: body.ids.map((id) => ({ id, name: CATALOG.regions.find((x) => x.id === id)!.name, state: "building" as const })),
+    });
+    return r.fulfill({ contentType: "application/json", body: JSON.stringify(box.state) });
+  });
+
+  await page.goto("/setup?step=maps");
+  const step = page.getByTestId("maps-step");
+  await expect(step).toBeVisible({ timeout: 20_000 });
+  await expect(step).toContainText("Nothing is downloaded until you say so");
+  await expect(step.getByTestId("map-region-yours")).toHaveAttribute("data-region", "new-zealand");
+  // Nothing ticked: only "Not now" is offered.
+  await expect(step.getByTestId("maps-step-download")).toHaveCount(0);
+  await expect(step.getByTestId("maps-step-skip")).toContainText("Not now");
+
+  // Too big for this disk: said so, and it can't be started.
+  await step.getByTestId("map-region-search").fill("united states");
+  await step.getByTestId("map-region-us").click();
+  await expect(step.getByTestId("map-region-too-big")).toContainText("That won't fit");
+  await expect(step.getByTestId("maps-step-download")).toBeDisabled();
+  await step.getByTestId("map-region-us").click();
+
+  // Two that do fit, chosen together.
+  await step.getByTestId("map-region-search").fill("");
+  await step.getByTestId("map-region-yours").click();
+  await step.getByTestId("map-region-monaco").click();
+  await expect(step.getByTestId("map-region-estimate")).toContainText("Disk space");
+  const go = step.getByTestId("maps-step-download");
+  await expect(go).toHaveText("Download 2 maps and continue");
+  await expect(go).toBeEnabled();
+  expect(chosen).toEqual([]);
+  await go.click();
+  await expect(page).toHaveURL(/\/admin\?tab=setup/, { timeout: 20_000 });
+  expect(chosen).toEqual([{ ids: ["new-zealand", "monaco"], force: false }]);
+
+  // Back on the step: what's chosen and how it's going; more can be added.
+  await page.goto("/setup?step=maps");
+  await expect(page.getByTestId("maps-step-chosen")).toContainText("New Zealand, Monaco");
+  await expect(page.getByTestId("maps-step-chosen")).toContainText("being put together");
+  await expect(page.getByTestId("map-region-new-zealand")).toBeDisabled();
+  await expect(page.getByTestId("maps-step-continue")).toBeVisible();
+
+  // A map set in .env: nothing to choose, said plainly.
+  box.state = state({ managed: "env", chosen: true, ready: true, regions: [{ id: "custom", name: "Your own map (set in .env)", state: "installed" }] });
+  await page.goto("/setup?step=maps");
+  await expect(page.getByTestId("maps-step-nothing")).toContainText("Your map is set in .env");
+  await expect(page.getByTestId("map-region-picker")).toHaveCount(0);
+});
+
 test("a map set in .env is shown but can't be changed here", async ({ dana: page }) => {
   await fakeMaps(page, state({ managed: "env", chosen: true, ready: true, regions: [{ id: "custom", name: "Your own map (set in .env)", state: "installed" }] }));
   const card = await openCard(page);
