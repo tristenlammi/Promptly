@@ -118,7 +118,8 @@ export const useModelStore = create<ModelState>()(
             m.provider_id === adminDefaultProviderId &&
             m.model_id === adminDefaultModelId,
         );
-        const target = personalEntry ?? adminEntry ?? available[0] ?? null;
+        // Never fall back onto a model that isn't ready to answer.
+        const target = personalEntry ?? adminEntry ?? available.find((m) => !m.needs_setup) ?? available[0] ?? null;
         if (target) {
           set({
             selectedProviderId: target.provider_id,
@@ -161,7 +162,7 @@ export const useModelStore = create<ModelState>()(
             m.model_id === adminDefaultModelId,
         );
         const target =
-          personalEntry ?? adminEntry ?? available[0] ?? null;
+          personalEntry ?? adminEntry ?? available.find((m) => !m.needs_setup) ?? available[0] ?? null;
         if (!target) return;
         if (
           target.provider_id === selectedProviderId &&

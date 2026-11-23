@@ -94,6 +94,8 @@ export function ModelsStep({
       if (viaPromptly && chat) {
         const saved = await setupApi.setPromptlyModel(chat[0], chat[1], true);
         useModelStore.getState().setAdminDefault(saved.default_chat_provider_id, saved.default_chat_model_id);
+        // The admin who just chose it chats on it too.
+        useModelStore.getState().setSelection(saved.provider_id, saved.model_id);
         await qc.invalidateQueries({ queryKey: AVAILABLE_MODELS_KEY });
       } else if (!info.promptly) {
         useModelStore.getState().setAdminDefault(chat ? chat[0] : null, chat ? chat[1] : null);

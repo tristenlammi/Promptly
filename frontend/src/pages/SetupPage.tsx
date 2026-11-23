@@ -1417,7 +1417,7 @@ function MfaStep({ email, onFinish }: { email: string; onFinish: () => void }) {
         </div>
       </div>
       <div className="flex gap-2">
-        <Button className="flex-1" onClick={() => setEnrolling(true)}>
+        <Button variant="primary" className="flex-1" onClick={() => setEnrolling(true)}>
           Turn it on
         </Button>
         <Button variant="secondary" className="flex-1" onClick={onFinish}>
