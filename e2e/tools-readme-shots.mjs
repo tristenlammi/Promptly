@@ -124,6 +124,7 @@ async function take(browser, name) {
   await context.addInitScript((t) => {
     localStorage.setItem("promptly.theme", JSON.stringify({ state: { theme: t }, version: 0 }));
     localStorage.setItem("promptly.today.install-nudge.dismissed", "1");
+    localStorage.setItem("promptly.maps.theme", t); // the map follows the shot's theme, whatever the time of day
   }, spec.theme ?? "light");
   const page = context.pages()[0] ?? (await context.newPage());
   try {
