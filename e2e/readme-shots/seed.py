@@ -45,7 +45,7 @@ PEOPLE = {
 }
 
 MODELS = [
-    {"id": "demo-large", "display_name": "Claude Sonnet 4.5", "context_window": 200000, "supports_vision": True, "supports_tools": True},
+    {"id": "demo-large", "display_name": "Promptly", "context_window": 200000, "supports_vision": True, "supports_tools": True},
     {"id": "demo-small", "display_name": "Claude Haiku 4.5", "context_window": 200000, "supports_vision": True, "supports_tools": True},
     {"id": "demo-local", "display_name": "Llama 3.3 70B (local)", "context_window": 128000, "supports_vision": False, "supports_tools": True},
 ]
@@ -284,9 +284,9 @@ async def _study(db, user: User) -> None:
 async def main() -> None:
     out: dict = {"users": {}}
     async with SessionLocal() as db:
-        provider = (await db.execute(select(ModelProvider).where(ModelProvider.name == "Anthropic", ModelProvider.user_id.is_(None)))).scalar_one_or_none()
+        provider = (await db.execute(select(ModelProvider).where(ModelProvider.name == "Promptly", ModelProvider.user_id.is_(None)))).scalar_one_or_none()
         if provider is None:
-            provider = ModelProvider(name="Anthropic", type="openai_compatible", user_id=None)
+            provider = ModelProvider(name="Promptly", type="openai_compatible", user_id=None)
             db.add(provider)
         # Nothing answers here: the chats are written straight in, below.
         provider.base_url = "http://127.0.0.1:9/v1"

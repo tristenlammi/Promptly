@@ -6,7 +6,7 @@ photographs). Runs where Pillow is: the stack's backend container.
     docker cp PromptlyShots-Backend:/tmp/shots/. docs/screenshots/
 
 Anything over 400 KB is cut to 256 colours, and, if that isn't enough,
-scaled down to 1600 px wide first. Flat interface shots are left alone.
+scaled down to 1600 px wide first. Lighter ones are left alone.
 """
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from PIL import Image
 
 LIMIT = 400_000
 for path in sorted(Path("/tmp/shots").glob("*.png")):
-    if path.stat().st_size <= LIMIT or path.name == "readme-banner.png":
+    if path.stat().st_size <= LIMIT:
         continue
     before = path.stat().st_size
     image = Image.open(path).convert("RGB")

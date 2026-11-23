@@ -3,13 +3,14 @@
 //
 //   cd e2e && node tools-readme-shots.mjs            # all of them
 //   node tools-readme-shots.mjs today chat-dark      # just some
+//   node tools-readme-shots.mjs banner               # the banner (no stack needed)
 //
 // README_BASE_URL / README_AUTH as in the seed. README_OUT writes somewhere
 // else (a look-over before replacing the real ones); README_SCALE=1 is
 // quicker for that.
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { chromium } from "@playwright/test";
 
@@ -18,7 +19,7 @@ const BASE = process.env.README_BASE_URL ?? "http://localhost:8093";
 const AUTH = process.env.README_AUTH ?? path.resolve(here, "../.stacks/shots/readme/auth.json");
 const OUT = process.env.README_OUT ?? path.resolve(here, "../docs/screenshots");
 const SCALE = Number(process.env.README_SCALE ?? 2);
-const users = JSON.parse(fs.readFileSync(AUTH, "utf8")).users;
+const users = fs.existsSync(AUTH) ? JSON.parse(fs.readFileSync(AUTH, "utf8")).users : {}; // none needed for the banner
 const VAULT = "wattle creek lemon slice 12!"; // the demo vault's master password (throwaway stack only)
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -128,7 +129,18 @@ async function take(browser, name) {
   }
 }
 
+// The banner at the top of the README: a page of its own (readme-shots/
+// banner.html), not the app, so it needs no stack. Only when asked for.
+async function banner(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 300 }, deviceScaleFactor: 2 });
+  await page.goto(pathToFileURL(path.join(here, "readme-shots", "banner.html")).href);
+  await page.evaluate(() => document.fonts.ready);
+  await page.screenshot({ path: path.join(OUT, "readme-banner.png") });
+  await page.close();
+  console.log("shot banner");
+}
+
 const wanted = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(SHOTS);
 const browser = await chromium.launch();
-for (const name of wanted) await take(browser, name);
+for (const name of wanted) await (name === "banner" ? banner(browser) : take(browser, name));
 await browser.close();

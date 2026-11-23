@@ -382,8 +382,6 @@ function sheet(name, rows, widths = {}) {
     if (number || formula) v.ct = { fa: "#,##0", t: "n" };
     if (r === 0 || (c === 0 && String(value).startsWith("Total"))) v.bl = 1;
     if (r === 0) v.bg = "#F3E9E2";
-    v.ff = "Arial";
-    v.fs = 11;
     celldata.push({ r, c, v });
   }));
   return { name, id: id(), order: 0, status: 1, row: Math.max(40, rows.length + 10), column: 14, celldata, config: { columnlen: widths } };
