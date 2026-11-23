@@ -140,6 +140,73 @@ async def test_the_picker_says_when_promptly_is_not_ready(db, user, client):
     assert row["base_display_name"] is None
 
 
+async def test_a_member_with_a_model_list_still_gets_promptly(db, user, client):
+    """Promptly is everyone's, whatever their own model list says. Nothing
+    else gets through the list: not the model behind Promptly, not another
+    custom model."""
+    from app.chat.models import Conversation
+    from app.custom_models.models import CustomModel
+    from app.models_config.access import is_model_allowed
+
+    cm = await _seeded(db)
+    p = await _provider(db, CATALOGUE)
+    other = CustomModel(name="tutor", display_name="Tutor", base_provider_id=p.id, base_model_id=CATALOGUE[0]["id"])
+    db.add(other)
+    await db.commit()
+    promptly, tutor = f"custom:{cm.id}", f"custom:{other.id}"
+    sonnet, haiku = CATALOGUE[0]["id"], CATALOGUE[1]["id"]
+
+    # Allowed one model only, and it isn't the one Promptly will run on.
+    member, hdr = await _member(db, client, user, allowed_models=[haiku])
+    locked, locked_hdr = await _member(db, client, user, allowed_models=[haiku], model_locked=True)
+
+    async def ids(headers) -> dict[str, dict]:
+        return {m["model_id"]: m for m in (await client.get("/api/models/available", headers=headers)).json()}
+
+    # Before it has a model: listed for them as not ready, like for anyone.
+    for headers in (hdr, locked_hdr):
+        listed = await ids(headers)
+        assert set(listed) == {haiku, promptly} and listed[promptly]["needs_setup"] is True
+
+    r = await client.put("/api/admin/setup/promptly-model", headers=_auth(user), json={"provider_id": str(p.id), "model_id": sonnet})
+    assert r.status_code == 200, r.text
+
+    for who, headers in ((member, hdr), (locked, locked_hdr)):
+        listed = await ids(headers)
+        # Promptly and their one model. Not Sonnet (what Promptly runs on),
+        # not the other custom model on Sonnet.
+        assert set(listed) == {haiku, promptly}, listed.keys()
+        assert listed[promptly]["needs_setup"] is False and listed[promptly]["base_display_name"] is None
+        await db.refresh(who)
+        assert await is_model_allowed(who, db, model_id=promptly, base_model_id=sonnet) is True
+        assert await is_model_allowed(who, db, model_id=haiku, base_model_id=haiku) is True
+        assert await is_model_allowed(who, db, model_id=sonnet, base_model_id=sonnet) is False
+        assert await is_model_allowed(who, db, model_id=tutor, base_model_id=sonnet) is False
+
+    # Sending: a chat on Promptly gets past the model check (the made-up
+    # provider then fails to answer, which is not a 403); one on the other
+    # custom model, or on the raw model behind Promptly, is refused.
+    async def send(model_id: str) -> int:
+        conv = Conversation(user_id=member.id, title="x", provider_id=p.id, model_id=model_id)
+        db.add(conv)
+        await db.commit()
+        r = await client.post(f"/api/chat/conversations/{conv.id}/messages", headers=hdr, json={"content": "hello"})
+        return r.status_code
+
+    assert await send(tutor) == 403
+    assert await send(sonnet) == 403
+    assert await send(promptly) != 403
+
+    # New chats start on Promptly for them too (it is the server's default).
+    r = await client.post("/api/chat/conversations", headers=hdr, json={})
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["model_id"] == promptly
+
+    # An unrestricted member is as before: everything.
+    _, free = await _member(db, client, user)
+    assert set(await ids(free)) == {sonnet, haiku, promptly, tutor}
+
+
 async def test_a_message_to_an_unready_promptly_gets_a_plain_answer(db, user, client, provider):
     from app.chat.models import Conversation
 

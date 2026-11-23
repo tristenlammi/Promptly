@@ -2,7 +2,9 @@
 
 Part one of two. This half runs INSIDE a throwaway stack's backend
 container and writes what has no simple API (accounts, the model list,
-finished chats, a mailbox, a Study course). It prints JSON with each
+finished chats, a mailbox, a Study course). The chats are on the real
+built-in "Promptly" model (``app/custom_models/builtin.py``), pointed at
+the first staged model, so the picker says Promptly because it is. It prints JSON with each
 person's id and sign-in tokens; ``tools-readme-seed.mjs`` (part two) uses
 those to fill everything else over the ordinary API.
 
@@ -25,6 +27,7 @@ import app.db_models  # noqa: F401  (every mapper, so relationships resolve)
 from app.auth.models import User
 from app.auth.utils import create_access_token, create_refresh_token, encrypt_secret, hash_password
 from app.chat.models import ChatFolder, Conversation, Message
+from app.custom_models import builtin
 from app.database import SessionLocal
 from app.files.system_folders import seed_system_folders
 from app.items.service import install_defaults
@@ -44,8 +47,10 @@ PEOPLE = {
     "max": ("Max", "max@hartley.example.com", "user", "#4E9F5B"),
 }
 
+# The staged AI service. Nothing answers behind it.
+PROVIDER = "OpenRouter"
 MODELS = [
-    {"id": "demo-large", "display_name": "Promptly", "context_window": 200000, "supports_vision": True, "supports_tools": True},
+    {"id": "demo-large", "display_name": "Claude Sonnet 4.5", "context_window": 200000, "supports_vision": True, "supports_tools": True},
     {"id": "demo-small", "display_name": "Claude Haiku 4.5", "context_window": 200000, "supports_vision": True, "supports_tools": True},
     {"id": "demo-local", "display_name": "Llama 3.3 70B (local)", "context_window": 128000, "supports_vision": False, "supports_tools": True},
 ]
@@ -171,7 +176,7 @@ async def _person(db, key: str) -> User:
     return user
 
 
-async def _chats(db, user: User, provider: ModelProvider) -> None:
+async def _chats(db, user: User, provider: ModelProvider, model_id: str) -> None:
     if await db.scalar(select(Conversation.id).where(Conversation.user_id == user.id).limit(1)):
         return
     folders: dict[str, ChatFolder] = {}
@@ -183,7 +188,7 @@ async def _chats(db, user: User, provider: ModelProvider) -> None:
     async def chat(title, turns, *, folder=None, pinned=False, age=timedelta(0)):
         when = NOW - age
         conv = Conversation(
-            user_id=user.id, title=title, model_id=MODELS[0]["id"], provider_id=provider.id, pinned=pinned,
+            user_id=user.id, title=title, model_id=model_id, provider_id=provider.id, pinned=pinned,
             folder_id=folders[folder].id if folder else None, title_manually_set=True, created_at=when, updated_at=when,
         )
         db.add(conv)
@@ -194,7 +199,7 @@ async def _chats(db, user: User, provider: ModelProvider) -> None:
                 conversation_id=conv.id, parent_id=parent, role=role, content=content,
                 created_at=when + timedelta(seconds=20 * i),
                 author_user_id=user.id if role == "user" else None,
-                model_id=MODELS[0]["id"] if role == "assistant" else None,
+                model_id=model_id if role == "assistant" else None,
             )
             db.add(msg)
             await db.flush()
@@ -284,9 +289,9 @@ async def _study(db, user: User) -> None:
 async def main() -> None:
     out: dict = {"users": {}}
     async with SessionLocal() as db:
-        provider = (await db.execute(select(ModelProvider).where(ModelProvider.name == "Promptly", ModelProvider.user_id.is_(None)))).scalar_one_or_none()
+        provider = (await db.execute(select(ModelProvider).where(ModelProvider.name == PROVIDER, ModelProvider.user_id.is_(None)))).scalar_one_or_none()
         if provider is None:
-            provider = ModelProvider(name="Promptly", type="openai_compatible", user_id=None)
+            provider = ModelProvider(name=PROVIDER, type="openai_compatible", user_id=None)
             db.add(provider)
         # Nothing answers here: the chats are written straight in, below.
         provider.base_url = "http://127.0.0.1:9/v1"
@@ -296,20 +301,35 @@ async def main() -> None:
         provider.enabled = True
         await db.flush()
 
+        # The built-in Promptly model, as the setup wizard's Models step
+        # leaves it: the first staged model behind it, and new chats start
+        # on it. (The server makes it at start-up; this covers a database
+        # that was emptied since.)
+        await builtin.provision(db)
+        promptly = await builtin.get(db)
+        if promptly is None:
+            raise SystemExit("seed: this stack has no built-in Promptly model (was it deleted?)")
+        await builtin.set_base(db, promptly, provider, MODELS[0]["id"], make_default=True)
+        promptly_id = f"custom:{promptly.id}"
+        await db.flush()
+
         people = {key: await _person(db, key) for key in PEOPLE}
-        for user in people.values():
+        for key, user in people.items():
             user.settings = {
                 **(user.settings or {}),
                 "timezone": TZ,
                 "memory_mode": "off",
                 "default_web_search_mode": "off",
                 "default_provider_id": str(provider.id),
-                "default_model_id": MODELS[0]["id"],
+                "default_model_id": promptly_id,
                 "features_chosen": True,
+                # The family is settled in: no "Finish setting up" card on
+                # the admin's Today (a demo stack has no email, address...).
+                **({"setup_card_dismissed": True} if key == "claire" else {}),
             }
         await db.flush()
         claire = people["claire"]
-        await _chats(db, claire, provider)
+        await _chats(db, claire, provider, promptly_id)
         await _mail(db, claire)
         await _study(db, claire)
         await db.commit()

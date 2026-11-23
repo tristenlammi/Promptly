@@ -4,6 +4,10 @@
 FROM node:22-alpine AS base
 WORKDIR /app
 COPY package.json package-lock.json* ./
+# The spreadsheet library's fixes go in right after the install ("postinstall"
+# in package.json), so the script has to be here before it. "prebuild" runs it
+# again, which changes nothing when it's already done.
+COPY scripts/patch-fortune-sheet.mjs scripts/
 RUN npm install --no-audit --no-fund
 
 # ---- Development target (Vite dev server w/ HMR) ----

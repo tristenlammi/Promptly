@@ -22,14 +22,20 @@
 #   .\install.ps1 -NoSearch     # skip the bundled SearXNG container - web
 #                               # search stays off until you add Brave/Tavily
 #                               # keys in the admin panel.
-#   .\install.ps1 -NoMaps       # skip P Maps. It's on by default, and builds
-#                               # its map data in the background: about an hour
-#                               # and 15 GB of disk (7 GB after).
+#   .\install.ps1 -NoMaps       # skip P Maps. It's on by default but has no
+#                               # map until you choose your country (in
+#                               # first-time setup, or Admin -> App settings ->
+#                               # "Maps on this server"). Size and time are
+#                               # shown before anything downloads.
 #   .\install.ps1 -NoCalls      # skip the calls server (LiveKit) behind voice
 #                               # channels in Rooms. On by default; voice stays
 #                               # off for people until an admin turns it on.
-#   .\install.ps1 -NoHome       # skip Promptly Home's bundled Home Assistant
-#                               # (smart devices; about 3.5 GB of disk).
+#   .\install.ps1 -WithHome     # add Promptly Home: lights, plugs and other
+#                               # smart devices, through a bundled Home
+#                               # Assistant (about 7 GB of disk and 0.6 GB of
+#                               # memory). Off unless you ask for it. On an
+#                               # install you already have, this adds it and
+#                               # leaves your other choices as they are.
 #   .\install.ps1 -NoStart      # set the folder up (.env, secrets, choices) but
 #                               # don't build or start anything yet.
 #
@@ -54,7 +60,10 @@ param(
     [switch]$NoSearch,
     [switch]$NoMaps,
     [switch]$NoCalls,
-    # Skip Promptly Home's bundled Home Assistant (smart devices; about 3.5 GB).
+    # Add Promptly Home's bundled Home Assistant (smart devices; about 7 GB of disk).
+    [switch]$WithHome,
+    # Back-compat: Home used to be on unless -NoHome was given. It is now off
+    # unless -WithHome is; on a re-run -NoHome still takes Home out.
     [switch]$NoHome,
     # Set the folder up but don't build or start anything.
     [switch]$NoStart,
@@ -64,7 +73,8 @@ param(
 )
 
 if ($Minimal) { $NoSearch = $true }
-$ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoMaps -or $NoCalls -or $NoHome -or $NoOllama -or $Minimal
+$OtherProfileFlags = $WithOllama -or $NoSearch -or $NoMaps -or $NoCalls -or $NoHome -or $NoOllama -or $Minimal
+$ProfileFlagsGiven = $OtherProfileFlags -or $WithHome
 
 function Write-Section($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)      { Write-Host "  OK  $msg" -ForegroundColor Green }
@@ -157,7 +167,7 @@ if (-not $ScriptDir -or -not (Test-Path (Join-Path $ScriptDir "docker-compose.ym
         Write-Ok "Downloaded"
     }
     $flags = @()
-    foreach ($name in "WithOllama", "NoSearch", "NoMaps", "NoCalls", "NoHome", "NoStart", "NoOllama", "Minimal") {
+    foreach ($name in "WithOllama", "NoSearch", "NoMaps", "NoCalls", "WithHome", "NoHome", "NoStart", "NoOllama", "Minimal") {
         if ((Get-Variable -Name $name -ValueOnly -ErrorAction SilentlyContinue)) { $flags += "-$name" }
     }
     # A new process: scripts on disk are blocked by the default execution
@@ -248,10 +258,9 @@ foreach ($k in @("TUS_HOOK_SECRET")) {
     }
 }
 Set-IfPlaceholder ([ref]$envText) "TUS_HOOK_SECRET"   (New-HexSecret 32)
-# Promptly Home: what its bundled home box proves itself with. Made with
-# -NoHome too: the update script turns Home on for an install that has no
-# secret yet, and someone who said -NoHome shouldn't get it at the next
-# update. (To add Home later: .\install.ps1 with the other flags you used.)
+# Promptly Home: what its bundled home box proves itself with. Made whether
+# or not Home is installed (it is off unless -WithHome), so adding it later
+# is one command: .\install.ps1 -WithHome
 if ($envText -notmatch "(?m)^HOME_BOX_SECRET=.") {
     $envText = [regex]::Replace($envText, "(?m)^HOME_BOX_SECRET=\s*\r?\n", "")
     if ($envText -and -not $envText.EndsWith("`n")) { $envText += "`n" }
@@ -334,10 +343,25 @@ if (-not $NoMaps) { $profiles += "maps" }
 # Calls: Docker Desktop has no host networking, so the bridged LiveKit
 # variant runs (media ports published, this PC's LAN address advertised).
 if (-not $NoCalls) { $profiles += "calls-desktop" }
-# Promptly Home: the bridged variant (Docker Desktop can't share the host's
-# network, so devices are added by brand with their address).
-if (-not $NoHome) { $profiles += "home-desktop" }
+# Promptly Home: only when asked for (-WithHome), or when this install
+# already has it and -NoHome wasn't given. The bridged variant (Docker Desktop
+# can't share the host's network, so devices are added by brand with their
+# address).
+$existingProfiles = $null
+if (-not $FreshEnv -and $envText -match "(?m)^COMPOSE_PROFILES=(.*)$") { $existingProfiles = $Matches[1].Trim() }
+$hadHome = ($null -ne $existingProfiles) -and ($existingProfiles -match "(^|,)home(-desktop)?(,|$)")
+$homeOn = $WithHome -or ($hadHome -and -not $NoHome)
+if ($homeOn) { $profiles += "home-desktop" }
 $profilesCsv = $profiles -join ","
+# Just -WithHome on an install that's already set up: add Home to what is
+# there, rather than putting every other part back to its default.
+if ($WithHome -and -not $OtherProfileFlags -and ($null -ne $existingProfiles)) {
+    if ($hadHome) { $profilesCsv = $existingProfiles }
+    else { $profilesCsv = (@($existingProfiles.Split(",") | Where-Object { $_ }) + "home-desktop") -join "," }
+    # Keep the search and calls switches as they were.
+    if ($existingProfiles -notmatch "(^|,)search(,|$)") { $NoSearch = $true }
+    if ($existingProfiles -notmatch "(^|,)calls(-desktop)?(,|$)") { $NoCalls = $true }
+}
 
 if ($ProfileFlagsGiven -or $FreshEnv -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
     Write-Section "Configuring optional services"
@@ -345,7 +369,8 @@ if ($ProfileFlagsGiven -or $FreshEnv -or ($envText -notmatch "(?m)^COMPOSE_PROFI
     Set-EnvLine ([ref]$envText) "SEARXNG_ENABLED" $(if ($NoSearch) { "false" } else { "true" })
     Write-Ok "Ollama: $OllamaLabel"
     if ($OllamaNote) { Write-Skip $OllamaNote }
-    if ($NoSearch) { Write-Skip "-NoSearch: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)" }
+    if ($NoSearch) { Write-Skip "Bundled web search (SearXNG) is off (add Brave/Tavily keys in the admin panel for web search)" }
+    if ($homeOn) { Write-Ok "Promptly Home: included (home-desktop; about 7 GB to download once)" }
     Write-Ok "COMPOSE_PROFILES=$(if ($profilesCsv) { $profilesCsv } else { '<none>' })"
     if (-not $NoCalls -and $envText -notmatch "(?m)^LIVEKIT_NODE_IP=") {
         $callsIp = $null
@@ -485,15 +510,24 @@ if ($setupCode -and -not $setupCode.StartsWith("change-me")) {
     Write-Host $setupCode -ForegroundColor Yellow
     Write-Host ""
 }
-Write-Host "  The setup wizard walks you through your admin account, a model"
-Write-Host "  provider, the public URL, embeddings, email and two-step verification."
+Write-Host "  The setup wizard walks you through your admin account, an AI service"
+Write-Host "  and its models, your country's map, reaching it from outside, email and"
+Write-Host "  two-step sign-in. You can also just look around and finish later."
 if ($OllamaMode -eq "cloud") {
     Write-Host ""
     Write-Skip "No local-model runtime. Connect a cloud provider (OpenAI, Anthropic, OpenRouter, ...) in the wizard. For local models, install Ollama natively and re-run, or use -WithOllama."
 }
 if ((Get-Content .env -Raw) -match "(?m)^COMPOSE_PROFILES=.*maps") {
     Write-Host ""
-    Write-Skip "P Maps is building Australia's map data in the background: about an hour and 15 GB of disk (7 GB after). Everything else works meanwhile. For another country, or to turn it off, see 'P Maps' in .env."
+    Write-Skip "P Maps is on but has no map yet. Choose your country in first-time setup, or later under Admin -> App settings -> 'Maps on this server'. Size and time are shown before anything downloads."
+}
+if ((Get-Content .env -Raw) -match "(?m)^COMPOSE_PROFILES=(.*,)?home(-desktop)?(,|\r?$)") {
+    Write-Host ""
+    Write-Skip "Promptly Home (smart devices): turn it on in Admin -> Home, then open Home."
+} else {
+    Write-Host ""
+    Write-Host "  Smart devices (Promptly Home) aren't part of this install. To add them"
+    Write-Host "  later (about 7 GB of disk): .\install.ps1 -WithHome"
 }
 if ((Get-Content .env -Raw) -match "(?m)^COMPOSE_PROFILES=.*calls") {
     Write-Host ""

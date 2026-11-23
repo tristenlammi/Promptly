@@ -11,6 +11,14 @@ import pytest
 from tests.test_member_defaults import _auth, _member, client  # noqa: F401
 
 
+def _maps(state: str = "off", **over) -> dict:
+    """What ``setup._maps_state`` answers."""
+    return {
+        "available": state != "off", "managed": "ui", "state": state, "step": None, "progress": None,
+        "ready": state == "ready", "names": [], **over,
+    }
+
+
 @pytest.fixture
 def quiet(monkeypatch):
     """No optional service answers: a bare install."""
@@ -21,7 +29,7 @@ def quiet(monkeypatch):
 
     state: dict = {
         "calls": None, "inside": None, "outside": None,
-        "maps": {"state": "off", "step": None, "ready": False},
+        "maps": _maps(),
         "photos": None, "hears": False, "speaks": False, "profiles": set(),
     }
 
@@ -37,13 +45,16 @@ def quiet(monkeypatch):
     async def photos_health(**_kw):
         return state["photos"]
 
+    async def maps_state():
+        return state["maps"]
+
     async def ollama():
         return False
 
     monkeypatch.setattr(rtc_config, "configured", lambda: state["calls"] is not None)
     monkeypatch.setattr(setup, "_calls_state", calls_state)
     monkeypatch.setattr(setup, "_calls_tests", calls_tests)
-    monkeypatch.setattr(setup, "_maps_state", lambda: state["maps"])
+    monkeypatch.setattr(setup, "_maps_state", maps_state)
     monkeypatch.setattr(setup, "_ollama_there", ollama)
     monkeypatch.setattr(setup, "profiles", lambda: state["profiles"])
     monkeypatch.setattr(talk_admin, "_speech", speech)
@@ -154,18 +165,91 @@ async def test_calls_follow_the_test_call_from_outside(db, user, client, quiet):
     assert _rows((await client.get("/api/admin/setup", headers=hdr)).json())["calls"]["status"] == "problem"
 
 
-async def test_maps_say_they_are_still_building(db, user, client, quiet):
+async def test_maps_rows_follow_the_real_state(db, user, client, quiet):
     hdr = _auth(user)
-    quiet["maps"] = {"state": "none", "step": None, "ready": False}
-    row = _rows((await client.get("/api/admin/setup", headers=hdr)).json())["maps"]
-    assert row["status"] == "todo" and row["to"] == "/setup?step=maps"
-    quiet["maps"] = {"state": "building", "step": "routing", "ready": False}
-    row = _rows((await client.get("/api/admin/setup", headers=hdr)).json())["maps"]
-    assert row["status"] == "working" and "routing" in row["detail"] and row["to"] is None
-    quiet["maps"] = {"state": "ready", "step": None, "ready": True}
-    assert _rows((await client.get("/api/admin/setup", headers=hdr)).json())["maps"]["status"] == "done"
-    quiet["maps"] = {"state": "failed", "step": "addresses", "ready": False}
-    assert _rows((await client.get("/api/admin/setup", headers=hdr)).json())["maps"]["status"] == "problem"
+
+    async def row() -> dict:
+        return _rows((await client.get("/api/admin/setup", headers=hdr)).json())["maps"]
+
+    # Nothing chosen: nothing has been downloaded, and the wizard's step is offered.
+    quiet["maps"] = _maps("none")
+    body = (await client.get("/api/admin/setup", headers=hdr)).json()
+    got = _rows(body)["maps"]
+    assert got["status"] == "todo" and got["to"] == "/setup?step=maps" and "nothing has been downloaded" in got["detail"]
+    assert body["outside"]["maps"]["can_choose"] is True and body["services"]["maps"] is True
+
+    quiet["maps"] = _maps("building", step="working out the roads for directions", progress=0.2, names=["New Zealand"])
+    got = await row()
+    assert got["status"] == "working" and got["to"] is None
+    assert "New Zealand is being put together" in got["detail"] and "working out the roads" in got["detail"] and "20%" in got["detail"]
+
+    # A second country being added: the first keeps working.
+    quiet["maps"] = _maps("building", step="building search", progress=0.6, ready=True, names=["New Zealand", "Fiji"])
+    assert "The map you have keeps working" in (await row())["detail"]
+
+    quiet["maps"] = _maps("ready", names=["New Zealand", "Fiji"])
+    got = await row()
+    assert got["status"] == "done" and "New Zealand and Fiji" in got["detail"]
+
+    quiet["maps"] = _maps("failed", step="downloading street addresses", names=["Australia"])
+    got = await row()
+    assert got["status"] == "problem" and "downloading street addresses" in got["detail"] and got["to"] == "/admin?tab=settings"
+
+    # Set in .env: said so, and no step to choose in.
+    quiet["maps"] = _maps("ready", managed="env", names=["Monaco"])
+    body = (await client.get("/api/admin/setup", headers=hdr)).json()
+    got = _rows(body)["maps"]
+    assert got["status"] == "done" and "set in .env" in got["detail"] and got["to"] is None
+    assert body["outside"]["maps"]["can_choose"] is False
+
+    # The install has Maps but the service isn't answering yet.
+    quiet["maps"] = _maps("off")
+    quiet["profiles"] = {"maps"}
+    got = await row()
+    assert got["status"] == "working" and "starting" in got["detail"]
+
+
+async def test_maps_state_reads_the_maps_service(monkeypatch):
+    from app.admin import setup
+    from app.maps import regions
+
+    answers: dict = {"doc": None}
+
+    async def control(method, path, body=None):
+        assert (method, path) == ("GET", "/state")
+        return answers["doc"]
+
+    monkeypatch.setattr(regions, "control", control)
+    monkeypatch.setattr(setup, "_maps_files", lambda: {"state": "off", "ready": False})
+
+    got = await setup._maps_state()
+    assert got["available"] is False and got["state"] == "off"
+
+    answers["doc"] = {"managed": "ui", "chosen": False, "wanted": [], "live": None, "status": {"state": "none"}, "disk": {}}
+    got = await setup._maps_state()
+    assert got["available"] is True and got["state"] == "none" and got["names"] == []
+
+    answers["doc"] = {
+        "managed": "ui", "chosen": True, "wanted": [{"id": "new-zealand", "name": "New Zealand"}], "live": None,
+        "status": {"state": "building", "step": "routing", "steps": ["osm", "basemap", "routing", "search"]}, "disk": {},
+    }
+    got = await setup._maps_state()
+    assert got["state"] == "building" and got["step"] == "working out the roads for directions"
+    assert got["names"] == ["New Zealand"] and got["ready"] is False and 0 < got["progress"] < 1
+
+    answers["doc"] = {
+        "managed": "env", "chosen": True, "wanted": [{"id": "custom", "name": "Monaco"}],
+        "live": {"regions": [{"id": "custom", "name": "Monaco"}], "bytes": 5}, "status": {"state": "ready"}, "disk": {},
+    }
+    got = await setup._maps_state()
+    assert got["state"] == "ready" and got["managed"] == "env" and got["ready"] is True
+
+    answers["doc"] = {
+        "managed": "ui", "chosen": True, "wanted": [{"id": "australia", "name": "Australia"}], "live": None,
+        "status": {"state": "failed", "step": "addresses", "steps": ["osm", "addresses"]}, "disk": {},
+    }
+    got = await setup._maps_state()
+    assert got["state"] == "failed" and got["step"] == "downloading street addresses"
 
 
 async def test_speech_and_photos_rows(db, user, client, quiet):

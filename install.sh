@@ -23,14 +23,20 @@
 #   ./install.sh --no-search    # skip the bundled SearXNG container - web
 #                               # search stays off until you add Brave/Tavily
 #                               # keys in the admin panel.
-#   ./install.sh --no-maps      # skip P Maps. It's on by default, and builds
-#                               # its map data in the background: about an hour
-#                               # and 15 GB of disk (7 GB after).
+#   ./install.sh --no-maps      # skip P Maps. It's on by default but has no
+#                               # map until you choose your country (in
+#                               # first-time setup, or Admin -> App settings ->
+#                               # "Maps on this server"). Size and time are
+#                               # shown before anything downloads.
 #   ./install.sh --no-calls     # skip the calls server (LiveKit) behind voice
 #                               # channels in Rooms. On by default; voice stays
 #                               # off for people until an admin turns it on.
-#   ./install.sh --no-home      # skip Promptly Home's bundled Home Assistant
-#                               # (smart devices; about 3.5 GB of disk).
+#   ./install.sh --with-home    # add Promptly Home: lights, plugs and other
+#                               # smart devices, through a bundled Home
+#                               # Assistant (about 7 GB of disk and 0.6 GB of
+#                               # memory). Off unless you ask for it. On an
+#                               # install you already have, this adds it and
+#                               # leaves your other choices as they are.
 #   ./install.sh --no-start     # set the folder up (.env, secrets, choices) but
 #                               # don't build or start anything yet.
 #
@@ -200,18 +206,25 @@ WITH_OLLAMA=false
 NO_SEARCH=false
 NO_MAPS=false
 NO_CALLS=false
+WITH_HOME=false
 NO_HOME=false
 NO_START=false
 PROFILE_FLAGS_GIVEN=false
+# A profile flag other than --with-home was given.
+OTHER_PROFILE_FLAGS=false
 for arg in "$@"; do
   case "$arg" in
-    --with-ollama) WITH_OLLAMA=true; PROFILE_FLAGS_GIVEN=true ;;
-    --no-search)   NO_SEARCH=true;   PROFILE_FLAGS_GIVEN=true ;;
-    --no-maps)     NO_MAPS=true;     PROFILE_FLAGS_GIVEN=true ;;
-    --no-calls)    NO_CALLS=true;    PROFILE_FLAGS_GIVEN=true ;;
-    --no-home)     NO_HOME=true;     PROFILE_FLAGS_GIVEN=true ;;
+    --with-ollama) WITH_OLLAMA=true; PROFILE_FLAGS_GIVEN=true; OTHER_PROFILE_FLAGS=true ;;
+    --no-search)   NO_SEARCH=true;   PROFILE_FLAGS_GIVEN=true; OTHER_PROFILE_FLAGS=true ;;
+    --no-maps)     NO_MAPS=true;     PROFILE_FLAGS_GIVEN=true; OTHER_PROFILE_FLAGS=true ;;
+    --no-calls)    NO_CALLS=true;    PROFILE_FLAGS_GIVEN=true; OTHER_PROFILE_FLAGS=true ;;
+    --with-home)   WITH_HOME=true;   PROFILE_FLAGS_GIVEN=true ;;
+    # Back-compat: Home used to be on unless --no-home was given. It is now
+    # off unless --with-home is, so on a new install this changes nothing; on
+    # a re-run it still takes Home out.
+    --no-home)     NO_HOME=true;     PROFILE_FLAGS_GIVEN=true; OTHER_PROFILE_FLAGS=true ;;
     # Back-compat: --no-ollama is now the default; accept it silently.
-    --no-ollama)   PROFILE_FLAGS_GIVEN=true ;;
+    --no-ollama)   PROFILE_FLAGS_GIVEN=true; OTHER_PROFILE_FLAGS=true ;;
     --no-start)    NO_START=true ;;
     -h|--help)
       sed -n '/^# Usage/,/^# ====/p' "$ROOT_DIR/$(basename "$SELF")" | sed '$d' | sed 's/^# //; s/^#//'
@@ -299,10 +312,9 @@ for k in TUS_HOOK_SECRET; do
   grep -qE "^${k}=." .env || { sed -i.bak "/^${k}=\$/d" .env; rm -f .env.bak; printf '%s=change-me\n' "$k" >> .env; }
 done
 seed_secret TUS_HOOK_SECRET   "$(rand_hex 32)"
-# Promptly Home: what its bundled home box proves itself with. Made with
-# --no-home too: the update script turns Home on for an install that has no
-# secret yet, and someone who said --no-home shouldn't get it at the next
-# update. (To add Home later: ./install.sh with the other flags you used.)
+# Promptly Home: what its bundled home box proves itself with. Made whether
+# or not Home is installed (it is off unless --with-home), so adding it later
+# is one command: ./install.sh --with-home
 grep -qE "^HOME_BOX_SECRET=." .env || { sed -i.bak "/^HOME_BOX_SECRET=\$/d" .env; rm -f .env.bak; printf 'HOME_BOX_SECRET=change-me\n' >> .env; }
 seed_secret HOME_BOX_SECRET "$(rand_hex 32)"
 # Calls (LiveKit). An .env from before Calls has no such lines: add them.
@@ -396,12 +408,33 @@ docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -qi 'docker deskt
 if ! $NO_CALLS; then
   if $DOCKER_DESKTOP; then profiles+=("calls-desktop"); else profiles+=("calls"); fi
 fi
-# Promptly Home: on the host's network on Linux (devices are found by
-# broadcast); bridged on Docker Desktop (docker-compose.yml, "Promptly Home").
-if ! $NO_HOME; then
-  if $DOCKER_DESKTOP; then profiles+=("home-desktop"); else profiles+=("home"); fi
+# Promptly Home: only when asked for (--with-home), or when this install
+# already has it and --no-home wasn't given. On the host's network on Linux
+# (devices are found by broadcast); bridged on Docker Desktop
+# (docker-compose.yml, "Promptly Home").
+HAD_HOME=false
+if ! $FRESH_ENV && grep -qE '^COMPOSE_PROFILES=(.*,)?home(-desktop)?(,|$)' .env; then HAD_HOME=true; fi
+HOME_VARIANT=home
+$DOCKER_DESKTOP && HOME_VARIANT=home-desktop
+HOME_ON=false
+if $WITH_HOME || { $HAD_HOME && ! $NO_HOME; }; then
+  HOME_ON=true
+  profiles+=("$HOME_VARIANT")
 fi
 profiles_csv=$(IFS=,; printf '%s' "${profiles[*]-}")
+# Just "--with-home" on an install that's already set up: add Home to what is
+# there, rather than putting every other part back to its default.
+if $WITH_HOME && ! $OTHER_PROFILE_FLAGS && ! $FRESH_ENV && grep -qE '^COMPOSE_PROFILES=' .env; then
+  existing="$(grep -E '^COMPOSE_PROFILES=' .env | tail -n1 | cut -d= -f2-)"
+  if $HAD_HOME; then
+    profiles_csv="$existing"
+  else
+    profiles_csv="${existing:+$existing,}$HOME_VARIANT"
+  fi
+  # Keep the search switch as it was (it follows the "search" token).
+  if ! grep -qE '(^|,)search(,|$)' <<<"$existing"; then NO_SEARCH=true; fi
+  if ! grep -qE '(^|,)calls(-desktop)?(,|$)' <<<"$existing"; then NO_CALLS=true; fi
+fi
 
 if $PROFILE_FLAGS_GIVEN || $FRESH_ENV || ! grep -qE '^COMPOSE_PROFILES=' .env; then
   bold "Configuring optional services"
@@ -410,7 +443,8 @@ if $PROFILE_FLAGS_GIVEN || $FRESH_ENV || ! grep -qE '^COMPOSE_PROFILES=' .env; t
   set_env_line SEARXNG_ENABLED "$($NO_SEARCH && echo false || echo true)"
   green "  Ollama: ${OLLAMA_LABEL}"
   [[ -n "$OLLAMA_NOTE" ]] && yellow "  ${OLLAMA_NOTE}"
-  $NO_SEARCH && yellow "  --no-search: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)"
+  $NO_SEARCH && yellow "  Bundled web search (SearXNG) is off (add Brave/Tavily keys in the admin panel for web search)"
+  $HOME_ON && green "  Promptly Home: included (${HOME_VARIANT}; about 7 GB to download once)"
   green "  COMPOSE_PROFILES=${profiles_csv:-<none>}"
   if ! $NO_CALLS && $DOCKER_DESKTOP && ! grep -qE '^LIVEKIT_NODE_IP=' .env; then
     calls_ip="$(lan_ip)"
@@ -553,8 +587,9 @@ if [[ -n "$setup_code" && "$setup_code" != change-me* ]]; then
   echo "  Setup code (asked for when you create the admin account): ${setup_code}"
   echo
 fi
-echo "  The setup wizard walks you through your admin account, a model"
-echo "  provider, the public URL, embeddings, email and two-step verification."
+echo "  The setup wizard walks you through your admin account, an AI service"
+echo "  and its models, your country's map, reaching it from outside, email and"
+echo "  two-step sign-in. You can also just look around and finish later."
 if [[ "$OLLAMA_MODE" == "cloud" ]]; then
   echo
   yellow "  Note: no local-model runtime. Connect a cloud provider (OpenAI,"
@@ -563,14 +598,22 @@ if [[ "$OLLAMA_MODE" == "cloud" ]]; then
 fi
 if grep -qE '^COMPOSE_PROFILES=.*maps' .env; then
   echo
-  yellow "  Note: P Maps is building Australia's map data in the background: about"
-  yellow "  an hour and 15 GB of disk (7 GB after). Everything else works meanwhile."
-  yellow "  For another country, or to turn it off, see \"P Maps\" in .env."
+  yellow "  Note: P Maps is on but has no map yet. Choose your country in first-time"
+  yellow "  setup, or later under Admin -> App settings -> \"Maps on this server\"."
+  yellow "  Size and time are shown before anything downloads."
 fi
 if grep -qE '^COMPOSE_PROFILES=.*calls' .env; then
   echo
   yellow "  Voice channels: turn them on in Admin -> Calls. For voice from outside"
   yellow "  your home, forward UDP 7882 and TCP 7881 on your router to this machine."
+fi
+if grep -qE '^COMPOSE_PROFILES=(.*,)?home(-desktop)?(,|$)' .env; then
+  echo
+  yellow "  Promptly Home (smart devices): turn it on in Admin -> Home, then open Home."
+else
+  echo
+  echo "  Smart devices (Promptly Home) aren't part of this install. To add them"
+  echo "  later (about 7 GB of disk): ./install.sh --with-home"
 fi
 if $NO_SEARCH; then
   echo

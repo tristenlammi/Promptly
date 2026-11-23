@@ -251,19 +251,25 @@ export function OutsideStep({ onDone, inApp, doneLabel = "Continue" }: { onDone:
           icon={<MapIcon className="h-4 w-4" />}
           title="Maps"
           status={
-            info.maps.ready && info.maps.state !== "failed" ? <Pill tone="ok">Ready</Pill>
-            : info.maps.state === "failed" ? <Pill tone="warn">Stopped, will try again</Pill>
+            info.maps.state === "failed" ? <Pill tone="warn">Stopped, will try again</Pill>
+            : info.maps.state === "building" ? <Pill tone="busy">{info.maps.progress != null ? `Building, ${Math.round(info.maps.progress * 100)}%` : "Building"}</Pill>
+            : info.maps.ready ? <Pill tone="ok">Ready</Pill>
             : info.maps.state === "none" ? <Pill tone="todo">No map chosen</Pill>
-            : <Pill tone="busy">{info.maps.step ? `Building: ${info.maps.step}` : "Getting ready"}</Pill>
+            : <Pill tone="busy">Getting ready</Pill>
           }
           testid="outside-maps"
         >
           <p>
-            {info.maps.ready
-              ? "The map is downloaded and works at home and away."
-              : info.maps.state === "none"
-                ? "No map has been chosen yet, so Maps is empty for now."
-                : "The map is being downloaded and put together in the background. The first time takes about an hour and needs room on the disk; everything else works meanwhile. Nothing for you to do."}
+            {info.maps.managed === "env" ? "Your map is set in .env. " : ""}
+            {info.maps.state === "failed"
+              ? `Getting the map stopped while ${info.maps.step ?? "getting ready"}. It tries again by itself${info.maps.ready ? ", and the map you have keeps working" : ""}.`
+              : info.maps.state === "building"
+                ? `${info.maps.names.length ? info.maps.names.join(", ") : "The map"} is being put together in the background${info.maps.step ? ` (now: ${info.maps.step})` : ""}. ${info.maps.ready ? "The map you have keeps working meanwhile." : "Everything else works meanwhile."} Nothing for you to do.`
+                : info.maps.ready
+                  ? `${info.maps.names.length ? `${info.maps.names.join(", ")}: the` : "The"} map is downloaded and works at home and away.`
+                  : info.maps.state === "none"
+                    ? "No map has been chosen yet, so nothing has been downloaded and Maps is empty for now. Choose your country in the Maps step, or later under Admin → App settings."
+                    : "Maps is getting ready. Nothing for you to do."}
           </p>
         </Block>
       )}

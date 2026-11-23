@@ -141,16 +141,75 @@ async def _calls_tests(redis) -> tuple[dict | None, dict | None]:  # noqa: ANN00
     return await checks._get_json(redis, checks.TEST_INSIDE), await checks._get_json(redis, checks.TEST_OUTSIDE)
 
 
-def _maps_state() -> dict[str, Any]:
+# The map build's steps, as the checklist says them.
+_MAP_STEPS = {
+    "osm": "downloading the map",
+    "basemap": "downloading the map's picture",
+    "routing": "working out the roads for directions",
+    "addresses": "downloading street addresses",
+    "search": "building search",
+    "places": "finding chargers and cameras",
+    "areas": "making offline maps for phones",
+    "finish": "finishing",
+}
+
+
+def _maps_files() -> dict[str, Any]:
     from app.maps import data
 
-    state = data.status()
-    manifest = data.manifest()
+    return {"state": data.status().get("state") or "off", "ready": data.manifest() is not None}
+
+
+async def _maps_state() -> dict[str, Any]:
+    """Where this server's map stands, from the maps service itself
+    (``/api/maps/regions`` reads the same thing): which countries are chosen,
+    whether they're being built, and whether the choice is made in ``.env``.
+
+    ``state`` is one of ``off`` (no maps service), ``none`` (nothing chosen,
+    nothing downloaded), ``waiting``, ``building``, ``ready`` or ``failed``.
+    Server state only: nothing about anyone's places or trips."""
+    from app.maps import regions
+
+    try:
+        raw = await regions.control("GET", "/state")
+    except regions.RegionError:
+        raw = None
+    doc = regions.describe(raw)
+    if not doc["available"]:
+        # The maps service isn't answering. What's on the disk still says
+        # whether a map is there.
+        files = await asyncio.to_thread(_maps_files)
+        return {
+            "available": False, "managed": "ui", "state": "ready" if files["ready"] else "off", "step": None,
+            "progress": None, "ready": files["ready"], "names": [],
+        }
+    kept = [r for r in doc["regions"] if r["state"] != "removing"]
+    if doc["failed"]:
+        state = "failed"
+    elif doc["building"]:
+        state = "building"
+    elif doc["ready"]:
+        state = "ready"
+    elif doc["managed"] == "env" or kept:
+        state = "waiting"
+    else:
+        state = "none"
+    step = doc["step"]
     return {
-        "state": state.get("state") or "off",
-        "step": state.get("step") or None,
-        "ready": manifest is not None,
+        "available": True,
+        "managed": doc["managed"],
+        "state": state,
+        "step": (_MAP_STEPS.get(step) or "getting ready") if step else None,
+        "progress": doc["progress"],
+        "ready": bool(doc["ready"]),
+        "names": [r["name"] for r in kept],
     }
+
+
+def _names(names: list[str]) -> str:
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def _https(origins: list[str]) -> bool:
@@ -216,13 +275,15 @@ async def checklist(db: AsyncSession, admin: User, redis, *, request_host: str |
         _within(_speech(), {"listening": {"reachable": False}, "speaking": {"reachable": False}}),
         _within(ml.health(), None),
         _within(_ollama_there(), False),
-        asyncio.to_thread(_maps_state),
+        _within(_maps_state(), {
+            "available": False, "managed": "ui", "state": "off", "step": None, "progress": None, "ready": False, "names": [],
+        }),
     )
     inside, outside_test = tests
     # The installer makes the calls keys even when calls are left out, so
     # keys alone don't mean the service is part of this install.
     has_calls = calls_state == "ok" or bool(profs & {"calls", "calls-desktop"}) or bool(row.calls_enabled)
-    has_maps = maps["state"] != "off" or maps["ready"] or "maps" in profs
+    has_maps = bool(maps["available"]) or bool(maps["ready"]) or "maps" in profs
     hears = bool((speech.get("listening") or {}).get("reachable"))
     speaks = bool((speech.get("speaking") or {}).get("reachable"))
     has_voice = hears or speaks
@@ -412,28 +473,47 @@ async def checklist(db: AsyncSession, admin: User, redis, *, request_host: str |
             ))
 
     if has_maps:
-        if maps["ready"] and maps["state"] != "failed":
-            add(Row("maps", "Maps", "extra", "done", "The map is ready."))
-        elif maps["state"] == "none":
-            # Written by the maps service once it waits for a country to be
-            # chosen (maps-regions); older builds never say it.
-            add(Row(
-                "maps", "Maps", "extra", "todo",
-                "No map chosen yet. Pick your country and Promptly downloads it in the background.",
-                "/setup?step=maps", "Choose",
-            ))
-        elif maps["state"] == "failed":
+        env = maps["managed"] == "env"
+        names = _names(maps["names"])
+        where = "Your map is set in .env. " if env else ""
+        now = ""
+        if maps["step"]:
+            now = f" (now: {maps['step']}"
+            if maps["progress"] is not None:
+                now += f", about {round(maps['progress'] * 100)}% done"
+            now += ")"
+        if maps["state"] == "failed":
             add(Row(
                 "maps", "Maps", "extra", "problem",
-                f"Getting the map stopped at the {maps['step'] or 'first'} step. It tries again by itself.",
-                "/admin?tab=settings", "Open Settings",
+                where + f"Getting the map stopped while {maps['step'] or 'getting ready'}. It tries again by itself"
+                + (", and the map you have keeps working." if maps["ready"] else "."),
+                None if env else "/admin?tab=settings", None if env else "Open Settings",
             ))
-        else:
+        elif maps["state"] == "building":
             add(Row(
                 "maps", "Maps", "extra", "working",
-                "The map is still being put together"
-                + (f" (now: {maps['step']})" if maps["step"] else "")
-                + ". It takes about an hour the first time and needs 15 GB of disk. Nothing for you to do.",
+                where + (f"{names} is" if len(maps["names"]) == 1 else "The map is") + f" being put together{now}. "
+                + ("The map you have keeps working meanwhile." if maps["ready"] else "Everything else works meanwhile.")
+                + " Nothing for you to do.",
+            ))
+        elif maps["ready"]:
+            add(Row(
+                "maps", "Maps", "extra", "done",
+                where + (f"The map is ready: {names}." if names else "The map is ready."),
+            ))
+        elif maps["state"] == "waiting":
+            add(Row("maps", "Maps", "extra", "working", where + "The map is about to start downloading. Nothing for you to do."))
+        elif maps["state"] == "none":
+            add(Row(
+                "maps", "Maps", "extra", "todo",
+                "No map chosen yet, and nothing has been downloaded. Choose your country and Promptly builds its map in the background.",
+                "/setup?step=maps", "Choose",
+            ))
+        else:
+            # Part of this install, but the maps service isn't answering.
+            add(Row(
+                "maps", "Maps", "extra", "working",
+                "Maps is still starting. It can take a few minutes after the first start.",
             ))
 
     # ---- Extras ----
@@ -481,7 +561,11 @@ async def checklist(db: AsyncSession, admin: User, redis, *, request_host: str |
             "inside_ok": bool(inside and inside.get("ok")),
             "outside": None if not outside_test else bool(outside_test.get("ok")),
         },
-        "maps": {"there": has_maps, **maps},
+        "maps": {
+            "there": has_maps, **maps,
+            # Whether the wizard's Maps step has anything to offer here.
+            "can_choose": bool(maps["available"]) and maps["managed"] == "ui",
+        },
         "voice": {"there": has_voice},
         "push": {"ready": bool(row.vapid_public_key)},
     }

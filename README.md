@@ -173,7 +173,7 @@ downloads. Live traffic is optional and needs your own TomTom key.
 - **Forms.** Build a form or quiz, share a link, collect answers.
 - **Workspaces.** A shared space for a project: notes, boards, sheets, whiteboards and chats that know about each other.
 - **AI tasks.** Things the assistant does on a schedule or when something happens, such as a morning summary. There is a visual flow editor for bigger jobs.
-- **Promptly Home.** Lights, plugs, fans, scenes and speakers, through a bundled Home Assistant you never have to open. Off until an admin turns it on. It never unlocks doors, garages or alarms.
+- **Promptly Home.** Lights, plugs, fans, scenes and speakers, through a bundled Home Assistant you never have to open. It is an add-on: install with `--with-home` (or add it later the same way), then an admin turns it on. It never unlocks doors, garages or alarms.
 
 <table>
 <tr>
@@ -215,10 +215,11 @@ Screen from Safari.
 
 Measured on a 4-core, 8 GB Linux test box: installing takes about 10 minutes
 (longer on a slow connection) and an update 1 to 4 minutes. Sitting idle it
-uses about 5.7 GB of memory, or about 4.8 GB with every optional part switched
-off. It takes about 26 GB of disk before any map data, or about 17 GB without
-Maps and Home; 5 to 7 GB of that is build cache that `docker builder prune`
-gives back.
+uses about 5.1 GB of memory, or about 4.8 GB with every optional part switched
+off. It takes about 19 GB of disk before any map data (about 17 GB without
+Maps); 5 to 7 GB of that is build cache that `docker builder prune` gives
+back. Promptly Home, if you add it, takes about 7 GB more disk and 0.6 GB more
+memory.
 
 ## Install
 
@@ -238,15 +239,16 @@ irm https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.ps1 | i
 ```
 
 It downloads the latest release into a `Promptly` folder where you run it and
-installs from there. To leave parts out, add options after `bash -s --`:
+installs from there. To add parts or leave some out, put options after
+`bash -s --`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.sh | bash -s -- --no-maps --no-home
+curl -fsSL https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.sh | bash -s -- --with-home --no-maps
 ```
 
-The options are `--with-ollama`, `--no-search`, `--no-maps`, `--no-calls`,
-`--no-home` and `--no-start` (in PowerShell: `-WithOllama`, `-NoSearch`,
-`-NoMaps`, `-NoCalls`, `-NoHome`, `-NoStart`). What each one does is in
+The options are `--with-ollama`, `--with-home`, `--no-search`, `--no-maps`,
+`--no-calls` and `--no-start` (in PowerShell: `-WithOllama`, `-WithHome`,
+`-NoSearch`, `-NoMaps`, `-NoCalls`, `-NoStart`). What each one does is in
 [install options](docs/guide-install-options.md).
 
 Or clone it first and run the installer from the folder:

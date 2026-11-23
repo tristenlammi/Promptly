@@ -214,7 +214,8 @@ async def test_the_list_has_sizes_and_no_download_addresses(user, client, maps):
     r = await client.get("/api/maps/regions/catalog", headers=_hdr(user))
     assert r.status_code == 200
     rows = {x["id"]: x for x in r.json()["regions"]}
-    assert set(rows["us/california"]) == {"id", "name", "parent", "parent_name", "continent", "kind", "download_mb", "disk_mb", "minutes"}
+    assert set(rows["us/california"]) == {"id", "name", "parent", "parent_name", "continent", "kind", "codes", "download_mb", "disk_mb", "minutes"}
+    assert rows["us/california"]["codes"] == ["us"]
     assert rows["us/california"]["parent_name"] == "United States of America" and rows["us/california"]["kind"] == "part"
 
 

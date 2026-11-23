@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/patch-fortune-sheet.mjs",
     "predev": "node scripts/patch-fortune-sheet.mjs && node scripts/copy-excalidraw-assets.mjs",
     "dev": "vite",
     "prebuild": "node scripts/patch-fortune-sheet.mjs && node scripts/generate-pwa-icons.mjs && node scripts/copy-excalidraw-assets.mjs",

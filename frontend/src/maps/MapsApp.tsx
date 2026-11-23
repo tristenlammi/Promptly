@@ -1,3 +1,4 @@
+import { cn } from "@/utils/cn";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -1466,10 +1467,10 @@ function PanelHeader({ title, detail, onClose }: { title: string; detail?: strin
   );
 }
 
-function PrimaryButton({ icon: Icon, children, onClick }: { icon: typeof Car; children: React.ReactNode; onClick: () => void }) {
+function PrimaryButton({ icon: Icon, children, onClick, className }: { icon: typeof Car; children: React.ReactNode; onClick: () => void; className?: string }) {
   return (
-    <button type="button" onClick={onClick} className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90">
-      <Icon className="h-4 w-4" />{children}
+    <button type="button" onClick={onClick} className={cn("inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90", className)}>
+      <Icon className="h-4 w-4 shrink-0" />{children}
     </button>
   );
 }
@@ -2166,11 +2167,12 @@ function RoutePanel(p: {
             </ol>
           )}
           {/* Always there: everything above scrolls under it. */}
-          <div className="sticky bottom-0 flex gap-2 bg-[var(--surface)] px-4 pb-3 pt-2">
-            {/* Turn-by-turn runs in the Android app: anywhere else, the trip goes to your phone. */}
-            <PrimaryButton icon={android ? Navigation : Smartphone} onClick={p.onStart}>{android ? "Start" : "Send to my phone"}</PrimaryButton>
+          <div className="sticky bottom-0 flex flex-wrap gap-2 bg-[var(--surface)] px-4 pb-3 pt-2" data-testid="route-actions">
+            {/* Turn-by-turn runs in the Android app: anywhere else, the trip goes to your phone.
+                "Send to my phone" is too long to share a line with the other three, so it gets its own. */}
+            <PrimaryButton icon={android ? Navigation : Smartphone} onClick={p.onStart} className={android ? undefined : "basis-full"}>{android ? "Start" : "Send to my phone"}</PrimaryButton>
             {p.onSaveOffline && (
-              <button type="button" onClick={p.onSaveOffline} disabled={p.savingOffline} aria-label="Save for offline" title="Save this route's roads for offline, on your phone" className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50">
+              <button type="button" onClick={p.onSaveOffline} disabled={p.savingOffline} aria-label="Save for offline" title="Save this route's roads for offline, on your phone" className={cn("inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50", !android && "flex-1")}>
                 {p.savingOffline ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
                 <span className="hidden sm:inline">Save for offline</span>
                 <span className="sm:hidden">Offline</span>
@@ -2187,7 +2189,7 @@ function RoutePanel(p: {
             <button type="button" onClick={() => setShareWays(true)} aria-label="Tell someone when you'll arrive" title="Tell someone when you'll arrive" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]">
               <Share2 className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => setShowSteps((v) => !v)} aria-expanded={showSteps} className="inline-flex h-10 items-center gap-1 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
+            <button type="button" onClick={() => setShowSteps((v) => !v)} aria-expanded={showSteps} className={cn("inline-flex h-10 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]", !android && !p.onSaveOffline && "flex-1")}>
               Steps{showSteps ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>
           </div>

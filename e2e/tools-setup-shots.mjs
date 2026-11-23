@@ -3,15 +3,25 @@
 // suite (the suite's stack already has its admin), but it fails loudly if a
 // step isn't where it should be, so it doubles as a check of the flow.
 //
-//   scripts/stack.sh up setup --with calls,maps,voice
+//   scripts/stack.sh up setup --with calls,maps-full,voice --build-extras
 //   cd e2e && E2E_BASE_URL=http://localhost:8094 SETUP_BACKEND=PromptlySetup-Backend \
 //     SETUP_PASS=desktop node tools-setup-shots.mjs
-//   scripts/stack.sh down setup --keep-images && scripts/stack.sh up setup --with calls,maps,voice --no-build
+//   scripts/stack.sh down setup --keep-images && scripts/stack.sh up setup --with calls,maps-full,voice --build-extras
 //   ... SETUP_PASS=phone node tools-setup-shots.mjs
 //
-// desktop:  "Set everything up now", every step, a reload in the middle
-//           (resume), then Today's card, Admin → Setup and one step reopened.
-// phone:    "Just look around" first, then a step from the summary.
+// The Maps step needs the real maps container: maps-full, and ALWAYS with
+// --build-extras (without it the stack reuses the main app's older maps
+// image, which may start downloading Australia by itself). With the stub
+// ("maps") or no maps the wizard leaves the step out and this says so.
+// The desktop pass really chooses a map (SETUP_MAP, default new-zealand:
+// about 400 MB, 12 minutes, 4.5 GB of disk while it builds); taking the
+// stack down afterwards deletes it. SETUP_MAP=none skips with "Not now".
+//
+// desktop:  "Set everything up now", every step (a real map chosen), a reload
+//           in the middle (resume), then Today's card, Admin → Setup and one
+//           step reopened.
+// phone:    "Just look around" first, then a step from the summary; "Not
+//           now" on the Maps step.
 // notready: "Just look around" and straight in; an AI service is connected
 //           afterwards, so the built-in Promptly model shows as not ready
 //           in the chat's model list until its model is chosen.
@@ -32,6 +42,8 @@ const BASE = process.env.E2E_BASE_URL ?? "http://localhost:8094";
 const BACKEND = process.env.SETUP_BACKEND ?? "PromptlySetup-Backend";
 const PASS = process.env.SETUP_PASS ?? "desktop";
 const OUT = path.resolve(here, "../docs/setup-shots");
+// The map the desktop pass downloads; "none" for "Not now".
+const MAP = process.env.SETUP_MAP ?? (PASS === "desktop" ? "new-zealand" : "none");
 fs.mkdirSync(OUT, { recursive: true });
 
 const SEED = `
@@ -71,11 +83,15 @@ const viewport = sizes[PASS];
 if (!viewport) throw new Error(`SETUP_PASS must be desktop or phone, not ${PASS}`);
 
 const browser = await chromium.launch();
-const context = await browser.newContext({ viewport, deviceScaleFactor: 2, hasTouch: PASS === "phone", isMobile: PASS === "phone" });
+// A browser in New Zealand, so the map picker offers New Zealand first.
+const context = await browser.newContext({ viewport, deviceScaleFactor: 2, hasTouch: PASS === "phone", isMobile: PASS === "phone", timezoneId: "Pacific/Auckland", locale: "en-NZ" });
 await context.route("**/version.json*", (r) => r.abort());
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
+
+// The signed-in admin's token, for a question straight to the API.
+const bearer = async () => `Bearer ${await page.evaluate(async () => (await (await fetch("/api/auth/refresh", { method: "POST", credentials: "include" })).json()).access_token)}`;
 
 let n = 0;
 const shot = async (name) => {
@@ -202,7 +218,37 @@ await page.getByRole("button", { name: /Set up later/ }).click();
 await shot("search-later");
 await page.getByRole("button", { name: "Continue" }).click();
 
-// ---- At home and away (no Maps step: this branch has no regions API) ----
+// ---- Maps: nothing downloads until a country is chosen ----
+await wizard.and(page.locator('[data-step="maps"], [data-step="outside"]')).waitFor({ timeout: 20_000 });
+const mapsStep = (await wizard.getAttribute("data-step")) === "maps";
+let mapChosen = false;
+if (!mapsStep) {
+  console.log("   no Maps step: this stack has no real maps service (bring it up --with maps-full --build-extras)");
+} else {
+  await page.getByTestId("maps-step").waitFor();
+  await page.getByTestId("map-region-picker").waitFor();
+  // The browser's own country is offered first.
+  const yours = page.getByTestId("map-region-yours");
+  await yours.waitFor({ timeout: 30_000 });
+  if ((await yours.getAttribute("data-region")) !== "new-zealand") throw new Error("the picker didn't offer New Zealand first");
+  await shot("maps");
+  const before = await (await page.request.get(`${BASE}/api/maps/regions`, { headers: { Authorization: await bearer() } })).json();
+  if (before.chosen || before.building || before.regions.length) throw new Error("something was chosen or downloading before anyone chose a map");
+  if (MAP === "none") {
+    await page.getByTestId("maps-step-skip").click();
+  } else {
+    await page.getByTestId("map-region-search").fill(MAP.replace(/-/g, " "));
+    await page.getByTestId(`map-region-${MAP}`).click();
+    await page.getByTestId("map-region-estimate").getByText("Disk space").waitFor({ timeout: 30_000 });
+    await page.getByTestId("map-region-addresses").waitFor();
+    await shot("maps-chosen");
+    const go = page.getByTestId("maps-step-download");
+    if (await go.isDisabled()) throw new Error(`${MAP} doesn't fit on this machine's disk: free some space or set SETUP_MAP=none`);
+    await go.click();
+    mapChosen = true;
+  }
+}
+
 await at("outside");
 await page.getByTestId("outside-step").waitFor();
 await shot("outside");
@@ -229,6 +275,12 @@ await page.getByTestId("setup-checklist").waitFor();
 await shot("summary");
 const row = async (id) => page.getByTestId(`setup-row-${id}`).getAttribute("data-status");
 const got = { provider: await row("provider"), models: await row("models"), search_model: await row("search_model"), address: await row("address"), email: await row("email"), mfa: await row("mfa") };
+if (mapsStep) {
+  const maps = await row("maps");
+  console.log("   maps row:", maps, "-", await page.getByTestId("setup-row-maps").innerText());
+  // Chosen: building by itself (or already done, for a tiny map). Not chosen: still to do.
+  if (mapChosen ? !["working", "done"].includes(maps) : maps !== "todo") throw new Error(`the Maps row says ${maps}`);
+}
 console.log("   summary:", JSON.stringify(got));
 const want = { provider: "done", models: "done", search_model: "todo", address: "done", email: "todo", mfa: "todo" };
 if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`summary rows: wanted ${JSON.stringify(want)}`);
@@ -259,30 +311,21 @@ await at("outside");
 await page.getByTestId("outside-step").waitFor();
 await shot("one-step-outside");
 
-// ---- The Maps step, with a stand-in for the regions API (not on this branch) ----
-const regions = [
-  { id: "australia", name: "Australia", group: "Oceania", build_gb: 15, disk_gb: 7, build_minutes: 60 },
-  { id: "new-zealand", name: "New Zealand", group: "Oceania", build_gb: 4, disk_gb: 2, build_minutes: 20 },
-  { id: "united-kingdom", name: "United Kingdom", group: "Europe", build_gb: 22, disk_gb: 11, build_minutes: 120 },
-];
-let chosen = [];
-await page.route("**/api/maps/regions", (r) => r.fulfill({ json: { regions } }));
-await page.route("**/api/maps/regions/state", (r) => r.fulfill({ json: { chosen, state: chosen.length ? "building" : "none", step: chosen.length ? "downloading" : null } }));
-await page.route("**/api/maps/regions/choose", (r) => {
-  chosen = [r.request().postDataJSON().region_id];
-  return r.fulfill({ json: { chosen, state: "building", step: "downloading" } });
-});
-await page.goto(`${BASE}/setup?step=maps`);
-await at("maps");
-await page.getByTestId("maps-step").waitFor();
-await shot("maps-standin");
-await page.getByLabel("Country").selectOption("australia");
-await page.getByTestId("maps-step-estimate").waitFor();
-await page.getByRole("button", { name: "Download Australia" }).click();
-await shot("maps-standin-confirm");
-await page.getByRole("button", { name: "Yes, start the download" }).click();
-await page.getByTestId("maps-step-chosen").waitFor();
-await shot("maps-standin-building");
+// ---- The Maps step by itself: what's chosen, and adding another ----
+if (mapsStep) {
+  await page.goto(`${BASE}/setup?step=maps`);
+  await at("maps");
+  await page.getByTestId("maps-step").waitFor();
+  await page.getByTestId("map-region-picker").waitFor();
+  if (mapChosen) await page.getByTestId("maps-step-chosen").waitFor();
+  await page.waitForTimeout(800);
+  await shot(mapChosen ? "one-step-maps-building" : "one-step-maps");
+  await page.goto(`${BASE}/admin?tab=settings`);
+  const card = page.getByTestId("maps-regions-card");
+  await card.waitFor({ timeout: 30_000 });
+  await card.scrollIntoViewIfNeeded();
+  await shot("admin-maps-card");
+}
 
 await browser.close();
 if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);

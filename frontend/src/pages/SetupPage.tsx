@@ -24,7 +24,7 @@ import type { ProviderType } from "@/api/types";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/shared/Button";
 import { EnrollmentWizard } from "@/components/mfa/EnrollmentWizard";
-import { MapsStep, mapsStepAvailable } from "@/components/setup/MapsStep";
+import { MapsStep } from "@/components/setup/MapsStep";
 import { ModelsStep } from "@/components/setup/ModelsStep";
 import { OutsideStep } from "@/components/setup/OutsideStep";
 import { SetupChecklist } from "@/components/setup/SetupChecklist";
@@ -43,8 +43,9 @@ import { SetupChecklist } from "@/components/setup/SetupChecklist";
  *             seeded one from an ``*_API_KEY`` env var).
  *   models    which model does each job, pre-filled with suggestions.
  *   search    the embedding model that lets the assistant read your files.
- *   maps      which country Maps downloads (only when this install has
- *             Maps and the regions API; see ``setup/mapsRegions.ts``).
+ *   maps      which countries' maps the server keeps (only when this
+ *             install has Maps and the map isn't set in ``.env``; the
+ *             picker is ``@/maps/regions``). Nothing downloads before this.
  *   outside   the address people use, and what to do outside Promptly
  *             (tunnel, router ports for calls), for the services this
  *             install has.
@@ -77,7 +78,7 @@ const SUBTITLE: Record<Step, string> = {
   provider: "Connect an AI service so Promptly can answer.",
   models: "Choose which model does each job.",
   search: "Let the assistant read your files.",
-  maps: "Choose the map to download.",
+  maps: "Choose your country's map.",
   outside: "Using Promptly at home and away.",
   email: "Set up outgoing email (optional).",
   mfa: "One last thing: protect your admin account.",
@@ -160,8 +161,9 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
   useEffect(() => {
     if (!signedIn) return;
     let alive = true;
-    Promise.all([setupApi.checklist(), mapsStepAvailable()])
-      .then(([c, choice]) => alive && setHasMaps(!!c.services.maps && choice))
+    setupApi
+      .checklist()
+      .then((c) => alive && setHasMaps(!!c.services.maps && !!c.outside.maps.can_choose))
       .catch(() => alive && setHasMaps(false));
     return () => {
       alive = false;
@@ -249,7 +251,7 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
   // One step by itself: back to the checklist when it's done.
   const backToList = () => navigate("/admin?tab=setup", { replace: true });
   const next = (s: Step) => (single ? backToList : () => setStep(after(s)));
-  const wide = step === "summary" || step === "outside" || step === "path";
+  const wide = step === "summary" || step === "outside" || step === "path" || step === "maps";
   const back = single ? null : before(step);
 
   return (

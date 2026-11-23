@@ -218,8 +218,8 @@ if ($target -eq "origin/main") {
 }
 if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
 # A newer update.ps1 can have one-time set-up steps this run doesn't know
-# (the first update with Promptly Home ran the old script, so Home's
-# containers were never added). Let the new script do the rest.
+# (a secret or a setting a later version needs). Let the new script do the
+# rest.
 Invoke-Quiet { git diff --quiet $prevSha HEAD -- update.ps1 }
 if ($LASTEXITCODE -ne 0) {
     $env:PROMPTLY_UPDATE_RESUME = "1"
@@ -265,11 +265,11 @@ if ((Test-Path ".env") -and -not (Select-String -Path ".env" -Pattern "^LIVEKIT_
     [System.IO.File]::WriteAllText((Join-Path $PWD ".env"), $envText)
     Write-Ok "Calls: made a key pair and turned the calls service on (calls-desktop). Turn voice on in Admin -> Calls."
 }
-# Promptly Home (smart devices): the first update that has it makes the
-# secret its bundled home box proves itself with, and turns the two
-# containers on (Docker Desktop: the bridged variant, home-desktop). Later
-# updates see the secret and leave both alone, so taking the token out of
-# COMPOSE_PROFILES sticks.
+# Promptly Home (smart devices) is something you add: .\install.ps1 -WithHome
+# An update never turns it on. An install that has "home-desktop" (or "home")
+# in COMPOSE_PROFILES keeps it; one that doesn't stays without. All an update
+# does is make the secret Home's bundled box proves itself with, when there
+# isn't one, so adding Home later is that one command.
 if ((Test-Path ".env") -and -not (Select-String -Path ".env" -Pattern "^HOME_BOX_SECRET=." -Quiet)) {
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     $b = New-Object byte[] 32; $rng.GetBytes($b); $rng.Dispose()
@@ -278,16 +278,7 @@ if ((Test-Path ".env") -and -not (Select-String -Path ".env" -Pattern "^HOME_BOX
     $envText = [regex]::Replace($envText, "(?m)^HOME_BOX_SECRET=\s*\n", "")
     if ($envText -and -not $envText.EndsWith("`n")) { $envText += "`n" }
     $envText += "HOME_BOX_SECRET=$homeSecret`n"
-    if ($envText -match "(?m)^COMPOSE_PROFILES=(.*)$") {
-        if ($Matches[1] -notmatch "(^|,)home(-desktop)?(,|$)") {
-            $newCsv = (@($Matches[1].Trim().Split(",") | Where-Object { $_ }) + "home-desktop") -join ","
-            $envText = [regex]::Replace($envText, "(?m)^COMPOSE_PROFILES=.*$", "COMPOSE_PROFILES=$newCsv")
-        }
-    } else {
-        $envText += "COMPOSE_PROFILES=home-desktop`n"
-    }
     [System.IO.File]::WriteAllText((Join-Path $PWD ".env"), $envText)
-    Write-Ok "Home: smart devices are bundled in now (home-desktop; about 3.5 GB to download this once). Turn Promptly Home on in Admin -> Home."
 }
 # Shared secrets that later versions need and older .env files lack (or still
 # hold the .env.example placeholder for): made once, before anything is

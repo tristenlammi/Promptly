@@ -4,6 +4,7 @@ import { Check, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { cn } from "@/utils/cn";
 
 import { mapRegionsApi, sizeText, timeText, useMapRegionCatalog, type MapRegion, type MapRegionEstimate } from "./api";
+import { guessCountry, mapForCountry } from "./guessCountry";
 
 export interface MapRegionPickerProps {
   /** The ids ticked in this picker. */
@@ -50,6 +51,9 @@ export function MapRegionPicker({ value, onChange, installed = [], single = fals
     return by;
   }, [regions]);
   const ids = useMemo(() => new Set(regions.map((r) => r.id)), [regions]);
+  // The browser's own country, offered first. A guess from its time zone and
+  // language: nothing is looked up.
+  const yours = useMemo(() => mapForCountry(regions, guessCountry()), [regions]);
 
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const shown = useMemo(() => {
@@ -116,6 +120,68 @@ export function MapRegionPicker({ value, onChange, installed = [], single = fals
     onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
   };
 
+  const row = (r: MapRegion, key: string, top = false) => {
+    const have = installed.includes(r.id);
+    const on = have || value.includes(r.id);
+    const parts = top ? undefined : children.get(r.id);
+    const depth = top || words.length || !r.parent || !ids.has(r.parent) ? 0 : 1;
+    return (
+      <div key={key} className={cn("flex items-stretch border-b border-[var(--border)] last:border-b-0", on && !have && "bg-[var(--hover)]")}>
+        <button
+          type="button"
+          role="option"
+          aria-selected={on}
+          disabled={have}
+          onClick={() => toggle(r.id)}
+          data-testid={top ? "map-region-yours" : `map-region-${r.id}`}
+          data-region={r.id}
+          className={cn("flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left", depth && "pl-8", have ? "cursor-default opacity-60" : "hover:bg-[var(--hover)]")}
+        >
+          <span
+            className={cn(
+              "flex h-5 w-5 shrink-0 items-center justify-center border border-[var(--border)]",
+              single ? "rounded-full" : "rounded",
+              on && "border-[var(--accent-strong)] bg-[var(--accent-strong)] text-white",
+            )}
+          >
+            {on && <Check className="h-3.5 w-3.5" />}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-[var(--text)]">
+              {r.name}
+              {words.length > 0 && r.parent_name && <span className="text-[var(--text-muted)]"> · {r.parent_name}</span>}
+            </span>
+            <span className="block truncate text-xs text-[var(--text-muted)]">{have ? "Already on this server" : rowDetail(r) || "Size not known"}</span>
+          </span>
+        </button>
+        {!words.length && parts && parts.length > 0 && (
+          <button
+            type="button"
+            onClick={() =>
+              setOpen((was) => {
+                const next = new Set(was);
+                if (next.has(r.id)) next.delete(r.id);
+                else next.add(r.id);
+                return next;
+              })
+            }
+            aria-expanded={open.has(r.id)}
+            aria-label={`${open.has(r.id) ? "Hide" : "Show"} the parts of ${r.name}`}
+            title={`Just part of ${r.name}`}
+            className="flex shrink-0 items-center gap-1 px-3 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]"
+          >
+            {parts.length} parts
+            {open.has(r.id) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+        )}
+      </div>
+    );
+  };
+  const heading = "sticky top-0 z-[1] border-b border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]";
+  // Anything but the whole of Australia has only OpenStreetMap's addresses.
+  const osmAddresses = value.some((id) => id !== "australia");
+  const shared = estimate?.streamed_bytes ?? 0;
+
   let lastGroup = "";
   return (
     <div className={cn("space-y-3", className)} data-testid="map-region-picker">
@@ -142,65 +208,20 @@ export function MapRegionPicker({ value, onChange, installed = [], single = fals
         {isLoading && <p className="p-3 text-sm text-[var(--text-muted)]">Getting the list of maps…</p>}
         {isError && <p className="p-3 text-sm text-[var(--text-muted)]">Couldn&apos;t get the list of maps. Check this server can reach the internet, then try again.</p>}
         {!isLoading && !isError && shown.length === 0 && <p className="p-3 text-sm text-[var(--text-muted)]">No map by that name.</p>}
+        {!words.length && yours && (
+          <div data-testid="map-region-yours-group">
+            <p className={heading}>Probably yours</p>
+            {row(yours, `yours-${yours.id}`, true)}
+          </div>
+        )}
         {shown.map((r) => {
           const group = words.length ? "" : r.continent;
           const header = group && group !== lastGroup && !(r.parent && ids.has(r.parent));
           if (header) lastGroup = group;
-          const have = installed.includes(r.id);
-          const on = have || value.includes(r.id);
-          const parts = children.get(r.id);
-          const depth = words.length || !r.parent || !ids.has(r.parent) ? 0 : 1;
           return (
             <div key={r.id}>
-              {header && <p className="sticky top-0 z-[1] border-b border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{group}</p>}
-              <div className={cn("flex items-stretch border-b border-[var(--border)] last:border-b-0", on && !have && "bg-[var(--hover)]")}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={on}
-                  disabled={have}
-                  onClick={() => toggle(r.id)}
-                  data-testid={`map-region-${r.id}`}
-                  className={cn("flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left", depth && "pl-8", have ? "cursor-default opacity-60" : "hover:bg-[var(--hover)]")}
-                >
-                  <span
-                    className={cn(
-                      "flex h-5 w-5 shrink-0 items-center justify-center border border-[var(--border)]",
-                      single ? "rounded-full" : "rounded",
-                      on && "border-[var(--accent-strong)] bg-[var(--accent-strong)] text-white",
-                    )}
-                  >
-                    {on && <Check className="h-3.5 w-3.5" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-[var(--text)]">
-                      {r.name}
-                      {words.length > 0 && r.parent_name && <span className="text-[var(--text-muted)]"> · {r.parent_name}</span>}
-                    </span>
-                    <span className="block truncate text-xs text-[var(--text-muted)]">{have ? "Already on this server" : rowDetail(r) || "Size not known"}</span>
-                  </span>
-                </button>
-                {!words.length && parts && parts.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setOpen((was) => {
-                        const next = new Set(was);
-                        if (next.has(r.id)) next.delete(r.id);
-                        else next.add(r.id);
-                        return next;
-                      })
-                    }
-                    aria-expanded={open.has(r.id)}
-                    aria-label={`${open.has(r.id) ? "Hide" : "Show"} the parts of ${r.name}`}
-                    title={`Just part of ${r.name}`}
-                    className="flex shrink-0 items-center gap-1 px-3 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]"
-                  >
-                    {parts.length} parts
-                    {open.has(r.id) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  </button>
-                )}
-              </div>
+              {header && <p className={heading}>{group}</p>}
+              {row(r, r.id)}
             </div>
           );
         })}
@@ -208,6 +229,12 @@ export function MapRegionPicker({ value, onChange, installed = [], single = fals
 
       {catalog?.source === "builtin" && (
         <p className="text-xs text-[var(--text-muted)]">This is a short list, because the full one couldn&apos;t be downloaded just now. Try again in a while for every country.</p>
+      )}
+
+      {osmAddresses && (
+        <p className="text-xs text-[var(--text-muted)]" data-testid="map-region-addresses">
+          House numbers in search depend on how well OpenStreetMap covers the country; Australia also gets the full official address file.
+        </p>
       )}
 
       {value.length > 0 && (
@@ -228,6 +255,11 @@ export function MapRegionPicker({ value, onChange, installed = [], single = fals
                 <dd>{timeText(estimate.minutes)}, by itself in the background</dd>
               </dl>
               {installed.length > 0 && <p className="mt-2 text-xs text-[var(--text-muted)]">That&apos;s for all your maps together: they&apos;re rebuilt as one, and the ones you have keep working until the new set is ready.</p>}
+              {shared > 0 && shared * 2 >= estimate.download_bytes && estimate.download_bytes > estimate.disk_needed_bytes && (
+                <p className="mt-2 text-xs text-[var(--text-muted)]" data-testid="map-region-shared">
+                  About {sizeText(shared)} of the download is a search file shared with neighbouring countries. It&apos;s read as it arrives and not kept, so it needs no disk space.
+                </p>
+              )}
               {!estimate.complete && <p className="mt-2 text-xs text-[var(--text-muted)]">Some sizes weren&apos;t known, so the real numbers will be bigger.</p>}
               {estimate.fits === false && (
                 <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-400" role="alert" data-testid="map-region-too-big">

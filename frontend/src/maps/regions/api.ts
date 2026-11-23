@@ -14,6 +14,8 @@ export interface MapRegion {
   parent_name: string | null;
   continent: string;
   kind: "country" | "part";
+  /** Two-letter codes of the countries it covers. */
+  codes?: string[];
   download_mb: number | null;
   disk_mb: number | null;
   minutes: number | null;
@@ -62,6 +64,9 @@ export interface MapRegionEstimate {
   /** False when a size wasn't known for every map: the numbers are low. */
   complete: boolean;
   download_bytes: number;
+  /** The part of the download that is read as it arrives and never stored
+   *  (search files, which a small country can share with a big neighbour). */
+  streamed_bytes?: number;
   disk_after_bytes: number;
   /** Free space needed while it builds, next to the maps already there. */
   disk_needed_bytes: number;

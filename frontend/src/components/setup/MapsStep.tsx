@@ -1,76 +1,61 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Map as MapIcon } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
-import {
-  buildTimeWords,
-  chooseRegion,
-  listRegions,
-  regionState,
-  type MapRegion,
-  type MapRegionState,
-} from "@/setup/mapsRegions";
+import { MapRegionPicker, mapRegionsApi, stepText, useMapRegionsState, type MapRegionEstimate } from "@/maps/regions";
+import { MAP_REGIONS_STATE_KEY } from "@/maps/regions/api";
 import { apiErrorMessage } from "@/utils/apiError";
 
-/** Can this server offer a choice of map? False when the regions API isn't
- *  there (the step is then left out). */
-export async function mapsStepAvailable(): Promise<boolean> {
-  try {
-    return (await listRegions()) !== null;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Which country Maps downloads. Shows the size and time before anything
- * starts, and "Not now" leaves Maps empty until one is chosen later.
- * If the regions API isn't on this server the step passes straight through.
+ * Which countries' maps this server keeps. Nothing is downloaded until one
+ * is chosen here (or later in Admin → App settings → Maps on this server):
+ * the size, the disk space and the time are shown first, and a choice that
+ * doesn't fit on the disk can't be started. "Not now" leaves Maps empty.
+ *
+ * The wizard leaves this step out when the server has no maps service or its
+ * map is set in ``.env`` (``SetupOutside.maps.can_choose``); opened anyway,
+ * it says so and moves on.
  */
 export function MapsStep({ onDone, doneLabel = "Continue" }: { onDone: () => void; doneLabel?: string }) {
-  const [regions, setRegions] = useState<MapRegion[] | null | undefined>(undefined);
-  const [state, setState] = useState<MapRegionState | null>(null);
-  const [pick, setPick] = useState("");
-  const [confirming, setConfirming] = useState(false);
+  const { data: state, isLoading, isError } = useMapRegionsState();
+  const client = useQueryClient();
+  const [picked, setPicked] = useState<string[]>([]);
+  const [estimate, setEstimate] = useState<MapRegionEstimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    Promise.all([listRegions(), regionState()])
-      .then(([r, s]) => {
-        if (!alive) return;
-        setRegions(r);
-        setState(s);
-      })
-      .catch(() => alive && setRegions(null));
-    return () => {
-      alive = false;
-    };
-  }, []);
+  if (isLoading) {
+    return <div className="py-6 text-center text-xs text-[var(--text-muted)]">Checking Maps…</div>;
+  }
 
-  // Not on this server: nothing to ask.
-  useEffect(() => {
-    if (regions === null) onDone();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [regions]);
+  if (isError || !state || !state.available || state.managed === "env") {
+    return (
+      <div className="space-y-3" data-testid="maps-step">
+        <p className="rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-xs leading-relaxed text-[var(--text-muted)]" data-testid="maps-step-nothing">
+          {state?.available && state.managed === "env"
+            ? "Your map is set in .env (MAPS_PBF_URL, MAPS_PHOTON_URL, MAPS_BBOX), so there's nothing to choose here."
+            : "Maps isn't running on this server, so there's no map to choose."}
+        </p>
+        <Button type="button" variant="primary" className="w-full" onClick={onDone}>
+          {doneLabel}
+        </Button>
+      </div>
+    );
+  }
 
-  const groups = useMemo(() => {
-    const by = new Map<string, MapRegion[]>();
-    for (const r of regions ?? []) by.set(r.group ?? "", [...(by.get(r.group ?? "") ?? []), r]);
-    return Array.from(by.entries());
-  }, [regions]);
-  const chosen = (regions ?? []).find((r) => r.id === pick) ?? null;
-  const have = (regions ?? []).filter((r) => state?.chosen.includes(r.id));
+  const kept = state.regions.filter((r) => r.state !== "removing");
+  const percent = state.progress != null ? Math.round(state.progress * 100) : null;
 
   const start = async () => {
-    if (!chosen) return;
+    if (!picked.length) return;
     setError(null);
     setBusy(true);
     try {
-      setState(await chooseRegion(chosen.id));
-      setConfirming(false);
-      setPick("");
+      const next = kept.length ? await mapRegionsApi.add(picked) : await mapRegionsApi.choose(picked);
+      client.setQueryData(MAP_REGIONS_STATE_KEY, next);
+      void client.invalidateQueries({ queryKey: ["setup-checklist"] });
+      onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Couldn't start the download."));
     } finally {
@@ -78,67 +63,31 @@ export function MapsStep({ onDone, doneLabel = "Continue" }: { onDone: () => voi
     }
   };
 
-  if (regions === undefined || regions === null) {
-    return <div className="py-6 text-center text-xs text-[var(--text-muted)]">Checking Maps…</div>;
-  }
-
   return (
     <div className="space-y-3" data-testid="maps-step">
       <div className="flex items-start gap-2.5 rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-xs leading-relaxed text-[var(--text-muted)]">
         <MapIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-hidden />
         <div>
-          Maps keeps the whole map on this server, so searches and directions stay private. Choose the country to
-          download. You can add more later in Admin.
+          Maps keeps the whole map on this server, so searches and directions stay private. Choose the country you live in,
+          and any others you want. Nothing is downloaded until you say so, and you can add or remove countries later in
+          Admin.
         </div>
       </div>
 
-      {have.length > 0 && (
+      {kept.length > 0 && (
         <div className="rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--text-muted)]" data-testid="maps-step-chosen">
-          <span className="font-medium text-[var(--text)]">{have.map((r) => r.name).join(", ")}</span>{" "}
-          {state?.state === "ready"
-            ? "is ready."
-            : state?.state === "failed"
-              ? "stopped part-way and will be tried again."
-              : `is downloading in the background${state?.step ? ` (now: ${state.step})` : ""}. Everything else works meanwhile.`}
+          <span className="font-medium text-[var(--text)]">{kept.map((r) => r.name).join(", ")}</span>{" "}
+          {state.failed
+            ? "stopped part-way and will be tried again."
+            : state.building
+              ? `${kept.length > 1 ? "are" : "is"} being put together in the background (${stepText(state.step).toLowerCase()}${percent != null ? `, about ${percent}% done` : ""}). Everything else works meanwhile.`
+              : kept.every((r) => r.state === "installed")
+                ? `${kept.length > 1 ? "are" : "is"} ready.`
+                : "will start downloading in a moment."}
         </div>
       )}
 
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-[var(--text-muted)]">Country</span>
-        <select
-          value={pick}
-          onChange={(e) => {
-            setPick(e.target.value);
-            setConfirming(false);
-          }}
-          disabled={busy}
-          aria-label="Country"
-          className="w-full rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-        >
-          <option value="">Choose a country…</option>
-          {groups.map(([group, rows]) =>
-            group ? (
-              <optgroup key={group} label={group}>
-                {rows.map((r) => (
-                  <option key={r.id} value={r.id} disabled={state?.chosen.includes(r.id)}>{r.name}</option>
-                ))}
-              </optgroup>
-            ) : (
-              rows.map((r) => (
-                <option key={r.id} value={r.id} disabled={state?.chosen.includes(r.id)}>{r.name}</option>
-              ))
-            ),
-          )}
-        </select>
-      </label>
-
-      {chosen && (
-        <div className="rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-xs leading-relaxed text-[var(--text-muted)]" data-testid="maps-step-estimate">
-          <span className="font-medium text-[var(--text)]">{chosen.name}</span> takes {buildTimeWords(chosen.build_minutes)} to
-          download and put together, and needs about {chosen.build_gb} GB of free disk while it does (about {chosen.disk_gb} GB
-          afterwards). It happens in the background.
-        </div>
-      )}
+      <MapRegionPicker value={picked} onChange={setPicked} installed={kept.map((r) => r.id)} onEstimate={setEstimate} listHeight="14rem" />
 
       {error && (
         <div role="alert" className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
@@ -146,31 +95,30 @@ export function MapsStep({ onDone, doneLabel = "Continue" }: { onDone: () => voi
         </div>
       )}
 
-      {chosen && !confirming && (
-        <Button type="button" variant="primary" className="w-full" onClick={() => setConfirming(true)}>
-          Download {chosen.name}
+      {picked.length > 0 && (
+        <Button
+          type="button"
+          variant="primary"
+          className="w-full"
+          onClick={() => void start()}
+          loading={busy}
+          disabled={estimate?.fits === false}
+          data-testid="maps-step-download"
+        >
+          {picked.length > 1 ? `Download ${picked.length} maps and continue` : "Download this map and continue"}
         </Button>
       )}
-      {chosen && confirming && (
-        <div className="flex gap-2">
-          <Button type="button" variant="secondary" className="flex-1" onClick={() => setConfirming(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button type="button" variant="primary" className="flex-1" onClick={() => void start()} loading={busy}>
-            Yes, start the download
-          </Button>
-        </div>
-      )}
 
-      {have.length > 0 ? (
-        <Button type="button" variant={chosen ? "secondary" : "primary"} className="w-full" onClick={onDone} disabled={busy}>
-          {doneLabel}
+      {kept.length > 0 ? (
+        <Button type="button" variant={picked.length ? "secondary" : "primary"} className="w-full" onClick={onDone} disabled={busy} data-testid="maps-step-continue">
+          {picked.length ? "Continue without adding" : doneLabel}
         </Button>
       ) : (
         <button
           type="button"
           onClick={onDone}
           disabled={busy}
+          data-testid="maps-step-skip"
           className="w-full text-center text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
         >
           Not now (Maps stays empty until you choose one)

@@ -31,7 +31,25 @@ export interface SetupOutside {
     /** The last test call from outside: passed, failed, or never run. */
     outside: boolean | null;
   };
-  maps: { there: boolean; state: string; step: string | null; ready: boolean };
+  maps: {
+    there: boolean;
+    /** False when the maps service isn't answering. */
+    available: boolean;
+    /** "env": the map is set in the server's .env file, not chosen in the app. */
+    managed: "ui" | "env";
+    /** off: no maps service. none: nothing chosen, nothing downloaded. */
+    state: "off" | "none" | "waiting" | "building" | "ready" | "failed";
+    /** The build step in plain words, while building or after it stopped. */
+    step: string | null;
+    /** 0 to 1 while building. */
+    progress: number | null;
+    /** A map is live (it stays live while another is added). */
+    ready: boolean;
+    /** The countries chosen. */
+    names: string[];
+    /** Whether the wizard's Maps step has anything to offer. */
+    can_choose: boolean;
+  };
   voice: { there: boolean };
   push: { ready: boolean };
 }

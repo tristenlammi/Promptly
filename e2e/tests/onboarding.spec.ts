@@ -209,7 +209,7 @@ test("an admin finds what is left to set up, on Today and in Admin", async ({ da
 /** The built-in Promptly model before an admin has chosen the model behind
  *  it: listed as not ready, and a message to it gets plain words, not an
  *  error. Only on a server where that's still the case (a fresh one). */
-test("Promptly says so while it has no model behind it", async ({ dana: admin }) => {
+test("Promptly says so while it has no model behind it", async ({ dana: admin, alice: member }) => {
   test.setTimeout(120_000);
   await admin.goto("/chat");
   await ready(admin);
@@ -245,6 +245,30 @@ test("Promptly says so while it has no model behind it", async ({ dana: admin })
   await expect(card).toBeVisible({ timeout: 20_000 });
   await expect(card).toContainText("Promptly doesn't have a model behind it yet");
   await expect(admin.getByText(/custom:|Unknown or disabled/)).toHaveCount(0);
+
+  // A member sees the same row and gets the same plain words, with who to
+  // ask instead of a way to fix it.
+  await member.goto("/chat");
+  await ready(member);
+  await member.locator('button[aria-haspopup="listbox"]').first().click();
+  const theirs = member.locator('[role="option"][data-needs-setup="true"]');
+  await expect(theirs).toContainText("Promptly");
+  await member.keyboard.press("Escape");
+  const memberAuth = { Authorization: `Bearer ${(await (await member.request.post("/api/auth/refresh")).json()).access_token as string}` };
+  const forMember = await member.request.post("/api/chat/conversations", {
+    headers: memberAuth,
+    data: { provider_id: promptly.provider_id, model_id: promptly.model_id },
+  });
+  expect(forMember.ok()).toBeTruthy();
+  await member.goto(`/chat/${(await forMember.json()).id}`);
+  await ready(member);
+  await member.getByPlaceholder(/^Message Promptly/).fill("Hello?");
+  await member.getByRole("button", { name: "Send message" }).click();
+  const memberCard = member.getByTestId("model-not-ready");
+  await expect(memberCard).toBeVisible({ timeout: 20_000 });
+  await expect(memberCard).toContainText("Ask the person who runs this server");
+  await expect(memberCard.getByRole("link", { name: "Choose its model" })).toHaveCount(0);
+  await expect(member.getByText(/custom:|Unknown or disabled/)).toHaveCount(0);
 
   // The card's button, like the row in the list, goes to choosing its model.
   await card.getByRole("link", { name: "Choose its model" }).click();

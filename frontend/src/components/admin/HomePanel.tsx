@@ -100,7 +100,7 @@ export function HomePanel() {
             )}
             {settings && !settings.bundled && (
               <span className="mt-2 block text-xs text-[var(--text-muted)]">
-                This server doesn't have its own home box. Run Promptly's update to add it (it's bundled from this version on), or use a separate box below.
+                This server doesn't have its own home box: it isn't part of an install unless you add it. To add it, run the installer again on the server with <code>--with-home</code> (<code>./install.sh --with-home</code>, or <code>.\install.ps1 -WithHome</code> on Windows). It needs about 7 GB of disk and leaves everything else as it is. Or use a separate box below.
               </span>
             )}
           </span>

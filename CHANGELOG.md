@@ -24,6 +24,19 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 - One-line install: `curl -fsSL https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.sh | bash` (Windows: `irm .../install.ps1 | iex`) downloads the latest release into `./Promptly` and installs it; `PROMPTLY_DIR`, `PROMPTLY_REF` and `PROMPTLY_REPO` change where and what.
 - Installer: `--no-start` / `-NoStart` sets the folder up (.env, secrets, choices) without building or starting, so the port can be changed first.
+- P Maps: admins choose which countries' maps the server keeps (Admin > App settings > Maps on this server): a searchable list of countries and parts of big ones, with download size, disk space and time shown before confirming, progress while it builds, and add or remove later. Maps you already have keep working while a change is built.
+- P Maps: `/api/maps/regions` (admin only) and a reusable `MapRegionPicker` for the first-time setup wizard.
+- Setup: right after the admin account is made, a choice between "Set everything up now" and "Just look around". Looking around goes straight in; nothing skipped is lost.
+- Setup: a "Finish setting up" list that reads what is and isn't set up from the server (AI service, models, the reading model, address, email, second sign-in step, off-site backup, family, calls from outside, maps, speech, photos, web search). It closes the wizard, sits on Today for admins until it's done or closed, and stays under Admin → Setup. Each row opens the setup step or admin page where it's done.
+- Setup: a models step that suggests a model for chat, quick jobs, Talk, reading pictures and making pictures from what the connected AI service offers, saved with one click. With nothing connected it says plainly what won't work.
+- Setup: an "at home and away" step for the services this install has: the address at home, why the web port must never be forwarded and what to use instead, the two ports calls need on the router (with this machine's home-network address when known) and the result of the last test call from outside, the microphone needing https on phones, and how the map download is going.
+- Models: every server has a built-in custom model called Promptly. In setup's Models step the chat choice is "the model behind Promptly", and accepting it makes Promptly what new chats start on, so a new person's first chat says Promptly. The other connected models stay in the list. Servers that update get Promptly pointed at their current default chat model; their default itself is not changed.
+- Models: until an admin has chosen the model behind it, Promptly is listed as "Not ready" in the model list, and a message sent to it gets a plain answer saying an admin needs to choose one (admins get a button to do it), not an error.
+- Setup: an OpenRouter key can now provide the reading (embedding) model in one click (OpenRouter's embeddings endpoint, `openai/text-embedding-3-small`), the same as an OpenAI key could.
+- Setup: a Maps step to choose the country to download, with the size and time shown first. It appears once the server offers a choice of map.
+- Installer: `--with-home` / `-WithHome` adds Promptly Home (smart devices). On an install you already have, that one option adds Home and leaves your other choices as they are.
+- P Maps: the list of countries puts the one your browser is probably in at the top ("Probably yours"), worked out from its time zone and language with nothing looked up online.
+- Setup: the Maps step uses the real country list: choose one or several, see the download, disk space and time first, and the download can't be started when it won't fit on the disk.
 
 ### Changed
 - Installer: says how to get git or Docker when they're missing, tells "Docker isn't running" from "your user isn't allowed to use Docker", warns when disk or memory is short, no longer needs openssl, says how long the build takes, and ends with the folder and the update command.
@@ -34,25 +47,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: the map opens on the maps this server has, rather than always on Australia.
 - Setup finishes on a summary of what's ready and what was skipped, then opens Today. The wizard has a Back link, and its words are plainer ("the reading model" for the embedding model, "a second step" for MFA).
 - Setup: the address step no longer fills in localhost as the public address.
+- Promptly Home is no longer part of a new install unless you ask for it with `--with-home` (about 7 GB of disk and 0.6 GB of memory saved). Installs that already have Home keep it across updates, and an update never adds it. `--no-home` is still accepted. Admin → Home says how to add it when it isn't installed.
+- The built-in Promptly model is there for everyone, including people whose account is limited to a list of models. Their list still decides every other model.
+- Installer and docs: P Maps is described as it now works (on, but no map until you choose your country), the setup wizard's steps are listed as they are, and Promptly Home's size is the measured 7 GB.
+- Setup checklist: the Maps row reads the maps service itself: no map chosen, which country is being built and how far along, ready, stopped, or "your map is set in .env".
+- P Maps: choosing a map says in one line that house numbers in search depend on OpenStreetMap's coverage (Australia also gets the official address file), and explains a download much bigger than its disk figure (a shared search file is read as it downloads and not kept).
+- Frontend: the spreadsheet fixes are also applied right after `npm install` (postinstall), so a fresh checkout is patched before anything runs.
 
 ### Fixed
 - `update.ps1` and `install.ps1` on Windows PowerShell 5.1 (the one that ships with Windows): anything Docker or git printed on stderr stopped the script, so an update died at "Reloading nginx config" after the new version was already running.
 - `update.sh` run as root on a folder owned by another user (git's "dubious ownership") now carries on with a note; run by a user who can't write to the folder, or without access to Docker, it says so before anything is touched.
 - Update scripts stop with a plain message when the new version can't be fetched (no internet) instead of carrying on with the old list of releases (Windows) or a bare git error.
 - Update on a small machine (8 GB): the web app's build ran out of memory next to the running app and the update died half-way, new code checked out and old containers running. The update now pauses photo search and speech for the build when memory is tight, and when a build fails it says the old version is still running, puts the folder back on it and says what to do.
-- An install made with `--no-home` no longer has Promptly Home switched on (and 3.5 GB downloaded) by its first update.
 - Installer: a failed build or start now says the likely cause (connection dropped, disk full, port taken) and what to do, and waits up to 5 minutes for the first start instead of 3.
-- P Maps: admins choose which countries' maps the server keeps (Admin > App settings > Maps on this server): a searchable list of countries and parts of big ones, with download size, disk space and time shown before confirming, progress while it builds, and add or remove later. Maps you already have keep working while a change is built.
-- P Maps: `/api/maps/regions` (admin only) and a reusable `MapRegionPicker` for the first-time setup wizard.
 - P Maps: a map download no longer fails when the mirror's "latest" file is missing during its daily update; the previous day's file is used.
-- Setup: right after the admin account is made, a choice between "Set everything up now" and "Just look around". Looking around goes straight in; nothing skipped is lost.
-- Setup: a "Finish setting up" list that reads what is and isn't set up from the server (AI service, models, the reading model, address, email, second sign-in step, off-site backup, family, calls from outside, maps, speech, photos, web search). It closes the wizard, sits on Today for admins until it's done or closed, and stays under Admin → Setup. Each row opens the setup step or admin page where it's done.
-- Setup: a models step that suggests a model for chat, quick jobs, Talk, reading pictures and making pictures from what the connected AI service offers, saved with one click. With nothing connected it says plainly what won't work.
-- Setup: an "at home and away" step for the services this install has: the address at home, why the web port must never be forwarded and what to use instead, the two ports calls need on the router (with this machine's home-network address when known) and the result of the last test call from outside, the microphone needing https on phones, and how the map download is going.
-- Models: every server has a built-in custom model called Promptly. In setup's Models step the chat choice is "the model behind Promptly", and accepting it makes Promptly what new chats start on, so a new person's first chat says Promptly. The other connected models stay in the list. Servers that update get Promptly pointed at their current default chat model; their default itself is not changed.
-- Models: until an admin has chosen the model behind it, Promptly is listed as "Not ready" in the model list, and a message sent to it gets a plain answer saying an admin needs to choose one (admins get a button to do it), not an error.
-- Setup: an OpenRouter key can now provide the reading (embedding) model in one click (OpenRouter's embeddings endpoint, `openai/text-embedding-3-small`), the same as an OpenAI key could.
-- Setup: a Maps step to choose the country to download, with the size and time shown first. It appears once the server offers a choice of map.
 - Setup: the progress bar now shows finished steps filled in. They were invisible, so the bar seemed to lose a step each time.
 - Memory and Study now work when the default chat model is a custom model: they called the provider with the custom model's id rather than the model behind it.
 - Talk: spoken turns on the built-in Promptly model use the admin's voice model, like plain models do.
@@ -61,6 +69,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Sheets: the Sum, Average, Max and Min at the bottom read a number's display text, so "5,570" counted as 5 and "50%" as 50. They use the number.
 - Sheets: a cell with no font of its own (anything typed, imported or filled in by the AI) was drawn in Times New Roman. It's now the plain sans-serif default, and the toolbar shows Arial for it.
 - Photos: an album made, or added to, straight after an upload came out short without saying so, because photos still being read weren't in the library yet. They're kept, and show in the album as soon as they've been read.
+- P Maps: "Send to my phone" in the route panel wrapped onto three lines on a computer. It has its own line now.
 
 ## [0.52.4] - 2026-11-23
 

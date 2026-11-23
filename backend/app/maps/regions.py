@@ -310,6 +310,9 @@ def public(region: dict[str, Any]) -> dict[str, Any]:
         "parent_name": region["parent_name"],
         "continent": region["continent"],
         "kind": region["kind"],
+        # The countries it covers (two-letter codes), so the picker can offer
+        # the browser's own country first.
+        "codes": sorted({c for p in region["photon"] for c in p["countries"]}),
         "download_mb": round(osm + sum(table["photon"].get(p["path"], 0) for p in region["photon"])) if osm else None,
         **estimate_one(region, osm),
     }
@@ -339,6 +342,10 @@ def estimate(regions: list[dict[str, Any]], osm_mb: dict[str, float], *, offline
     return {
         "complete": len(known) == len(regions),
         "download_bytes": int(download * 1_000_000),
+        # The search files (a small country can share one with a big
+        # neighbour) are read as they download and never stored, so they count
+        # towards the download but not towards the disk space below.
+        "streamed_bytes": int(search_files * 1_000_000),
         "disk_after_bytes": int(built * 1_000_000),
         # Free space the build needs: the new set is built next to the live one.
         "disk_needed_bytes": needs,

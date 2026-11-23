@@ -894,8 +894,7 @@ services:
     # new installs through COMPOSE_PROFILES in .env. It downloads nothing until
     # an admin chooses which countries' maps to keep (first-time setup, or Admin
     # > App settings > P Maps); the size depends on the country (Australia: about
-    # an hour and 15 GB of disk while building, 7 GB after, or 12 GB with offline
-    # areas). It then rebuilds every MAPS_REFRESH_DAYS next to the live data
+    # 11 GB of disk, and 18.5 GB free while it builds). It then rebuilds every MAPS_REFRESH_DAYS next to the live data
     # (about twice the size at the peak). Only downloads leave the server:
     # searches, routes and locations never do.
     build:
@@ -1149,9 +1148,10 @@ services:
   # through the calls Home Assistant's own first-run screens make, which
   # aren't a promised interface: bump the tag on purpose, on a test copy
   # first (scripts/stack.sh up <name> --with home), and bump both variants.
-  # It is a big image (about 3.5 GB on disk) and uses roughly 400-600 MB of
-  # memory. Leave it out by taking the home token out of COMPOSE_PROFILES
-  # (or install with --no-home).
+  # It is a big image (about 7 GB on disk) and uses roughly 400-600 MB of
+  # memory. It is not part of an install unless asked for: ./install.sh
+  # --with-home adds the home token to COMPOSE_PROFILES, and taking the
+  # token out removes it. Updates never add it.
   #
   # Two variants, one per host type, chosen by COMPOSE_PROFILES (the
   # installer and updater write the right one; only one may run):

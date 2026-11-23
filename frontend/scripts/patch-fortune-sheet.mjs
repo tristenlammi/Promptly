@@ -1,6 +1,7 @@
 // Fixes to the spreadsheet library (@fortune-sheet 1.0.4), applied to the
-// installed copy before every dev start and build (package.json "predev" /
-// "prebuild"), and by the unit test before it checks them. The library is
+// installed copy after every install and before every dev start and build
+// (package.json "postinstall" / "predev" / "prebuild"; the Dockerfile copies
+// this file in before its install), and by the unit test before it checks them. The library is
 // unmaintained upstream, so these live here:
 //
 //   selection  A sheet with no saved selection got {row:[0], column:[0]},
