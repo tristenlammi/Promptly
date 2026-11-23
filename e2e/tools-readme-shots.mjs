@@ -32,7 +32,7 @@ const SHOTS = {
   "chat-dark": { path: "/chat", theme: "dark", before: openChat },
   files: { path: "/files", ready: (p) => p.getByText("Tasmania itinerary").first().waitFor() },
   document: { path: "/files", before: async (p) => { await openFile(p, "Tasmania itinerary"); await p.getByRole("button", { name: /Comments/ }).first().click(); await p.getByText("Could we swap this").first().waitFor(); } },
-  sheet: { path: "/files", before: async (p) => { await openFile(p, "Household budget"); await p.mouse.click(770, 407); } }, // H12: a total, so the formula bar shows a formula
+  sheet: { path: "/files", before: async (p) => { await openFile(p, "Household budget"); await p.mouse.click(300, 407); } }, // a cell picked, as when someone is working in it
   calendar: { path: "/calendar", ready: (p) => p.getByText("Max: dentist").first().waitFor() },
   notes: { path: "/notes", ready: (p) => p.getByText("Tasmania in January").first().waitFor() },
   tasks: { path: "/app/open/tasks", ready: (p) => p.getByText("Sign Ellie's camp forms").first().waitFor() },
@@ -40,13 +40,11 @@ const SHOTS = {
   rooms: { path: "/rooms", before: openSpace, ready: (p) => p.getByText("He has a type").first().waitFor() },
   photos: { path: "/photos", ready: (p) => p.waitForTimeout(3000) },
   "photos-album": { path: "/photos/albums", before: async (p) => { await p.getByText("Tasmania 2025").first().click(); await p.waitForURL(/albums\/.+/); }, ready: (p) => p.waitForTimeout(2500) },
-  "photos-albums": { path: "/photos/albums", ready: (p) => p.getByText("Tasmania 2025").first().waitFor() },
   porch: { path: "/porch", ready: (p) => p.getByText("Ferry to Tasmania is booked").first().waitFor() },
   study: { path: "/study", before: async (p) => { await openCourse(p); await p.waitForTimeout(1500); await p.mouse.move(780, 400); await p.mouse.wheel(0, -4000); } },
   passwords: { path: "/passwords", profile: "vault-profile", before: vault },
   mealplan: { path: "/app/open/mealplan", ready: (p) => p.getByText("Chickpea and spinach curry").first().waitFor() },
   budget: { path: "/app/open/budget", ready: (p) => p.getByText(/Groceries/).first().waitFor() },
-  habits: { path: "/app/open/habits", ready: (p) => p.getByText("Walk Biscuit").first().waitFor() },
   apps: { path: "/apps/store" },
   "phone-today": { path: "/today", viewport: PHONE, ready: (p) => p.getByText("Parent-teacher interviews").first().waitFor() },
   "phone-rooms": { path: "/rooms", viewport: PHONE, before: async (p) => { await p.getByText("Spaces", { exact: true }).click(); await p.getByText("Hartley HQ").first().click(); await p.getByText("general", { exact: true }).first().click(); await p.getByText("He has a type").first().waitFor(); } },
@@ -83,7 +81,8 @@ async function vault(page) {
   await master.fill(VAULT);
   await page.getByRole("button", { name: "Unlock", exact: true }).click();
   await page.getByRole("navigation", { name: "Passwords" }).waitFor({ timeout: 30_000 });
-  await page.getByRole("article", { name: "Southern Ridge Energy" }).click();
+  await page.getByText("Southern Ridge Energy").first().click();
+  await page.waitForTimeout(800);
 }
 
 async function take(browser, name) {
