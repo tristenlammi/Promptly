@@ -7,6 +7,11 @@
 # is configured through the first-run wizard in your browser after
 # this completes.
 #
+# Fresh machine, one line (needs git and Docker; downloads the latest release
+# into ./Promptly and installs it):
+#   curl -fsSL https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.sh | bash
+#   curl -fsSL ... | bash -s -- --no-maps      # the same, with options
+#
 # Usage (from the repo root):
 #   ./install.sh                # cloud-first: bring your API keys (set in
 #                               # the setup wizard). Auto-detects and uses a
@@ -26,6 +31,12 @@
 #                               # off for people until an admin turns it on.
 #   ./install.sh --no-home      # skip Promptly Home's bundled Home Assistant
 #                               # (smart devices; about 3.5 GB of disk).
+#   ./install.sh --no-start     # set the folder up (.env, secrets, choices) but
+#                               # don't build or start anything yet.
+#
+# One-line install only: PROMPTLY_DIR (where to put it; default ./Promptly),
+# PROMPTLY_REF (a release tag or branch; default the latest release) and
+# PROMPTLY_REPO (where to download from).
 #
 # The choice persists in COMPOSE_PROFILES in .env, so a plain
 # `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
@@ -33,15 +44,142 @@
 # Re-running is safe - already-set values in .env are preserved
 # untouched. Only placeholders that still say "change-me" get replaced.
 # ============================================================
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "This installer needs bash. Run it with:  bash install.sh   (or pipe it to 'bash', not 'sh')" >&2
+  exit 1
+fi
 set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT_DIR"
 
 bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+
+# "sudo " in the commands we suggest, unless this already is root.
+SUDO="sudo "
+[[ "$(id -u)" == "0" ]] && SUDO=""
+
+# How to get a missing program on this machine, as one line to paste.
+how_to_install() {
+  local pkg="$1"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ "$pkg" == "git" ]]; then echo "xcode-select --install"; else echo "brew install $pkg"; fi
+  elif command -v apt-get >/dev/null 2>&1; then echo "${SUDO}apt-get update && ${SUDO}apt-get install -y $pkg"
+  elif command -v dnf >/dev/null 2>&1;     then echo "${SUDO}dnf install -y $pkg"
+  elif command -v yum >/dev/null 2>&1;     then echo "${SUDO}yum install -y $pkg"
+  elif command -v pacman >/dev/null 2>&1;  then echo "${SUDO}pacman -S --noconfirm $pkg"
+  elif command -v zypper >/dev/null 2>&1;  then echo "${SUDO}zypper install -y $pkg"
+  elif command -v apk >/dev/null 2>&1;     then echo "${SUDO}apk add $pkg"
+  else echo "install '$pkg' with your system's package manager"
+  fi
+}
+
+# Docker: installed, new enough, running, and usable by this user. Says what
+# to do about whichever of those is wrong, then stops.
+check_docker() {
+  if ! command -v docker >/dev/null 2>&1; then
+    red "Docker isn't installed. Promptly runs in Docker, so get that first:"
+    if [[ "$(uname -s)" == "Linux" ]]; then
+      red "    curl -fsSL https://get.docker.com | ${SUDO}sh"
+      [[ -n "$SUDO" ]] && red "    sudo usermod -aG docker $(id -un)     # then log out and back in"
+      red "  (that is Docker's own installer; other ways: https://docs.docker.com/engine/install/)"
+    else
+      red "    Docker Desktop: https://www.docker.com/products/docker-desktop/"
+      red "  Install it, start it, and wait until it says it's running."
+    fi
+    red "Then run this installer again."
+    exit 1
+  fi
+  if ! docker compose version >/dev/null 2>&1; then
+    red "This Docker has no 'docker compose' (version 2). Update Docker:"
+    red "    https://docs.docker.com/engine/install/"
+    exit 1
+  fi
+  # The compose file uses optional depends_on and env_file entries
+  # (``required: false``), which need compose >= 2.24 (early 2024). Fail
+  # early with a clear message instead of a cryptic error at `up` time.
+  local compose_ver
+  compose_ver=$(docker compose version --short 2>/dev/null | sed 's/^v//' || true)
+  if [[ -n "$compose_ver" ]] && ! printf '2.24.0\n%s\n' "$compose_ver" | sort -V -C 2>/dev/null; then
+    red "docker compose ${compose_ver} is too old (Promptly needs 2.24 or newer). Update Docker:"
+    red "    https://docs.docker.com/engine/install/"
+    exit 1
+  fi
+  local err
+  if ! err="$(docker info 2>&1 >/dev/null)"; then
+    if [[ "$err" == *"ermission denied"* ]]; then
+      red "Docker is installed, but your user ($(id -un)) isn't allowed to use it yet. Either:"
+      red "    sudo usermod -aG docker $(id -un)     # then log out and back in, and run this again"
+      red "  or run this installer with sudo."
+    elif [[ "$(uname -s)" == "Linux" ]]; then
+      red "Docker is installed but isn't running. Start it and run this again:"
+      red "    ${SUDO}systemctl enable --now docker"
+    else
+      red "Docker is installed but isn't running. Start Docker Desktop, wait until it"
+      red "says it's running, and run this again."
+    fi
+    exit 1
+  fi
+}
+
+# ---------- 0. one-line install ----------
+# Piped from the web (curl ... | bash), or run as a lone downloaded file:
+# there is no Promptly folder around this script yet. Fetch the latest
+# release into ./Promptly and carry on with the install.sh in there.
+bootstrap() {
+  local repo="${PROMPTLY_REPO:-https://github.com/tristenlammi/Promptly.git}"
+  local ref="${PROMPTLY_REF:-}"
+  local dir="${PROMPTLY_DIR:-$PWD/Promptly}"
+
+  bold "Promptly installer"
+  if [[ -f "$dir/install.sh" && -f "$dir/docker-compose.yml" ]]; then
+    yellow "  $dir is already there, so the install carries on in it."
+    yellow "  (To move an install to the newest version: cd \"$dir\" && ./update.sh)"
+  else
+    if [[ -e "$dir" ]] && [[ ! -d "$dir" || -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
+      red "$dir already exists and isn't a Promptly folder."
+      red "Move it away, or choose another place by putting PROMPTLY_DIR=/some/where before 'bash'."
+      exit 1
+    fi
+    if ! command -v git >/dev/null 2>&1; then
+      red "git isn't installed. It downloads Promptly now and updates it later. Get it with:"
+      red "    $(how_to_install git)"
+      command -v docker >/dev/null 2>&1 || red "Docker is missing too: https://docs.docker.com/engine/install/"
+      red "Then run this installer again."
+      exit 1
+    fi
+    check_docker
+    if [[ -z "$ref" ]]; then
+      # Newest vX.Y.Z tag. No tags (a fork, a mirror): the default branch.
+      ref="$(git ls-remote --tags --refs "$repo" 'v[0-9]*' 2>/dev/null \
+        | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+    fi
+    echo "  Downloading Promptly ${ref:-(newest)} into $dir"
+    local branch_args=()
+    [[ -n "$ref" ]] && branch_args=(--branch "$ref")
+    if ! git -c advice.detachedHead=false clone ${branch_args[@]+"${branch_args[@]}"} "$repo" "$dir"; then
+      red "The download didn't work (git's message is above). Check the internet connection"
+      red "and that this folder can be written to, then try again."
+      exit 1
+    fi
+    green "  Downloaded"
+  fi
+  # Piped in: let the download of this script finish before handing over.
+  if [[ -z "$SELF" && ! -t 0 ]]; then cat >/dev/null 2>&1 || true; fi
+  cd "$dir"
+  exec bash ./install.sh "$@" </dev/null
+}
+
+SELF="${BASH_SOURCE[0]:-}"
+ROOT_DIR=""
+if [[ -n "$SELF" && -f "$SELF" ]]; then
+  ROOT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+fi
+if [[ -z "$ROOT_DIR" || ! -f "$ROOT_DIR/docker-compose.yml" || ! -f "$ROOT_DIR/.env.example" ]]; then
+  bootstrap "$@"
+  exit 1
+fi
+cd "$ROOT_DIR"
 
 # ---------- argument parsing ----------
 WITH_OLLAMA=false
@@ -49,6 +187,7 @@ NO_SEARCH=false
 NO_MAPS=false
 NO_CALLS=false
 NO_HOME=false
+NO_START=false
 PROFILE_FLAGS_GIVEN=false
 for arg in "$@"; do
   case "$arg" in
@@ -59,8 +198,9 @@ for arg in "$@"; do
     --no-home)     NO_HOME=true;     PROFILE_FLAGS_GIVEN=true ;;
     # Back-compat: --no-ollama is now the default; accept it silently.
     --no-ollama)   PROFILE_FLAGS_GIVEN=true ;;
+    --no-start)    NO_START=true ;;
     -h|--help)
-      sed -n '2,33p' "$0" | sed 's/^# //; s/^#//'
+      sed -n '/^# Usage/,/^# ====/p' "$0" | sed '$d' | sed 's/^# //; s/^#//'
       exit 0
       ;;
     *)
@@ -72,31 +212,41 @@ done
 
 # ---------- 1. prerequisite checks ----------
 bold "Checking prerequisites"
-if ! command -v docker >/dev/null 2>&1; then
-  red "docker is not installed. Install from https://docs.docker.com/engine/install/"
+check_docker
+if [[ ! -w . ]]; then
+  red "This folder ($ROOT_DIR) can't be written to by $(id -un)."
+  red "It belongs to $(stat -c %U . 2>/dev/null || stat -f %Su . 2>/dev/null || echo someone else): run the installer as that user, or with sudo."
   exit 1
 fi
-if ! docker compose version >/dev/null 2>&1; then
-  red "docker compose v2 is not available. Update Docker Engine to a recent version."
-  exit 1
+green "  Docker and docker compose are ready"
+
+# Random hex for secrets: openssl when it's there, the kernel's generator when not.
+rand_hex() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex "$1"
+  else
+    head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' 
+'
+  fi
+}
+
+# Room to work in. Not a hard stop: a warning the person can act on.
+free_gb=$(df -Pk . 2>/dev/null | awk 'NR==2 {printf "%d", $4/1048576}' || true)
+need_gb=20
+if [[ -n "${free_gb:-}" ]] && (( free_gb < need_gb )); then
+  yellow "  Only ${free_gb} GB of disk is free here. The install needs about ${need_gb} GB"
+  yellow "  (more with P Maps); it may stop part-way with \"no space left on device\"."
 fi
-# The compose file uses optional depends_on and env_file entries
-# (``required: false``), which need compose >= 2.24 (early 2024). Fail
-# early with a clear message instead of a cryptic error at `up` time.
-compose_ver=$(docker compose version --short 2>/dev/null | sed 's/^v//')
-if [[ -n "$compose_ver" ]] && ! printf '2.24.0\n%s\n' "$compose_ver" | sort -V -C; then
-  red "docker compose ${compose_ver} is too old (need >= 2.24). Update Docker Engine / Compose."
-  exit 1
+mem_gb=""
+if [[ -r /proc/meminfo ]]; then
+  mem_gb=$(awk '/^MemTotal:/ {printf "%d", ($2+524288)/1048576}' /proc/meminfo 2>/dev/null || true)
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+  mem_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
 fi
-if ! docker info >/dev/null 2>&1; then
-  red "The Docker daemon isn't reachable. Start Docker Desktop / Docker Engine and try again."
-  exit 1
+if [[ -n "${mem_gb:-}" ]] && (( mem_gb > 0 && mem_gb < 4 )); then
+  yellow "  This machine has about ${mem_gb} GB of memory. Promptly wants 4 GB or more;"
+  yellow "  with less it can be slow or run out while building."
 fi
-if ! command -v openssl >/dev/null 2>&1; then
-  red "openssl is required to generate secrets. Install with: apt-get install openssl"
-  exit 1
-fi
-green "  Docker, docker compose v2 and openssl detected"
 
 # ---------- 2. .env bootstrap ----------
 # A brand-new .env copies COMPOSE_PROFILES from the example, so "the line
@@ -124,27 +274,27 @@ seed_secret() {
 }
 
 bold "Seeding secrets"
-seed_secret SECRET_KEY        "$(openssl rand -hex 32)"
-seed_secret SEARXNG_SECRET    "$(openssl rand -hex 32)"
-seed_secret POSTGRES_PASSWORD "$(openssl rand -hex 24)"
-seed_secret SETUP_TOKEN       "$(openssl rand -hex 6)"
+seed_secret SECRET_KEY        "$(rand_hex 32)"
+seed_secret SEARXNG_SECRET    "$(rand_hex 32)"
+seed_secret POSTGRES_PASSWORD "$(rand_hex 24)"
+seed_secret SETUP_TOKEN       "$(rand_hex 6)"
 # An .env from before this existed has no such line: add it.
 for k in TUS_HOOK_SECRET; do
   grep -qE "^${k}=." .env || { sed -i.bak "/^${k}=\$/d" .env; rm -f .env.bak; printf '%s=change-me\n' "$k" >> .env; }
 done
-seed_secret TUS_HOOK_SECRET   "$(openssl rand -hex 32)"
+seed_secret TUS_HOOK_SECRET   "$(rand_hex 32)"
 # Promptly Home: what its bundled home box proves itself with. Not made with
 # --no-home, so a later update still offers it.
 if ! $NO_HOME; then
   grep -qE "^HOME_BOX_SECRET=." .env || { sed -i.bak "/^HOME_BOX_SECRET=\$/d" .env; rm -f .env.bak; printf 'HOME_BOX_SECRET=change-me\n' >> .env; }
-  seed_secret HOME_BOX_SECRET "$(openssl rand -hex 32)"
+  seed_secret HOME_BOX_SECRET "$(rand_hex 32)"
 fi
 # Calls (LiveKit). An .env from before Calls has no such lines: add them.
 for k in LIVEKIT_API_KEY LIVEKIT_API_SECRET; do
   grep -qE "^${k}=" .env || printf '%s=change-me\n' "$k" >> .env
 done
-seed_secret LIVEKIT_API_KEY    "API$(openssl rand -hex 8)"
-seed_secret LIVEKIT_API_SECRET "$(openssl rand -hex 32)"
+seed_secret LIVEKIT_API_KEY    "API$(rand_hex 8)"
+seed_secret LIVEKIT_API_SECRET "$(rand_hex 32)"
 
 # This machine's LAN address (for LIVEKIT_NODE_IP on Docker Desktop), or "".
 lan_ip() {
@@ -272,6 +422,14 @@ if [[ "$OLLAMA_MODE" == "host" ]] && ! grep -qE '^OLLAMA_URL=' .env; then
 fi
 
 # ---------- 4. build + start ----------
+if $NO_START; then
+  echo
+  green "The folder is set up; nothing was built or started (--no-start)."
+  echo "  Settings are in $ROOT_DIR/.env (the web port is NGINX_HTTP_PORT)."
+  echo "  When you're ready:  cd \"$ROOT_DIR\" && ./install.sh"
+  exit 0
+fi
+
 bold "Building images (first run can take 3-5 minutes)"
 docker compose build
 
