@@ -76,13 +76,22 @@ async def answer_source(conversation_id: uuid.UUID) -> dict[str, object] | None:
                 return None
             provider = None
             custom = bool(conv.model_id) and is_custom_model_id(conv.model_id)
+            if custom:
+                # The built-in Promptly model takes the voice model like a
+                # plain model does (chat/router.py).
+                from app.custom_models.builtin import builtin_id
+                from app.custom_models.resolver import parse_custom_model_id
+
+                if parse_custom_model_id(conv.model_id) == await builtin_id(db):
+                    custom = False
+            builtin_custom = bool(conv.model_id) and is_custom_model_id(conv.model_id) and not custom
             if not custom:
                 defaults = await load_effective_defaults(db)
                 if defaults.voice_configured:
                     voice = await db.get(ModelProvider, defaults.voice_provider_id)
                     if voice is not None and voice.enabled:
                         provider = voice
-            if provider is None and custom:
+            if provider is None and (custom or builtin_custom):
                 resolved = await resolve_custom_model(conv.model_id, db)
                 provider = resolved.base_provider if resolved is not None else None
             if provider is None and conv.provider_id is not None:

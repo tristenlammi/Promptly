@@ -47,9 +47,12 @@ class CustomModelSummary(BaseModel):
     name: str
     display_name: str
     description: str | None = None
-    base_provider_id: uuid.UUID
-    base_model_id: str
+    # Both None = no model behind it yet ("not ready").
+    base_provider_id: uuid.UUID | None = None
+    base_model_id: str | None = None
     base_display_name: str | None = None
+    # The server's own "Promptly" model (custom_models/builtin.py).
+    is_builtin: bool = False
     file_count: int = 0
     ready_file_count: int = 0
     top_k: int

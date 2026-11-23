@@ -47,6 +47,7 @@ from app.custom_models.embedding import (
     embed_texts,
     embedding_dim_for,
 )
+from app.custom_models import builtin
 from app.custom_models.ingestion import (
     index_file_for_custom_model,
     reembed_custom_model,
@@ -93,11 +94,13 @@ async def _get_or_404(
 
 
 async def _resolve_base_display_name(
-    base_provider_id: uuid.UUID,
-    base_model_id: str,
+    base_provider_id: uuid.UUID | None,
+    base_model_id: str | None,
     db: AsyncSession,
 ) -> str | None:
     """Look up the human label for a custom model's underlying base model."""
+    if base_provider_id is None or not base_model_id:
+        return None
     provider = await db.get(ModelProvider, base_provider_id)
     if provider is None:
         return None
@@ -167,6 +170,7 @@ async def _summarise(
         base_provider_id=cm.base_provider_id,
         base_model_id=cm.base_model_id,
         base_display_name=base_label,
+        is_builtin=cm.id == await builtin.builtin_id(db),
         file_count=int(file_count or 0),
         ready_file_count=int(ready_count or 0),
         top_k=cm.top_k,
@@ -674,6 +678,8 @@ async def update_custom_model(
         await _validate_base_model(new_provider_id, new_model_id, db)
         cm.base_provider_id = new_provider_id
         cm.base_model_id = new_model_id
+        # A default chat model that is this custom model follows it.
+        await builtin.follow_base(db, cm)
 
     cm.updated_at = datetime.utcnow()
     await db.commit()

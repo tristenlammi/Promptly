@@ -202,6 +202,9 @@ async def checklist(db: AsyncSession, admin: User, redis, *, request_host: str |
         )
     ).scalar_one_or_none()
     embed_provider = await db.get(ModelProvider, row.embedding_provider_id) if row.embedding_provider_id else None
+    from app.custom_models import builtin
+
+    promptly = await builtin.get(db)
     origins = list(row.public_origins or [])
 
     # ---- What the other services say (side by side) ----
@@ -257,11 +260,41 @@ async def checklist(db: AsyncSession, admin: User, redis, *, request_host: str |
         add(Row("provider", "Connect an AI service", "essential", "done", f"Connected: {names}."))
 
     chat_ok = bool(row.default_chat_configured) and _still_there(row.default_chat_provider_id, row.default_chat_model_id, models)
+    behind = (
+        next((m for m in models if m.provider_id == promptly.base_provider_id and m.model_id == promptly.base_model_id), None)
+        if promptly is not None and builtin.ready(promptly) else None
+    )
     if not chat_models:
         add(Row(
             "models", "Choose the models Promptly uses", "essential", "todo",
             "Waits for an AI service to be connected.",
             "/setup?step=provider", "Connect one",
+        ))
+    elif promptly is not None and behind is None:
+        # The built-in model exists but nothing (usable) is behind it.
+        add(Row(
+            "models", "Choose the models Promptly uses", "essential", "todo",
+            f"{promptly.display_name} doesn't have a model behind it yet, so it can't answer.",
+            "/setup?step=models", "Choose",
+        ))
+    elif promptly is not None:
+        is_default = row.default_chat_model_id == f"custom:{promptly.id}"
+        extras = [
+            label for label, on in (
+                ("quick jobs", row.memory_configured), ("Talk", row.voice_configured),
+                ("reading pictures", row.vision_relay_configured), ("making pictures", row.image_gen_configured),
+            ) if on
+        ]
+        add(Row(
+            "models", "Choose the models Promptly uses", "essential", "done",
+            f"{promptly.display_name} answers with {behind.display_name or behind.model_id}."
+            + (
+                "" if is_default
+                else f" New chats start on {_model_name(row.default_chat_provider_id, row.default_chat_model_id, models)}." if chat_ok
+                else ""
+            )
+            + (f" Also chosen: {', '.join(extras)}." if extras else ""),
+            "/setup?step=models", "Change",
         ))
     elif not chat_ok:
         add(Row(
@@ -586,8 +619,13 @@ ROLES: list[dict[str, str]] = [
 ]
 
 
-def suggest_models(models: list, row: AppSettings | None) -> dict[str, Any]:  # noqa: ANN001
-    """A pick for each job from ``models`` (the admin's available models)."""
+def suggest_models(models: list, row: AppSettings | None, promptly=None) -> dict[str, Any]:  # noqa: ANN001
+    """A pick for each job from ``models`` (the admin's available models).
+
+    With ``promptly`` (the built-in custom model, when it still exists) the
+    chat job is "the model behind Promptly": saving it goes through
+    :func:`set_promptly_model`, which also makes Promptly the default for
+    new chats."""
     chat = [m for m in models if _chat_candidate(m.model_id, bool(m.supports_image_output))]
     seeing = [m for m in chat if m.supports_vision]
     drawing = [m for m in models if m.supports_image_output and not m.model_id.startswith("custom:")]
@@ -611,6 +649,12 @@ def suggest_models(models: list, row: AppSettings | None) -> dict[str, Any]:  # 
         }
 
     def current(field: str) -> dict[str, Any] | None:
+        if field == "default_chat" and promptly is not None:
+            hit = next(
+                (m for m in models if m.provider_id == promptly.base_provider_id and m.model_id == promptly.base_model_id),
+                None,
+            ) if promptly.base_provider_id else None
+            return pair(hit) if hit else None
         if row is None:
             return None
         pid, mid = getattr(row, f"{field}_provider_id", None), getattr(row, f"{field}_model_id", None)
@@ -619,8 +663,27 @@ def suggest_models(models: list, row: AppSettings | None) -> dict[str, Any]:  # 
         hit = next((m for m in models if m.provider_id == pid and m.model_id == mid), None)
         return pair(hit) if hit else None
 
+    roles = [dict(r) for r in ROLES]
+    if promptly is not None:
+        roles[0].update(
+            label=f"The model behind {promptly.display_name}",
+            what=(
+                f"{promptly.display_name} is what people chat with, and the assistant inside each app. "
+                "This is the model that does its thinking. Other models you connected stay in the list for anyone who wants them."
+            ),
+            unset=f"None yet ({promptly.display_name} can't answer)",
+        )
     return {
         "has_models": bool(chat),
+        "promptly": (
+            {
+                "id": str(promptly.id),
+                "display_name": promptly.display_name,
+                "ready": bool(promptly.base_provider_id and promptly.base_model_id),
+                "is_default": bool(row is not None and row.default_chat_model_id == f"custom:{promptly.id}"),
+            }
+            if promptly is not None else None
+        ),
         "roles": [
             {
                 **r,
@@ -628,6 +691,29 @@ def suggest_models(models: list, row: AppSettings | None) -> dict[str, Any]:  # 
                 "suggestion": pair(picks[r["role"]]),
                 "current": current(r["field"]),
             }
-            for r in ROLES
+            for r in roles
         ],
     }
+
+
+def embedding_options(providers: list) -> list[dict[str, Any]]:  # noqa: ANN001
+    """One-click embedding ("reading") models the connected services offer.
+
+    OpenRouter serves embeddings at ``POST /api/v1/embeddings`` with the
+    OpenAI request shape (checked against its API reference and its
+    ``/api/v1/embeddings/models`` list, 2026-11-23), so an OpenRouter-only
+    install can use ``openai/text-embedding-3-small`` through the key it
+    already has. 1536 dimensions is one of the two sizes the database stores.
+    """
+    out: list[dict[str, Any]] = []
+    for p in providers:
+        if not getattr(p, "enabled", True):
+            continue
+        model = {"openai": "text-embedding-3-small", "openrouter": "openai/text-embedding-3-small"}.get(p.type)
+        if model:
+            out.append({
+                "provider_id": str(p.id), "provider_name": p.name, "provider_type": p.type,
+                "model_id": model, "dim": 1536,
+            })
+    # A direct OpenAI key first: one hop fewer.
+    return sorted(out, key=lambda o: o["provider_type"] != "openai")

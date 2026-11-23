@@ -377,6 +377,14 @@ class AppSettings(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # ----- The built-in "Promptly" custom model (0486) -----
+    # Made once at start-up (``custom_models/builtin.py``). ``seeded`` stays
+    # true for good, so a model an admin renamed or deleted never comes back.
+    builtin_model_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    builtin_model_seeded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     # ----- Calls: voice channels (0280) -----
     # Off until an admin turns it on (Admin > Calls). ``calls_group_ids``:
     # NULL = everyone, else only members of these user groups (admins

@@ -407,6 +407,16 @@ async def provision_vapid_keys() -> None:
             await db.commit()
 
 
+async def provision_builtin_model() -> None:
+    """The built-in "Promptly" custom model, made once per install (after
+    the env provider, so an install that set an API key in .env and a
+    default chat model gets a Promptly that already answers)."""
+    from app.custom_models.builtin import provision
+
+    async with SessionLocal() as db:
+        await provision(db)
+
+
 async def _provision_all() -> None:
     """Run every async provisioning step inside a single event loop.
 
@@ -421,6 +431,7 @@ async def _provision_all() -> None:
     await provision_singleton_user()
     await provision_default_search_provider()
     await provision_env_model_provider()
+    await provision_builtin_model()
 
 
 def main() -> int:

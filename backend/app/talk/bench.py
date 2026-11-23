@@ -327,7 +327,10 @@ async def _bench_model(args: argparse.Namespace) -> dict[str, Any]:
         elif defaults.voice_configured:
             provider, model_id, role = await db.get(ModelProvider, defaults.voice_provider_id), defaults.voice_model_id, "voice"
         elif defaults.default_chat_configured:
-            provider, model_id, role = await db.get(ModelProvider, defaults.default_chat_provider_id), defaults.default_chat_model_id, "default chat"
+            from app.custom_models.resolver import base_pair
+
+            pair = await base_pair(db, defaults.default_chat_provider_id, defaults.default_chat_model_id)
+            provider, model_id, role = (pair[0], pair[1], "default chat") if pair else (None, None, "default chat")
         else:
             for row in (await db.execute(select(ModelProvider).where(ModelProvider.enabled.is_(True)))).scalars():
                 enabled = row.enabled_models or []

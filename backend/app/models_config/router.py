@@ -247,6 +247,11 @@ async def delete_provider(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="System-wide providers cannot be deleted",
         )
+    # The built-in Promptly model goes back to "no model behind it" rather
+    # than being deleted along with the provider it pointed at.
+    from app.custom_models.builtin import release_provider
+
+    await release_provider(db, provider.id)
     await db.delete(provider)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -432,6 +437,28 @@ async def list_available_models_for(
     ).scalars().all()
 
     for cm in custom_rows:
+        if cm.base_provider_id is None or not cm.base_model_id:
+            # No model behind it yet. Listed (when there is anything to
+            # list at all) so the picker can say so instead of the model
+            # silently not being there; the provider is a placeholder.
+            placeholder = next(iter(allowed_provider_map.values()), None)
+            if placeholder is None:
+                continue
+            if user_allow is not None and f"custom:{cm.id}" not in user_allow:
+                continue
+            flat.append(
+                AvailableModel(
+                    provider_id=placeholder.id,
+                    provider_name=placeholder.name,
+                    provider_type=placeholder.type,  # type: ignore[arg-type]
+                    model_id=f"custom:{cm.id}",
+                    display_name=cm.display_name,
+                    is_custom=True,
+                    custom_model_id=cm.id,
+                    needs_setup=True,
+                )
+            )
+            continue
         base_provider = allowed_provider_map.get(cm.base_provider_id)
         if base_provider is None:
             # Admin curated a custom model whose base provider isn't

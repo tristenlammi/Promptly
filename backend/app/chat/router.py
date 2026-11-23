@@ -1800,9 +1800,13 @@ async def send_message(
     if is_custom_model_id(model_id):
         resolved = await resolve_custom_model(model_id, db)
         if resolved is None:
+            from app.custom_models.resolver import unavailable_reason
+
+            # 409 + plain words: the built-in Promptly model before an admin
+            # has chosen the model behind it lands here.
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unknown or disabled custom model",
+                status_code=status.HTTP_409_CONFLICT,
+                detail=await unavailable_reason(model_id, db, admin=user.role == "admin"),
             )
         effective_model_id = resolved.base_model_id
 
@@ -4675,11 +4679,12 @@ async def _stream_generator(
         if is_custom_model_id(ctx["model_id"]):
             resolved = await resolve_custom_model(ctx["model_id"], db)
             if resolved is None:
+                from app.custom_models.resolver import unavailable_reason
+
                 yield _sse(
                     {
-                        "error": (
-                            "This custom model is no longer available — "
-                            "ask an admin to re-create it or pick a different model."
+                        "error": await unavailable_reason(
+                            ctx["model_id"], db, admin=user.role == "admin"
                         )
                     }
                 )
@@ -4702,7 +4707,13 @@ async def _stream_generator(
         # Skipped for custom-model turns — a custom assistant's whole point is
         # its base model + personality + RAG; don't silently swap it out.
         # ------------------------------------------------------------------
-        if ctx.get("voice") and custom_assistant is None:
+        # The built-in Promptly model is the exception to the exception: it is
+        # just "the default model" with a name, so spoken turns on it still
+        # get the fast voice model (and keep its short personality).
+        from app.custom_models.builtin import builtin_id as _builtin_id
+
+        _swap_voice = custom_assistant is None or custom_assistant.id == await _builtin_id(db)
+        if ctx.get("voice") and _swap_voice:
             _voice_defaults = await load_effective_defaults(db)
             if _voice_defaults.voice_configured:
                 _voice_provider = await db.get(

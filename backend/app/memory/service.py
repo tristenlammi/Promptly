@@ -968,9 +968,13 @@ async def resolve_memory_model(
     if fallback_provider is not None and fallback_model_id:
         return fallback_provider, fallback_model_id
     if settings.default_chat_configured:
-        provider = await db.get(ModelProvider, settings.default_chat_provider_id)
-        if provider is not None and provider.enabled:
-            return provider, settings.default_chat_model_id
+        # The default may be a custom model (the built-in Promptly one):
+        # the provider only knows the model behind it.
+        from app.custom_models.resolver import base_pair
+
+        pair = await base_pair(db, settings.default_chat_provider_id, settings.default_chat_model_id)
+        if pair is not None:
+            return pair
     if user_id is not None:
         from app.chat.models import Conversation
 

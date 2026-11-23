@@ -68,13 +68,17 @@ class CustomModel(Base):
     # Underlying model. ``base_provider_id`` is the FK we cascade
     # on; ``base_model_id`` is the string id within that provider's
     # catalog (matches ``ModelProvider.models[i].id``).
-    base_provider_id: Mapped[uuid.UUID] = mapped_column(
+    #
+    # Both NULL = "not ready": no model behind it yet (0486). Only the
+    # built-in Promptly model starts that way (``custom_models/builtin.py``),
+    # on an install where no AI service is connected.
+    base_provider_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("model_providers.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
-    base_model_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    base_model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     # Number of nearest chunks to inject into the system prompt at
     # send time. 6 is a sensible default for ~500-token chunks; the
