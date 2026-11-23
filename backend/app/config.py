@@ -263,6 +263,8 @@ class Settings(BaseSettings):
     MAPS_DATA_DIR: str = "/maps"
     MAPS_VALHALLA_URL: str = "http://maps:8002"
     MAPS_PHOTON_URL: str = "http://maps:2322"
+    # The maps container's control door: which maps to keep (app/maps/regions.py).
+    MAPS_CONTROL_URL: str = "http://maps:8003"
     # Live traffic: normally set in the admin panel. This is a fallback for
     # servers configured by file. The cap keeps a month inside the free 200,000.
     MAPS_TRAFFIC_KEY: str = ""

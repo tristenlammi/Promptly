@@ -1,14 +1,43 @@
 #!/bin/bash
 # Runs the refresh loop, plus routing and search over whichever build
-# /data/current names. Nothing here is reachable from outside the Docker network.
+# /data/current names, and the control door Promptly's backend uses to choose
+# maps (control.py). Nothing here is reachable from outside the Docker network.
 set -u
 DATA=/data
 mkdir -p "$DATA"
 
+# Changes when an admin picks different maps, or asks for another try.
+stamp() { cat "$DATA/regions.json" "$DATA/.kick" 2>/dev/null | md5sum | cut -c1-32; }
+
+control_loop() {
+  while true; do
+    python3 /opt/maps/control.py || echo "maps: the control door stopped; starting it again" >&2
+    sleep 5
+  done
+}
+control_loop &
+
 refresh_loop() {
   while true; do
-    /opt/maps/refresh.sh || echo "maps: refresh failed; the current data stays in use" >&2
-    sleep 21600   # look again in 6 hours; refresh.sh does nothing until the data is old enough
+    seen=$(stamp)
+    # Its own process group, so a change of maps can stop a build mid-step.
+    setsid /opt/maps/refresh.sh &
+    job=$!
+    while kill -0 "$job" 2>/dev/null; do
+      sleep 5
+      if [ "$(stamp)" != "$seen" ]; then
+        echo "maps: the chosen maps changed; stopping this build"
+        kill -TERM -- "-$job" 2>/dev/null || kill -TERM "$job" 2>/dev/null
+        sleep 3
+        kill -KILL -- "-$job" 2>/dev/null
+        break
+      fi
+    done
+    wait "$job" 2>/dev/null || echo "maps: refresh stopped or failed; the current data stays in use" >&2
+    # Look again in 6 hours (refresh.sh does nothing until the data is old
+    # enough), or as soon as the choice changes.
+    end=$((SECONDS + 21600))
+    while [ "$SECONDS" -lt "$end" ] && [ "$(stamp)" = "$seen" ]; do sleep 5; done
   done
 }
 refresh_loop &
@@ -16,7 +45,7 @@ refresh_loop &
 while true; do
   build=$(cat "$DATA/current" 2>/dev/null || true)
   if [ -z "$build" ] || [ ! -f "$DATA/$build/manifest.json" ]; then
-    sleep 20
+    sleep 5
     continue
   fi
   dir="$DATA/$build"
@@ -27,7 +56,7 @@ while true; do
   p=$!
   # Until a new build is swapped in, or one of the two stops.
   while [ "$(cat "$DATA/current" 2>/dev/null)" = "$build" ] && kill -0 $v 2>/dev/null && kill -0 $p 2>/dev/null; do
-    sleep 20
+    sleep 5
   done
   kill $v $p 2>/dev/null
   wait $v $p 2>/dev/null

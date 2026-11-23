@@ -89,6 +89,15 @@ ADMIN_ROUTES: dict[str, str] = {
     "POST /api/admin/backups/offsite/{action}": "config",
     "GET /api/maps/data-status": "health",
     "POST /api/maps/traffic/test": "config",
+    # Which countries' maps the server keeps (maps-regions): public map
+    # downloads and disk space, nothing of anyone's.
+    "GET /api/maps/regions": "config",
+    "GET /api/maps/regions/catalog": "config",
+    "POST /api/maps/regions/estimate": "config",
+    "PUT /api/maps/regions": "config",
+    "POST /api/maps/regions/add": "config",
+    "POST /api/maps/regions/remove": "config",
+    "POST /api/maps/regions/retry": "config",
     "GET /api/calls/check": "health",
     "GET /api/calls/usage": "counts",
     "GET /api/admin/talk/usage": "counts",
