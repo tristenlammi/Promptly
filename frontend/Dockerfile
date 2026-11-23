@@ -22,6 +22,11 @@ ARG VITE_AUTH_PROVIDER=custom
 ARG VITE_CLERK_PUBLISHABLE_KEY=
 ENV VITE_AUTH_PROVIDER=$VITE_AUTH_PROVIDER
 ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
+# The production build needs about 4 GB of JavaScript heap. Node sizes its
+# default limit from the machine: about 2 GB on anything under 16 GB of RAM
+# (which includes Docker Desktop's default 8 GB), where the build died with
+# "JavaScript heap out of memory". Say it outright, with room to grow.
+ENV NODE_OPTIONS=--max-old-space-size=6144
 RUN npm run build
 
 # ---- Production target (nginx serving built SPA) ----

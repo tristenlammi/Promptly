@@ -379,26 +379,39 @@ ensure_secrets
 # ours build FROM, so security fixes in them actually arrive.
 echo "  Downloading newer parts and rebuilding (a few minutes; longer when a new part is added)"
 docker compose pull --ignore-buildable --quiet || yellow "  Couldn't pull some images; continuing with what's here."
-# Building the web app takes about 3 GB of memory. On a small machine the
+# Building the web app takes close to 5 GB of memory. On a small machine the
 # running app doesn't leave that much, and the build gets killed part-way. So
 # when memory is tight the three heaviest helpers (photo search, speech in,
-# speech out) are stopped for the build; `up` below starts them again.
-# PROMPTLY_LOW_MEMORY=1 forces this, =0 never does it.
+# speech out) are stopped for the build, and if that still isn't enough, the
+# rest of the app too; `up` below starts everything again.
+# PROMPTLY_LOW_MEMORY=1 forces the first, =2 the second, =0 neither.
 PAUSED=""
-avail_mb=""
-[[ -r /proc/meminfo ]] && avail_mb="$(awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || true)"
-if [[ "${PROMPTLY_LOW_MEMORY:-}" == "1" ]] || { [[ "${PROMPTLY_LOW_MEMORY:-}" != "0" && -n "$avail_mb" ]] && (( avail_mb < 5000 )); }; then
+avail_mb() { [[ -r /proc/meminfo ]] && awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || true; }
+low="${PROMPTLY_LOW_MEMORY:-}"
+mb="$(avail_mb)"
+if [[ "$low" == "1" || "$low" == "2" ]] || { [[ "$low" != "0" && -n "$mb" ]] && (( mb < 6000 )); }; then
   PAUSED="photos-ml tts whisper"
-  yellow "  Memory is tight${avail_mb:+ (${avail_mb} MB free)}: photo search and speech are paused while the new version builds."
+  yellow "  Memory is tight: photo search and speech are paused while the new version builds."
   # shellcheck disable=SC2086
   docker compose stop $PAUSED >/dev/null 2>&1 || true
+  sleep 3
+  mb="$(avail_mb)"
+  if [[ "$low" == "2" ]] || { [[ "$low" != "1" && -n "$mb" ]] && (( mb < 5200 )); }; then
+    PAUSED="all"
+    yellow "  Still tight: Promptly is stopped for a few minutes while the new version builds."
+    docker compose stop >/dev/null 2>&1 || true
+  fi
 fi
 if ! docker compose build --pull; then
   # Nothing has been restarted yet: the old version is still what's running.
   # Put the folder back on it, so a retry (and a later --rollback) start from
   # the truth.
-  # shellcheck disable=SC2086
-  [[ -n "$PAUSED" ]] && { docker compose start $PAUSED >/dev/null 2>&1 || true; }
+  if [[ "$PAUSED" == "all" ]]; then
+    docker compose start >/dev/null 2>&1 || true
+  elif [[ -n "$PAUSED" ]]; then
+    # shellcheck disable=SC2086
+    docker compose start $PAUSED >/dev/null 2>&1 || true
+  fi
   prev_sha=""
   # shellcheck disable=SC1090
   [[ -f "$STATE" ]] && prev_sha="$(source "$STATE" 2>/dev/null && printf '%s' "${PREV_SHA:-}")"
@@ -410,7 +423,7 @@ if ! docker compose build --pull; then
   fi
   red "  * \"cannot allocate memory\", \"Killed\" or \"heap out of memory\": the machine ran out"
   red "    of memory while building. Close other programs (or add swap) and try again:"
-  red "        PROMPTLY_LOW_MEMORY=1 ./update.sh"
+  red "        PROMPTLY_LOW_MEMORY=2 ./update.sh     # stops Promptly while it builds"
   red "  * A download failed: check the internet connection, then ./update.sh"
   red "  * \"no space left on device\": free some disk (docker image prune -f), then ./update.sh"
   exit 1
