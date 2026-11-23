@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-11-24
+
 ### Added
 - One-line install: `curl -fsSL https://raw.githubusercontent.com/tristenlammi/Promptly/main/install.sh | bash` (Windows: `irm .../install.ps1 | iex`) downloads the latest release into `./Promptly` and installs it; `PROMPTLY_DIR`, `PROMPTLY_REF` and `PROMPTLY_REPO` change where and what.
 - Installer: `--no-start` / `-NoStart` sets the folder up (.env, secrets, choices) without building or starting, so the port can be changed first.
