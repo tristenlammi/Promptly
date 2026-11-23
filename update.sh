@@ -262,6 +262,32 @@ ensure_secrets() {
   ensure_secret TUS_HOOK_SECRET
 }
 
+# Building the web app takes close to 5 GB of memory. On a small machine the
+# running app doesn't leave that much, and the build gets killed part-way. So
+# when memory is tight the three heaviest helpers (photo search, speech in,
+# speech out) are stopped for the build, and if that still isn't enough, the
+# rest of the app too; the `up` after the build starts everything again.
+# PROMPTLY_LOW_MEMORY=1 forces the first, =2 the second, =0 neither.
+PAUSED=""
+avail_mb() { [[ -r /proc/meminfo ]] && awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || true; }
+make_room_to_build() {
+  local low="${PROMPTLY_LOW_MEMORY:-}" mb
+  mb="$(avail_mb)"
+  if [[ "$low" == "1" || "$low" == "2" ]] || { [[ "$low" != "0" && -n "$mb" ]] && (( mb < 6000 )); }; then
+    PAUSED="photos-ml tts whisper"
+    yellow "  Memory is tight: photo search and speech are paused while the new version builds."
+    # shellcheck disable=SC2086
+    docker compose stop $PAUSED >/dev/null 2>&1 || true
+    sleep 3
+    mb="$(avail_mb)"
+    if [[ "$low" == "2" ]] || { [[ "$low" != "1" && -n "$mb" ]] && (( mb < 5200 )); }; then
+      PAUSED="all"
+      yellow "  Still tight: Promptly is stopped for a few minutes while the new version builds."
+      docker compose stop >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 reload_nginx() {
   # Recreated, not reloaded: nginx.conf is a single-file bind mount, and
   # git replaces the file on update — a running container keeps the old
@@ -289,6 +315,7 @@ if $ROLLBACK; then
     -c "DROP DATABASE IF EXISTS promptly WITH (FORCE)" -c "CREATE DATABASE promptly OWNER promptly" >/dev/null
   docker compose exec -T postgres pg_restore --no-owner --exit-on-error -U promptly -d promptly < "$DUMP"
   git checkout --quiet "$PREV_SHA"
+  make_room_to_build
   docker compose build
   docker compose up -d --remove-orphans
   reload_nginx
@@ -379,29 +406,7 @@ ensure_secrets
 # ours build FROM, so security fixes in them actually arrive.
 echo "  Downloading newer parts and rebuilding (a few minutes; longer when a new part is added)"
 docker compose pull --ignore-buildable --quiet || yellow "  Couldn't pull some images; continuing with what's here."
-# Building the web app takes close to 5 GB of memory. On a small machine the
-# running app doesn't leave that much, and the build gets killed part-way. So
-# when memory is tight the three heaviest helpers (photo search, speech in,
-# speech out) are stopped for the build, and if that still isn't enough, the
-# rest of the app too; `up` below starts everything again.
-# PROMPTLY_LOW_MEMORY=1 forces the first, =2 the second, =0 neither.
-PAUSED=""
-avail_mb() { [[ -r /proc/meminfo ]] && awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || true; }
-low="${PROMPTLY_LOW_MEMORY:-}"
-mb="$(avail_mb)"
-if [[ "$low" == "1" || "$low" == "2" ]] || { [[ "$low" != "0" && -n "$mb" ]] && (( mb < 6000 )); }; then
-  PAUSED="photos-ml tts whisper"
-  yellow "  Memory is tight: photo search and speech are paused while the new version builds."
-  # shellcheck disable=SC2086
-  docker compose stop $PAUSED >/dev/null 2>&1 || true
-  sleep 3
-  mb="$(avail_mb)"
-  if [[ "$low" == "2" ]] || { [[ "$low" != "1" && -n "$mb" ]] && (( mb < 5200 )); }; then
-    PAUSED="all"
-    yellow "  Still tight: Promptly is stopped for a few minutes while the new version builds."
-    docker compose stop >/dev/null 2>&1 || true
-  fi
-fi
+make_room_to_build
 if ! docker compose build --pull; then
   # Nothing has been restarted yet: the old version is still what's running.
   # Put the folder back on it, so a retry (and a later --rollback) start from
@@ -456,6 +461,6 @@ fi
 docker image prune -f >/dev/null 2>&1 || true
 
 echo
-docker compose ps
+docker compose ps --format 'table {{.Name}}\t{{.Status}}'
 echo
 green "Updated to $TARGET. (Undo with ./update.sh --rollback)"

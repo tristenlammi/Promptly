@@ -391,6 +391,6 @@ if (-not (Wait-Healthy)) {
 Invoke-Quiet { docker image prune -f } | Out-Null
 
 Write-Host ""
-docker compose ps
+docker compose ps --format 'table {{.Name}}\t{{.Status}}'
 Write-Host ""
 Write-Host "Updated to $target. (Undo with .\update.ps1 -Rollback)" -ForegroundColor Green
