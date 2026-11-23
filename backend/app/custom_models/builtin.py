@@ -114,11 +114,11 @@ async def provision(db: AsyncSession) -> CustomModel | None:
 
 
 async def _grant_to_existing_lists(db: AsyncSession, cm: CustomModel) -> int:
-    """People whose account is limited to a list of models (locked ones
-    included: their own model stays first) get Promptly added to that list,
-    this once, as the model is first made. Not people with full access
-    (no list), nor people an admin gave no models at all (an empty list is
-    "no AI for this person", and stays that). It is then an ordinary
+    """People whose account is limited to a list of models get Promptly
+    added to that list, this once, as the model is first made. Not people
+    with full access (no list), nor people an admin gave no models at all
+    (an empty list is "no AI for this person", and stays that), nor people
+    locked to one model (they stay on exactly that model). It is then an ordinary
     entry: an admin who unticks it has it stay unticked, because this never
     runs again (``builtin_model_seeded``). Returns how many lists grew."""
     from app.auth.models import User
@@ -128,7 +128,7 @@ async def _grant_to_existing_lists(db: AsyncSession, cm: CustomModel) -> int:
     changed = 0
     for person in people:
         # None (in the database: NULL or a JSON null) is full access.
-        if not person.allowed_models:
+        if not person.allowed_models or person.model_locked:
             continue
         have = list(person.allowed_models)
         if synthetic in have:

@@ -233,8 +233,8 @@ async def test_an_upgrade_adds_promptly_to_existing_model_lists_once(db, user, c
     for person in (listed, locked, nothing, free, user):
         await db.refresh(person)
     assert listed.allowed_models == [haiku, promptly]
-    # Locked: their own model is still the first one.
-    assert locked.allowed_models == [haiku, promptly] and locked.model_locked is True
+    # Locked to one model: left exactly as it was.
+    assert locked.allowed_models == [haiku] and locked.model_locked is True
     # "No models at all" stays that; full access and admins have no list to add to.
     assert nothing.allowed_models == []
     assert free.allowed_models is None and user.allowed_models is None
