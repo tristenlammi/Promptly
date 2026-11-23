@@ -315,10 +315,46 @@ if (Test-Path ".env") {
     }
     if ($changed) { [System.IO.File]::WriteAllText($envPath, ($envText -replace "`r`n", "`n")) }
 }
+Write-Host "  Downloading newer parts and rebuilding (a few minutes; longer when a new part is added)"
 docker compose pull --ignore-buildable --quiet
 if ($LASTEXITCODE -ne 0) { Write-Warn "Couldn't pull some images; continuing with what's here." }
+# Building the web app takes about 3 GB of memory. When Docker has little
+# (under 10 GB in all), the running app doesn't leave that much and the build
+# gets killed part-way, so the three heaviest helpers (photo search, speech in,
+# speech out) are stopped for the build; `up` below starts them again.
+# $env:PROMPTLY_LOW_MEMORY = "1" forces this, "0" never does it.
+$paused = @()
+$dockerMem = 0
+try { $dockerMem = [int64](Invoke-Quiet { docker info --format '{{.MemTotal}}' }) } catch { }
+if ($env:PROMPTLY_LOW_MEMORY -eq "1" -or ($env:PROMPTLY_LOW_MEMORY -ne "0" -and $dockerMem -gt 0 -and $dockerMem -lt 10GB)) {
+    $paused = @("photos-ml", "tts", "whisper")
+    Write-Warn "Memory is tight: photo search and speech are paused while the new version builds."
+    Invoke-Quiet { docker compose stop @paused } | Out-Null
+}
 docker compose build --pull
-if ($LASTEXITCODE -ne 0) { throw "docker compose build failed" }
+if ($LASTEXITCODE -ne 0) {
+    # Nothing has been restarted yet: the old version is still what's running.
+    # Put the folder back on it, so a retry (and a later -Rollback) start from
+    # the truth.
+    if ($paused) { Invoke-Quiet { docker compose start @paused } | Out-Null }
+    Write-Host ""
+    Write-Fail "The new version couldn't be built (the reason is in the lines above), so nothing"
+    Write-Fail "was restarted: Promptly is still running $prevRef and your data is untouched."
+    if (Test-Path $StateFile) {
+        $st = Get-Content $StateFile -Raw | ConvertFrom-Json
+        if ($st.prev_sha) {
+            Invoke-Quiet { git checkout --quiet $st.prev_sha }
+            if ($LASTEXITCODE -eq 0) { Write-Fail "The folder is back on $prevRef as well." }
+        }
+    }
+    Write-Host "      * 'cannot allocate memory', 'Killed' or 'heap out of memory': Docker ran out of memory"
+    Write-Host "        while building. Give Docker Desktop more memory (Settings -> Resources, or"
+    Write-Host "        .wslconfig), close other programs, and try again:"
+    Write-Host "            `$env:PROMPTLY_LOW_MEMORY = '1'; .\update.ps1"
+    Write-Host "      * A download failed: check the internet connection, then .\update.ps1"
+    Write-Host "      * 'no space left on device': free some disk (docker image prune -f), then .\update.ps1"
+    exit 1
+}
 # --remove-orphans also clears containers of services that no longer exist
 # (the old code sandbox, Promptly-Sandbox). Its empty network is left behind
 # by compose, so tidy that too; harmless when it isn't there.

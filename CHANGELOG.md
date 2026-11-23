@@ -35,6 +35,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - `update.ps1` and `install.ps1` on Windows PowerShell 5.1 (the one that ships with Windows): anything Docker or git printed on stderr stopped the script, so an update died at "Reloading nginx config" after the new version was already running.
 - `update.sh` run as root on a folder owned by another user (git's "dubious ownership") now carries on with a note; run by a user who can't write to the folder, or without access to Docker, it says so before anything is touched.
 - Update scripts stop with a plain message when the new version can't be fetched (no internet) instead of carrying on with the old list of releases (Windows) or a bare git error.
+- An install made with `--no-home` no longer has Promptly Home switched on (and 3.5 GB downloaded) by its first update.
 - Installer: a failed build or start now says the likely cause (connection dropped, disk full, port taken) and what to do, and waits up to 5 minutes for the first start instead of 3.
 
 ## [0.52.4] - 2026-11-23

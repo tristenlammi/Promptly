@@ -240,27 +240,28 @@ rand_hex() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex "$1"
   else
-    head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' 
-'
+    head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'
   fi
 }
 
 # Room to work in. Not a hard stop: a warning the person can act on.
-free_gb=$(df -Pk . 2>/dev/null | awk 'NR==2 {printf "%d", $4/1048576}' || true)
-need_gb=20
-if [[ -n "${free_gb:-}" ]] && (( free_gb < need_gb )); then
-  yellow "  Only ${free_gb} GB of disk is free here. The install needs about ${need_gb} GB"
-  yellow "  (more with P Maps); it may stop part-way with \"no space left on device\"."
-fi
-mem_gb=""
-if [[ -r /proc/meminfo ]]; then
-  mem_gb=$(awk '/^MemTotal:/ {printf "%d", ($2+524288)/1048576}' /proc/meminfo 2>/dev/null || true)
-elif [[ "$(uname -s)" == "Darwin" ]]; then
-  mem_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
-fi
-if [[ -n "${mem_gb:-}" ]] && (( mem_gb > 0 && mem_gb < 4 )); then
-  yellow "  This machine has about ${mem_gb} GB of memory. Promptly wants 4 GB or more;"
-  yellow "  with less it can be slow or run out while building."
+# Disk: where Docker keeps its images when that's a folder on this machine
+# (on Docker Desktop it's inside Docker's own disk), else this folder.
+if ! $NO_START; then
+  need_gb=30
+  disk_dir="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"
+  [[ -n "$disk_dir" && -d "$disk_dir" ]] || disk_dir="."
+  free_gb=$(df -Pk "$disk_dir" 2>/dev/null | awk 'NR==2 {printf "%d", $4/1048576}' || true)
+  if [[ -n "${free_gb:-}" ]] && (( free_gb < need_gb )); then
+    yellow "  Only ${free_gb} GB of disk is free. A full install takes about ${need_gb} GB while it"
+    yellow "  builds; it may stop part-way with \"no space left on device\"."
+  fi
+  # Memory: what Docker has (on Docker Desktop that's its own setting).
+  mem_mb=$(docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{printf "%d", $1/1048576}' || true)
+  if [[ -n "${mem_mb:-}" ]] && (( mem_mb > 0 && mem_mb < 7200 )); then
+    yellow "  Docker has about $(( (mem_mb + 512) / 1024 )) GB of memory here. Promptly needs 8 GB (16 GB is"
+    yellow "  comfortable); with less, the build or the app itself can run out and stop."
+  fi
 fi
 
 # ---------- 2. .env bootstrap ----------
@@ -298,12 +299,12 @@ for k in TUS_HOOK_SECRET; do
   grep -qE "^${k}=." .env || { sed -i.bak "/^${k}=\$/d" .env; rm -f .env.bak; printf '%s=change-me\n' "$k" >> .env; }
 done
 seed_secret TUS_HOOK_SECRET   "$(rand_hex 32)"
-# Promptly Home: what its bundled home box proves itself with. Not made with
-# --no-home, so a later update still offers it.
-if ! $NO_HOME; then
-  grep -qE "^HOME_BOX_SECRET=." .env || { sed -i.bak "/^HOME_BOX_SECRET=\$/d" .env; rm -f .env.bak; printf 'HOME_BOX_SECRET=change-me\n' >> .env; }
-  seed_secret HOME_BOX_SECRET "$(rand_hex 32)"
-fi
+# Promptly Home: what its bundled home box proves itself with. Made with
+# --no-home too: the update script turns Home on for an install that has no
+# secret yet, and someone who said --no-home shouldn't get it at the next
+# update. (To add Home later: ./install.sh with the other flags you used.)
+grep -qE "^HOME_BOX_SECRET=." .env || { sed -i.bak "/^HOME_BOX_SECRET=\$/d" .env; rm -f .env.bak; printf 'HOME_BOX_SECRET=change-me\n' >> .env; }
+seed_secret HOME_BOX_SECRET "$(rand_hex 32)"
 # Calls (LiveKit). An .env from before Calls has no such lines: add them.
 for k in LIVEKIT_API_KEY LIVEKIT_API_SECRET; do
   grep -qE "^${k}=" .env || printf '%s=change-me\n' "$k" >> .env

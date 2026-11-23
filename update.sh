@@ -377,8 +377,44 @@ setup_home
 ensure_secrets
 # Refresh third-party images (nginx, postgres, redis…) and the base images
 # ours build FROM, so security fixes in them actually arrive.
+echo "  Downloading newer parts and rebuilding (a few minutes; longer when a new part is added)"
 docker compose pull --ignore-buildable --quiet || yellow "  Couldn't pull some images; continuing with what's here."
-docker compose build --pull
+# Building the web app takes about 3 GB of memory. On a small machine the
+# running app doesn't leave that much, and the build gets killed part-way. So
+# when memory is tight the three heaviest helpers (photo search, speech in,
+# speech out) are stopped for the build; `up` below starts them again.
+# PROMPTLY_LOW_MEMORY=1 forces this, =0 never does it.
+PAUSED=""
+avail_mb=""
+[[ -r /proc/meminfo ]] && avail_mb="$(awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || true)"
+if [[ "${PROMPTLY_LOW_MEMORY:-}" == "1" ]] || { [[ "${PROMPTLY_LOW_MEMORY:-}" != "0" && -n "$avail_mb" ]] && (( avail_mb < 5000 )); }; then
+  PAUSED="photos-ml tts whisper"
+  yellow "  Memory is tight${avail_mb:+ (${avail_mb} MB free)}: photo search and speech are paused while the new version builds."
+  # shellcheck disable=SC2086
+  docker compose stop $PAUSED >/dev/null 2>&1 || true
+fi
+if ! docker compose build --pull; then
+  # Nothing has been restarted yet: the old version is still what's running.
+  # Put the folder back on it, so a retry (and a later --rollback) start from
+  # the truth.
+  # shellcheck disable=SC2086
+  [[ -n "$PAUSED" ]] && { docker compose start $PAUSED >/dev/null 2>&1 || true; }
+  prev_sha=""
+  # shellcheck disable=SC1090
+  [[ -f "$STATE" ]] && prev_sha="$(source "$STATE" 2>/dev/null && printf '%s' "${PREV_SHA:-}")"
+  red ""
+  red "The new version couldn't be built (the reason is in the lines above), so nothing"
+  red "was restarted: Promptly is still running $PREV_REF and your data is untouched."
+  if [[ -n "$prev_sha" ]] && git checkout --quiet "$prev_sha" 2>/dev/null; then
+    red "The folder is back on $PREV_REF as well."
+  fi
+  red "  * \"cannot allocate memory\", \"Killed\" or \"heap out of memory\": the machine ran out"
+  red "    of memory while building. Close other programs (or add swap) and try again:"
+  red "        PROMPTLY_LOW_MEMORY=1 ./update.sh"
+  red "  * A download failed: check the internet connection, then ./update.sh"
+  red "  * \"no space left on device\": free some disk (docker image prune -f), then ./update.sh"
+  exit 1
+fi
 # --remove-orphans also clears containers of services that no longer exist
 # (the old code sandbox, Promptly-Sandbox). Its empty network is left behind
 # by compose, so tidy that too; harmless when it isn't there.

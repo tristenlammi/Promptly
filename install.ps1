@@ -240,16 +240,16 @@ foreach ($k in @("TUS_HOOK_SECRET")) {
     }
 }
 Set-IfPlaceholder ([ref]$envText) "TUS_HOOK_SECRET"   (New-HexSecret 32)
-# Promptly Home: what its bundled home box proves itself with. Not made with
-# -NoHome, so a later update still offers it.
-if (-not $NoHome) {
-    if ($envText -notmatch "(?m)^HOME_BOX_SECRET=.") {
-        $envText = [regex]::Replace($envText, "(?m)^HOME_BOX_SECRET=\s*\r?\n", "")
-        if ($envText -and -not $envText.EndsWith("`n")) { $envText += "`n" }
-        $envText += "HOME_BOX_SECRET=change-me`n"
-    }
-    Set-IfPlaceholder ([ref]$envText) "HOME_BOX_SECRET" (New-HexSecret 32)
+# Promptly Home: what its bundled home box proves itself with. Made with
+# -NoHome too: the update script turns Home on for an install that has no
+# secret yet, and someone who said -NoHome shouldn't get it at the next
+# update. (To add Home later: .\install.ps1 with the other flags you used.)
+if ($envText -notmatch "(?m)^HOME_BOX_SECRET=.") {
+    $envText = [regex]::Replace($envText, "(?m)^HOME_BOX_SECRET=\s*\r?\n", "")
+    if ($envText -and -not $envText.EndsWith("`n")) { $envText += "`n" }
+    $envText += "HOME_BOX_SECRET=change-me`n"
 }
+Set-IfPlaceholder ([ref]$envText) "HOME_BOX_SECRET" (New-HexSecret 32)
 # Calls (LiveKit). An .env from before Calls has no such lines: add them.
 foreach ($k in @("LIVEKIT_API_KEY", "LIVEKIT_API_SECRET")) {
     if ($envText -notmatch "(?m)^$k=") {
