@@ -214,7 +214,7 @@ for arg in "$@"; do
     --no-ollama)   PROFILE_FLAGS_GIVEN=true ;;
     --no-start)    NO_START=true ;;
     -h|--help)
-      sed -n '/^# Usage/,/^# ====/p' "$0" | sed '$d' | sed 's/^# //; s/^#//'
+      sed -n '/^# Usage/,/^# ====/p' "$ROOT_DIR/$(basename "$SELF")" | sed '$d' | sed 's/^# //; s/^#//'
       exit 0
       ;;
     *)
