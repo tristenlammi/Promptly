@@ -641,6 +641,8 @@ export interface AdminModelOption {
   /** Custom Models surface here as model_id "custom:<uuid>". */
   is_custom?: boolean;
   base_display_name?: string | null;
+  /** The built-in Promptly model: first in the list, ticked by default for a new person. */
+  is_builtin?: boolean;
 }
 
 // ---- Auth response — discriminated by ``status`` ----
@@ -778,6 +780,9 @@ export interface AvailableModel {
    *  so; a message sent to it gets a plain "an admin needs to choose a
    *  model" answer. Its ``provider_id`` is only a placeholder. */
   needs_setup?: boolean;
+  /** The built-in Promptly model: first in an admin's "which models" list
+   *  for a person, and ticked by default for a new one. */
+  is_builtin?: boolean;
   /** Only set when ``is_custom`` is true. Raw ``CustomModel.id`` uuid. */
   custom_model_id?: string | null;
   /** Only set when ``is_custom`` is true. Used as the subtitle in the

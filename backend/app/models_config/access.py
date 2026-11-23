@@ -53,27 +53,17 @@ async def effective_allow_set(
     (full access). Groups can only WIDEN a custom list, never narrow full
     access.
 
-    The built-in Promptly model is in everyone's set, whatever their list
-    says: it is the family's assistant, and the apps' own assistants run on
-    it. Every other model, custom ones included, keeps the rule above.
+    The built-in Promptly model is an ordinary entry (``custom:<uuid>``): an
+    admin ticks or unticks it per person like any other model. It is ticked
+    by default in the admin's "new person" form, and added once to the lists
+    that existed when it was first made (``custom_models.builtin.provision``).
     """
     if user.role == "admin" or user.allowed_models is None:
         return None
-    everyone = await _builtin_model_ids(db)
     if user.model_locked:
         # Locked to what the admin picked — groups can't widen it.
-        return set(user.allowed_models) | everyone
-    return set(user.allowed_models) | await group_granted_models(user.id, db) | everyone
-
-
-async def _builtin_model_ids(db: AsyncSession) -> set[str]:
-    """The built-in Promptly model's synthetic id (``custom:<uuid>``), as a
-    set; empty when this install has none."""
-    from app.custom_models import builtin
-    from app.custom_models.resolver import CUSTOM_MODEL_PREFIX
-
-    cm_id = await builtin.builtin_id(db)
-    return {f"{CUSTOM_MODEL_PREFIX}{cm_id}"} if cm_id else set()
+        return set(user.allowed_models)
+    return set(user.allowed_models) | await group_granted_models(user.id, db)
 
 
 async def is_model_allowed(

@@ -297,8 +297,10 @@ local model will be noticeably weaker than a top hosted one, and running a
 capable local model needs a strong graphics card.
 
 The built-in assistant is a model called **Promptly**. The admin chooses the
-model behind it, in setup or later under Admin → Models, and everyone picks
-"Promptly" in chat without having to know which one that is.
+model behind it, in setup or later under Admin → Models, and people pick
+"Promptly" in chat without having to know which one that is. When an admin
+limits someone to certain models, Promptly is ticked to begin with and can be
+unticked like any other.
 
 Everything that isn't AI works with no model at all: files, photos, mail,
 calendar, notes, passwords, Rooms and Porch.

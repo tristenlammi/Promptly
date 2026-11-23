@@ -483,6 +483,9 @@ class AdminModelOption(BaseModel):
     # be granted per-user / per-group; the flag lets the picker badge them.
     is_custom: bool = False
     base_display_name: str | None = None
+    # The built-in Promptly model: first in the list, and ticked by default
+    # when an admin makes a new person's list (they can untick it).
+    is_builtin: bool = False
 
 
 # --------------------------------------------------------------------

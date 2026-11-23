@@ -106,8 +106,37 @@ async def provision(db: AsyncSession) -> CustomModel | None:
         logger.info("Made the built-in Promptly model (%s).", "ready" if model_id else "no model behind it yet")
     settings.builtin_model_id = cm.id
     settings.builtin_model_seeded = True
+    granted = await _grant_to_existing_lists(db, cm)
     await db.commit()
+    if granted:
+        logger.info("Added the built-in Promptly model to %d people's model lists.", granted)
     return cm
+
+
+async def _grant_to_existing_lists(db: AsyncSession, cm: CustomModel) -> int:
+    """People whose account is limited to a list of models (locked ones
+    included: their own model stays first) get Promptly added to that list,
+    this once, as the model is first made. Not people with full access
+    (no list), nor people an admin gave no models at all (an empty list is
+    "no AI for this person", and stays that). It is then an ordinary
+    entry: an admin who unticks it has it stay unticked, because this never
+    runs again (``builtin_model_seeded``). Returns how many lists grew."""
+    from app.auth.models import User
+
+    synthetic = f"{CUSTOM_MODEL_PREFIX}{cm.id}"
+    people = (await db.execute(select(User).where(User.role != "admin"))).scalars().all()
+    changed = 0
+    for person in people:
+        # None (in the database: NULL or a JSON null) is full access.
+        if not person.allowed_models:
+            continue
+        have = list(person.allowed_models)
+        if synthetic in have:
+            continue
+        # A new list object, so the change is seen and saved.
+        person.allowed_models = [*have, synthetic]
+        changed += 1
+    return changed
 
 
 async def set_base(

@@ -436,6 +436,10 @@ async def list_available_models_for(
         )
     ).scalars().all()
 
+    from app.custom_models import builtin as _builtin
+
+    builtin_cm_id = await _builtin.builtin_id(db)
+
     for cm in custom_rows:
         if cm.base_provider_id is None or not cm.base_model_id:
             # No model behind it yet. Listed (when there is anything to
@@ -456,6 +460,7 @@ async def list_available_models_for(
                     is_custom=True,
                     custom_model_id=cm.id,
                     needs_setup=True,
+                    is_builtin=cm.id == builtin_cm_id,
                 )
             )
             continue
@@ -518,6 +523,7 @@ async def list_available_models_for(
                 or _detect_reasoning_by_id(base_provider.type, cm.base_model_id),
                 is_custom=True,
                 custom_model_id=cm.id,
+                is_builtin=cm.id == builtin_cm_id,
                 # Members see a custom model by its own name only — what it
                 # runs on is the admin's business.
                 base_display_name=base_label if user.role == "admin" else None,

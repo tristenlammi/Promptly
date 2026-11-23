@@ -78,6 +78,13 @@ async def setup() -> dict:
         await db.flush()
 
         out: dict = {"provider_id": str(provider.id), "users": {}}
+        # The built-in Promptly model is an ordinary entry on a person's
+        # model list (ticked by default for new people).
+        from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+
+        app_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+        builtin_id = getattr(app_row, "builtin_model_id", None)
+        promptly = [f"custom:{builtin_id}"] if builtin_id else []
         pw_hash = hash_password(password)
         for key, (email, username) in USERS.items():
             user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
@@ -93,7 +100,7 @@ async def setup() -> dict:
             user.failed_login_attempts = 0
             user.mfa_enrolled_method = None
             user.must_change_password = key == "carol"
-            user.allowed_models = [m["id"] for m in MODELS]
+            user.allowed_models = [m["id"] for m in MODELS] + promptly
             user.can_use_automations = True  # off by default since 0240
             user.settings = {
                 **(user.settings or {}),

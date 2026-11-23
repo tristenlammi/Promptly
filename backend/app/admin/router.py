@@ -805,12 +805,29 @@ async def model_pool(
     # without also exposing its raw base model.
     from app.custom_models.models import CustomModel  # local import: avoid cycle
 
+    from app.custom_models import builtin
+
+    builtin_id = await builtin.builtin_id(db)
     provider_by_id = {p.id: p for p in await _pool_providers(actor, db)}
     custom_rows = (
         await db.execute(select(CustomModel).order_by(CustomModel.display_name))
     ).scalars().all()
     for cm in custom_rows:
         base = provider_by_id.get(cm.base_provider_id)
+        if cm.id == builtin_id and base is None and cm.base_provider_id is None and provider_by_id:
+            # The built-in Promptly model before its model is chosen: it can
+            # be ticked for someone already, and works for them once it has
+            # one. (Listed under the first AI service only as a placeholder.)
+            holder = next(iter(provider_by_id.values()))
+            rows.insert(0, AdminModelOption(
+                provider_id=holder.id,
+                provider_name=holder.name,
+                model_id=f"custom:{cm.id}",
+                display_name=cm.display_name,
+                is_custom=True,
+                is_builtin=True,
+            ))
+            continue
         if base is None:
             continue
         # Respect the base provider's enabled_models curation — if the
@@ -826,18 +843,22 @@ async def model_pool(
             (m for m in (base.models or []) if m.get("id") == cm.base_model_id),
             None,
         )
-        rows.append(
-            AdminModelOption(
-                provider_id=base.id,
-                provider_name=base.name,
-                model_id=f"custom:{cm.id}",
-                display_name=cm.display_name,
-                context_window=(base_entry or {}).get("context_window"),
-                is_custom=True,
-                base_display_name=(base_entry or {}).get("display_name")
-                or cm.base_model_id,
-            )
+        row = AdminModelOption(
+            provider_id=base.id,
+            provider_name=base.name,
+            model_id=f"custom:{cm.id}",
+            display_name=cm.display_name,
+            context_window=(base_entry or {}).get("context_window"),
+            is_custom=True,
+            base_display_name=(base_entry or {}).get("display_name")
+            or cm.base_model_id,
+            is_builtin=cm.id == builtin_id,
         )
+        # The built-in model leads the list.
+        if row.is_builtin:
+            rows.insert(0, row)
+        else:
+            rows.append(row)
     return rows
 
 

@@ -180,6 +180,9 @@ class AvailableModel(BaseModel):
     # sending to it answers with a plain "an admin needs to choose a model".
     # ``provider_id`` on such a row is only a placeholder.
     needs_setup: bool = False
+    # The built-in Promptly model: listed first and ticked by default when an
+    # admin makes a new person's model list.
+    is_builtin: bool = False
     # The id of the underlying ``custom_models`` row — handy for the
     # frontend when it needs to deep-link into the admin edit drawer.
     # ``None`` for non-custom rows.

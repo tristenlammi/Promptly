@@ -236,8 +236,9 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
   /** Leaving the wizard is the one place auth status flips to
    *  "authenticated" — that's what swaps App.tsx over to the real app
    *  routes. Must happen before the navigate, or the "needs_setup"
-   *  catch-all bounces straight back to /setup. Lands on Today, where the
-   *  "Finish setting up" card lists whatever was skipped. */
+   *  catch-all bounces straight back to /setup. Lands on a new chat, both
+   *  after setting everything up and after "Just look around"; whatever
+   *  was skipped is on Today's "Finish setting up" card and Admin → Setup. */
   const finish = () => {
     try {
       localStorage.removeItem(SETUP_PROGRESS_KEY);
@@ -245,7 +246,7 @@ export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
       /* ignore */
     }
     setStatus("authenticated");
-    navigate("/today", { replace: true });
+    navigate("/chat", { replace: true });
   };
 
   // One step by itself: back to the checklist when it's done.

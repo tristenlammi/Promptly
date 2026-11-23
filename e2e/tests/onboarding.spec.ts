@@ -278,3 +278,26 @@ test("Promptly says so while it has no model behind it", async ({ dana: admin, a
   await expect(admin.getByTestId("setup-row-models")).toHaveAttribute("data-status", "todo", { timeout: 20_000 });
   await expect(admin.getByTestId("setup-row-models")).toContainText("doesn't have a model behind it yet");
 });
+
+/** Giving a new person only certain models: Promptly is first in the list and
+ *  ticked to begin with, and the admin can untick it like any other. */
+test("a new person's model list starts with Promptly ticked, and it can be unticked", async ({ dana: admin }) => {
+  await admin.goto("/admin?tab=users");
+  await ready(admin);
+  await admin.getByRole("button", { name: "Create user" }).first().click();
+  const form = admin.getByRole("dialog");
+  await expect(form).toBeVisible();
+  await form.getByRole("button", { name: /^Custom/ }).click();
+  const promptly = form.getByTestId("user-model-builtin");
+  await expect(promptly).toBeVisible({ timeout: 20_000 });
+  await expect(promptly).toBeChecked();
+  // First in the list, by its own name.
+  const boxes = form.locator('[data-testid^="user-model"]');
+  await expect(boxes.first()).toHaveAttribute("data-testid", "user-model-builtin");
+  await expect(form.locator("label", { has: admin.getByTestId("user-model-builtin") })).toContainText("Promptly");
+  // Nothing else is ticked for them.
+  await expect(form.locator('[data-testid^="user-model"]:checked')).toHaveCount(1);
+  await promptly.uncheck();
+  await expect(promptly).not.toBeChecked();
+  await expect(form.locator('[data-testid^="user-model"]:checked')).toHaveCount(0);
+});

@@ -140,10 +140,9 @@ async def test_the_picker_says_when_promptly_is_not_ready(db, user, client):
     assert row["base_display_name"] is None
 
 
-async def test_a_member_with_a_model_list_still_gets_promptly(db, user, client):
-    """Promptly is everyone's, whatever their own model list says. Nothing
-    else gets through the list: not the model behind Promptly, not another
-    custom model."""
+async def test_promptly_is_an_ordinary_entry_on_a_persons_model_list(db, user, client):
+    """Ticked: they see it and can use it (and nothing it runs on). Unticked:
+    it isn't listed and a message to it is refused, like any other model."""
     from app.chat.models import Conversation
     from app.custom_models.models import CustomModel
     from app.models_config.access import is_model_allowed
@@ -156,55 +155,97 @@ async def test_a_member_with_a_model_list_still_gets_promptly(db, user, client):
     promptly, tutor = f"custom:{cm.id}", f"custom:{other.id}"
     sonnet, haiku = CATALOGUE[0]["id"], CATALOGUE[1]["id"]
 
-    # Allowed one model only, and it isn't the one Promptly will run on.
-    member, hdr = await _member(db, client, user, allowed_models=[haiku])
-    locked, locked_hdr = await _member(db, client, user, allowed_models=[haiku], model_locked=True)
+    # The admin's list of models says which one is the built-in one, so the
+    # "new person" form can put it first and tick it.
+    pool = {m["model_id"]: m for m in (await client.get("/api/models/available", headers=_auth(user))).json()}
+    assert pool[promptly]["is_builtin"] is True
+    assert not any(m.get("is_builtin") for mid, m in pool.items() if mid != promptly)
+
+    # The list an admin ticks from (Admin → Users) has it first, even
+    # before its model is chosen.
+    choices = (await client.get("/api/admin/model-pool", headers=_auth(user))).json()
+    assert choices[0]["model_id"] == promptly and choices[0]["is_builtin"] is True
+    assert [c["model_id"] for c in choices if c.get("is_builtin")] == [promptly]
+
+    r = await client.put("/api/admin/setup/promptly-model", headers=_auth(user), json={"provider_id": str(p.id), "model_id": sonnet})
+    assert r.status_code == 200, r.text
+    choices = (await client.get("/api/admin/model-pool", headers=_auth(user))).json()
+    assert choices[0]["model_id"] == promptly and choices[0]["is_builtin"] is True
+    assert {c["model_id"] for c in choices} == {promptly, tutor, sonnet, haiku}
+
+    ticked, ticked_hdr = await _member(db, client, user, allowed_models=[promptly, haiku])
+    unticked, unticked_hdr = await _member(db, client, user, allowed_models=[haiku])
 
     async def ids(headers) -> dict[str, dict]:
         return {m["model_id"]: m for m in (await client.get("/api/models/available", headers=headers)).json()}
 
-    # Before it has a model: listed for them as not ready, like for anyone.
-    for headers in (hdr, locked_hdr):
-        listed = await ids(headers)
-        assert set(listed) == {haiku, promptly} and listed[promptly]["needs_setup"] is True
+    # Ticked: Promptly and their one model. Not Sonnet (what Promptly runs
+    # on), not the other custom model on Sonnet.
+    listed = await ids(ticked_hdr)
+    assert set(listed) == {haiku, promptly}
+    assert listed[promptly]["needs_setup"] is False and listed[promptly]["base_display_name"] is None
+    assert await is_model_allowed(ticked, db, model_id=promptly, base_model_id=sonnet) is True
+    assert await is_model_allowed(ticked, db, model_id=sonnet, base_model_id=sonnet) is False
+    assert await is_model_allowed(ticked, db, model_id=tutor, base_model_id=sonnet) is False
 
-    r = await client.put("/api/admin/setup/promptly-model", headers=_auth(user), json={"provider_id": str(p.id), "model_id": sonnet})
-    assert r.status_code == 200, r.text
+    # Unticked: hidden, and not usable.
+    assert set(await ids(unticked_hdr)) == {haiku}
+    assert await is_model_allowed(unticked, db, model_id=promptly, base_model_id=sonnet) is False
 
-    for who, headers in ((member, hdr), (locked, locked_hdr)):
-        listed = await ids(headers)
-        # Promptly and their one model. Not Sonnet (what Promptly runs on),
-        # not the other custom model on Sonnet.
-        assert set(listed) == {haiku, promptly}, listed.keys()
-        assert listed[promptly]["needs_setup"] is False and listed[promptly]["base_display_name"] is None
-        await db.refresh(who)
-        assert await is_model_allowed(who, db, model_id=promptly, base_model_id=sonnet) is True
-        assert await is_model_allowed(who, db, model_id=haiku, base_model_id=haiku) is True
-        assert await is_model_allowed(who, db, model_id=sonnet, base_model_id=sonnet) is False
-        assert await is_model_allowed(who, db, model_id=tutor, base_model_id=sonnet) is False
-
-    # Sending: a chat on Promptly gets past the model check (the made-up
-    # provider then fails to answer, which is not a 403); one on the other
-    # custom model, or on the raw model behind Promptly, is refused.
-    async def send(model_id: str) -> int:
-        conv = Conversation(user_id=member.id, title="x", provider_id=p.id, model_id=model_id)
+    async def send(who, hdr, model_id: str) -> int:
+        conv = Conversation(user_id=who.id, title="x", provider_id=p.id, model_id=model_id)
         db.add(conv)
         await db.commit()
         r = await client.post(f"/api/chat/conversations/{conv.id}/messages", headers=hdr, json={"content": "hello"})
         return r.status_code
 
-    assert await send(tutor) == 403
-    assert await send(sonnet) == 403
-    assert await send(promptly) != 403
+    assert await send(unticked, unticked_hdr, promptly) == 403
+    assert await send(ticked, ticked_hdr, tutor) == 403
+    assert await send(ticked, ticked_hdr, sonnet) == 403
+    # Past the model check (the made-up provider then fails to answer, which is not a 403).
+    assert await send(ticked, ticked_hdr, promptly) != 403
 
-    # New chats start on Promptly for them too (it is the server's default).
-    r = await client.post("/api/chat/conversations", headers=hdr, json={})
-    assert r.status_code in (200, 201), r.text
-    assert r.json()["model_id"] == promptly
+    # An admin unticks it: gone for that person.
+    r = await client.patch(f"/api/admin/users/{ticked.id}", headers=_auth(user), json={"allowed_models": [haiku]})
+    assert r.status_code == 200, r.text
+    assert set(await ids(ticked_hdr)) == {haiku}
 
-    # An unrestricted member is as before: everything.
+    # No list at all: everything, as ever.
     _, free = await _member(db, client, user)
     assert set(await ids(free)) == {sonnet, haiku, promptly, tutor}
+
+
+async def test_an_upgrade_adds_promptly_to_existing_model_lists_once(db, user, client):
+    """The first time the built-in model is made, people who already have a
+    model list get it added. Never again: an admin who unticks it afterwards
+    has it stay unticked."""
+    from app.custom_models import builtin
+
+    p = await _provider(db, CATALOGUE)
+    haiku = CATALOGUE[1]["id"]
+    listed, _ = await _member(db, client, user, allowed_models=[haiku])
+    locked, _ = await _member(db, client, user, allowed_models=[haiku], model_locked=True)
+    nothing, _ = await _member(db, client, user, allowed_models=[])
+    free, _ = await _member(db, client, user)
+
+    cm = await _seeded(db)
+    promptly = f"custom:{cm.id}"
+    for person in (listed, locked, nothing, free, user):
+        await db.refresh(person)
+    assert listed.allowed_models == [haiku, promptly]
+    # Locked: their own model is still the first one.
+    assert locked.allowed_models == [haiku, promptly] and locked.model_locked is True
+    # "No models at all" stays that; full access and admins have no list to add to.
+    assert nothing.allowed_models == []
+    assert free.allowed_models is None and user.allowed_models is None
+
+    # The admin unticks it; a restart (provision again) doesn't put it back.
+    r = await client.patch(f"/api/admin/users/{listed.id}", headers=_auth(user), json={"allowed_models": [haiku]})
+    assert r.status_code == 200, r.text
+    assert await builtin.provision(db) is None
+    await db.refresh(listed)
+    assert listed.allowed_models == [haiku]
+    _ = p
 
 
 async def test_a_message_to_an_unready_promptly_gets_a_plain_answer(db, user, client, provider):

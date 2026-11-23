@@ -18,8 +18,8 @@
 // stack down afterwards deletes it. SETUP_MAP=none skips with "Not now".
 //
 // desktop:  "Set everything up now", every step (a real map chosen), a reload
-//           in the middle (resume), then Today's card, Admin → Setup and one
-//           step reopened.
+//           in the middle (resume), then the new chat it ends on, Today's card,
+//           Admin → Setup and one step reopened.
 // phone:    "Just look around" first, then a step from the summary; "Not
 //           now" on the Maps step.
 // notready: "Just look around" and straight in; an AI service is connected
@@ -130,7 +130,8 @@ if (PASS === "notready") {
   await at("summary");
   await page.getByTestId("setup-checklist").waitFor();
   await page.getByTestId("setup-finish").click();
-  await page.waitForURL(/\/today$/, { timeout: 30_000 });
+  // Setup ends on a new chat.
+  await page.waitForURL(/\/chat$/, { timeout: 30_000 });
   // An AI service is connected later, outside the wizard.
   seedProvider();
   await page.goto(`${BASE}/chat`);
@@ -286,8 +287,12 @@ const want = { provider: "done", models: "done", search_model: "todo", address: 
 if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`summary rows: wanted ${JSON.stringify(want)}`);
 await page.getByTestId("setup-finish").click();
 
-// ---- In the app: the card on Today, Admin → Setup, one step reopened ----
-await page.waitForURL(/\/today$/, { timeout: 30_000 });
+// ---- In the app: a new chat first, then the card on Today, Admin → Setup, one step reopened ----
+await page.waitForURL(/\/chat$/, { timeout: 30_000 });
+await page.getByPlaceholder(/^Message /).waitFor({ timeout: 30_000 });
+await page.waitForFunction(() => /Promptly/.test(((b) => `${b?.textContent ?? ""} ${b?.getAttribute("aria-label") ?? ""}`)(document.querySelector('button[aria-haspopup="listbox"]'))), null, { timeout: 30_000 });
+await shot("lands-on-chat");
+await page.goto(`${BASE}/today`);
 await page.getByTestId("today-setup-card").waitFor({ timeout: 30_000 });
 await page.waitForTimeout(1500);
 await shot("today-card");

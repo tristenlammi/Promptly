@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { usePasswordPolicy } from "@/hooks/usePasswordPolicy";
 import {
   Loader2,
@@ -174,16 +174,31 @@ export function UserFormModal({
     }
   }, [open, mode, user]);
 
+  // The built-in Promptly model: first in the list, and ticked to begin
+  // with for a new person. It can be unticked like any other.
+  const builtinId = useMemo(() => pool.find((m) => m.is_builtin)?.model_id ?? null, [pool]);
+  const ordered = useMemo(() => [...pool].sort((a, b) => Number(!!b.is_builtin) - Number(!!a.is_builtin)), [pool]);
+  const tickedBuiltin = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      tickedBuiltin.current = false;
+      return;
+    }
+    if (mode !== "create" || !builtinId || tickedBuiltin.current) return;
+    tickedBuiltin.current = true;
+    setPicked((prev) => new Set([builtinId, ...prev]));
+  }, [open, mode, builtinId]);
+
   const filteredPool = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return pool;
-    return pool.filter(
+    if (!q) return ordered;
+    return ordered.filter(
       (m) =>
         m.model_id.toLowerCase().includes(q) ||
         m.display_name.toLowerCase().includes(q) ||
         m.provider_name.toLowerCase().includes(q)
     );
-  }, [pool, search]);
+  }, [ordered, search]);
 
   const toggle = (id: string) => {
     // Locked = exactly one model, so a tick replaces the last one.
@@ -634,6 +649,7 @@ export function UserFormModal({
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggle(m.model_id)}
+                            data-testid={m.is_builtin ? "user-model-builtin" : "user-model"}
                             className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
                           />
                           <div className="min-w-0 flex-1">
@@ -641,7 +657,7 @@ export function UserFormModal({
                               {m.display_name}
                             </div>
                             <div className="truncate text-[10px] text-[var(--text-muted)]">
-                              {m.model_id} · {m.provider_name}
+                              {m.is_builtin ? "The built-in assistant" : `${m.model_id} · ${m.provider_name}`}
                               {m.context_window
                                 ? ` · ${m.context_window.toLocaleString()} ctx`
                                 : ""}
