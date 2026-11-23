@@ -887,11 +887,13 @@ services:
 
   maps:
     # P Maps: routing, search and the map itself, all on this server. On for
-    # new installs through COMPOSE_PROFILES in .env. The first start downloads
-    # Australia's map data and builds it (about an hour and 15 GB of disk while
-    # building, about 7 GB after, or 12 GB with offline areas), then rebuilds
-    # every MAPS_REFRESH_DAYS next to the live data (about twice that at the peak). Only
-    # downloads leave the server: searches, routes and locations never do.
+    # new installs through COMPOSE_PROFILES in .env. It downloads nothing until
+    # an admin chooses which countries' maps to keep (first-time setup, or Admin
+    # > App settings > P Maps); the size depends on the country (Australia: about
+    # an hour and 15 GB of disk while building, 7 GB after, or 12 GB with offline
+    # areas). It then rebuilds every MAPS_REFRESH_DAYS next to the live data
+    # (about twice the size at the peak). Only downloads leave the server:
+    # searches, routes and locations never do.
     build:
       context: ./maps
       dockerfile: Dockerfile
@@ -905,6 +907,9 @@ services:
       - MAPS_PBF_URL=${MAPS_PBF_URL:-}
       - MAPS_PHOTON_URL=${MAPS_PHOTON_URL:-}
       - MAPS_BBOX=${MAPS_BBOX:-}
+      - MAPS_REGION_NAME=${MAPS_REGION_NAME:-}
+      - MAPS_SEARCH_LANGUAGES=${MAPS_SEARCH_LANGUAGES:-en}
+      - MAPS_BUILD_THREADS=${MAPS_BUILD_THREADS:-4}
       - MAPS_SEARCH_HEAP=${MAPS_SEARCH_HEAP:-1g}
       - MAPS_ROUTE_THREADS=${MAPS_ROUTE_THREADS:-2}
       # Offline areas for phones (maps-offline): each refresh also cuts the map,
@@ -916,6 +921,7 @@ services:
     expose:
       - "8002"
       - "2322"
+      - "8003"
     restart: unless-stopped
     networks:
       - promptly

@@ -15,7 +15,9 @@
 #                                      data/models read-only if it has them)
 #                           ollama     local embeddings/models (pulls ~270 MB first start)
 #                           maps       a stub map, so the Maps screen opens
-#                           maps-full  the real maps container (~1 h and ~15 GB on first start)
+#                           maps-full  the real maps container (downloads nothing until a map is
+#                                      chosen in Admin > App settings; pass --build-extras too,
+#                                      or the main app's older maps image is used)
 #                           voice      whisper + tts
 #                           convert    Office previews (Gotenberg)
 #                           search     SearXNG

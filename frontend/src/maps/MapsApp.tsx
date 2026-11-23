@@ -29,6 +29,7 @@ import type { PinHold } from "./pinView";
 import { OFFLINE_KEY, OfflinePanel, saveRouteForOffline, useOffline } from "./Offline";
 import { PeoplePanel, useShares } from "./People";
 import { PLACE_COLOURS, PLACE_ICON_SVG, PLACE_ICONS } from "./placeIcons";
+import { MapNotChosen } from "./regions/MapNotChosen";
 import { TimelinePanel } from "./Timeline";
 import { Choice, PanelSlide, PhoneSheet, RouteSkeleton, SendToPhone, StepIcon, SwitchRow, copyText, distanceKm, usePendingRemovals, type SheetSnap } from "./ui";
 
@@ -766,7 +767,9 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
         <div className="flex h-full items-center justify-center p-6 text-center">
           <div className="max-w-sm">
             <Navigation className="mx-auto mb-3 h-8 w-8 text-[var(--accent-text)]" />
-            {config.building ? (
+            {config.unchosen ? (
+              <MapNotChosen isAdmin={isAdmin} />
+            ) : config.building ? (
               <>
                 <h1 className="text-lg font-semibold text-[var(--text)]">Building your map</h1>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">This server is downloading and preparing the map. It takes a while the first time and carries on by itself.</p>

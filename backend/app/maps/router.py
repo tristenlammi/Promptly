@@ -76,7 +76,10 @@ async def config(db: AsyncSession = Depends(get_db), user: User = Depends(maps_u
         "failed": state.get("state") == "failed",
         "built_at": (manifest or {}).get("built_at"),
         "osm_data": (manifest or {}).get("osm_data"),
-        "attribution": "© OpenStreetMap contributors · Protomaps · Addresses: G-NAF © Geoscape Australia",
+        "attribution": "© OpenStreetMap contributors · Protomaps" + (" · Addresses: G-NAF © Geoscape Australia" if (manifest or {}).get("gnaf", True) else ""),
+        # Where the map opens (the chosen maps' box), and whether an admin still has to choose one.
+        "bounds": (manifest or {}).get("bounds"),
+        "unchosen": manifest is None and state.get("state") == "none",
         "traffic": has_traffic,
     }
 

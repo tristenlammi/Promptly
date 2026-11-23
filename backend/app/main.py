@@ -712,6 +712,10 @@ app.include_router(maps_router, prefix="/api/maps", tags=["maps"])
 from app.maps.timeline import router as maps_timeline_router  # noqa: E402
 
 app.include_router(maps_timeline_router, prefix="/api/maps", tags=["maps"])
+# Choosing which countries' maps this server keeps (app/maps/regions_router.py).
+from app.maps.regions_router import router as maps_regions_router  # noqa: E402
+
+app.include_router(maps_regions_router, prefix="/api/maps", tags=["maps"])
 # The phone app hands the P Maps page its own GPS (app/maps/phone_location.py).
 from app.maps.phone_location import router as maps_phone_location_router  # noqa: E402
 

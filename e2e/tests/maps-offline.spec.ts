@@ -214,6 +214,6 @@ test("admins see the offline packs' state and disk use", async ({ dana: page }) 
   // The stub map's index: nine squares.
   await expect(card).toContainText("Ready");
   await expect(card).toContainText("9 squares");
-  await expect(card).toContainText(/\d+ MB for all of Australia/);
+  await expect(card).toContainText(/\d+ MB for all your maps/);
   await expect(card).toContainText(/saved by|No one has saved/);
 });

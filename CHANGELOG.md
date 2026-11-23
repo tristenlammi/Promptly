@@ -30,6 +30,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Installer: refuses to start a second install on a machine that already runs Promptly (it would take over the first one's containers) and points at the existing folder.
 - Installer: re-running with a flag that switches a part off (`--no-search`, `--no-calls`, ...) now stops that part's container too.
 - Frontend image build no longer prints npm's audit summary.
+- P Maps: a new server downloads no map data until an admin chooses a country (it used to start on Australia straight away). Servers that already have map data, or set `MAPS_PBF_URL` / `MAPS_PHOTON_URL` / `MAPS_BBOX` in `.env`, carry on exactly as before with no re-download.
+- P Maps: the map opens on the maps this server has, rather than always on Australia.
 
 ### Fixed
 - `update.ps1` and `install.ps1` on Windows PowerShell 5.1 (the one that ships with Windows): anything Docker or git printed on stderr stopped the script, so an update died at "Reloading nginx config" after the new version was already running.
@@ -38,6 +40,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Update on a small machine (8 GB): the web app's build ran out of memory next to the running app and the update died half-way, new code checked out and old containers running. The update now pauses photo search and speech for the build when memory is tight, and when a build fails it says the old version is still running, puts the folder back on it and says what to do.
 - An install made with `--no-home` no longer has Promptly Home switched on (and 3.5 GB downloaded) by its first update.
 - Installer: a failed build or start now says the likely cause (connection dropped, disk full, port taken) and what to do, and waits up to 5 minutes for the first start instead of 3.
+- P Maps: admins choose which countries' maps the server keeps (Admin > App settings > Maps on this server): a searchable list of countries and parts of big ones, with download size, disk space and time shown before confirming, progress while it builds, and add or remove later. Maps you already have keep working while a change is built.
+- P Maps: `/api/maps/regions` (admin only) and a reusable `MapRegionPicker` for the first-time setup wizard.
+- P Maps: a map download no longer fails when the mirror's "latest" file is missing during its daily update; the previous day's file is used.
 
 ## [0.52.4] - 2026-11-23
 

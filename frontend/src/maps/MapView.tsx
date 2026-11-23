@@ -1,5 +1,6 @@
 import type { GeoJSONSource, LngLatBoundsLike, Map as MapLibreMap, Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { useQueryClient } from "@tanstack/react-query";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { loadMapLibre, serverMapStyle, signTrafficRequest } from "@/components/maps/mapStyle";
@@ -7,7 +8,7 @@ import { useThemeStore } from "@/store/themeStore";
 
 import { pinTarget, type Covered, type PinHold } from "./pinView";
 import { PLACE_ICON_SVG } from "./placeIcons";
-import { decodeShape, type Charger, type Parked, type Route, type RouteIncident, type SavedPlace, type Spot } from "./api";
+import { decodeShape, type Charger, type MapsConfig, type Parked, type Route, type RouteIncident, type SavedPlace, type Spot } from "./api";
 
 export interface MapViewHandle {
   /** Centre on a point. [covered]: how much of each side panels cover, so the
@@ -114,7 +115,15 @@ function savedMarker(place: SavedPlace, onPick: () => void): HTMLButtonElement {
 }
 
 const VIEW_KEY = "promptly.maps.view";
+// Where the map opens when this server's maps don't say (older map data: Australia).
 const WHOLE_COUNTRY = { center: [134, -27] as [number, number], zoom: 3.4 };
+
+/** The chosen maps' box, from the config the Maps app already loaded. */
+function mapBounds(config: MapsConfig | undefined): [[number, number], [number, number]] | null {
+  const b = config?.bounds;
+  if (!Array.isArray(b) || b.length !== 4 || b.some((v) => typeof v !== "number" || !Number.isFinite(v))) return null;
+  return [[b[0], Math.max(-85, b[1])], [b[2], Math.min(85, b[3])]];
+}
 
 /** Where the map was left on this device, if it's a sane view. */
 function storedView(): { center: [number, number]; zoom: number } | null {
@@ -178,6 +187,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
   const view = useRef<{ center: [number, number]; zoom: number }>((rememberView && storedView()) || WHOLE_COUNTRY);
   // Still on the whole-country view nobody chose: Home (or the last place) is a better start.
   const untouched = useRef(view.current === WHOLE_COUNTRY);
+  const queryClient = useQueryClient();
   // You're moving the map yourself right now (a drag, a pinch, the wheel).
   const gesture = useRef(false);
 
@@ -253,11 +263,12 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       const style = await serverMapStyle(maplibre, theme, basemap);
       if (off || !box.current) return;
       libRef.current = maplibre;
+      const opening = view.current === WHOLE_COUNTRY ? mapBounds(queryClient.getQueryData<MapsConfig>(["maps-config"])) : null;
       map = new maplibre.Map({
         container: box.current,
         style,
-        center: view.current.center,
-        zoom: view.current.zoom,
+        // Nowhere remembered: open on the maps this server has.
+        ...(opening ? { bounds: opening, fitBoundsOptions: { padding: 24 } } : { center: view.current.center, zoom: view.current.zoom }),
         attributionControl: { compact: true },
         transformRequest: signTrafficRequest,
       });
@@ -362,7 +373,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       map?.remove();
       mapRef.current = null;
     };
-  }, [basemap, theme]);
+  }, [basemap, theme, queryClient]);
 
   const routeLines = useMemo(() => routes.map((r) => r.legs.flatMap((l) => decodeShape(l.shape))), [routes]);
 

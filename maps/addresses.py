@@ -27,6 +27,8 @@ STATES = {
     "VIC": "Victoria",
     "WA": "Western Australia",
 }
+# Where G-NAF has the addresses: Australia and its outlying territories.
+GNAF_COUNTRIES = {"au", "nf", "cx", "cc", "hm"}
 SUFFIX = {"N": "North", "S": "South", "E": "East", "W": "West", "NE": "North East", "NW": "North West", "SE": "South East", "SW": "South West", "EX": "Extension", "LR": "Lower", "UP": "Upper", "CN": "Central"}
 
 
@@ -109,7 +111,8 @@ def main():
     for line in sys.stdin:
         if line.lstrip().startswith('{"type":"Place"'):
             doc = json.loads(line)
-            content = [c for c in doc["content"] if c.get("name") or not c.get("housenumber")]
+            # Only Australia's: another country in the same build keeps OSM's.
+            content = [c for c in doc["content"] if c.get("name") or not c.get("housenumber") or c.get("country_code", "au") not in GNAF_COUNTRIES]
             dropped += len(doc["content"]) - len(content)
             if not content:
                 continue

@@ -23,6 +23,8 @@ import { apiClient } from "@/api/client";
 import { adminApi, type AppSettingsPatch } from "@/api/admin";
 import { apiErrorMessage } from "@/utils/apiError";
 
+import { MapsRegionsCard } from "@/maps/regions/MapsRegionsCard";
+
 import { SettingsCard } from "./SettingsCard";
 
 /**
@@ -85,6 +87,7 @@ export function AppSettingsPanel() {
         busy={update.isPending}
       />
       <MapDataWarning />
+      <MapsRegionsCard />
       <MapsTrafficCard
         settings={data}
         onSubmit={(patch) => update.mutateAsync(patch)}
@@ -1206,7 +1209,7 @@ function MapsOfflineCard() {
           <span className="block text-xs text-[var(--text-muted)]">{state.text}</span>
         </dd>
         <dt className="text-[var(--text-muted)]">Disk</dt>
-        <dd>{offline.state === "ready" ? `${bytesText(offline.bytes)} for all of Australia` : "None in use"}</dd>
+        <dd>{offline.state === "ready" ? `${bytesText(offline.bytes)} for all your maps` : "None in use"}</dd>
         <dt className="text-[var(--text-muted)]">Areas</dt>
         <dd>
           {offline.areas

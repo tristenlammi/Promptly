@@ -12,6 +12,10 @@ export interface MapsConfig {
   osm_data: string | null;
   attribution: string;
   traffic?: boolean;
+  /** The chosen maps' box [west, south, east, north]: where the map opens. */
+  bounds?: [number, number, number, number] | null;
+  /** P Maps is on, but no admin has chosen a country yet (nothing downloaded). */
+  unchosen?: boolean;
 }
 
 export interface Spot {
