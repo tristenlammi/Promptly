@@ -21,6 +21,17 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- P Maps: admins choose which countries' maps the server keeps (Admin > App settings > Maps on this server): a searchable list of countries and parts of big ones, with download size, disk space and time shown before confirming, progress while it builds, and add or remove later. Maps you already have keep working while a change is built.
+- P Maps: `/api/maps/regions` (admin only) and a reusable `MapRegionPicker` for the first-time setup wizard.
+
+### Changed
+- P Maps: a new server downloads no map data until an admin chooses a country (it used to start on Australia straight away). Servers that already have map data, or set `MAPS_PBF_URL` / `MAPS_PHOTON_URL` / `MAPS_BBOX` in `.env`, carry on exactly as before with no re-download.
+- P Maps: the map opens on the maps this server has, rather than always on Australia.
+
+### Fixed
+- P Maps: a map download no longer fails when the mirror's "latest" file is missing during its daily update; the previous day's file is used.
+
 ## [0.52.4] - 2026-11-23
 
 ### Fixed

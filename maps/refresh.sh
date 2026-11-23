@@ -111,12 +111,24 @@ step() {  # step NAME: true if it still has to run
 }
 done_step() { touch "$B/.done-$1"; }
 
-# The mirror swaps in each day's file over a few minutes, when "latest" can
-# point at one that isn't there yet: wait and ask again before giving up.
+# The mirror swaps in each day's file over a while, when "latest" can point
+# at one that isn't there yet: take one of the last few days' files instead,
+# and failing that wait and ask again before giving up.
 fetch() {  # fetch URL FILE
-  local try
-  for try in 1 2 3 4 5 6 7 8; do
+  local try back dated
+  for try in 1 2 3 4 5 6; do
     if curl -fL --retry 5 -C - -o "$2" "$1"; then return 0; fi
+    case "$1" in
+      *-latest.osm.pbf)
+        for back in 1 2 3 4; do
+          dated="${1%-latest.osm.pbf}-$(date -u -d "$back day ago" +%y%m%d).osm.pbf"
+          rm -f "$2"
+          if curl -fL --retry 2 -o "$2" "$dated"; then
+            echo "maps: today's file wasn't there; using $(basename "$dated")"
+            return 0
+          fi
+        done ;;
+    esac
     echo "maps: couldn't download $1 (try $try); trying again in 2 minutes" >&2
     sleep "${MAPS_RETRY_WAIT:-120}"
   done
