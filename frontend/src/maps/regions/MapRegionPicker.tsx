@@ -13,6 +13,8 @@ export interface MapRegionPickerProps {
   /** Maps the server already has: shown ticked and greyed, and counted in the
    *  estimate (all the maps are built together). */
   installed?: string[];
+  /** Those of ``installed`` that are chosen but not built yet. */
+  pending?: string[];
   /** One map only: picking another replaces it. Default: several. */
   single?: boolean;
   /** Told the estimate for what's ticked (plus ``installed``), or null. */
@@ -37,7 +39,7 @@ function rowDetail(r: MapRegion): string {
  * API). It only chooses: the caller saves with ``mapRegionsApi.choose`` or
  * ``mapRegionsApi.add``.
  */
-export function MapRegionPicker({ value, onChange, installed = [], single = false, onEstimate, listHeight = "18rem", className }: MapRegionPickerProps) {
+export function MapRegionPicker({ value, onChange, installed = [], pending = [], single = false, onEstimate, listHeight = "18rem", className }: MapRegionPickerProps) {
   const { data: catalog, isLoading, isError } = useMapRegionCatalog();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -151,7 +153,7 @@ export function MapRegionPicker({ value, onChange, installed = [], single = fals
               {r.name}
               {words.length > 0 && r.parent_name && <span className="text-[var(--text-muted)]"> · {r.parent_name}</span>}
             </span>
-            <span className="block truncate text-xs text-[var(--text-muted)]">{have ? "Already on this server" : rowDetail(r) || "Size not known"}</span>
+            <span className="block truncate text-xs text-[var(--text-muted)]">{have ? (pending.includes(r.id) ? "Already chosen, being added" : "Already on this server") : rowDetail(r) || "Size not known"}</span>
           </span>
         </button>
         {!words.length && parts && parts.length > 0 && (

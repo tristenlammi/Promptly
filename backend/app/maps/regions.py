@@ -313,7 +313,14 @@ def public(region: dict[str, Any]) -> dict[str, Any]:
         # The countries it covers (two-letter codes), so the picker can offer
         # the browser's own country first.
         "codes": sorted({c for p in region["photon"] for c in p["countries"]}),
-        "download_mb": round(osm + sum(table["photon"].get(p["path"], 0) for p in region["photon"])) if osm else None,
+        # Everything the build fetches, as the estimate counts it: the map
+        # file, its share of the basemap, the search files and, for
+        # Australia, the address file.
+        "download_mb": round(
+            osm * (1 + BASEMAP_PER_OSM)
+            + sum(table["photon"].get(p["path"], 0) for p in region["photon"])
+            + (GNAF_DOWNLOAD_MB if region["id"] == "australia" else 0)
+        ) if osm else None,
         **estimate_one(region, osm),
     }
 

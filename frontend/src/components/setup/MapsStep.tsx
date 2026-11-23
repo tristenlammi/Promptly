@@ -80,14 +80,14 @@ export function MapsStep({ onDone, doneLabel = "Continue" }: { onDone: () => voi
           {state.failed
             ? "stopped part-way and will be tried again."
             : state.building
-              ? `${kept.length > 1 ? "are" : "is"} being put together in the background (${stepText(state.step).toLowerCase()}${percent != null ? `, about ${percent}% done` : ""}). Everything else works meanwhile.`
+              ? `${kept.length > 1 ? "are" : "is"} being put together in the background (${stepText(state.step).toLowerCase()}${percent ? `, about ${percent}% done` : ""}). Everything else works meanwhile.`
               : kept.every((r) => r.state === "installed")
                 ? `${kept.length > 1 ? "are" : "is"} ready.`
                 : "will start downloading in a moment."}
         </div>
       )}
 
-      <MapRegionPicker value={picked} onChange={setPicked} installed={kept.map((r) => r.id)} onEstimate={setEstimate} listHeight="14rem" />
+      <MapRegionPicker value={picked} onChange={setPicked} installed={kept.map((r) => r.id)} pending={kept.filter((r) => r.state !== "installed").map((r) => r.id)} onEstimate={setEstimate} listHeight="14rem" />
 
       {error && (
         <div role="alert" className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">

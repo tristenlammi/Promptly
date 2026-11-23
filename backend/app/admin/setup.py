@@ -479,7 +479,7 @@ async def checklist(db: AsyncSession, admin: User, redis, *, request_host: str |
         now = ""
         if maps["step"]:
             now = f" (now: {maps['step']}"
-            if maps["progress"] is not None:
+            if maps["progress"]:
                 now += f", about {round(maps['progress'] * 100)}% done"
             now += ")"
         if maps["state"] == "failed":

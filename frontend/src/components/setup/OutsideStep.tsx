@@ -255,7 +255,7 @@ export function OutsideStep({ onDone, inApp, doneLabel = "Continue" }: { onDone:
             : info.maps.state === "building" ? <Pill tone="busy">{info.maps.progress != null ? `Building, ${Math.round(info.maps.progress * 100)}%` : "Building"}</Pill>
             : info.maps.ready ? <Pill tone="ok">Ready</Pill>
             : info.maps.state === "none" ? <Pill tone="todo">No map chosen</Pill>
-            : <Pill tone="busy">Getting ready</Pill>
+            : <Pill tone="busy">{info.maps.state === "waiting" ? "About to start" : "Getting ready"}</Pill>
           }
           testid="outside-maps"
         >
@@ -269,7 +269,9 @@ export function OutsideStep({ onDone, inApp, doneLabel = "Continue" }: { onDone:
                   ? `${info.maps.names.length ? `${info.maps.names.join(", ")}: the` : "The"} map is downloaded and works at home and away.`
                   : info.maps.state === "none"
                     ? "No map has been chosen yet, so nothing has been downloaded and Maps is empty for now. Choose your country in the Maps step, or later under Admin → App settings."
-                    : "Maps is getting ready. Nothing for you to do."}
+                    : info.maps.state === "waiting"
+                      ? `${info.maps.names.length ? info.maps.names.join(", ") : "The map"} is about to start downloading. It carries on in the background; nothing for you to do.`
+                      : "Maps is getting ready. Nothing for you to do."}
           </p>
         </Block>
       )}

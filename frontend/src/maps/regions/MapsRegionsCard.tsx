@@ -151,7 +151,7 @@ export function MapsRegionsCard() {
           </p>
         ) : adding ? (
           <div className="space-y-3 rounded-input border border-[var(--border)] p-3">
-            <MapRegionPicker value={picked} onChange={setPicked} installed={kept.map((r) => r.id)} onEstimate={setEstimate} />
+            <MapRegionPicker value={picked} onChange={setPicked} installed={kept.map((r) => r.id)} pending={kept.filter((r) => r.state !== "installed").map((r) => r.id)} onEstimate={setEstimate} />
             <div className="flex justify-end gap-2">
               <Button
                 variant="ghost"
