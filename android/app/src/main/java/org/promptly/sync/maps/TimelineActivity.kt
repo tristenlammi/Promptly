@@ -214,18 +214,9 @@ private fun Screen(server: String?, code: String?, onDone: () -> Unit) {
                     Text("Android stops apps in the background to save battery, and after an update. To let this start again by itself and keep sending with the phone asleep, allow Promptly to run in the background without limits.", fontSize = 14.sp)
                     // The Play build never asks Android for the exemption directly (Play's
                     // rules): it opens the list, and says what to pick there.
-                    val ask = BackgroundAsk.of(ownApk = org.promptly.sync.BuildConfig.SELF_UPDATE)
+                    val ask = backgroundAsk()
                     ask.hint?.let { Text(it, fontSize = 14.sp) }
-                    OutlinedButton(onClick = {
-                        val list = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                        if (ask.direct) {
-                            runCatching {
-                                context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")))
-                            }.onFailure { runCatching { context.startActivity(list) } }
-                        } else {
-                            runCatching { context.startActivity(list) }
-                        }
-                    }) { Text(ask.button) }
+                    OutlinedButton(onClick = { ask.open(context) }) { Text(ask.button) }
                 }
             }
         }

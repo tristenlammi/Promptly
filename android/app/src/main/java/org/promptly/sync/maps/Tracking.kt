@@ -302,11 +302,21 @@ object Wanted {
     fun sharing(saidSharing: Boolean, until: Long, now: Long): Boolean = saidSharing && (until == 0L || now < until)
 }
 
-/** How the timeline screen offers "run in the background without battery limits".
+/** How the app offers "run in the background without battery limits" (the timeline
+ *  screen, and photo backup's "Back up right away instead").
  *  The APK from your own server asks Android directly ([direct]: its one-tap dialog).
- *  The Google Play build must not (Play only allows that for a few kinds of app): it
- *  opens Android's battery list instead, with a line ([hint]) saying what to pick. */
+ *  The Google Play build must not (Play only allows that for a few kinds of app, and
+ *  that build doesn't even declare the permission): it opens Android's battery list
+ *  instead, with a line ([hint]) saying what to pick. [button]: the words for a button
+ *  that's about nothing else; a screen with its own wording for the direct ask keeps it. */
 data class BackgroundAsk(val direct: Boolean, val button: String, val hint: String?) {
+    /** What to try opening, in order, until one opens: Android's one-tap question
+     *  (never in the Play build), its battery list, then this app's own settings page,
+     *  so the button always goes somewhere. */
+    fun steps(): List<Step> = if (direct) listOf(Step.ASK, Step.LIST, Step.APP_SETTINGS) else listOf(Step.LIST, Step.APP_SETTINGS)
+
+    enum class Step { ASK, LIST, APP_SETTINGS }
+
     companion object {
         /** [ownApk]: the build your server hands out (BuildConfig.SELF_UPDATE), not Play's. */
         fun of(ownApk: Boolean): BackgroundAsk =

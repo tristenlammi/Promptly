@@ -367,6 +367,9 @@ class TrackingTest {
         assertTrue(own.direct)
         assertEquals("Allow running in the background", own.button)
         assertNull(own.hint)
+        // What the button tries, in order. Play: never the direct question, and never a dead button.
+        assertEquals(listOf(BackgroundAsk.Step.LIST, BackgroundAsk.Step.APP_SETTINGS), play.steps())
+        assertEquals(listOf(BackgroundAsk.Step.ASK, BackgroundAsk.Step.LIST, BackgroundAsk.Step.APP_SETTINGS), own.steps())
     }
 
     @Test

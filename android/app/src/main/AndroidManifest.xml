@@ -31,8 +31,9 @@
     <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
     <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
-    <!-- Only for "Back up right away instead" — asked, never assumed. -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- The permission for Android's one-tap "let this app run in the background" is
+         declared in src/server only. The Google Play build doesn't have it and never
+         asks: it opens the battery list instead (BackgroundAsk). -->
     <!-- Hides other apps' overlays over the unlock and fill screens, where Android allows it. -->
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
     <!-- Only what Chrome's documented autofill-state provider asks of a caller. -->

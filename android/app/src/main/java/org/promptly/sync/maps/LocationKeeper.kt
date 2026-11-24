@@ -375,6 +375,29 @@ object LocationKeeper {
     }
 }
 
+/** How this build asks to run in the background: directly in the app from your own
+ *  server, by way of Android's battery list in the Google Play one. */
+fun backgroundAsk(): BackgroundAsk = BackgroundAsk.of(ownApk = BuildConfig.SELF_UPDATE)
+
+/** Open it: the first of [BackgroundAsk.steps] that this phone will open. */
+@SuppressLint("BatteryLife") // Only the own-server build has ASK, and only when the person taps.
+fun BackgroundAsk.open(context: Context) = openBackgroundAsk(this, context)
+
+/** The same, for callers outside this package. */
+@SuppressLint("BatteryLife")
+fun openBackgroundAsk(ask: BackgroundAsk, context: Context) {
+    val pkg = android.net.Uri.parse("package:${context.packageName}")
+    for (step in ask.steps()) {
+        val intent = when (step) {
+            BackgroundAsk.Step.ASK -> Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pkg)
+            BackgroundAsk.Step.LIST -> Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            BackgroundAsk.Step.APP_SETTINGS -> Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
+        }
+        if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(intent) }.isSuccess) return
+    }
+}
+
 /** Every quarter of an hour, and whenever Android gets round to it: is the service
  *  still there, is there anything waiting to send, has someone started a share? */
 class LocationWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {

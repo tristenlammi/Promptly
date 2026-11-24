@@ -6,6 +6,10 @@
 
     <!-- Installing an update the app has downloaded and checked against its hash. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- "Back up right away instead" and the timeline's "Allow running in the background":
+         asked, never assumed. Not in the Play build, which Play's rules don't let ask
+         directly; there the same buttons open Android's battery list (BackgroundAsk). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application>
         <!-- A checked update, given to Android's package installer. -->

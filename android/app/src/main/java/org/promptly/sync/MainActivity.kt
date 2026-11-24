@@ -718,11 +718,11 @@ private fun BatteryCard(mode: Power.Mode) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = {
-                    @Suppress("BatteryLife") // sideloaded, and only when the person asks
-                    val ask = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
-                    runCatching { ctx.startActivity(ask) }.onFailure { appSettings() }
-                }) { Text("Back up right away instead") }
+                // Your own server's app asks Android directly. The Google Play app may not
+                // (Play's rules): it opens the battery list and says what to pick there.
+                val ask = org.promptly.sync.maps.backgroundAsk()
+                ask.hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                TextButton(onClick = { org.promptly.sync.maps.openBackgroundAsk(ask, ctx) }) { Text("Back up right away instead") }
             }
         }
         Power.Mode.UNRESTRICTED -> Card(Modifier.fillMaxWidth()) {
