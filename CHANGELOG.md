@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-11-24
+
 ### Added
 - Mail: the names of what's attached show on the list, under the email, as small buttons with an icon for the kind of file. A long name is cut in the middle so its ending stays readable, and there's a "+3" when there are more than fit. Clicking a name opens that file without opening the email. Pictures placed inside an email, like a signature's logo, aren't listed.
 - Mail: a Layout choice in Mail settings (the mailbox menu at the top of Mail), saved to your account so it's the same on every computer. Split is how Mail has always looked and stays the default. Full list gives the list the whole width, one line per email (who, subject, the start of the email, when), with attachment names on a second line.
