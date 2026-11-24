@@ -66,6 +66,10 @@ export interface ThreadRow {
   unread: number;
   starred: boolean;
   attachments: boolean;
+  /** The first few real attachments, newest email first, for the names on the list. */
+  files?: ListFile[];
+  /** How many there are in all. */
+  files_total?: number;
   labels: string[];
   summary: string;
   needs_reply: boolean;
@@ -78,6 +82,11 @@ export interface MailAttachment {
   name: string;
   mime: string;
   size: number;
+}
+
+/** An attachment as the list knows it: enough to open it without opening the email. */
+export interface ListFile extends MailAttachment {
+  message_id: string;
 }
 
 export type InviteAnswer = "going" | "maybe" | "declined";
@@ -159,8 +168,12 @@ export interface FailedSend {
   error: string;
 }
 
+/** Split: the list beside the open email. Full: the list across the whole width. */
+export type MailLayout = "split" | "full";
+
 export interface MailSettings {
   sorting: { provider_id: string; model_id: string } | null;
+  layout: MailLayout;
 }
 
 export interface ThreadQuery {
@@ -336,6 +349,9 @@ export const mailApi = {
   },
   async setSorting(choice: { provider_id?: string; model_id?: string }) {
     return (await apiClient.put<MailSettings>("/mail/settings", choice)).data;
+  },
+  async setLayout(layout: MailLayout) {
+    return (await apiClient.put<MailSettings>("/mail/settings/layout", { layout })).data;
   },
   async undoSend(id: string) {
     await apiClient.delete(`/mail/send/${id}`);

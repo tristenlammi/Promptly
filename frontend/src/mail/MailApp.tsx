@@ -25,12 +25,14 @@ import { useSelectedModel } from "@/store/modelStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
-import { mailApi, personName, shortWhen, type Person, type InviteAnswer, type KnownPerson, type MailAccount, type MailInvite, type Conversation, type MailLabel, type Message, type ThreadAction, type ThreadRow } from "./api";
+import { mailApi, personName, shortWhen, type ListFile, type Person, type InviteAnswer, type KnownPerson, type MailAccount, type MailInvite, type Conversation, type MailLabel, type Message, type ThreadAction, type ThreadRow } from "./api";
 import { AccountPicker, AccountSheet, MailboxSheet } from "./AccountSheet";
 import { AliasNotes, replyAlias, sendAsNote, useThreadAliases } from "./Aliases";
 import { asParagraphs, Composer, draftId, type Draft } from "./Composer";
 import { AttachmentViewer, SaveToFiles, useSavedAttachments } from "./AttachmentViewer";
 import { readComposeLink } from "./composeLink";
+import { FileChips, ListFileViewer } from "./FileChips";
+import { addressWith, CHIPS_FULL, CHIPS_SPLIT, layoutInUse, openInAddress, sameEmail } from "./listFiles";
 import { useThreadDrag } from "./DragMove";
 import { LabelPicker, LabelPill, LabelsSheet, NewLabelSheet, RuleSheet, type LabelTarget } from "./Labels";
 import { labelRows, labelsInside, readFolded, saveFolded, unfolded } from "./labelTree";
@@ -98,7 +100,6 @@ interface View {
   needsReply?: boolean;
 }
 
-const OPEN_LINK = /^[0-9a-f-]{36}\/[0-9a-zA-Z_-]{1,40}$/;
 const SWIPE_AT = 0.35;
 
 interface Open {
@@ -112,9 +113,9 @@ const idOf = (row: Open) => `${row.account_id}/${row.key}`;
 const conversations = (n: number) => `${n} conversation${n === 1 ? "" : "s"}`;
 
 /** The contact's own picture when you know them, otherwise their initial. */
-function Avatar({ person, people }: { person: Person; people: People }) {
+function Avatar({ person, people, size = 36 }: { person: Person; people: People; size?: number }) {
   const known = people[person.addr.toLowerCase()];
-  return <UserAvatar name={known?.name || personName(person)} avatarUrl={known?.photo ?? undefined} color="#D97757" size={36} className="shrink-0" />;
+  return <UserAvatar name={known?.name || personName(person)} avatarUrl={known?.photo ?? undefined} color="#D97757" size={size} className="shrink-0" />;
 }
 
 function shownName(person: Person, people: People): string {
@@ -125,6 +126,13 @@ export function MailApp() {
   const isMobile = useIsMobile();
   const qc = useQueryClient();
   const { data: overview, isLoading } = useQuery({ queryKey: ["mail-overview"], queryFn: mailApi.overview, refetchInterval: 20_000 });
+  // Split (the list beside the email) or the full-width list: your choice, kept on the
+  // server so it's the same on every computer. A phone is always list, then email.
+  const { data: mailSettings, isLoading: settingsLoading } = useQuery({ queryKey: ["mail-settings"], queryFn: mailApi.settings, retry: 1 });
+  const full = layoutInUse(mailSettings?.layout, isMobile) === "full";
+  const fullNow = useRef(full);
+  fullNow.current = full;
+  const navigate = useNavigate();
   const [view, setView] = useState<View>({ role: "inbox" });
   const [typed, setTyped] = useState("");
   const [search, setSearch] = useState("");
@@ -152,6 +160,11 @@ export function MailApp() {
   const [snoozing, setSnoozing] = useState<Open[] | null>(null);
   const [editing, setEditing] = useState<MailAccount | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // An attachment opened from its name on the list, with the same email's others.
+  const [viewing, setViewing] = useState<{ files: ListFile[]; start: number } | null>(null);
+  // Full list: the email you just closed, so you can see where you were.
+  const [lastOpen, setLastOpen] = useState<string | null>(null);
+  const panel = useRef<HTMLElement>(null);
   const hidden = useRef(new Set<string>());
   // Closing up before it's gone, so the list settles rather than jumps.
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
@@ -196,17 +209,52 @@ export function MailApp() {
 
   // Arrived from a notification, Today, Ctrl+K or a task, maybe with a draft from Chat.
   useEffect(() => {
-    const link = new URLSearchParams(location.search).get("open");
-    if (link && OPEN_LINK.test(link)) {
-      const [account_id, key] = link.split("/");
-      setOpen({ account_id, key });
+    const at = openInAddress(location.search);
+    if (at) {
+      setOpen((o) => (o && o.account_id === at.account_id && o.key === at.key ? o : at));
       const hash = new URLSearchParams(location.hash.slice(1)).get("draft");
       if (hash) {
         setPrefill(hash);
         window.history.replaceState(window.history.state, "", location.pathname + location.search);
       }
+    } else if (fullNow.current) {
+      // Full list: the browser's Back took the address back to the list.
+      setOpen(null);
     }
   }, [location.search, location.hash, location.pathname]);
+
+  // Full list: the open email is in the address, so Back closes it and a reload or a
+  // link opens it again. Opening one from the list is a step Back can undo; moving
+  // to the next one isn't a new step.
+  // Nothing synced yet: the address you arrived with is followed, never overwritten.
+  const synced = useRef<{ at: string | null; open: Open | null }>({ at: null, open });
+  useEffect(() => {
+    const was = synced.current;
+    synced.current = { at: location.key, open };
+    if (!full) return;
+    // The address moved by itself (Back, a link): the effect above follows it.
+    if (was.at !== location.key && was.open === open) return;
+    const at = openInAddress(location.search);
+    if (at ? !!open && at.account_id === open.account_id && at.key === open.key : !open) return;
+    const fromList = !!(location.state as { mailFromList?: boolean } | null)?.mailFromList;
+    if (open) navigate({ pathname: location.pathname, search: addressWith(location.search, open) }, at ? { replace: true, state: location.state } : { state: { mailFromList: true } });
+    else if (fromList) navigate(-1);
+    else navigate({ pathname: location.pathname, search: addressWith(location.search, null) }, { replace: true });
+  }, [open, full, location, navigate]);
+
+  // Full list: reading happens in the panel, so that's where the keyboard goes. Closing
+  // it hands the keyboard back to the email you were on, without moving the list.
+  const wasOpen = useRef<Open | null>(null);
+  useEffect(() => {
+    const before = wasOpen.current;
+    wasOpen.current = open;
+    if (!full) return;
+    if (open) panel.current?.focus({ preventScroll: true });
+    else if (before) {
+      setLastOpen(idOf(before));
+      document.querySelector<HTMLElement>(`[data-mail-row="${CSS.escape(idOf(before))}"] button`)?.focus({ preventScroll: true });
+    }
+  }, [open, full]);
 
   // A new draft from a link (Passwords' account deletion request): filled in, never sent.
   const composed = useRef("");
@@ -260,6 +308,7 @@ export function MailApp() {
   useEffect(() => {
     setPicked(NONE);
     setSelectMode(false);
+    setLastOpen(null);
     anchor.current = null;
   }, [view.role, view.label, view.account, view.needsReply, search]);
   useEffect(() => {
@@ -567,6 +616,17 @@ export function MailApp() {
 
   const newMessage = useCallback((): Draft => ({ account_id: view.account ?? accounts[0]?.id ?? "", to: "", subject: "" }), [view.account, accounts]);
 
+  /** The next conversation down the list, or the one before. */
+  const openAt = open ? rows.findIndex((r) => r.key === open.key && r.account_id === open.account_id) : -1;
+  const step = useCallback((by: number) => {
+    const next = rows[Math.min(rows.length - 1, Math.max(0, openAt + by))];
+    if (!next) return;
+    setOpen({ account_id: next.account_id, key: next.key });
+    document.querySelector(`[data-mail-row="${CSS.escape(idOf(next))}"]`)?.scrollIntoView({ block: "nearest" });
+    // Nearly at the end of what's loaded: get the older ones ready.
+    if (by > 0 && openAt + by >= rows.length - 3 && hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [rows, openAt, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   // The keys people already know.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -605,13 +665,8 @@ export function MailApp() {
         moveAway(open, "trash", "Moved to Trash");
         return;
       }
-      const index = open ? rows.findIndex((r) => r.key === open.key) : -1;
       if (e.key === "j" || e.key === "k") {
-        const next = rows[Math.min(rows.length - 1, Math.max(0, index + (e.key === "j" ? 1 : -1)))];
-        if (next) {
-          setOpen({ account_id: next.account_id, key: next.key });
-          document.querySelector(`[data-mail-row="${CSS.escape(idOf(next))}"]`)?.scrollIntoView({ block: "nearest" });
-        }
+        step(e.key === "j" ? 1 : -1);
       } else if (e.key === "c" && accounts[0]) {
         e.preventDefault();
         write(newMessage());
@@ -628,9 +683,9 @@ export function MailApp() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, rows, accounts, newMessage, write, activeDraft, moveAway, sendAway, picked, pickedRows, view.role, view.label]);
+  }, [open, rows, accounts, newMessage, write, activeDraft, moveAway, sendAway, picked, pickedRows, view.role, view.label, step]);
 
-  if (isLoading) return <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-[var(--text-muted)]" /></div>;
+  if (isLoading || (settingsLoading && !isMobile)) return <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-[var(--text-muted)]" /></div>;
 
   if (accounts.length === 0) {
     return (
@@ -861,12 +916,12 @@ export function MailApp() {
   );
 
   const listPane = (
-    <section aria-label="Conversations" className={`flex min-h-0 flex-col ${isMobile ? "w-full flex-1" : "w-96 shrink-0 border-r border-[var(--border)]"}`}>
+    <section aria-label="Conversations" data-mail-layout={full ? "full" : "split"} className={`flex min-h-0 flex-col ${isMobile ? "w-full flex-1" : full ? "min-w-0 flex-1" : "w-96 shrink-0 border-r border-[var(--border)]"}`}>
       {isMobile && <div className="px-2 pt-2">{picker}</div>}
       <div className="flex items-center gap-2 p-3">
         {/* Inside Promptly on a phone: its menu (AppLayout's drawer). Not in the installed Mail app. */}
         {isMobile && showsPromptlyNav("mail") && <PromptlyMenuButton className="-ml-1" />}
-        <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl bg-[var(--hover)] px-3">
+        <div className={`flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl bg-[var(--hover)] px-3 ${full ? "max-w-2xl" : ""}`}>
           <Search className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
           <input id="mail-search" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search your mail" aria-label="Search your mail" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
           {typed && <button type="button" onClick={() => setTyped("")} aria-label="Clear search" className="-mr-2 flex h-10 w-9 shrink-0 items-center justify-center"><X className="h-4 w-4 text-[var(--text-muted)]" /></button>}
@@ -928,7 +983,7 @@ export function MailApp() {
           <button type="button" onClick={() => showRole("inbox")} aria-label="Back to Inbox" className="-my-2 flex h-10 w-10 shrink-0 items-center justify-center text-[var(--text-muted)] md:my-0 md:h-6 md:w-6"><X className="h-4 w-4" /></button>
         </div>
       )}
-      <div onContextMenu={(e) => { if (!e.defaultPrevented && markAllHere.length) openPlaceMenu(e, markAllHere); }} ref={scroller} aria-busy={list.isLoading || undefined} className={`promptly-scroll min-h-0 flex-1 overflow-y-auto ${isMobile ? "pb-24" : ""}`}>
+      <div onContextMenu={(e) => { if (!e.defaultPrevented && markAllHere.length) openPlaceMenu(e, markAllHere); }} ref={scroller} data-mail-list-scroll aria-busy={list.isLoading || undefined} className={`promptly-scroll min-h-0 flex-1 overflow-y-auto ${isMobile ? "pb-24" : ""}`}>
         {list.isLoading && (
           <div>
             <p className="sr-only" role="status">Getting your mail…</p>
@@ -954,7 +1009,7 @@ export function MailApp() {
           {row.related && !rows[i - 1]?.related && <p className="px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Related</p>}
           <div style={{ gridTemplateRows: leaving.has(`${row.account_id}/${row.key}`) ? "0fr" : "1fr", transitionDuration: `${LEAVE_MS}ms` }} className={`grid transition-[grid-template-rows,opacity] ease-out ${leaving.has(`${row.account_id}/${row.key}`) ? "opacity-0" : "opacity-100"}`}>
           <div className={`min-h-0 overflow-hidden transition-opacity duration-150 ${dragging && (idOf(dragging) === idOf(row) || (picked.has(idOf(dragging)) && picked.has(idOf(row)))) ? "opacity-40" : ""}`}>
-          <ThreadItem key={`${row.account_id}/${row.key}`} quick={isMobile || row.related || pickedRows.length > 0 ? undefined : quickActions(row)} onDragStart={isMobile ? undefined : startDrag} row={row} selected={open?.key === row.key || picked.has(idOf(row))} picked={picked.has(idOf(row))} colour={accounts.length > 1 ? accounts.find((a) => a.id === row.account_id)?.color : undefined} people={people} labels={row.labels.filter((id) => id !== view.label).flatMap((id) => labels.filter((l) => l.id === id))} onOpen={(e) => clickRow(e, row)} onMenu={(x, y) => { if (!picked.has(idOf(row))) setPicked(NONE); setMenu({ row, x, y }); }} onSwipe={isMobile && pickedRows.length === 0 ? (a) => (a === "archive" ? moveAway(row, "archive", "Archived") : moveAway(row, "trash", "Moved to Trash")) : undefined} />
+          <ThreadItem key={`${row.account_id}/${row.key}`} wide={full} onFile={(f) => setViewing(sameEmail(row.files ?? [], f))} quick={isMobile || row.related || pickedRows.length > 0 ? undefined : quickActions(row)} onDragStart={isMobile ? undefined : startDrag} row={row} selected={open?.key === row.key || picked.has(idOf(row))} last={full && !open && picked.size === 0 && lastOpen === idOf(row)} picked={picked.has(idOf(row))} colour={accounts.length > 1 ? accounts.find((a) => a.id === row.account_id)?.color : undefined} people={people} labels={row.labels.filter((id) => id !== view.label).flatMap((id) => labels.filter((l) => l.id === id))} onOpen={(e) => clickRow(e, row)} onMenu={(x, y) => { if (!picked.has(idOf(row))) setPicked(NONE); setMenu({ row, x, y }); }} onSwipe={isMobile && pickedRows.length === 0 ? (a) => (a === "archive" ? moveAway(row, "archive", "Archived") : moveAway(row, "trash", "Moved to Trash")) : undefined} />
           </div>
           </div>
           </div>
@@ -976,6 +1031,7 @@ export function MailApp() {
       key={open.key}
       open={open}
       showBack={isMobile}
+      panel={full ? { onPrev: openAt > 0 ? () => step(-1) : undefined, onNext: openAt >= 0 && openAt < rows.length - 1 ? () => step(1) : undefined } : undefined}
       labels={labels}
       mine={accounts.map((a) => a.email.toLowerCase())}
       prefill={prefill}
@@ -992,7 +1048,7 @@ export function MailApp() {
       markRead={() => { void qc.invalidateQueries({ queryKey: ["mail-overview"] }); void qc.invalidateQueries({ queryKey: ["mail-threads"] }); }}
     />
   ) : (
-    !isMobile && (
+    !isMobile && !full && (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 text-[var(--text-muted)]">
         {pickedRows.length > 0
           ? <><CheckSquare className="h-8 w-8 opacity-40" /><p className="text-sm">{conversations(pickedRows.length)} selected</p></>
@@ -1026,8 +1082,23 @@ export function MailApp() {
     <div className="relative flex h-full min-h-0 flex-col bg-[var(--bg,transparent)]">
       <div className="relative flex min-h-0 flex-1">
         {!isMobile && rail}
-        {(!isMobile || !open) && listPane}
-        {reading && <div className="flex min-w-0 flex-1 flex-col">{reading}</div>}
+        {full ? (
+          // The list keeps the whole width and stays where it is; the email opens over it.
+          <div className="relative flex min-w-0 flex-1 overflow-hidden">
+            {listPane}
+            {reading && (
+              <div className="absolute inset-0 z-20 flex">
+                <button type="button" tabIndex={-1} aria-label="Back to the list" title="Back to the list" onClick={() => setOpen(null)} className="mail-fade w-8 shrink-0 cursor-default bg-black/25 lg:w-14" />
+                <section ref={panel} tabIndex={-1} aria-label="Open conversation" data-mail-panel className="mail-panel flex min-w-0 flex-1 flex-col border-l border-[var(--border)] bg-[var(--bg,var(--surface))] shadow-2xl outline-none">{reading}</section>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {(!isMobile || !open) && listPane}
+            {reading && <div className="flex min-w-0 flex-1 flex-col">{reading}</div>}
+          </>
+        )}
         {!isMobile && dock}
       </div>
       <AskBar open={open} accounts={accounts} viewing={view.account} compactModel={isMobile} />
@@ -1053,7 +1124,8 @@ export function MailApp() {
       {eventFor && <EventSheet accountId={eventFor.account_id} threadKey={eventFor.key} subject={eventFor.subject} onClose={() => setEventFor(null)} />}
       {remindFor && <ReminderSheet accountId={remindFor.account_id} threadKey={remindFor.key} subject={remindFor.subject} onClose={() => setRemindFor(null)} />}
       {snoozing && <SnoozeSheet onPick={(when) => void snooze(snoozing, when)} onClose={() => setSnoozing(null)} />}
-      {settingsOpen && <MailSettingsSheet onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <MailSettingsSheet phone={isMobile} onClose={() => setSettingsOpen(false)} />}
+      {viewing && <ListFileViewer key={`${viewing.files[0].message_id}/${viewing.start}`} files={viewing.files} start={viewing.start} onClose={() => setViewing(null)} />}
       {editing && <EditMailboxSheet account={editing} onClose={() => setEditing(null)} />}
       {managing && (
         <MailboxSheet
@@ -1093,7 +1165,7 @@ interface QuickAction {
   onClick: () => void;
 }
 
-function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onMenu, onSwipe, onDragStart, quick }: { quick?: QuickAction[]; onDragStart?: (e: ReactPointerEvent<HTMLElement>, row: ThreadRow) => void; row: ThreadRow; selected: boolean; picked: boolean; colour?: string; people: People; labels: MailLabel[]; onOpen: (e: ReactMouseEvent) => void; onMenu: (x: number, y: number) => void; onSwipe?: (action: "archive" | "trash") => void }) {
+function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onMenu, onSwipe, onDragStart, quick, wide, last, onFile }: { wide: boolean; last: boolean; onFile: (file: ListFile) => void; quick?: QuickAction[]; onDragStart?: (e: ReactPointerEvent<HTMLElement>, row: ThreadRow) => void; row: ThreadRow; selected: boolean; picked: boolean; colour?: string; people: People; labels: MailLabel[]; onOpen: (e: ReactMouseEvent) => void; onMenu: (x: number, y: number) => void; onSwipe?: (action: "archive" | "trash") => void }) {
   const unread = row.unread > 0;
   // Press and hold on a phone is the right-click of a computer.
   const press = useRef<{ timer: number; x: number; y: number } | null>(null);
@@ -1119,6 +1191,14 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
     if (press.current) window.clearTimeout(press.current.timer);
     press.current = null;
   };
+  // Names of what's attached go on a line of their own, under the words.
+  const hasFiles = (row.files?.length ?? 0) > 0;
+  const sliding: CSSProperties = {
+    transform: slide ? `translateX(${slide}px)` : undefined,
+    transition: phase === "drag" || phase === "idle" ? undefined : "transform 190ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+  };
+  // The one you just closed keeps a quiet mark down its edge: where you were, not a selection.
+  const face = `${selected ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg,var(--surface)))]" : "bg-[var(--bg,var(--surface))] group-hover/row:bg-[var(--hover)]"} ${last ? "shadow-[inset_3px_0_0_var(--accent)]" : ""}`;
   return (
     <div
       ref={shell}
@@ -1201,18 +1281,31 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
         wasArmed.current = false;
       }}
       onTouchCancel={() => { cancelPress(); sideways.current = false; wasArmed.current = false; if (phase === "drag") { setPhase("back"); setSlide(0); window.setTimeout(() => setPhase("idle"), 220); } }}
-      aria-current={selected ? "true" : undefined}
+      aria-current={selected || last ? "true" : undefined}
       aria-pressed={picked ? true : undefined}
-      style={{
-        WebkitTouchCallout: "none",
-        transform: slide ? `translateX(${slide}px)` : undefined,
-        transition: phase === "drag" || phase === "idle" ? undefined : "transform 190ms cubic-bezier(0.2, 0.8, 0.2, 1)",
-        touchAction: "pan-y",
-      }}
-      className={`relative flex w-full gap-3 border-b border-[var(--border)] px-3 py-3 text-left transition-colors ${selected ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg,var(--surface)))]" : "bg-[var(--bg,var(--surface))] hover:bg-[var(--hover)]"}`}>
+      style={{ WebkitTouchCallout: "none", touchAction: "pan-y", ...sliding }}
+      className={`relative flex w-full gap-3 border-b border-[var(--border)] text-left transition-colors ${wide ? `items-center px-4 pt-2.5 ${hasFiles ? "pb-10" : "pb-2.5"}` : `px-3 pt-3 ${hasFiles ? "pb-12 md:pb-10" : "pb-3"}`} ${face}`}>
       {picked
-        ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white"><Check className="h-5 w-5" /></span>
-        : <Avatar person={row.from} people={people} />}
+        ? <span className={`flex shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] text-white ${wide ? "h-7 w-7" : "h-9 w-9"}`}><Check className={wide ? "h-4 w-4" : "h-5 w-5"} /></span>
+        : <Avatar person={row.from} people={people} size={wide ? 28 : 36} />}
+      {wide ? (
+        // One line, as in a full-width list: who, then the subject running into the preview, then when.
+        <>
+          <span className={`w-44 shrink-0 truncate text-sm ${unread ? "font-semibold text-[var(--text)]" : "text-[var(--text)]"}`}>{shownName(row.from, people)}{row.count > 1 && <span className="ml-1 font-normal text-[var(--text-muted)]">{row.count}</span>}</span>
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            {row.needs_reply && <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-px text-xs font-medium text-[var(--accent-text)]">Reply</span>}
+            <span className="min-w-0 truncate text-sm">
+              <span className={unread ? "font-semibold text-[var(--text)]" : "text-[var(--text)]"}>{row.subject || "(No subject)"}</span>
+              {(row.summary || row.snippet) && <span className="text-[var(--text-muted)]"><span aria-hidden className="mx-1.5">·</span>{row.summary || row.snippet}</span>}
+            </span>
+          </span>
+          {labels.slice(0, 2).map((l) => <LabelPill key={l.id} label={l} />)}
+          {row.attachments && !hasFiles && <Paperclip className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />}
+          {row.starred && <Star className="h-3.5 w-3.5 shrink-0 fill-[var(--accent)] text-[var(--accent-text)]" />}
+          {colour && <span style={{ backgroundColor: colour }} className="h-2 w-2 shrink-0 rounded-full" />}
+          <span className={`w-16 shrink-0 text-right text-xs ${unread ? "font-semibold text-[var(--accent-text)]" : "text-[var(--text-muted)]"}`}>{shortWhen(row.at)}</span>
+        </>
+      ) : (
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           <span className={`min-w-0 flex-1 truncate text-sm ${unread ? "font-semibold text-[var(--text)]" : "text-[var(--text)]"}`}>{shownName(row.from, people)}{row.count > 1 && <span className="ml-1 font-normal text-[var(--text-muted)]">{row.count}</span>}</span>
@@ -1224,13 +1317,17 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
           {row.needs_reply && <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-px text-xs font-medium text-[var(--accent-text)]">Reply</span>}
           <span className="min-w-0 flex-1 truncate text-xs text-[var(--text-muted)]">{row.summary || row.snippet}</span>
           {labels.slice(0, 2).map((l) => <LabelPill key={l.id} label={l} />)}
-          {row.attachments && <Paperclip className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />}
+          {row.attachments && !hasFiles && <Paperclip className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />}
           {row.starred && <Star className="h-3 w-3 shrink-0 fill-[var(--accent)] text-[var(--accent-text)]" />}
         </span>
       </span>
+      )}
     </button>
+    {/* Over the row, not inside its button: each name is a button of its own. The space
+        for it is the row's extra padding, and anywhere between the names still opens the email. */}
+    {hasFiles && <FileChips files={row.files} total={row.files_total} room={wide ? CHIPS_FULL : CHIPS_SPLIT} onOpen={onFile} style={sliding} className={`absolute ${wide ? "bottom-2.5 left-[15.25rem] right-4" : "bottom-2.5 left-[3.75rem] right-3"}`} />}
     {quick && (
-      <div role="group" aria-label="Quick actions" className={`absolute bottom-2 right-2 flex items-center gap-0.5 rounded-lg border border-[var(--border)] p-0.5 opacity-0 shadow-sm transition-opacity duration-100 focus-within:opacity-100 group-hover/row:opacity-100 ${selected ? "bg-[var(--surface)]" : "bg-[var(--bg,var(--surface))]"}`}>
+      <div role="group" aria-label="Quick actions" className={`absolute ${wide ? "right-3 top-[7px]" : hasFiles ? "bottom-10 right-2" : "bottom-2 right-2"} flex items-center gap-0.5 rounded-lg border border-[var(--border)] p-0.5 opacity-0 shadow-sm transition-opacity duration-100 focus-within:opacity-100 group-hover/row:opacity-100 ${selected ? "bg-[var(--surface)]" : "bg-[var(--bg,var(--surface))]"}`}>
         {quick.map((q) => (
           <button key={q.label} type="button" aria-label={q.label} title={q.label} onClick={q.onClick} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]">
             <q.icon className="h-4 w-4" />
@@ -1242,9 +1339,11 @@ function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onM
   );
 }
 
-function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, onAddEvent, onRemind, onLabel, onSnooze, onUnsnooze, onBack, onAct, onMove, onWrite, markRead }: {
+function ConversationPane({ open, showBack, panel, labels, mine, prefill, onPrefilled, onAddEvent, onRemind, onLabel, onSnooze, onUnsnooze, onBack, onAct, onMove, onWrite, markRead }: {
   open: Open;
   showBack: boolean;
+  /** Opened over the full-width list: a way back to it, and on to the next one. */
+  panel?: { onPrev?: () => void; onNext?: () => void };
   labels: MailLabel[];
   mine: string[];
   prefill: string | null;
@@ -1311,8 +1410,10 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  if (isLoading) return <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" /></div>;
-  if (isError || !data) return <p className="p-6 text-sm text-[var(--text-muted)]">Couldn't open this conversation.</p>;
+  const iconButton = "flex h-10 w-10 shrink-0 items-center justify-center md:h-9 md:w-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted)]";
+  const backToList = panel && <button type="button" onClick={onBack} aria-label="Back to the list" title="Back to the list (Esc)" className={iconButton}><ArrowLeft className="h-5 w-5" /></button>;
+  if (isLoading) return <>{backToList && <header className="flex items-center border-b border-[var(--border)] px-3 py-2">{backToList}</header>}<div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" /></div></>;
+  if (isError || !data) return <>{backToList && <header className="flex items-center border-b border-[var(--border)] px-3 py-2">{backToList}</header>}<p className="p-6 text-sm text-[var(--text-muted)]">Couldn't open this conversation.</p></>;
   // What a reply answers: the newest email that's really in the mailbox, not one still on its way.
   const last = data.messages.findLast((m) => !m.outgoing) ?? data.messages[data.messages.length - 1];
   const starred = data.messages.some((m) => m.starred);
@@ -1400,13 +1501,22 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   const shown = tucked ? [settled[0], last, ...data.messages.filter((m) => m.outgoing)] : data.messages;
   const answer = "inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-[var(--border)] px-4 text-sm text-[var(--text)] transition-colors hover:border-[var(--accent)]";
   const action = "inline-flex h-10 shrink-0 items-center gap-1.5 md:h-8 whitespace-nowrap rounded-lg border border-[var(--border)] px-2.5 text-xs text-[var(--text)] transition-colors hover:border-[var(--accent)]";
-  const iconButton = "flex h-10 w-10 shrink-0 items-center justify-center md:h-9 md:w-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
+  // In the wide panel the words keep to a comfortable width, in the middle.
+  const column = panel ? "px-[max(1rem,calc((100%-60rem)/2))]" : "px-4";
   return (
     <>
       <header className="flex items-center gap-1 border-b border-[var(--border)] px-3 py-2">
         {showBack && <button type="button" onClick={onBack} aria-label="Back" className={iconButton}><ArrowLeft className="h-5 w-5" /></button>}
+        {backToList}
         {/* On a phone the buttons leave the subject a few letters: it gets its own lines below. */}
         {showBack ? <span className="flex-1" /> : <h2 className="min-w-0 flex-1 truncate px-1 text-[15px] font-semibold text-[var(--text)]">{data.subject || "(No subject)"}</h2>}
+        {panel && (
+          <>
+            <button type="button" onClick={panel.onPrev} disabled={!panel.onPrev} aria-label="Previous conversation" title="Previous conversation (k)" className={iconButton}><ChevronUp className="h-[18px] w-[18px]" /></button>
+            <button type="button" onClick={panel.onNext} disabled={!panel.onNext} aria-label="Next conversation" title="Next conversation (j)" className={iconButton}><ChevronDown className="h-[18px] w-[18px]" /></button>
+            <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-[var(--border)]" />
+          </>
+        )}
         <button type="button" onClick={() => onAct(starred ? "unstar" : "star")} aria-label={starred ? "Remove star" : "Star"} title={starred ? "Remove star (s)" : "Star (s)"} className={iconButton}><Star className={`h-[18px] w-[18px] ${starred ? "fill-[var(--accent)] text-[var(--accent-text)]" : ""}`} /></button>
         <button type="button" onClick={() => onLabel({ account_id: open.account_id, key: open.key, from: data.messages[0].from, subject: data.subject, labels: data.labels })} aria-label="Label" title="Label" className={iconButton}><Tag className="h-[18px] w-[18px]" /></button>
         <button type="button" onClick={onSnooze} aria-label="Snooze" title="Snooze" className={iconButton}><AlarmClock className="h-[18px] w-[18px]" /></button>
@@ -1430,7 +1540,7 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
           onOther={() => void share()}
         />
       </div>
-      <div className="promptly-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+      <div className={`promptly-scroll min-h-0 flex-1 space-y-3 overflow-y-auto py-4 ${column}`}>
         {showBack && <h2 className="line-clamp-3 text-lg font-semibold leading-snug text-[var(--text)]">{data.subject || "(No subject)"}</h2>}
         {data.suggest && !offerClosed && (
           <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--text)]">
