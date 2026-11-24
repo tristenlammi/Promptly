@@ -206,9 +206,16 @@ test("in the full list an email opens over the list, and closing it leaves the l
   await row.click();
   await expect(panel(page).getByRole("heading", { name: "Email number 28" })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/mail\\?open=${ACCOUNT}/k28$`));
-  // Wide: nearly all of the space the list has.
-  const [wide, room] = [await panel(page).boundingBox(), await list(page).boundingBox()];
-  expect(wide!.width).toBeGreaterThan(room!.width * 0.9);
+  // It covers the list exactly: nothing of the list or its search bar shows beside it, and the folders stay.
+  // (Once it has finished sliding in.)
+  const box = async (of: ReturnType<typeof panel>) => { const b = (await of.boundingBox())!; return [b.x, b.y, b.width, b.height]; };
+  await expect.poll(() => box(panel(page))).toEqual(await box(list(page)));
+  expect(await page.evaluate(() => {
+    const at = document.querySelector("#mail-search")!.getBoundingClientRect();
+    return document.elementFromPoint(at.left + 4, at.top + at.height / 2)?.closest("[data-mail-panel]") !== null;
+  })).toBe(true);
+  await expect(page.getByRole("navigation", { name: "Mail folders" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to the list" })).toHaveCount(1);
   for (const name of ["Reply", "Forward", "Archive", "Move to Trash", "Snooze", "Label"]) await expect(panel(page).getByRole("button", { name, exact: true }).first()).toBeVisible();
   await panel(page).getByRole("button", { name: "Back to the list" }).click();
   await expect(panel(page)).toHaveCount(0);
