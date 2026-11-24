@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-11-25
+
 ### Added
 - P Maps, Your timeline: the panel says when your phone has gone quiet. With "Record where I go" on and nothing heard from the phone for three hours (or ever), it says "Your phone hasn't sent anything since Tuesday 2:14 pm. Open Promptly on your phone to start it again", with a button that opens the app when you're on that phone. When all is well it says "Your phone last checked in 4 min ago" under the switch, and how many positions are waiting on the phone if any are.
 - Promptly for Android 1.18.0, Your timeline: the screen shows what is really happening instead of what was asked for: running or not, when the last position was taken, when it last sent to your server, how many positions are waiting, and what went wrong in plain words. "Start it again" when it isn't running, "Try sending now" when something's waiting, and a button to let Promptly run in the background without battery limits. In the app from your own server that's Android's one-tap question; in the Google Play app it opens Android's battery list and says what to pick there (Play doesn't allow the app to ask directly).
