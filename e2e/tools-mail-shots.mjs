@@ -110,6 +110,37 @@ async function pass(browser, png, { theme, viewport, tag = "" }) {
 
 const browser = await chromium.launch();
 const png = await picture(browser);
+// MAIL_COMPARE=strip|covered: only the open email in the full list, 1440 wide, light
+// and dark, as compare-<name>-<theme>.png, to set two builds side by side.
+if (process.env.MAIL_COMPARE) {
+  for (const theme of ["dark", "light"]) {
+    const context = await browser.newContext({ storageState: path.join(AUTH, "alice.json"), viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5 });
+    await context.route("**/version.json*", (r) => r.abort());
+    await context.addInitScript((t) => localStorage.setItem("promptly.theme", JSON.stringify({ state: { theme: t }, version: 0 })), theme);
+    await context.route("**/api/mail/overview", async (r) => {
+      const got = await r.fetch();
+      const body = await got.json();
+      for (const a of body.accounts ?? []) Object.assign(a, { status: "ok", status_detail: "" });
+      await r.fulfill({ response: got, json: body });
+    });
+    const page = await context.newPage();
+    const asked = page.waitForRequest((r) => !!r.headers()["authorization"] && r.url().includes("/api/"));
+    await page.goto(`${BASE}/mail`);
+    const headers = { Authorization: (await asked).headers()["authorization"] };
+    await page.request.put(`${BASE}/api/mail/settings/layout`, { headers, data: { layout: "full" } });
+    await page.goto(`${BASE}/mail`);
+    await page.locator("[data-mail-row]").filter({ hasText: "Year 4 camp" }).first().getByRole("button").first().click();
+    await page.getByRole("region", { name: "Open conversation" }).getByRole("heading", { name: /Year 4 camp/ }).waitFor();
+    await page.mouse.move(900, 700);
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: path.join(OUT, `compare-${process.env.MAIL_COMPARE}-${theme}.png`) });
+    console.log("shot", `compare-${process.env.MAIL_COMPARE}-${theme}`);
+    await page.request.put(`${BASE}/api/mail/settings/layout`, { headers, data: { layout: "split" } });
+    await context.close();
+  }
+  await browser.close();
+  process.exit(0);
+}
 for (const theme of ["light", "dark"]) await pass(browser, png, { theme, viewport: { width: 1440, height: 900 } });
 await pass(browser, png, { theme: "light", viewport: { width: 1100, height: 760 }, tag: "-narrow" });
 await pass(browser, png, { theme: "light", viewport: { width: 390, height: 800 }, tag: "" });

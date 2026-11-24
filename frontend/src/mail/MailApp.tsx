@@ -208,8 +208,18 @@ export function MailApp() {
   }, []);
 
   // Arrived from a notification, Today, Ctrl+K or a task, maybe with a draft from Chat.
+  // Where the effect below has sent the address and it hasn't arrived yet. Those arrivals
+  // are ours: following them would put back an email you've already moved on from
+  // (j, j in quick succession).
+  const ours = useRef<string[]>([]);
   useEffect(() => {
     const at = openInAddress(location.search);
+    const mine = ours.current.indexOf(at ? idOf(at) : "");
+    if (mine >= 0) {
+      ours.current = ours.current.slice(mine + 1);
+      return;
+    }
+    ours.current = [];
     if (at) {
       setOpen((o) => (o && o.account_id === at.account_id && o.key === at.key ? o : at));
       const hash = new URLSearchParams(location.hash.slice(1)).get("draft");
@@ -237,6 +247,7 @@ export function MailApp() {
     const at = openInAddress(location.search);
     if (at ? !!open && at.account_id === open.account_id && at.key === open.key : !open) return;
     const fromList = !!(location.state as { mailFromList?: boolean } | null)?.mailFromList;
+    ours.current.push(open ? idOf(open) : "");
     if (open) navigate({ pathname: location.pathname, search: addressWith(location.search, open) }, at ? { replace: true, state: location.state } : { state: { mailFromList: true } });
     else if (fromList) navigate(-1);
     else navigate({ pathname: location.pathname, search: addressWith(location.search, null) }, { replace: true });
@@ -1083,15 +1094,11 @@ export function MailApp() {
       <div className="relative flex min-h-0 flex-1">
         {!isMobile && rail}
         {full ? (
-          // The list keeps the whole width and stays where it is; the email opens over it.
+          // The list keeps the whole width and stays where it is, mounted, so its scroll is
+          // kept; the open email covers all of it, search bar included. Folders stay beside it.
           <div className="relative flex min-w-0 flex-1 overflow-hidden">
             {listPane}
-            {reading && (
-              <div className="absolute inset-0 z-20 flex">
-                <button type="button" tabIndex={-1} aria-label="Back to the list" title="Back to the list" onClick={() => setOpen(null)} className="mail-fade w-8 shrink-0 cursor-default bg-black/25 lg:w-14" />
-                <section ref={panel} tabIndex={-1} aria-label="Open conversation" data-mail-panel className="mail-panel flex min-w-0 flex-1 flex-col border-l border-[var(--border)] bg-[var(--bg,var(--surface))] shadow-2xl outline-none">{reading}</section>
-              </div>
-            )}
+            {reading && <section ref={panel} tabIndex={-1} aria-label="Open conversation" data-mail-panel className="mail-panel absolute inset-0 z-20 flex min-w-0 flex-col bg-[var(--bg,var(--surface))] outline-none">{reading}</section>}
           </div>
         ) : (
           <>
