@@ -61,7 +61,9 @@ async def _prepare() -> str:
             await db.refresh(user)
         token = new_token()
         db.add(AppPassword(user_id=user.id, name="litmus", token_hash=token_hash(token), hint=hint(token),
-                           scopes=["dav:read", "dav:write"]))
+                           # Delete too: without it a DELETE is answered but leaves the
+                           # file (a phone freeing space), and litmus can't clear its folder.
+                           scopes=["dav:read", "dav:write", "dav:delete"]))
         await db.commit()
     return token
 

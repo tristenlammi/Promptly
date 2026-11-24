@@ -313,6 +313,43 @@ async def _background_tasks_end_with_their_test():
         pass
     yield
     await _stop_leftover_tasks()
+    # And the shared Redis client's connections, for the tests that don't
+    # take ``db`` (which does this itself): one left open is closed when the
+    # process ends, on a loop that is long gone ("Event loop is closed").
+    shared = sys.modules.get("app.redis_client")
+    if shared is not None:
+        try:
+            await shared.redis.connection_pool.disconnect()
+        except Exception:  # noqa: BLE001 — best effort between tests
+            pass
+    # The job queue's pool is made once and kept (``app.tasks.queue._pool``),
+    # so it too belonged to the first test that queued anything.
+    queue = sys.modules.get("app.tasks.queue")
+    if queue is not None and queue._pool is not None:
+        pool, queue._pool = queue._pool, None
+        try:
+            await pool.aclose()
+        except Exception:  # noqa: BLE001 — best effort between tests
+            pass
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_teardown(item, nextitem):  # noqa: ARG001
+    """No test may leave the uploads root pointing somewhere else for the
+    tests after it. One did (it reloaded ``app.files.storage`` with the env
+    var removed), so the rest of that worker wrote to ``/app/uploads``: the
+    real uploads folder in the app image, and a failure wherever ``/app``
+    can't be made (CI), in whichever tests happened to follow it. Checked
+    here, once every fixture of the test (monkeypatch too) has been undone."""
+    yield
+    storage = sys.modules.get("app.files.storage")
+    if storage is None:
+        return
+    want = Path(os.environ["PROMPTLY_UPLOAD_ROOT"]).resolve()
+    left = storage.UPLOAD_ROOT
+    if left != want:
+        storage.UPLOAD_ROOT = want
+        pytest.fail(f"this test left the uploads root at {left} (the run's is {want})", pytrace=False)
 
 
 async def _empty_redis() -> None:

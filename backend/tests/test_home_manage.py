@@ -20,6 +20,23 @@ TIDAL = {"id": "tidal--abc", "brand": "tidal", "name": "Tidal"}
 LOUNGE = {"id": "lounge", "name": "Lounge"}
 
 
+_BOXES: list["Box"] = []
+
+
+@pytest.fixture(autouse=True)
+async def _boxes_stop_answering():
+    """A box's answering task ends with its test, stopped or not: one left
+    waiting was thrown away with the test's event loop, and said so
+    ("Event loop is closed") in the middle of some later test."""
+    yield
+    loop = asyncio.get_running_loop()
+    mine = [box._run for box in _BOXES if box._run.get_loop() is loop]
+    _BOXES.clear()
+    for task in mine:
+        task.cancel()
+    await asyncio.gather(*mine, return_exceptions=True)
+
+
 class Box:
     """A connected box that answers like a real one, and remembers what the
     home put on it (a brand, a linked music service, a room)."""
@@ -31,6 +48,7 @@ class Box:
         self.heard: list[str] = []
         self.refuse: set[str] = set()
         self._run = asyncio.create_task(self._answer())
+        _BOXES.append(self)
 
     async def _answer(self) -> None:
         while True:

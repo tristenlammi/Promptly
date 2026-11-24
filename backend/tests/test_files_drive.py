@@ -173,22 +173,17 @@ def _make_fake_file(
 def upload_root(monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the storage helper at a temp dir for this test.
 
-    ``storage.UPLOAD_ROOT`` is resolved at import time from the env
-    variable, so we have to ``importlib.reload`` it after the patch
-    to pick up the new root.
+    Set on the module, as every other test does, and put back by
+    monkeypatch. This used to delete ``PROMPTLY_UPLOAD_ROOT`` and reload
+    the module on the way out, which left the root at ``/app/uploads`` for
+    every later test in the same process: the real uploads folder inside
+    the app image, and a folder that can't be made anywhere else (CI).
     """
-    import importlib
-
     from app.files import storage as storage_mod
 
-    tmp = Path(tempfile.mkdtemp(prefix="promptly-test-"))
-    monkeypatch.setenv("PROMPTLY_UPLOAD_ROOT", str(tmp))
-    importlib.reload(storage_mod)
-    yield tmp
-    # Reload back to the real env value so later tests don't see
-    # the temp dir.
-    monkeypatch.delenv("PROMPTLY_UPLOAD_ROOT", raising=False)
-    importlib.reload(storage_mod)
+    tmp = Path(tempfile.mkdtemp(prefix="promptly-test-")).resolve()
+    monkeypatch.setattr(storage_mod, "UPLOAD_ROOT", tmp)
+    return tmp
 
 
 def test_extract_text_file(upload_root: Path) -> None:

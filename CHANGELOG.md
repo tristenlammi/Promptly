@@ -21,6 +21,13 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+- Tests: one test left the uploads folder pointing at `/app/uploads` for every test after it in the same worker. Inside the app image those tests then wrote into the checkout's real `backend/uploads`; on GitHub, where `/app` can't be made, whichever tests came next failed (the red "Backend tests" run on v0.53.0). The test now puts the folder back, and the suite fails any test that leaves it changed.
+- CI: the WebDAV conformance step (litmus) signs in with a password that may delete. Without that a delete is answered but nothing is removed, so litmus could not clear its own folder and failed at `copymove`.
+- Tests: no more "Event loop is closed" messages at the end of a run: a Home test's stand-in box stops answering when its test ends, and the shared Redis connections are closed after every test.
+- CI: the test results file is uploaded with `actions/upload-artifact@v7` (v4 ran on Node 20, which GitHub is retiring).
+
+
 ## [0.53.0] - 2026-11-24
 
 ### Added

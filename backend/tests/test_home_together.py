@@ -15,7 +15,7 @@ import uuid
 from sqlalchemy import select
 
 from tests.test_home import _turn_on, client  # noqa: F401
-from tests.test_home_manage import HUE, LOUNGE, _add, _delete_account, _home
+from tests.test_home_manage import HUE, LOUNGE, _add, _boxes_stop_answering, _delete_account, _home  # noqa: F401
 from tests.test_maps_timeline import _hdr, _other
 
 PAGE = {"widgets": [{"id": "w1", "type": "rest", "size": "l"}]}
