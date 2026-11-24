@@ -41,6 +41,9 @@ logger = logging.getLogger("promptly.mail")
 
 UNDO_SEND_S = 10
 PAGE = 50
+# Names shown on a row of the list. The row says how many more there are.
+LIST_FILES = 6
+LAYOUTS = ("split", "full")
 MAX_LABELS = 100
 MAX_RULES = 200
 APPLY_AT_ONCE = 1000
@@ -354,6 +357,7 @@ async def threads(
     rows = rows[:PAGE]
     tagged: dict[tuple[uuid.UUID, str], list[str]] = {}
     standing = await _summaries(db, accounts, [r.thread_key for r in rows])
+    files = await _files(db, accounts, folder_ids, [r.thread_key for r in rows if r.attached])
     if rows:
         found = await db.execute(select(MailThreadLabel).where(MailThreadLabel.account_id.in_(accounts), MailThreadLabel.thread_key.in_([r.thread_key for r in rows])))
         for t in found.scalars():
@@ -371,12 +375,50 @@ async def threads(
             "account_id": str(row.account_id), "key": row.thread_key, "subject": latest.subject, "snippet": latest.snippet,
             "from": _person(latest.from_name, latest.from_addr), "at": row.last.isoformat(), "count": row.total,
             "unread": row.unread, "starred": row.starred, "attachments": row.attached,
+            **_files_out(files.get((row.account_id, row.thread_key), [])),
             "labels": tagged.get((row.account_id, row.thread_key), []),
             "summary": standing.get((row.account_id, row.thread_key), ""), "needs_reply": bool(latest.needs_reply) and not latest.answered,
         })
     if query and not before:
         out += await _related(db, accounts, query, folder_ids, {(t["account_id"], t["key"]) for t in out})
     return {"threads": out, "next": rows[-1].last.isoformat() if more else None}
+
+
+def _named(messages: list[tuple[uuid.UUID, str, list[dict[str, Any]]]]) -> list[dict[str, Any]]:
+    """The attachments of one conversation's emails, newest email first. The same email
+    in two folders (Gmail's Inbox and All Mail) counts once."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for message, message_id, attachments in messages:
+        if message_id:
+            if message_id in seen:
+                continue
+            seen.add(message_id)
+        for a in attachments or []:
+            out.append({"message_id": str(message), "part": a.get("part", 0), "name": a.get("name") or "attachment", "mime": a.get("mime", ""), "size": a.get("size", 0)})
+    return out
+
+
+def _files_out(found: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"files": found[:LIST_FILES], "files_total": len(found)}
+
+
+async def _files(db: AsyncSession, accounts: list[uuid.UUID], folder_ids: list[uuid.UUID], keys: list[str]) -> dict[tuple[uuid.UUID, str], list[dict[str, Any]]]:
+    """What's attached, for the names on the list: one query for the whole page, and only
+    the attachment column, never an email's words. These are real attachments only:
+    pictures placed inside an email (a signature's logo) were left out when it was read
+    (``parse.parse``)."""
+    if not keys:
+        return {}
+    rows = await db.execute(text(
+        "SELECT account_id, thread_key, id, message_id, attachments FROM mail_messages "
+        "WHERE account_id = ANY(:accounts) AND thread_key = ANY(:keys) AND folder_id = ANY(:folders) "
+        "AND attachments <> '[]'::jsonb ORDER BY sent_at DESC"
+    ), {"accounts": accounts, "keys": keys, "folders": folder_ids})
+    grouped: dict[tuple[uuid.UUID, str], list[tuple[uuid.UUID, str, list[dict[str, Any]]]]] = {}
+    for r in rows:
+        grouped.setdefault((r[0], r[1]), []).append((r[2], r[3], r[4]))
+    return {key: _named(messages) for key, messages in grouped.items()}
 
 
 async def _summaries(db: AsyncSession, accounts: list[uuid.UUID], keys: list[str]) -> dict[tuple[uuid.UUID, str], str]:
@@ -412,6 +454,7 @@ async def _related(db: AsyncSession, accounts: list[uuid.UUID], query: str, fold
             "account_id": str(account_id), "key": key, "subject": rows[0].subject, "snippet": rows[0].snippet,
             "from": _person(rows[0].from_name, rows[0].from_addr), "at": rows[0].sent_at.isoformat(), "count": len(rows),
             "unread": sum(not m.seen for m in rows), "starred": any(m.flagged for m in rows), "attachments": any(m.attachments for m in rows),
+            **_files_out(_named([(m.id, m.message_id, m.attachments) for m in rows])),
             "labels": [str(x) for x in labels], "related": True, "summary": (await _summaries(db, [account_id], [key])).get((account_id, key), ""), "needs_reply": bool(rows[0].needs_reply) and not rows[0].answered,
         })
     return out
@@ -655,9 +698,14 @@ class SortingBody(BaseModel):
     model_id: str | None = Field(default=None, max_length=255)
 
 
+def _settings_out(settings: dict[str, Any] | None) -> dict[str, Any]:
+    layout = (settings or {}).get("mail_layout")
+    return {"sorting": (settings or {}).get("mail_triage"), "layout": layout if layout in LAYOUTS else "split"}
+
+
 @router.get("/settings")
 async def get_settings(user: User = Depends(get_current_user)) -> dict[str, Any]:
-    return {"sorting": (user.settings or {}).get("mail_triage")}
+    return _settings_out(user.settings)
 
 
 @router.put("/settings")
@@ -672,7 +720,21 @@ async def set_settings(body: SortingBody, db: AsyncSession = Depends(get_db), us
         settings.pop("mail_triage", None)
     user.settings = settings
     await db.commit()
-    return {"sorting": settings.get("mail_triage")}
+    return _settings_out(settings)
+
+
+class LayoutBody(BaseModel):
+    layout: Literal["split", "full"]
+
+
+@router.put("/settings/layout")
+async def set_layout(body: LayoutBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """How the list is laid out on a computer: beside the open email, or the full width."""
+    settings = dict(user.settings or {})
+    settings["mail_layout"] = body.layout
+    user.settings = settings
+    await db.commit()
+    return _settings_out(settings)
 
 
 # ---- with the rest of Promptly

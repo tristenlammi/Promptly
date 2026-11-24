@@ -21,12 +21,19 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Mail: the names of what's attached show on the list, under the email, as small buttons with an icon for the kind of file. A long name is cut in the middle so its ending stays readable, and there's a "+3" when there are more than fit. Clicking a name opens that file without opening the email. Pictures placed inside an email, like a signature's logo, aren't listed.
+- Mail: a Layout choice in Mail settings (the mailbox menu at the top of Mail), saved to your account so it's the same on every computer. Split is how Mail has always looked and stays the default. Full list gives the list the whole width, one line per email (who, subject, the start of the email, when), with attachment names on a second line.
+- Mail, Full list: an email opens as a wide panel over the list with all its usual buttons, plus Previous and Next (j and k work too). Esc, the Back arrow or the browser's Back button close it and the list is exactly where you left it, with the email you were reading marked. The open email is in the address bar, so a reload or a link opens it again.
+
+### Changed
+- Mail: `GET /api/mail/threads` also returns `files` (up to 6 per conversation: message id, part, name, type, size) and `files_total`, read in one extra query for the whole page. `GET /api/mail/settings` also returns `layout`; `PUT /api/mail/settings/layout` saves it. No migration. Phones are unchanged.
+
 ### Fixed
 - Tests: one test left the uploads folder pointing at `/app/uploads` for every test after it in the same worker. Inside the app image those tests then wrote into the checkout's real `backend/uploads`; on GitHub, where `/app` can't be made, whichever tests came next failed (the red "Backend tests" run on v0.53.0). The test now puts the folder back, and the suite fails any test that leaves it changed.
 - CI: the WebDAV conformance step (litmus) signs in with a password that may delete. Without that a delete is answered but nothing is removed, so litmus could not clear its own folder and failed at `copymove`.
 - Tests: no more "Event loop is closed" messages at the end of a run: a Home test's stand-in box stops answering when its test ends, and the shared Redis connections are closed after every test.
 - CI: the test results file is uploaded with `actions/upload-artifact@v7` (v4 ran on Node 20, which GitHub is retiring).
-
 
 ## [0.53.0] - 2026-11-24
 

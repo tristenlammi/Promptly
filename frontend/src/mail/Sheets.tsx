@@ -10,7 +10,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { mapsSearchLink } from "@/maps/links";
 
-import { mailApi, type MailAccount } from "./api";
+import { mailApi, type MailAccount, type MailLayout, type MailSettings } from "./api";
 
 function localDay(d = new Date()): string {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
@@ -213,8 +213,48 @@ export function EditMailboxSheet({ account, onClose }: { account: MailAccount; o
   );
 }
 
-/** Sorting by AI is off until you choose a model, and it's your model and your choice. */
-export function MailSettingsSheet({ onClose }: { onClose: () => void }) {
+const LAYOUTS: { id: MailLayout; name: string; about: string }[] = [
+  { id: "split", name: "Split", about: "The list on the left, the open email beside it." },
+  { id: "full", name: "Full list", about: "One line per email across the whole width. An email opens over the list." },
+];
+
+/** A thumbnail of a layout: folders, then the list, and where the open email goes. */
+function LayoutPicture({ layout }: { layout: MailLayout }) {
+  const line = "h-1 rounded-full bg-[var(--text-muted)] opacity-50";
+  const faint = "h-1 rounded-full bg-[var(--text-muted)] opacity-25";
+  return (
+    <span aria-hidden className="flex h-[4.5rem] w-full gap-1 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg,var(--surface))] p-1.5">
+      <span className="flex w-[16%] flex-col gap-1 pt-0.5">
+        <span className="h-1.5 rounded-full bg-[var(--accent)]" />
+        {[0, 1, 2].map((i) => <span key={i} className={line} />)}
+      </span>
+      {layout === "split" ? (
+        <>
+          <span className="flex w-[30%] flex-col gap-1.5 border-l border-[var(--border)] pl-1 pt-0.5">
+            {[0, 1, 2, 3].map((i) => <span key={i} className="flex flex-col gap-0.5"><span className={`${line} w-3/5`} /><span className={faint} /></span>)}
+          </span>
+          <span className="flex flex-1 flex-col gap-1 rounded border border-[var(--border)] bg-[var(--surface)] p-1">
+            <span className={`${line} w-2/5`} />
+            {[0, 1, 2].map((i) => <span key={i} className={faint} />)}
+            <span className={`${faint} w-3/5`} />
+          </span>
+        </>
+      ) : (
+        <span className="flex flex-1 flex-col gap-[5px] border-l border-[var(--border)] pl-1 pt-0.5">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <span key={i} className="flex items-center gap-1">
+              <span className={`${line} w-[16%]`} /><span className={`${faint} flex-1`} /><span className={`${line} w-[7%]`} />
+            </span>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** How the list is laid out, and sorting by AI: off until you choose a model, and it's
+ *  your model and your choice. */
+export function MailSettingsSheet({ phone, onClose }: { phone: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const selected = useSelectedModel();
   const { data } = useQuery({ queryKey: ["mail-settings"], queryFn: mailApi.settings });
@@ -226,9 +266,46 @@ export function MailSettingsSheet({ onClose }: { onClose: () => void }) {
     },
     onError: (e) => toast.error(apiErrorMessage(e, "Couldn't change that.")),
   });
+  const lay = useMutation({
+    mutationFn: (layout: MailLayout) => mailApi.setLayout(layout),
+    // Straight away: the list behind this changes as you choose.
+    onMutate: (layout) => {
+      const before = qc.getQueryData<MailSettings>(["mail-settings"]);
+      qc.setQueryData<MailSettings>(["mail-settings"], (old) => (old ? { ...old, layout } : old));
+      return before;
+    },
+    onSuccess: (next) => qc.setQueryData<MailSettings>(["mail-settings"], (old) => ({ ...(old ?? next), layout: next.layout })),
+    onError: (e, _layout, before) => {
+      qc.setQueryData(["mail-settings"], before);
+      toast.error(apiErrorMessage(e, "Couldn't change the layout."));
+    },
+  });
   const on = Boolean(data?.sorting);
+  const layout = data?.layout ?? "split";
   return (
     <Sheet title="Mail settings" onClose={onClose}>
+      <div className="px-1">
+        <p id="mail-layout-title" className="text-sm font-medium text-[var(--text)]">Layout</p>
+        {phone ? (
+          <p className="mt-1 text-xs text-[var(--text-muted)]">On a phone, Mail always shows the list, then the email. You can choose a layout for bigger screens from a computer.</p>
+        ) : (
+          <>
+            <div role="radiogroup" aria-labelledby="mail-layout-title" className="mt-2 grid grid-cols-2 gap-2">
+              {LAYOUTS.map((l) => (
+                <button key={l.id} type="button" role="radio" aria-checked={layout === l.id} disabled={!data} onClick={() => { if (layout !== l.id) lay.mutate(l.id); }} className={`flex flex-col gap-2 rounded-xl border p-2 text-left transition-colors ${layout === l.id ? "border-[var(--accent)] bg-[var(--accent)]/10" : "border-[var(--border)] hover:bg-[var(--hover)]"}`}>
+                  <LayoutPicture layout={l.id} />
+                  <span className="px-0.5">
+                    <span className="block text-sm font-medium text-[var(--text)]">{l.name}</span>
+                    <span className="mt-0.5 block text-xs text-[var(--text-muted)]">{l.about}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-[var(--text-muted)]">Saved to your account, so it's the same on every computer you sign in on. Phones always show the list, then the email.</p>
+          </>
+        )}
+      </div>
+      <hr className="border-[var(--border)]" />
       <label className="flex items-start gap-3 px-1 text-sm text-[var(--text)]">
         <input type="checkbox" checked={on} disabled={change.isPending || (!on && !selected)} onChange={(e) => change.mutate(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" />
         <span>

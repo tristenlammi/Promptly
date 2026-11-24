@@ -472,3 +472,128 @@ async def test_a_failed_send_says_so_and_tries_again(client, db, server):
     item = await db.get(MailOutbox, item.id, populate_existing=True)
     assert item.status == "waiting" and item.attempts == 1 and "tried again" in item.error
     assert item.send_at > datetime.now(timezone.utc)
+
+
+# ---- the list: what's attached, by name, and how it's laid out
+
+
+async def test_the_list_names_what_is_attached_in_one_query(client, db):
+    from sqlalchemy import event
+
+    from app.database import engine
+
+    u = await mk_user(db, "names")
+    account = await mk_account(db, u)
+    first = await mk_message(db, account, subject="Quote")
+    first.uid = 100
+    first.attachments = [
+        {"part": 2, "name": "Quote 2026.pdf", "mime": "application/pdf", "size": 2048},
+        {"part": 3, "name": "Plans.xlsx", "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "size": 4096},
+    ]
+    await db.commit()
+    # A reply in the same conversation, with its own file: newest first.
+    reply = await mk_message(db, account, subject="Re: Quote")
+    reply.thread_key = first.thread_key
+    reply.uid = 101
+    reply.sent_at = first.sent_at + timedelta(minutes=5)
+    reply.attachments = [{"part": 1, "name": "Signed.pdf", "mime": "application/pdf", "size": 10}]
+    # Nothing attached: a picture inside an email is dropped when it's read, so there's nothing to name.
+    await db.commit()
+    plain = await mk_message(db, account, subject="Just words")
+    plain.uid = 102
+    plain.attachments = []
+    await db.commit()
+    for n in range(4, 12):
+        more = await mk_message(db, account, subject=f"More {n}")
+        more.uid = 100 + n
+        await db.commit()
+
+    counted: list[str] = []
+
+    def count(_conn, _cursor, statement, *_rest):
+        if "attachments <> '[]'::jsonb ORDER BY" in statement:
+            counted.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", count)
+    try:
+        r = await client.get("/api/mail/threads", headers=H(u))
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count)
+    assert r.status_code == 200, r.text
+    # Ten conversations with files on the page, one query for their names, and it never asks for an email's words.
+    assert len(counted) == 1
+    assert "body_" not in counted[0]
+    rows = {t["subject"]: t for t in r.json()["threads"]}
+    quote = rows["Re: Quote"]
+    assert [(f["name"], f["part"], f["message_id"]) for f in quote["files"]] == [
+        ("Signed.pdf", 1, str(reply.id)), ("Quote 2026.pdf", 2, str(first.id)), ("Plans.xlsx", 3, str(first.id)),
+    ]
+    assert quote["files"][1]["mime"] == "application/pdf" and quote["files"][1]["size"] == 2048
+    assert quote["files_total"] == 3
+    assert rows["Just words"]["files"] == [] and rows["Just words"]["files_total"] == 0 and rows["Just words"]["attachments"] is False
+
+
+async def test_the_list_names_a_few_and_counts_the_rest(client, db):
+    u = await mk_user(db, "many")
+    account = await mk_account(db, u)
+    m = await mk_message(db, account)
+    m.attachments = [{"part": n, "name": f"photo-{n}.jpg", "mime": "image/jpeg", "size": 5} for n in range(1, 10)]
+    await db.commit()
+    row = (await client.get("/api/mail/threads", headers=H(u))).json()["threads"][0]
+    assert [f["name"] for f in row["files"]] == [f"photo-{n}.jpg" for n in range(1, 7)]
+    assert row["files_total"] == 9
+
+
+async def test_the_same_email_in_two_folders_is_named_once(client, db):
+    u = await mk_user(db, "twice")
+    account = await mk_account(db, u)
+    m = await mk_message(db, account)
+    label = (await client.post("/api/mail/labels", json={"name": "Family"}, headers=H(u))).json()["id"]
+    everything = MailFolder(account_id=account.id, path="All Mail", name="All Mail", role="all")
+    db.add(everything)
+    await db.flush()
+    db.add(MailMessage(
+        account_id=account.id, folder_id=everything.id, uid=9, thread_key=m.thread_key, message_id=m.message_id, subject=m.subject,
+        from_name="Sam", from_addr="sam@example.com", to_addrs=[], cc_addrs=[], sent_at=m.sent_at, attachments=m.attachments,
+    ))
+    await db.commit()
+    assert (await client.put(f"/api/mail/threads/{account.id}/{m.thread_key}/labels/{label}", headers=H(u))).status_code == 204
+    # A label looks in every folder, so it sees both copies.
+    row = (await client.get(f"/api/mail/threads?label={label}", headers=H(u))).json()["threads"][0]
+    assert [f["name"] for f in row["files"]] == ["a.pdf"] and row["files_total"] == 1
+
+
+async def test_nobody_else_sees_your_attachment_names(client, db):
+    owner, other = await mk_user(db, "owner"), await mk_user(db, "other")
+    account = await mk_account(db, owner)
+    await mk_message(db, account)
+    await mk_account(db, other, email="them@example.com")
+    assert (await client.get("/api/mail/threads", headers=H(other))).json()["threads"] == []
+    assert (await client.get(f"/api/mail/threads?account={account.id}", headers=H(other))).json()["threads"] == []
+
+
+async def test_a_logo_inside_an_email_is_not_an_attachment():
+    from email.message import EmailMessage
+
+    from app.mail import parse
+
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = "sam@example.com", "me@example.com", "Hello"
+    msg.set_content("Hello")
+    msg.add_alternative('<p>Hello</p><img src="cid:logo">', subtype="html")
+    msg.get_payload()[1].add_related(b"PNG fake", "image", "png", cid="<logo>")
+    msg.add_attachment(b"%PDF fake", maintype="application", subtype="pdf", filename="Invoice.pdf")
+    assert [a["name"] for a in parse.parse(msg.as_bytes()).attachments] == ["Invoice.pdf"]
+
+
+async def test_the_layout_is_yours_and_follows_you(client, db):
+    u, other = await mk_user(db, "wide"), await mk_user(db, "narrow")
+    assert (await client.get("/api/mail/settings", headers=H(u))).json()["layout"] == "split"
+    r = await client.put("/api/mail/settings/layout", json={"layout": "full"}, headers=H(u))
+    assert r.status_code == 200 and r.json() == {"sorting": None, "layout": "full"}
+    assert (await client.get("/api/mail/settings", headers=H(u))).json()["layout"] == "full"
+    assert (await client.get("/api/mail/settings", headers=H(other))).json()["layout"] == "split"
+    assert (await client.put("/api/mail/settings/layout", json={"layout": "tiny"}, headers=H(u))).status_code == 422
+    assert (await client.put("/api/mail/settings/layout", json={"layout": "full"})).status_code == 401
+    # Turning AI sorting off doesn't touch it.
+    assert (await client.put("/api/mail/settings", json={}, headers=H(u))).json() == {"sorting": None, "layout": "full"}
