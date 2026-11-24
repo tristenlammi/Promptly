@@ -361,7 +361,7 @@ class TrackingTest {
         val play = BackgroundAsk.of(ownApk = false)
         assertFalse(play.direct)
         assertEquals("Open battery settings", play.button)
-        assertTrue(play.hint!!.contains("find Promptly") && play.hint!!.contains("Don't optimise"))
+        assertTrue(play.hint!!.contains("find Promptly") && play.hint!!.contains("\"Allow background usage\"") && play.hint!!.contains("\"Unrestricted\""))
         // The APK from your own server keeps the one-tap dialog.
         val own = BackgroundAsk.of(ownApk = true)
         assertTrue(own.direct)
@@ -370,6 +370,14 @@ class TrackingTest {
         // What the button tries, in order. Play: never the direct question, and never a dead button.
         assertEquals(listOf(BackgroundAsk.Step.LIST, BackgroundAsk.Step.APP_SETTINGS), play.steps())
         assertEquals(listOf(BackgroundAsk.Step.ASK, BackgroundAsk.Step.LIST, BackgroundAsk.Step.APP_SETTINGS), own.steps())
+    }
+
+    @Test
+    fun `the phone is kept awake only on the move and woken on a schedule when still`() {
+        assertTrue(LiveBeat.stayAwake(moving = true))
+        assertFalse(LiveBeat.stayAwake(moving = false))
+        assertEquals(180_000L, LiveBeat.wakeEvery(sharing = true))
+        assertEquals(300_000L, LiveBeat.wakeEvery(sharing = false))
     }
 
     @Test

@@ -288,6 +288,17 @@ object LiveBeat {
      *  a fresh time would tell people you're somewhere you've left. */
     fun sendable(moving: Boolean, fixAgeMs: Long): Boolean = !moving || fixAgeMs <= MOVING_FIX_GOOD_MS
 
+    /** How often the phone is woken to do its rounds when it may be asleep: while
+     *  sharing, as often as the heartbeat; recording only, every five minutes (to send
+     *  what's waiting, look where it is, and notice a drive that's started). */
+    fun wakeEvery(sharing: Boolean): Long = if (sharing) STILL_MS else 5 * 60_000L
+
+    /** Whether the phone is kept from sleeping. Only on the move, when the GPS is
+     *  running every half minute anyway: asleep, a phone delivers no positions and runs
+     *  no timers, so a drive with the screen off recorded and sent nothing. Staying
+     *  put, it sleeps, and [wakeEvery] wakes it. */
+    fun stayAwake(moving: Boolean): Boolean = moving
+
     /** How often the phone looks at all (GPS when moving; anything cheaper when still). */
     fun fixEvery(moving: Boolean): Long = if (moving) 30_000L else STILL_MS
 }
@@ -326,7 +337,8 @@ data class BackgroundAsk(val direct: Boolean, val button: String, val hint: Stri
                 BackgroundAsk(
                     direct = false,
                     button = "Open battery settings",
-                    hint = "In the list that opens, choose \"All apps\", find Promptly and pick \"Don't optimise\" (some phones say \"Unrestricted\").",
+                    // As Android 16's own screens word it (checked on the emulator); older ones differ.
+                    hint = "In the list that opens, find Promptly, tap \"Allow background usage\" and choose \"Unrestricted\". (On older phones: choose \"All apps\", then Promptly, then \"Don't optimise\".)",
                 )
             }
     }

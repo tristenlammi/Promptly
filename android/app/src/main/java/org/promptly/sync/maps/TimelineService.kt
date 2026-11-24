@@ -22,6 +22,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.car.app.connection.CarConnection
@@ -69,6 +70,12 @@ class TimelineService : Service() {
     private var kept: Location? = null
     private var lastFlush = 0L
     private var flushing = false
+
+    /** The first position kept since starting goes up at the next beat, so "nothing
+     *  sent yet" doesn't sit on the screen for five minutes. */
+    private var firstKept = false
+    private var poking = false
+    private var awakeLock: PowerManager.WakeLock? = null
     private var lastLiveTry = 0L
     private var liveWorked = true
     private var liveBusy = false
@@ -248,6 +255,7 @@ class TimelineService : Service() {
             TrackRows.fixTime(at.time, age, System.currentTimeMillis()), at.latitude, at.longitude,
             if (at.hasAccuracy()) at.accuracy else null, if (at.hasSpeed()) at.speed else null,
         ) ?: return
+        if (kept == null) firstKept = true
         kept = at
         runCatching { queue.add(line) }
     }
@@ -256,10 +264,12 @@ class TimelineService : Service() {
      *  once you've stayed put, sending what's waiting, the heartbeat to the people you
      *  share with, and stopping when nothing's wanted any more. Called every half minute,
      *  on each position, when a connection comes back, and by the wake-up alarm. */
-    fun beat() {
+    fun beat(woken: Boolean = false) {
         if (running !== this) return
         val now = SystemClock.elapsedRealtime()
         if (motion.tick(now)) request()
+        stayAwake(LiveBeat.stayAwake(motion.moving))
+        if (woken && !motion.moving) poke()
         val timeline = status.timeline
         val sharing = status.sharing
         if (!Wanted.running(timeline, sharing)) {
@@ -269,14 +279,58 @@ class TimelineService : Service() {
         if (words().first != shown) runCatching { getSystemService(NotificationManager::class.java).notify(NOTE, notification()) }
         val off = if (manager.isLocationEnabled) null else Problem.LOCATION_OFF
         if (status.runProblem != off) status.runProblem = off
-        if (timeline && now - lastFlush >= FLUSH_MS) flush()
+        if (timeline && (now - lastFlush >= FLUSH_MS || firstKept)) flush()
         live(now, sharing)
+    }
+
+    /** On the move the phone is kept awake (the GPS is on anyway); staying put it's
+     *  let sleep. Taken for a quarter of an hour at a time and renewed by each beat, so
+     *  it can't outlive a service that's stopped beating. */
+    private fun stayAwake(on: Boolean) {
+        runCatching {
+            if (on) {
+                val lock = awakeLock ?: (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "promptly:moving").apply { setReferenceCounted(false) }.also { awakeLock = it }
+                lock.acquire(15 * 60_000L)
+            } else {
+                awakeLock?.takeIf { it.isHeld }?.release()
+            }
+        }
+    }
+
+    /** Woken by the alarm while staying put: ask the phone where it is, once. A sleeping
+     *  phone may not have delivered anything since the last look, and this is how a
+     *  drive that started meanwhile is noticed and a heartbeat has a current place. */
+    private fun poke() {
+        if (poking) return
+        poking = true
+        scope.launch {
+            try {
+                LocationKeeper.awake(this@TimelineService, 30_000L) {
+                    val at = LocationKeeper.current(this@TimelineService, 12)
+                    val done = java.util.concurrent.CountDownLatch(1)
+                    main.post {
+                        try {
+                            if (at != null && running === this@TimelineService) onFix(at) else beat()
+                        } finally {
+                            done.countDown()
+                        }
+                    }
+                    done.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "poke: ${e.javaClass.simpleName}")
+            } finally {
+                poking = false
+            }
+        }
     }
 
     /** Send the timeline positions that are waiting. */
     private fun flush() {
         if (flushing) return
         flushing = true
+        firstKept = false
         lastFlush = SystemClock.elapsedRealtime()
         scope.launch {
             try {
@@ -321,6 +375,7 @@ class TimelineService : Service() {
         runCatching { manager.removeUpdates(listener) }
         carObserver?.let { connection?.type?.removeObserver(it) }
         network?.let { cb -> runCatching { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb) } }
+        stayAwake(false)
         if (running === this) running = null
         // What's waiting goes now if it can; if it can't, it's in the file for next time.
         val app = applicationContext

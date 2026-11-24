@@ -300,12 +300,12 @@ object LocationKeeper {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    /** The next wake-up: every few minutes while sharing (the heartbeat), a quarter of an
-     *  hour otherwise (is the service still there?). Inexact, so it needs no permission;
+    /** The next wake-up: every three minutes while sharing (the heartbeat), five
+     *  otherwise (is the service still there, is there anything to send?). Inexact, so it needs no permission;
      *  Android may hold it back a few minutes on a phone that's sound asleep. */
     fun scheduleBeat(app: Context, sharing: Boolean) {
         val alarms = app.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val wait = if (sharing) LiveBeat.STILL_MS else 15 * 60_000L
+        val wait = LiveBeat.wakeEvery(sharing)
         runCatching { alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + wait, beat(app)) }
     }
 
@@ -350,7 +350,7 @@ object LocationKeeper {
 
     /** Ask the phone where it is now, and wait a little for an answer. */
     @SuppressLint("MissingPermission")
-    private fun current(app: Context, waitSeconds: Long): Location? {
+    internal fun current(app: Context, waitSeconds: Long): Location? {
         if (Build.VERSION.SDK_INT < 30) return null
         val manager = app.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val providers = manager.allProviders
@@ -427,7 +427,7 @@ class TimelineBootReceiver : BroadcastReceiver() {
                 val service = TimelineService.running
                 if (service != null) {
                     LocationKeeper.scheduleBeat(app, TrackStatus(app).sharing)
-                    service.beat()
+                    service.beat(woken = true)
                 } else {
                     val pending = goAsync()
                     LocationKeeper.background {
