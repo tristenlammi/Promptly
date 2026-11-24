@@ -302,6 +302,26 @@ object Wanted {
     fun sharing(saidSharing: Boolean, until: Long, now: Long): Boolean = saidSharing && (until == 0L || now < until)
 }
 
+/** How the timeline screen offers "run in the background without battery limits".
+ *  The APK from your own server asks Android directly ([direct]: its one-tap dialog).
+ *  The Google Play build must not (Play only allows that for a few kinds of app): it
+ *  opens Android's battery list instead, with a line ([hint]) saying what to pick. */
+data class BackgroundAsk(val direct: Boolean, val button: String, val hint: String?) {
+    companion object {
+        /** [ownApk]: the build your server hands out (BuildConfig.SELF_UPDATE), not Play's. */
+        fun of(ownApk: Boolean): BackgroundAsk =
+            if (ownApk) {
+                BackgroundAsk(direct = true, button = "Allow running in the background", hint = null)
+            } else {
+                BackgroundAsk(
+                    direct = false,
+                    button = "Open battery settings",
+                    hint = "In the list that opens, choose \"All apps\", find Promptly and pick \"Don't optimise\" (some phones say \"Unrestricted\").",
+                )
+            }
+    }
+}
+
 /** "2 min ago", "3 h ago", for the screen. */
 object Ago {
     fun words(ms: Long): String = when {

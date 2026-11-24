@@ -357,6 +357,19 @@ class TrackingTest {
     }
 
     @Test
+    fun `the play build never asks android for the battery exemption directly`() {
+        val play = BackgroundAsk.of(ownApk = false)
+        assertFalse(play.direct)
+        assertEquals("Open battery settings", play.button)
+        assertTrue(play.hint!!.contains("find Promptly") && play.hint!!.contains("Don't optimise"))
+        // The APK from your own server keeps the one-tap dialog.
+        val own = BackgroundAsk.of(ownApk = true)
+        assertTrue(own.direct)
+        assertEquals("Allow running in the background", own.button)
+        assertNull(own.hint)
+    }
+
+    @Test
     fun `ago in words`() {
         assertEquals("just now", Ago.words(20_000))
         assertEquals("12 min ago", Ago.words(12 * 60_000L))
