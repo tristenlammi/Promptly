@@ -24,6 +24,17 @@ async def client(db):
         rate_limit._settings.RATE_LIMIT_ENABLED = True
 
 
+@pytest.fixture(autouse=True)
+def _no_real_pushes(monkeypatch):
+    """Starting a share tells your own phone; nothing here really pushes."""
+    from app.maps import timeline
+
+    async def fake(**kwargs):
+        return None
+
+    monkeypatch.setattr(timeline, "notify_user", fake)
+
+
 def _hdr(user) -> dict[str, str]:
     from app.auth.utils import create_access_token
 
@@ -93,7 +104,7 @@ async def test_a_day_reads_as_stays_and_journeys(db, user, client, no_photon):
 
 async def test_a_paused_timeline_keeps_nothing(user, client):
     r = await client.post("/api/maps/timeline/points", headers=_hdr(user), json={"points": _morning()})
-    assert r.json() == {"saved": 0, "timeline_on": False}
+    assert r.json() == {"saved": 0, "skipped": 0, "timeline_on": False}
 
 
 async def test_an_import_works_even_with_recording_off(user, client, no_photon):

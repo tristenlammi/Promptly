@@ -81,6 +81,13 @@ object Maps {
         return if (text.isBlank()) JSONObject() else JSONObject(text)
     }
 
+    /** The same, for callers that need to tell "no" from "not now": the status and
+     *  the answer's text, whatever the status. Throws only when there was no answer. */
+    fun post(context: Context, path: String, json: String, timeoutSeconds: Long = 40): Pair<Int, String> {
+        val server = server(context) ?: throw IOException("Not signed in")
+        return call(context, timeoutSeconds) { url("$server$path").post(json.toRequestBody(JSON)) }
+    }
+
     /** Make sure this phone can use maps: its current sign-in if that works,
      *  or the one-time code the web app just sent along. */
     suspend fun signIn(context: Context, server: String?, code: String?) = withContext(Dispatchers.IO) {

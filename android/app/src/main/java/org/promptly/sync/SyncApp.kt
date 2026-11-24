@@ -22,5 +22,8 @@ class SyncApp : Application() {
         org.promptly.sync.push.NativePush.start(this)
         // "Hey Promptly", if you've turned it on (off unless you have).
         org.promptly.sync.assistant.WakeWord.init(this)
+        // The timeline and live location: start the background service again if it
+        // should be running (Android stops it on every update, and now and then).
+        org.promptly.sync.maps.LocationKeeper.init(this)
     }
 }

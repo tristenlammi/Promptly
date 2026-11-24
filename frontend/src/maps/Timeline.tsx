@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Bike, Car, ChevronLeft, ChevronRight, Footprints, Loader2, MapPin, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Bike, Car, ChevronLeft, ChevronRight, Footprints, Loader2, MapPin, Smartphone, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiClient } from "@/api/client";
@@ -9,6 +9,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
 import { formatDuration, formatKm, mapsApi } from "./api";
+import { recordingWords, type PhoneReport } from "./freshness";
 import { pointsFromExport } from "./timelineImport";
 import { Choice, RowsSkeleton, SwitchRow } from "./ui";
 
@@ -44,6 +45,23 @@ function shift(day: string, by: number): string {
 }
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+/** This device's time zone, for someone who never saved one: a day is their day, not UTC's. */
+const zone = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+})();
+
+/** Hand over to the app on this phone: it links itself if it needs to, starts the
+ *  background service again, and shows what's really happening. */
+export async function openPhoneTracking() {
+  const code = await mapsApi.pairCode();
+  const params = new URLSearchParams({ server: window.location.origin, code, on: "1" });
+  window.location.href = `promptlymaps://timeline?${params.toString()}`;
+}
+
 const lasted = (s: Segment) => formatDuration((new Date(s.end).getTime() - new Date(s.start).getTime()) / 1000);
 
 export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onShowDay: (day: { lines: [number, number][][]; stays: { lat: number; lon: number; name: string }[] }) => void }) {
@@ -55,12 +73,23 @@ export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onS
   });
   const { data, isLoading, error } = useQuery({
     queryKey: ["maps-timeline", day],
-    queryFn: async () => (await apiClient.get<Day>("/maps/timeline/day", { params: { date: day } })).data,
+    queryFn: async () => (await apiClient.get<Day>("/maps/timeline/day", { params: { date: day, tz: zone } })).data,
   });
   const { data: settings } = useQuery({
     queryKey: ["maps-timeline-settings"],
-    queryFn: async () => (await apiClient.get<{ timeline_on: boolean; retention_days: number | null }>("/maps/timeline/settings")).data,
+    queryFn: async () => (await apiClient.get<{ timeline_on: boolean; retention_days: number | null; phone?: PhoneReport }>("/maps/timeline/settings")).data,
+    // So "last checked in" and a phone going quiet show without reloading.
+    refetchInterval: 60_000,
   });
+  // Recording is on: is anything actually arriving from the phone?
+  const heard = settings?.timeline_on ? recordingWords(settings.phone) : null;
+  const openOnPhone = async () => {
+    try {
+      await openPhoneTracking();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't open the app."));
+    }
+  };
 
   const shown = useRef<string | null>(null);
   useEffect(() => {
@@ -76,9 +105,7 @@ export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onS
     if (on && isAndroidDevice()) {
       // The phone does the recording, and asks for the location permission it needs.
       try {
-        const code = await mapsApi.pairCode();
-        const params = new URLSearchParams({ server: window.location.origin, code, on: "1" });
-        window.location.href = `promptlymaps://timeline?${params.toString()}`;
+        await openPhoneTracking();
       } catch (e) {
         toast.error(apiErrorMessage(e, "Couldn't start the timeline."));
       }
@@ -162,7 +189,26 @@ export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onS
 
       {isLoading && <RowsSkeleton rows={4} label="Loading this day" />}
       {error && <p className="px-4 py-3 text-sm text-[var(--text-muted)]">{apiErrorMessage(error, "Couldn't load this day.")}</p>}
-      {data && data.segments.length === 0 && <p className="px-4 py-4 text-center text-sm text-[var(--text-muted)]">Nothing recorded on this day.</p>}
+      {data && data.segments.length === 0 && (
+        <p className="px-4 py-4 text-center text-sm text-[var(--text-muted)]">
+          {data.points > 0
+            ? `Only ${data.points} ${data.points === 1 ? "position" : "positions"} recorded on this day: not enough to show where you went.`
+            : "Nothing recorded on this day."}
+        </p>
+      )}
+      {heard?.bad && (
+        <div role="status" className="mx-4 mb-1 rounded-lg border border-[var(--border)] bg-[var(--hover)] px-3 py-2.5">
+          <p className="flex gap-2 text-sm text-[var(--text)]">
+            <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-text)]" />
+            <span>{heard.text}</span>
+          </p>
+          {isAndroidDevice() && (
+            <button type="button" onClick={() => void openOnPhone()} className="mt-2 h-10 rounded-lg bg-[var(--accent-strong)] px-4 text-sm font-medium text-white hover:opacity-90 md:h-9">
+              Open Promptly on this phone
+            </button>
+          )}
+        </div>
+      )}
       {data && data.segments.length > 0 && (
         <>
           <ol className="px-4 pt-2">
@@ -199,6 +245,7 @@ export function TimelinePanel({ onClose, onShowDay }: { onClose: () => void; onS
         <SwitchRow checked={settings?.timeline_on ?? false} onChange={(on) => void setRecording(on)}>
           <span className="text-sm text-[var(--text)]">Record where I go</span>
         </SwitchRow>
+        {heard && !heard.bad && <p className="text-xs text-[var(--text-muted)]">{heard.text}</p>}
         <p className="text-xs text-[var(--text-muted)]">Only you can see your timeline. An admin of this server could read its database.</p>
         <div>
           <p className="mb-1 text-sm text-[var(--text)]">Keep history for</p>

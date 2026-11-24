@@ -214,6 +214,9 @@
         <receiver android:name=".maps.TimelineBootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- An update stops the service; this starts it again. The same receiver
+                     takes the wake-up alarm that keeps a shared location fresh. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

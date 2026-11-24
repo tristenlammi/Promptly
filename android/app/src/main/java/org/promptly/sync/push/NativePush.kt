@@ -200,7 +200,12 @@ class PromptlyPushService : PushService() {
         val text = String(message.content, Charsets.UTF_8)
         io.execute {
             try {
-                PushNotes.show(app, PushPayload.parse(text))
+                val payload = PushPayload.parse(text)
+                // A push is a moment Android lets the app start things. If the timeline
+                // or live location should be running and isn't, start it; and one about
+                // sharing ("Sharing your location with…") means go and ask what's wanted.
+                runCatching { org.promptly.sync.maps.LocationKeeper.wake(app, ask = payload.category == "maps", force = true) }
+                PushNotes.show(app, payload)
             } catch (e: Exception) {
                 Log.w(NativePush.TAG, "showing a push: ${e.message}")
             }
