@@ -208,8 +208,18 @@ export function MailApp() {
   }, []);
 
   // Arrived from a notification, Today, Ctrl+K or a task, maybe with a draft from Chat.
+  // Where the effect below has sent the address and it hasn't arrived yet. Those arrivals
+  // are ours: following them would put back an email you've already moved on from
+  // (j, j in quick succession).
+  const ours = useRef<string[]>([]);
   useEffect(() => {
     const at = openInAddress(location.search);
+    const mine = ours.current.indexOf(at ? idOf(at) : "");
+    if (mine >= 0) {
+      ours.current = ours.current.slice(mine + 1);
+      return;
+    }
+    ours.current = [];
     if (at) {
       setOpen((o) => (o && o.account_id === at.account_id && o.key === at.key ? o : at));
       const hash = new URLSearchParams(location.hash.slice(1)).get("draft");
@@ -237,6 +247,7 @@ export function MailApp() {
     const at = openInAddress(location.search);
     if (at ? !!open && at.account_id === open.account_id && at.key === open.key : !open) return;
     const fromList = !!(location.state as { mailFromList?: boolean } | null)?.mailFromList;
+    ours.current.push(open ? idOf(open) : "");
     if (open) navigate({ pathname: location.pathname, search: addressWith(location.search, open) }, at ? { replace: true, state: location.state } : { state: { mailFromList: true } });
     else if (fromList) navigate(-1);
     else navigate({ pathname: location.pathname, search: addressWith(location.search, null) }, { replace: true });
