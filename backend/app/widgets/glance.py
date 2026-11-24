@@ -215,6 +215,7 @@ async def trips(db: AsyncSession, user: User, now: datetime) -> list[dict[str, A
     from sqlalchemy import or_
 
     from app.maps.models import MapLiveLocation, MapShare
+    from app.maps.timeline import freshness
     from app.people import blocks
 
     hidden = await blocks.hidden_ids(db, user.id)
@@ -239,6 +240,8 @@ async def trips(db: AsyncSession, user: User, now: datetime) -> list[dict[str, A
                 "eta": eta.isoformat() if eta else None,
                 "minutes": max(0, round((eta - now).total_seconds() / 60)) if eta else None,
                 "seen": live.at.isoformat() if live.at else None,
+                # fresh / late / stale: a position that stopped coming says so.
+                "state": freshness(live.at, now)[1],
                 "url": "/maps",
             }
         )

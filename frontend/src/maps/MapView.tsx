@@ -47,7 +47,8 @@ interface Props {
   /** Your saved places: always on the map. */
   saved: SavedPlace[];
   onPickSaved: (place: SavedPlace) => void;
-  friends: { user_id: string; name: string; live: { lat: number; lon: number } | null }[];
+  /** `state`: how fresh the position is; a stale one is drawn greyed, with since when. */
+  friends: { user_id: string; name: string; live: { lat: number; lon: number; at?: string; state?: string } | null }[];
   /** Numbered dots: search results, or the stays of a day. */
   marks?: { lat: number; lon: number; name: string }[];
   /** Lines of [lon, lat]: journeys on your timeline. */
@@ -563,9 +564,13 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
     }
     for (const f of friends) {
       if (!f.live) continue;
-      const el = dot("", "flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#7C5CCB] text-sm font-semibold text-white shadow");
+      // A phone that's gone quiet: grey and see-through, so it doesn't read as "they're here now".
+      const stale = f.live.state === "stale";
+      const late = f.live.state === "late";
+      const el = dot("", `flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-semibold text-white shadow ${stale ? "border-dashed border-white bg-[#8A8A8A] opacity-60" : late ? "border-white bg-[#7C5CCB] opacity-80" : "border-white bg-[#7C5CCB]"}`);
       el.textContent = f.name.slice(0, 1).toUpperCase();
-      el.title = f.name;
+      const since = f.live.at ? new Date(f.live.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+      el.title = stale ? `${f.name}: phone hasn't checked in since ${since}` : late ? `${f.name}: last seen ${since}` : f.name;
       add(el, f.live.lat, f.live.lon, "center", true);
     }
     const uncrowd = () => {

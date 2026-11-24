@@ -372,6 +372,8 @@ class OnTheWayWidget : HubWidget() {
                             Words(name + (t.text("destination")?.let { " → $it" } ?: ""), bold = true)
                             Words(
                                 when {
+                                    // Their phone has gone quiet: the arrival time is from before it did.
+                                    t.text("state") == "stale" -> "Phone hasn't checked in since ${runCatching { clock.time(java.time.OffsetDateTime.parse(t.text("seen")).toInstant().toEpochMilli()) }.getOrDefault("a while ago")}"
                                     left == null -> "On the way"
                                     left <= 1 -> "Arriving now"
                                     else -> "${minutesLabel(left)} away · arrives ${runCatching { clock.time(java.time.OffsetDateTime.parse(t.text("eta")).toInstant().toEpochMilli()) }.getOrDefault("")}"

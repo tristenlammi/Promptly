@@ -112,6 +112,16 @@ async def storage_check(ctx) -> None:
     await run_check(trigger="nightly")
 
 
+async def maps_live_watch(ctx) -> None:
+    """Cron: someone sharing their location whose phone went quiet is told
+    (and the push wakes the phone, which starts sending again)."""
+    from app.database import SessionLocal
+    from app.maps.timeline import live_watch
+
+    async with SessionLocal() as db:
+        await live_watch(db)
+
+
 async def disk_check(ctx) -> None:
     """Cron: tell the admins when the uploads disk passes 85 % / 95 %."""
     from app.files.disk_guard import check_and_alert
@@ -489,6 +499,8 @@ class WorkerSettings:
         # After storage maintenance (03:30), before the morning.
         cron(storage_check, hour=4, minute=15, run_at_startup=False, unique=True),
         cron(disk_check, minute=5, run_at_startup=False, unique=True),
+        # Live location: a phone that stopped sending while it's being shared.
+        cron(maps_live_watch, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True, timeout=120),
         cron(zip_sweep, minute=50, run_at_startup=False, unique=True),
         # Reads only mail it hasn't read yet, so it's cheap to run often.
         cron(tus_sweep, hour=4, minute=45, run_at_startup=False, unique=True),

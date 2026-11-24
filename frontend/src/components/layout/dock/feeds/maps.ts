@@ -3,6 +3,7 @@ import { MapPin, Navigation, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { apiClient } from "@/api/client";
+import { seenWords, sharingWords, type MySharing } from "@/maps/freshness";
 import { useMapsReady } from "@/maps/useMapsReady";
 import { toast } from "@/store/toastStore";
 
@@ -12,7 +13,8 @@ import { clock } from "../useNow";
 /** The same shape and cache key as the Maps app's "People" panel. */
 interface Shares {
   sharing_with: { user_id: string; name: string; expires_at: string | null }[];
-  shared_with_me: { user_id: string; name: string; live: { destination: string | null; eta: string | null; at: string } | null }[];
+  shared_with_me: { user_id: string; name: string; live: { destination: string | null; eta: string | null; at: string; age_s?: number; state?: string } | null }[];
+  me?: MySharing | null;
 }
 
 /**
@@ -51,7 +53,8 @@ function useCards(): DockCardData[] {
       icon: MapPin,
       tone: "accent",
       title: "Sharing your location",
-      detail: `With ${who} ${until}`,
+      // If the phone isn't sending, that's the thing to say.
+      detail: data.me && sharingWords(data.me).bad ? sharingWords(data.me).text : `With ${who} ${until}`,
       onOpen: open,
       actions: [
         {
@@ -79,7 +82,13 @@ function useCards(): DockCardData[] {
       priority: 58,
       icon: Navigation,
       title: `${p.name} is on the way`,
-      detail: p.live?.destination ? `To ${p.live.destination} · arriving ${eta}` : `Arriving ${eta}`,
+      // Their phone has gone quiet: the arrival time is a guess from before it did.
+      detail:
+        p.live?.state === "stale"
+          ? seenWords(p.live.age_s ?? null, p.live.at)
+          : p.live?.destination
+            ? `To ${p.live.destination} · arriving ${eta}`
+            : `Arriving ${eta}`,
       onOpen: open,
     });
   }

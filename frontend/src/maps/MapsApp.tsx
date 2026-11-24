@@ -29,6 +29,7 @@ import { MapView, placeLook, type MapViewHandle } from "./MapView";
 import type { PinHold } from "./pinView";
 import { OFFLINE_KEY, OfflinePanel, saveRouteForOffline, useOffline } from "./Offline";
 import { PeoplePanel, useShares } from "./People";
+import { seenWords } from "./freshness";
 import { PLACE_COLOURS, PLACE_ICON_SVG, PLACE_ICONS } from "./placeIcons";
 import { MapNotChosen } from "./regions/MapNotChosen";
 import { TimelinePanel } from "./Timeline";
@@ -910,7 +911,17 @@ export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: 
             setShowPerson(null);
             setPanel("home");
           }}
-          onShow={(p) => p.live && showPlace({ kind: "contact", name: p.name, address: p.live.destination ? `Going to ${p.live.destination}` : null, lat: p.live.lat, lon: p.live.lon })}
+          onShow={(p) =>
+            p.live &&
+            showPlace({
+              kind: "contact",
+              name: p.name,
+              // Always how old it is: a pin from an hour ago isn't where they are.
+              address: [seenWords(p.live.age_s ?? null, p.live.at), p.live.state !== "stale" && p.live.destination ? `going to ${p.live.destination}` : null].filter(Boolean).join(" · "),
+              lat: p.live.lat,
+              lon: p.live.lon,
+            })
+          }
         />
       )}
       {panel === "offline" && (
